@@ -22,6 +22,22 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     )
     # Timezone: member profile → soul (legacy)
     _tz = (ctx.member_profile or {}).get("timezone", "") or ctx.soul.timezone
+
+    # MODEL-AND-STATUS-V1: load any persisted (member, space) override
+    # so ReasoningService can apply it via resolve_effective_chain.
+    # None when no row exists or InstanceDB is unwired (legacy paths).
+    model_override = None
+    instance_db = getattr(handler, "_instance_db", None)
+    if instance_db and ctx.member_id and ctx.active_space_id:
+        try:
+            model_override = await instance_db.get_model_override(
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                space_id=ctx.active_space_id,
+            )
+        except Exception:
+            model_override = None
+
     request = ReasoningRequest(
         instance_id=ctx.instance_id, conversation_id=ctx.conversation_id,
         system_prompt=ctx.system_prompt, messages=ctx.messages, tools=ctx.tools,
@@ -33,6 +49,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         input_text=ctx.message.content, active_space=ctx.active_space,
         user_timezone=_tz,
         trace=ctx.trace,
+        model_override=model_override,
     )
     ctx.task = await handler.engine.execute(ctx.task, request)
     ctx.response_text = ctx.task.result_text

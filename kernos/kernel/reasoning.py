@@ -93,6 +93,14 @@ class ReasoningRequest:
     system_prompt_static: str = ""   # Cacheable prefix (RULES + ACTIONS)
     system_prompt_dynamic: str = ""  # Fresh per turn (NOW + STATE + RESULTS + MEMORY)
     trace: Any = None  # TurnEventCollector — for runtime trace instrumentation
+    # MODEL-AND-STATUS-V1: per-(member, space) chain switch + head
+    # override loaded from instance.db.model_overrides at dispatch
+    # construction time. None when no override is set. Shape mirrors
+    # InstanceDB.get_model_override return value:
+    #   {"chain_name": str | None, "override_provider": str | None,
+    #    "override_model": str | None, "set_at": str}
+    # Consumed by _call_chain via resolve_effective_chain.
+    model_override: dict | None = None
 
 
 # GateResult and ApprovalToken extracted to kernos/kernel/gate.py (re-exported above)
@@ -436,10 +444,35 @@ class ReasoningService:
         ReasoningRequest) rather than the chain's configured model — this
         preserves the current handler → reasoning model selection.
 
+        MODEL-AND-STATUS-V1: when ``request.model_override`` is set, the
+        shared resolver in ``model_routing`` rewrites the chain by
+        switching to a different chain (when ``chain_name`` is set on
+        the override) and/or prepending a head entry with later
+        duplicates de-duped. The override is "preferred first attempt,"
+        not a hard pin — natural fallback applies on override-head
+        failure (Codex pre-spec refinement #1). Stale overrides
+        (chain or entry no longer in current chains) are skipped at
+        resolve time so the dispatch sees a clean entry list.
+
         Catches only ReasoningProviderError | ReasoningConnectionError to
         match existing behavior and avoid masking programming errors.
         """
-        entries = self._chains.get(chain_name, self._chains.get("primary", []))
+        from kernos.kernel.model_routing import resolve_effective_chain
+
+        eff = resolve_effective_chain(
+            chains=self._chains,
+            requested_chain=chain_name,
+            override=(request.model_override if request is not None else None),
+        )
+        # Use the resolver's chain choice. When a stale chain_name was
+        # passed via the override, eff.chain_name reflects the
+        # fallback so logging stays accurate.
+        chain_name = eff.chain_name
+        entries = list(eff.entries)
+        if not entries:
+            entries = list(
+                self._chains.get(chain_name, self._chains.get("primary", []))
+            )
         last_exc: Exception | None = None
         # LLM-SETUP-AND-FALLBACK: accumulate per-entry failure detail so the
         # LLMChainExhausted exception can carry it for the pre-rendered
