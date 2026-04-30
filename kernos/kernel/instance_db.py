@@ -168,6 +168,25 @@ CREATE INDEX IF NOT EXISTS idx_parcels_sender
     ON parcels(sender_member_id, status);
 CREATE INDEX IF NOT EXISTS idx_parcels_instance
     ON parcels(instance_id, status);
+
+-- MODEL-AND-STATUS-V1: per-(instance, member, space) chain switch
+-- and head override. The override columns are nullable independently
+-- and the CHECK enforces the (provider, model) pair invariant
+-- (both set or both null).
+CREATE TABLE IF NOT EXISTS model_overrides (
+    instance_id       TEXT NOT NULL,
+    member_id         TEXT NOT NULL,
+    space_id          TEXT NOT NULL,
+    chain_name        TEXT,
+    override_provider TEXT,
+    override_model    TEXT,
+    set_at            TEXT NOT NULL,
+    PRIMARY KEY (instance_id, member_id, space_id),
+    CHECK (
+        (override_provider IS NULL AND override_model IS NULL)
+        OR (override_provider IS NOT NULL AND override_model IS NOT NULL)
+    )
+);
 """
 
 
@@ -1424,3 +1443,114 @@ class InstanceDB:
         if stale:
             await self._conn.commit()
         return len(stale)
+
+    # ------------------------------------------------------------------
+    # MODEL-AND-STATUS-V1: per-(instance, member, space) chain + head
+    # override.
+    # ------------------------------------------------------------------
+
+    async def get_model_override(
+        self, *, instance_id: str, member_id: str, space_id: str,
+    ) -> dict | None:
+        """Return the persisted override for a (member, space) pair, or
+        None if no row exists. Shape:
+
+            {
+                "chain_name": str | None,
+                "override_provider": str | None,
+                "override_model": str | None,
+                "set_at": str,
+            }
+        """
+        if not self._conn:
+            return None
+        async with self._conn.execute(
+            "SELECT chain_name, override_provider, override_model, set_at "
+            "FROM model_overrides "
+            "WHERE instance_id = ? AND member_id = ? AND space_id = ?",
+            (instance_id, member_id, space_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "chain_name": row["chain_name"],
+            "override_provider": row["override_provider"],
+            "override_model": row["override_model"],
+            "set_at": row["set_at"],
+        }
+
+    async def set_model_chain(
+        self,
+        *,
+        instance_id: str,
+        member_id: str,
+        space_id: str,
+        chain_name: str,
+    ) -> None:
+        """Switch the active chain for a (member, space). Clears any
+        prior provider/model head override since the new chain has its
+        own head."""
+        if not self._conn:
+            return
+        from kernos.utils import utc_now
+        await self._conn.execute(
+            "INSERT INTO model_overrides "
+            "(instance_id, member_id, space_id, chain_name, "
+            " override_provider, override_model, set_at) "
+            "VALUES (?, ?, ?, ?, NULL, NULL, ?) "
+            "ON CONFLICT(instance_id, member_id, space_id) DO UPDATE SET "
+            " chain_name = excluded.chain_name, "
+            " override_provider = NULL, "
+            " override_model = NULL, "
+            " set_at = excluded.set_at",
+            (instance_id, member_id, space_id, chain_name, utc_now()),
+        )
+        await self._conn.commit()
+
+    async def set_model_head_override(
+        self,
+        *,
+        instance_id: str,
+        member_id: str,
+        space_id: str,
+        provider: str,
+        model: str,
+    ) -> None:
+        """Record a (provider, model) head override for a (member,
+        space). Preserves any existing chain_name selection — the
+        override prepends the chain head at dispatch time without
+        changing which chain is active."""
+        if not self._conn:
+            return
+        from kernos.utils import utc_now
+        await self._conn.execute(
+            "INSERT INTO model_overrides "
+            "(instance_id, member_id, space_id, chain_name, "
+            " override_provider, override_model, set_at) "
+            "VALUES (?, ?, ?, NULL, ?, ?, ?) "
+            "ON CONFLICT(instance_id, member_id, space_id) DO UPDATE SET "
+            " override_provider = excluded.override_provider, "
+            " override_model = excluded.override_model, "
+            " set_at = excluded.set_at",
+            (
+                instance_id, member_id, space_id, provider, model,
+                utc_now(),
+            ),
+        )
+        await self._conn.commit()
+
+    async def reset_model_override(
+        self, *, instance_id: str, member_id: str, space_id: str,
+    ) -> bool:
+        """Clear both chain selection and head override for a
+        (member, space). Returns True when a row was deleted."""
+        if not self._conn:
+            return False
+        cur = await self._conn.execute(
+            "DELETE FROM model_overrides "
+            "WHERE instance_id = ? AND member_id = ? AND space_id = ?",
+            (instance_id, member_id, space_id),
+        )
+        await self._conn.commit()
+        return (cur.rowcount or 0) > 0
