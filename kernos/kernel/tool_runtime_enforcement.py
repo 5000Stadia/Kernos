@@ -48,7 +48,7 @@ from kernos.kernel.credentials_member import (
     MemberCredentialNotFound,
     MemberCredentialStore,
 )
-from kernos.kernel.services import ServiceRegistry
+from kernos.kernel.services import AuthType, ServiceRegistry
 from kernos.kernel.tool_descriptor import ToolDescriptor
 from kernos.kernel.tool_runtime import (
     ToolRuntimeContext,
@@ -230,11 +230,25 @@ def check_credential_scope(
     descriptor: ToolDescriptor,
     member_id: str,
     credential_store: MemberCredentialStore,
+    service_registry: ServiceRegistry | None = None,
 ) -> None:
     """Raise CredentialUnavailableError when a service-bound tool's
     credential is missing or expired.
 
     Tools that are not service-bound pass this check trivially.
+
+    Auto-refresh (OAUTH-DEVICE-CODE-SUBSYSTEM Q4 follow-on): when an
+    expired credential carries a refresh_token AND the service is an
+    oauth_device_code service AND a service_registry is supplied,
+    the runtime attempts an in-line refresh before raising. Success
+    rotates the credential in place and the check returns cleanly.
+    Refresh-endpoint failures (revoked grant, network error) fall
+    through to the original "expired" error path so the user is
+    asked to re-onboard.
+
+    api_token services and credentials without a refresh_token skip
+    the refresh attempt and raise immediately, matching the prior
+    behaviour.
     """
     if not descriptor.is_service_bound:
         return
@@ -249,11 +263,82 @@ def check_credential_scope(
             f"on a compatible channel first."
         ) from exc
     if credential.is_expired:
+        if _try_auto_refresh(
+            descriptor=descriptor,
+            credential=credential,
+            member_id=member_id,
+            credential_store=credential_store,
+            service_registry=service_registry,
+        ):
+            return
         raise CredentialUnavailableError(
             f"Credential for service {descriptor.service_id!r} has "
             f"expired (expires_at={credential.expires_at}). Re-run "
             f"the auth onboarding flow or rotate the credential."
         )
+
+
+def _try_auto_refresh(
+    *,
+    descriptor: ToolDescriptor,
+    credential,
+    member_id: str,
+    credential_store: MemberCredentialStore,
+    service_registry: ServiceRegistry | None,
+) -> bool:
+    """Attempt OAuth refresh for an expired credential. Returns True
+    when the refresh succeeded (credential rotated in store), False
+    when refresh is not applicable or failed.
+
+    Applicable iff: registry supplied, descriptor maps to an oauth_
+    device_code service, refresh_token present on the credential.
+    """
+    if service_registry is None:
+        return False
+    if not credential.refresh_token:
+        return False
+    service = service_registry.get(descriptor.service_id)
+    if service is None or service.auth_type != AuthType.OAUTH_DEVICE_CODE:
+        return False
+    # Local import keeps the heavy oauth surface lazy at module load.
+    from kernos.kernel.oauth_device_code import (
+        DeviceCodeNetworkError,
+        TokenEndpointError,
+        refresh_credential,
+    )
+    try:
+        rotated = refresh_credential(
+            service=service, member_id=member_id,
+            store=credential_store,
+        )
+    except (TokenEndpointError, DeviceCodeNetworkError) as exc:
+        logger.warning(
+            "CREDENTIAL_REFRESH_FAILED: member=%s service=%s err=%s",
+            member_id, descriptor.service_id, exc,
+        )
+        return False
+    # Codex pre-push fold: refresh_credential maps a missing or
+    # zero ``expires_in`` to ``expires_at=None``, and
+    # ``MemberCredentialStore.rotate`` treats ``expires_at=None`` as
+    # "preserve the prior value" (credentials_member.py:320). The
+    # access token rotates but the original expired timestamp can
+    # survive — the gate would incorrectly accept a still-expired
+    # credential. Re-check is_expired on the rotated record; only
+    # signal success when the rotation actually delivered a valid
+    # window.
+    if rotated.is_expired:
+        logger.warning(
+            "CREDENTIAL_REFRESH_NO_FRESH_EXPIRY: member=%s service=%s "
+            "rotated record is still expired (expires_at=%s) — token "
+            "endpoint response likely omitted expires_in",
+            member_id, descriptor.service_id, rotated.expires_at,
+        )
+        return False
+    logger.info(
+        "CREDENTIAL_REFRESH_OK: member=%s service=%s",
+        member_id, descriptor.service_id,
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +450,7 @@ def enforce_invocation(inputs: EnforcementInputs) -> None:
         descriptor=inputs.descriptor,
         member_id=inputs.member_id,
         credential_store=inputs.credential_store,
+        service_registry=inputs.service_registry,
     )
     # Sandbox check is per-path; the dispatcher calls
     # check_sandbox_path on any user-supplied path inputs and on
