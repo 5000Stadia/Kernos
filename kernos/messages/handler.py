@@ -26,6 +26,12 @@ from kernos.kernel.exceptions import (
     ReasoningRateLimitError,
     ReasoningTimeoutError,
 )
+from kernos.kernel.model_routing import (
+    EffectiveChain,
+    list_configured_entries,
+    parse_provider_model_spec,
+    resolve_effective_chain,
+)
 from kernos.kernel.reasoning import PendingAction, ReasoningRequest, ReasoningService
 from kernos.kernel.projectors.coordinator import run_projectors
 from kernos.kernel.soul import Soul
@@ -4129,6 +4135,10 @@ class MessageHandler:
                             response = "Only the instance owner can restart."
                     elif _cmd_lower == "/disconnect":
                         response = await self._handle_disconnect(primary_ctx)
+                    elif _cmd_lower.startswith("/model"):
+                        response = await self._handle_model_command(
+                            primary_ctx, _cmd,
+                        )
                     else:
                         try:
                             _t0 = time.monotonic()
@@ -5752,12 +5762,256 @@ class MessageHandler:
         except Exception:
             pass
 
+        # MODEL-AND-STATUS-V1: Models block. Surfaces the active chain,
+        # effective head, fallback entries, and any persisted override
+        # (including stale specs) so the user can see at a glance which
+        # model is answering for this space.
+        try:
+            models_block = await self._render_models_block(ctx)
+        except Exception as _mblk_exc:
+            logger.warning("MODELS_BLOCK: render failed: %s", _mblk_exc)
+            models_block = ""
+        if models_block:
+            parts.append("")
+            parts.append(models_block)
+
         parts.append("")
         parts.append(
             "For a full diagnostic snapshot (internal ids, runtime trace, "
             "phase timings) use **/dump** — admin surface."
         )
         return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # MODEL-AND-STATUS-V1: Models block + /model command
+    # ------------------------------------------------------------------
+
+    def _resolve_effective_chain_for_ctx(
+        self, ctx: TurnContext, override: dict | None,
+        requested_chain: str = "primary",
+    ) -> EffectiveChain | None:
+        """Wrapper that fetches the configured chains from
+        ReasoningService and resolves the EffectiveChain for this
+        (member, space) override. Returns None when chains are not
+        introspectable.
+        """
+        chains = getattr(self.reasoning, "_chains", None)
+        if not chains:
+            return None
+        return resolve_effective_chain(
+            chains=chains, requested_chain=requested_chain,
+            override=override,
+        )
+
+    async def _render_models_block(self, ctx: TurnContext) -> str:
+        """Render the **Models** block appended to /status output. See
+        spec section "/status — Models block"."""
+        chains = getattr(self.reasoning, "_chains", None)
+        if not chains:
+            return ""
+        override = None
+        if (
+            self._instance_db and ctx.member_id
+            and ctx.active_space_id
+        ):
+            override = await self._instance_db.get_model_override(
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                space_id=ctx.active_space_id,
+            )
+        eff = resolve_effective_chain(
+            chains=chains, requested_chain="primary", override=override,
+        )
+
+        lines = ["**Models** (this space)"]
+        lines.append(f"Active chain: {eff.chain_name}")
+        lines.append(
+            f"Effective head: {eff.head_provider}/{eff.head_model}"
+        )
+        # Fallback entries after the head.
+        fallback_entries = list(eff.entries)[1:]
+        if fallback_entries:
+            fb = ", ".join(
+                f"{getattr(e.provider, 'provider_name', '?')}/{e.model}"
+                for e in fallback_entries
+            )
+            lines.append(f"Fallback: {fb}")
+        if eff.override_in_effect:
+            ov_parts = []
+            if override and override.get("chain_name"):
+                ov_parts.append(f"chain={override['chain_name']}")
+            if (
+                override and override.get("override_provider")
+                and override.get("override_model")
+            ):
+                ov_parts.append(
+                    f"head={override['override_provider']}/"
+                    f"{override['override_model']}"
+                )
+            if ov_parts:
+                lines.append(
+                    f"Override (this space): {', '.join(ov_parts)}"
+                )
+        # Stale-config markers.
+        if eff.stale_chain_name:
+            lines.append(
+                f"Override chain {eff.stale_chain_name!r} is "
+                "unavailable — not in any current chain."
+            )
+        if eff.stale_head_spec:
+            lines.append(
+                f"Override head {eff.stale_head_spec} is "
+                "unavailable — not in any current chain."
+            )
+        return "\n".join(lines)
+
+    async def _handle_model_command(
+        self, ctx: TurnContext, cmd: str,
+    ) -> str:
+        """Dispatch /model. See spec section "/model — list / switch".
+
+        Modes:
+          * /model            → list chains + effective head + targets
+          * /model <chain>    → switch active chain
+          * /model <p>/<m>    → override head (must be in some chain)
+          * /model reset      → clear chain + head override
+        """
+        chains = getattr(self.reasoning, "_chains", None)
+        if not chains:
+            return "Models are not configured for this install."
+        if not (self._instance_db and ctx.member_id and ctx.active_space_id):
+            return (
+                "Cannot apply a model override without a member + space "
+                "context. /model is per-(member, space) sticky."
+            )
+
+        # Strip the leading /model and split args.
+        rest = cmd.strip()[len("/model"):].strip()
+        override = await self._instance_db.get_model_override(
+            instance_id=ctx.instance_id,
+            member_id=ctx.member_id,
+            space_id=ctx.active_space_id,
+        )
+
+        # No-args list.
+        if not rest:
+            return self._render_model_list(chains, override)
+
+        # /model reset
+        if rest.lower() == "reset":
+            removed = await self._instance_db.reset_model_override(
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                space_id=ctx.active_space_id,
+            )
+            if removed:
+                return (
+                    "Cleared model override. Falling back to configured "
+                    "default (primary chain)."
+                )
+            return "No override was set for this space."
+
+        # /model <chain>
+        if rest in chains:
+            await self._instance_db.set_model_chain(
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                space_id=ctx.active_space_id,
+                chain_name=rest,
+            )
+            new_override = await self._instance_db.get_model_override(
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                space_id=ctx.active_space_id,
+            )
+            eff = resolve_effective_chain(
+                chains=chains, requested_chain="primary",
+                override=new_override,
+            )
+            return (
+                f"Switched chain to **{rest}** for this space.\n"
+                f"Effective head: {eff.head_provider}/{eff.head_model}"
+            )
+
+        # /model <provider>/<model>
+        parsed = parse_provider_model_spec(rest)
+        if parsed is not None:
+            provider, model = parsed
+            from kernos.kernel.model_routing import head_spec_in_any_chain
+            if head_spec_in_any_chain(chains, provider, model):
+                await self._instance_db.set_model_head_override(
+                    instance_id=ctx.instance_id,
+                    member_id=ctx.member_id,
+                    space_id=ctx.active_space_id,
+                    provider=provider, model=model,
+                )
+                return (
+                    f"Override head set to **{provider}/{model}** for "
+                    "this space. The override is the preferred first "
+                    "attempt; chain fallbacks still apply on failure."
+                )
+            available = list_configured_entries(chains)
+            available_md = "\n".join(
+                f"  • {p}/{m}" for p, m in available
+            )
+            return (
+                f"`{provider}/{model}` is not in any configured chain. "
+                "Available entries:\n" + available_md
+            )
+
+        # Unknown argument shape.
+        return (
+            "Usage:\n"
+            "  /model               — show current models for this space\n"
+            "  /model <chain>       — switch chain (e.g. primary | lightweight)\n"
+            "  /model <provider>/<model>\n"
+            "                        — override head (must be in a configured chain)\n"
+            "  /model reset         — clear override"
+        )
+
+    def _render_model_list(
+        self, chains, override: dict | None,
+    ) -> str:
+        """Compose the no-args /model output. Pure function over the
+        chains config and persisted override; testable without IO."""
+        eff = resolve_effective_chain(
+            chains=chains, requested_chain="primary", override=override,
+        )
+        lines = ["**Models** (this space)"]
+        lines.append(f"Active chain: {eff.chain_name}")
+        lines.append(
+            f"Effective head: {eff.head_provider}/{eff.head_model} (active)"
+        )
+        if eff.stale_chain_name:
+            lines.append(
+                f"Override chain {eff.stale_chain_name!r} is "
+                "unavailable — not in any current chain."
+            )
+        if eff.stale_head_spec:
+            lines.append(
+                f"Override head {eff.stale_head_spec} is "
+                "unavailable — not in any current chain."
+            )
+
+        lines.append("")
+        lines.append("Available chains:")
+        for chain_name, chain_entries in chains.items():
+            chain_view = " → ".join(
+                f"{getattr(e.provider, 'provider_name', '?')}/{e.model}"
+                for e in chain_entries
+            )
+            marker = " (active)" if chain_name == eff.chain_name else ""
+            lines.append(f"  • {chain_name}{marker} — {chain_view}")
+
+        lines.append("")
+        lines.append("Switch with:")
+        lines.append("  /model primary | lightweight        — switch chain")
+        lines.append(
+            "  /model anthropic/claude-haiku-4.5   "
+            "— override head (must be in a configured chain)"
+        )
+        lines.append("  /model reset                         — clear override")
+        return "\n".join(lines)
 
     async def _build_departure_context(
         self, ctx: TurnContext, prev_space_id: str,
