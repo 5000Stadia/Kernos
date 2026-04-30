@@ -97,12 +97,12 @@ name: CC batch report arrival notice
 owner: founder
 version: 1.0
 trigger:
-  event_type: bridge.inbox.updated
+  event_type: external.webhook
   predicate:
     AND:
-      - event.payload.inbox_name == "architect"
-      - event.payload.source_agent == "cc"
-      - event.payload.artifact_type == "batch_report"
+      - event.payload.source_id == "architect_inbox"
+      - event.payload.body.source_agent == "cc"
+      - event.payload.body.artifact_type == "batch_report"
 bounds:
   iteration_count: 1
   wall_time_seconds: 30
