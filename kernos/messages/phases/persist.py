@@ -226,7 +226,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                                 if _commitments:
                                     try:
                                         await handler._process_compaction_follow_ups(
-                                            instance_id, ctx.active_space_id, _follow_ups)
+                                            instance_id, ctx.active_space_id, _commitments)
                                     except Exception as _cx:
                                         logger.warning("FOLLOW_UP: processing failed: %s", _cx)
 
