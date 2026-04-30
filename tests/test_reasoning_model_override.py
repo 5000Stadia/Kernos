@@ -283,6 +283,71 @@ class TestStaleOverrideHandling:
 # ---------------------------------------------------------------------------
 
 
+class TestRequestModelDoesNotClobberHeadOverride:
+    """Codex post-impl fold REAL bug: the loop at _call_chain
+    replaces entry 0's model with request_model when present. With
+    a head override active, entry 0 IS the override and the
+    request_model substitution would silently call the natural head
+    model on the overridden provider — defeating the user's pick.
+
+    This test pins: when override head + request_model both set,
+    the override head wins.
+    """
+
+    async def test_head_override_respected_under_request_model(
+        self, reasoning_with_chains,
+    ):
+        svc, anthropic, openrouter = reasoning_with_chains
+        override = {
+            "chain_name": None,
+            "override_provider": "anthropic",
+            "override_model": "claude-haiku-4.5",
+        }
+        # Caller passes request_model=claude-sonnet-4.6 (the natural
+        # primary head) — without the fold, this would override
+        # entry 0's model and the call would hit sonnet.
+        await svc._call_chain(
+            chain_name="primary", system="s", messages=[], tools=[],
+            max_tokens=1024,
+            request_model="claude-sonnet-4.6",
+            request=_request(
+                model_override=override, model="claude-sonnet-4.6",
+            ),
+        )
+        called_models = [
+            call.kwargs["model"]
+            for call in anthropic.complete.await_args_list
+        ]
+        # Override head wins as entry 0 (claude-haiku-4.5), not sonnet.
+        assert called_models[0] == "claude-haiku-4.5"
+
+    async def test_chain_switch_alone_still_uses_request_model(
+        self, reasoning_with_chains,
+    ):
+        """Chain-only switches do NOT carry a head spec — entry 0's
+        model under request_model substitution is the right
+        behaviour (preserves the principal's model selection
+        within the new chain)."""
+        svc, anthropic, _ = reasoning_with_chains
+        override = {
+            "chain_name": "lightweight",
+            "override_provider": None,
+            "override_model": None,
+        }
+        await svc._call_chain(
+            chain_name="primary", system="s", messages=[], tools=[],
+            max_tokens=1024,
+            request_model="explicit-model-from-handler",
+            request=_request(model_override=override),
+        )
+        called_models = [
+            call.kwargs["model"]
+            for call in anthropic.complete.await_args_list
+        ]
+        # request_model wins entry 0 (no head override prevents it).
+        assert called_models[0] == "explicit-model-from-handler"
+
+
 class TestBackwardCompat:
     async def test_no_override_uses_default_chain(
         self, reasoning_with_chains,

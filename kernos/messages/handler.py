@@ -4135,7 +4135,12 @@ class MessageHandler:
                             response = "Only the instance owner can restart."
                     elif _cmd_lower == "/disconnect":
                         response = await self._handle_disconnect(primary_ctx)
-                    elif _cmd_lower.startswith("/model"):
+                    elif (
+                        _cmd_lower == "/model"
+                        or _cmd_lower.startswith("/model ")
+                    ):
+                        # Exact-prefix match so future /models or
+                        # /modelx commands aren't intercepted here.
                         response = await self._handle_model_command(
                             primary_ctx, _cmd,
                         )

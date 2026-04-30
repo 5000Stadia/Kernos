@@ -473,6 +473,22 @@ class ReasoningService:
             entries = list(
                 self._chains.get(chain_name, self._chains.get("primary", []))
             )
+
+        # Codex post-impl fold: when the override carries a (provider,
+        # model) head spec, the user has explicitly chosen that exact
+        # entry — the request_model substitution below MUST NOT clobber
+        # entry 0's model with the principal's default main_model. This
+        # flag is consulted in the loop. Chain-only switches do NOT set
+        # the flag because the chain's natural head is what entry 0
+        # carries and request_model substitution remains the right
+        # behaviour.
+        head_was_overridden = bool(
+            request is not None
+            and request.model_override is not None
+            and request.model_override.get("override_provider")
+            and request.model_override.get("override_model")
+            and not eff.stale_head_spec
+        )
         last_exc: Exception | None = None
         # LLM-SETUP-AND-FALLBACK: accumulate per-entry failure detail so the
         # LLMChainExhausted exception can carry it for the pre-rendered
@@ -492,7 +508,13 @@ class ReasoningService:
         largest_ceiling: int | None = None
 
         for i, entry in enumerate(entries):
-            model = request_model if (i == 0 and request_model) else entry.model
+            # When the user has set an explicit head override, entry 0
+            # IS the override and its model must not be replaced by
+            # request_model (Codex post-impl fold).
+            if i == 0 and head_was_overridden:
+                model = entry.model
+            else:
+                model = request_model if (i == 0 and request_model) else entry.model
             pname = getattr(entry.provider, "provider_name", "unknown")
 
             # Pre-flight context-window skip. Tolerant on unknown models:

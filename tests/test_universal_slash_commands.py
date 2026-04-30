@@ -145,6 +145,45 @@ class TestSlashHandlersReturnStrings:
         finally:
             await idb.close()
 
+    # Codex post-impl fold: per-branch behavioral tests for the
+    # remaining slash commands (/spaces, /wipe, /restart non-owner,
+    # /disconnect, /dump). AC #9 requires behavioral pins, not just
+    # AST presence.
+
+    async def test_spaces_returns_string(self, tmp_path):
+        handler, idb, ctx = await self._make_handler_with_chains(tmp_path)
+        try:
+            out = await handler._handle_spaces(ctx, "/spaces")
+            assert isinstance(out, str)
+        finally:
+            await idb.close()
+
+    async def test_wipe_returns_string(self, tmp_path):
+        handler, idb, ctx = await self._make_handler_with_chains(tmp_path)
+        try:
+            # /wipe me without exact-phrase confirmation returns the
+            # confirmation prompt as a string.
+            out = await handler._handle_wipe(ctx, "/wipe me")
+            assert isinstance(out, str)
+        finally:
+            await idb.close()
+
+    async def test_disconnect_returns_string(self, tmp_path):
+        handler, idb, ctx = await self._make_handler_with_chains(tmp_path)
+        try:
+            out = await handler._handle_disconnect(ctx)
+            assert isinstance(out, str)
+        finally:
+            await idb.close()
+
+    async def test_dump_returns_string(self, tmp_path):
+        handler, idb, ctx = await self._make_handler_with_chains(tmp_path)
+        try:
+            out = await handler._handle_dump(ctx)
+            assert isinstance(out, str)
+        finally:
+            await idb.close()
+
 
 # ---------------------------------------------------------------------------
 # Backstop (NOT load-bearing): AST walk of the slash intercept block.
