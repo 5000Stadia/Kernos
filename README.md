@@ -159,7 +159,7 @@ Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and 
 
 ## Engineering proof
 
-- **3,700+ tests** across the runtime, with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance).
+- **4,600+ tests** across the runtime, with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance).
 - **Durable per-instance event stream** backed by SQLite, with `instance_id` / `member_id` / `space_id` / `correlation_id` schema and a post-flush hook contract for trigger registries that doesn't poison event persistence on workflow code failure.
 - **Workflow primitive with approval gates** — per-gate nonce binding so an approval can't wake an unintended execution; restart-resume per workflow descriptor with conservative default; safe-deny on `auto_proceed_with_default` for irreversible post-gate continuations.
 - **Local/test-provider containment** for live test sweeps so edge-case observation doesn't produce accidental public side effects.

@@ -1,9 +1,9 @@
 ## NOW
 
-**Status:** Multi-member V1 live. Stewardship, sensitivity, relationships (2c.1) shipped. 1808 tests.
+**Status:** Multi-member V1 live. Stewardship, sensitivity, relationships (2c.1) shipped. 4684 tests.
 **Owner:** Founder
 **Action:** Live test relationships + sensitivity. Next: Phase 2c.2 (invite-time proposals) or Phase 2d (cross-member decision procedure).
-**Tests:** 1808
+**Tests:** 4684
 
 > **Rule:** This block is always the first thing in the file. Whoever completes a step updates it before handing off. Format is always: Status (what), Owner (who), Action (next thing to do).
 
