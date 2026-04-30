@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-3%2C700%2B-brightgreen.svg)](#engineering-proof)
+[![Tests](https://img.shields.io/badge/tests-4%2C600%2B-brightgreen.svg)](#engineering-proof)
 [![Last Commit](https://img.shields.io/github/last-commit/theman8631/Kernos.svg)](https://github.com/theman8631/Kernos/commits/main)
 [![Status](https://img.shields.io/badge/status-active%20development-blue.svg)](#engineering-proof)
 
