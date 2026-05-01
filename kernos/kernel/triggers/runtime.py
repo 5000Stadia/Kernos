@@ -56,6 +56,14 @@ from kernos.kernel.triggers.errors import (
     StaleClaimError,
     TriggerError,
 )
+
+# WTC v1 C6: substrate-emitted event when a cron predicate's
+# evaluate_now walk detects more than one missed fire in
+# (last_evaluated, now]. The event records the missed window so
+# audit/diagnostics can show what the runtime chose not to fire
+# (skip policy) or collapsed into the single catch-up fire
+# (catch_up policy).
+EVENT_TYPE_WORKFLOW_MISSED_FIRE: str = "workflow.missed_fire"
 from kernos.kernel.triggers.evaluator import (
     PendingDueFire,
     compute_due_at_for_temporal,
@@ -452,19 +460,29 @@ class TriggerEvaluationRuntime:
                     record.trigger_id, exc,
                 )
                 continue
-            for fire_time in fires:
-                normalized = normalize_cron_fire_time(cron_expr, fire_time)
-                fwk = fire_window_key_for_every(cron_expr, normalized)
-                payload = {
-                    "fire_time": normalized,
-                    "cron_expression": cron_expr,
-                }
-                if await self._claim_and_dispatch(
-                    record=record,
-                    fire_window_key=fwk,
-                    payload=payload,
-                ):
-                    fired += 1
+            # WTC v1 C6: missed-window semantics. For 0 fires the
+            # walk is silent. For exactly 1 fire (the on-time
+            # case) we dispatch normally. For 2+ fires (downtime
+            # detected) we honor DispatchPolicy.missed_window:
+            #
+            #   skip      — emit workflow.missed_fire for every
+            #               missed fire; dispatch nothing. The
+            #               next on-time tick fires normally.
+            #   catch_up  — emit workflow.missed_fire for every
+            #               missed fire EXCEPT the latest;
+            #               dispatch the latest as a single
+            #               catch-up fire (catch_up=True flag on
+            #               the outbox row). Bounds the catch-up
+            #               cost at exactly one dispatch per
+            #               predicate per recovery, regardless of
+            #               downtime length.
+            policy = record.predicate.dispatch_policy
+            fired += await self._dispatch_cron_fires(
+                record=record,
+                cron_expr=cron_expr,
+                fires=fires,
+                missed_window=policy.missed_window,
+            )
             record.last_evaluated = now
 
         # 2. Drain pending due-fires whose due_at has passed.
@@ -486,6 +504,123 @@ class TriggerEvaluationRuntime:
         self._pending_due_fires = still_pending
 
         return fired
+
+    # -- missed-window helpers (C6) ------------------------------------
+
+    async def _dispatch_cron_fires(
+        self,
+        *,
+        record: _RegisteredPredicate,
+        cron_expr: str,
+        fires: list[datetime],
+        missed_window: str,
+    ) -> int:
+        """Apply missed-window semantics to a cron walk's fire list.
+
+        * 0 fires → 0 dispatches.
+        * 1 fire  → dispatch normally (no missed-window logic).
+        * 2+ fires (downtime detected):
+          - ``skip``: emit workflow.missed_fire for each; dispatch
+            none. Next on-time tick fires normally.
+          - ``catch_up``: emit workflow.missed_fire for each
+            EXCEPT the latest; dispatch the latest with
+            catch_up=True.
+
+        Returns count of fires actually dispatched.
+        """
+        if not fires:
+            return 0
+        if len(fires) == 1:
+            # On-time: a single fire in (last_evaluated, now].
+            return await self._claim_one_cron_fire(
+                record=record, cron_expr=cron_expr,
+                fire_time=fires[0], catch_up=False,
+            )
+        # Downtime detected — len(fires) >= 2.
+        if missed_window == "skip":
+            for f in fires:
+                await self._emit_missed_fire(
+                    record=record, cron_expr=cron_expr,
+                    fire_time=f, reason="skip",
+                )
+            return 0
+        # catch_up — emit missed_fire for all but the latest;
+        # dispatch the latest as a single catch-up.
+        for f in fires[:-1]:
+            await self._emit_missed_fire(
+                record=record, cron_expr=cron_expr,
+                fire_time=f, reason="catch_up_collapsed",
+            )
+        return await self._claim_one_cron_fire(
+            record=record, cron_expr=cron_expr,
+            fire_time=fires[-1], catch_up=True,
+        )
+
+    async def _claim_one_cron_fire(
+        self,
+        *,
+        record: _RegisteredPredicate,
+        cron_expr: str,
+        fire_time: datetime,
+        catch_up: bool,
+    ) -> int:
+        """Build the fire_window_key + payload for a cron fire and
+        route through _claim_and_dispatch. Returns 1 if claimed
+        and dispatched, else 0."""
+        normalized = normalize_cron_fire_time(cron_expr, fire_time)
+        fwk = fire_window_key_for_every(cron_expr, normalized)
+        payload = {
+            "fire_time": normalized,
+            "cron_expression": cron_expr,
+        }
+        if catch_up:
+            payload["catch_up"] = True
+        if await self._claim_and_dispatch(
+            record=record,
+            fire_window_key=fwk,
+            payload=payload,
+            catch_up=catch_up,
+        ):
+            return 1
+        return 0
+
+    async def _emit_missed_fire(
+        self,
+        *,
+        record: _RegisteredPredicate,
+        cron_expr: str,
+        fire_time: datetime,
+        reason: str,
+    ) -> None:
+        """Emit ``workflow.missed_fire`` to the durable event_stream.
+
+        ``reason`` is ``"skip"`` (missed_window=skip dropped this
+        fire) or ``"catch_up_collapsed"`` (catch_up policy
+        collapsed this fire into the single catch-up). Failure to
+        emit is logged but does not prevent dispatch — the audit
+        record is best-effort, the durable outbox claim is the
+        authoritative substrate state.
+        """
+        from kernos.kernel import event_stream
+        normalized = normalize_cron_fire_time(cron_expr, fire_time)
+        try:
+            await event_stream.emit(
+                instance_id=record.instance_id,
+                event_type=EVENT_TYPE_WORKFLOW_MISSED_FIRE,
+                payload={
+                    "trigger_id": record.trigger_id,
+                    "workflow_id": record.workflow_id,
+                    "cron_expression": cron_expr,
+                    "missed_fire_time": normalized,
+                    "reason": reason,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "WTC v1 C6: workflow.missed_fire emit failed "
+                "trigger=%s reason=%s: %s",
+                record.trigger_id, reason, exc,
+            )
 
     # -- dispatch boundary ----------------------------------------------
 

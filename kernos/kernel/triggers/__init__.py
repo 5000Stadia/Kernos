@@ -68,7 +68,10 @@ from kernos.kernel.triggers.external_sources import (
     EmailMessageSource,
     NotionPageSource,
 )
-from kernos.kernel.triggers.runtime import TriggerEvaluationRuntime
+from kernos.kernel.triggers.runtime import (
+    EVENT_TYPE_WORKFLOW_MISSED_FIRE,
+    TriggerEvaluationRuntime,
+)
 from kernos.kernel.triggers.sources import (
     CALENDAR_SOURCE_MODULE,
     EVENT_TYPE_CALENDAR_OBSERVED,
@@ -92,6 +95,7 @@ __all__ = [
     "EVENT_TYPE_EMAIL_MESSAGE_OBSERVED",
     "EVENT_TYPE_NOTION_PAGE_OBSERVED",
     "EVENT_TYPE_SCHEDULER_TICK_DUE",
+    "EVENT_TYPE_WORKFLOW_MISSED_FIRE",
     "EmailMessageSource",
     "EventSource",
     "FireOutbox",

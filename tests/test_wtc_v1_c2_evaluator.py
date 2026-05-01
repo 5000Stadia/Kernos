@@ -120,15 +120,35 @@ def _make_event(
 # ---------------------------------------------------------------------------
 
 
+def _last_evaluated_for_one_fire(cron_minutes: int) -> datetime:
+    """Compute a last_evaluated that makes (last_evaluated, now]
+    contain EXACTLY one cron boundary for ``*/cron_minutes * * * *``.
+    Anchors the rollback to the most recent boundary so it's
+    independent of where wall-clock seconds land in the minute.
+    """
+    now = datetime.now(timezone.utc)
+    # Most recent boundary at or before now.
+    minute_floor = (now.minute // cron_minutes) * cron_minutes
+    boundary = now.replace(minute=minute_floor, second=0, microsecond=0)
+    # If now is exactly on a boundary, boundary == now → window
+    # would be empty. That's vanishingly unlikely in tests but
+    # safe to nudge by stepping back one cron interval.
+    if boundary >= now:
+        boundary = boundary - timedelta(minutes=cron_minutes)
+    # Window (boundary - 1s, now] contains exactly one boundary
+    # (boundary itself) as long as now < boundary + cron_minutes.
+    return boundary - timedelta(seconds=1)
+
+
 class TestEveryCron:
-    async def test_every_fires_due_windows(self, runtime, wlp):
-        # Register a cron that fires every minute. Set
-        # last_evaluated to 5 minutes ago via direct attribute
-        # access; calling evaluate_now should claim 5 fires.
+    async def test_every_on_time_fires_single_window(self, runtime, wlp):
+        """The on-time case: a cron walk over a window containing
+        exactly one fire dispatches normally regardless of
+        missed_window policy (no downtime, nothing to skip)."""
         pred = TriggerPredicate(
             event_selector={"op": "exists", "path": "event_id"},
             temporal_relation=TemporalRelation(
-                kind="every", cron_expression="* * * * *",
+                kind="every", cron_expression="*/5 * * * *",
             ),
         )
         await runtime.register(
@@ -137,25 +157,20 @@ class TestEveryCron:
             workflow_id="wf_cron",
             predicate=pred,
         )
-        # Roll back last_evaluated so the walk has windows to fire.
         record = runtime._predicates["trig_cron"]
-        record.last_evaluated = (
-            datetime.now(timezone.utc) - timedelta(minutes=5)
-        )
+        record.last_evaluated = _last_evaluated_for_one_fire(5)
         fired = await runtime.evaluate_now()
-        assert fired >= 4, f"expected ~5 fires, got {fired}"
-        # Each dispatch carried a distinct fire_id.
-        fire_ids = {c["fire_id"] for c in wlp.dispatch_calls}
-        assert len(fire_ids) == fired
+        assert fired == 1
+        assert len(wlp.dispatch_calls) == 1
 
     async def test_every_idempotent_within_same_window(self, runtime, wlp):
-        # Two calls to evaluate_now in the same minute should
-        # produce no second fire (deterministic fire_window_key
-        # dedup at the outbox PK).
+        # Two calls to evaluate_now within the same cron interval
+        # should produce no second fire (deterministic
+        # fire_window_key dedup at the outbox PK).
         pred = TriggerPredicate(
             event_selector={"op": "exists", "path": "event_id"},
             temporal_relation=TemporalRelation(
-                kind="every", cron_expression="* * * * *",
+                kind="every", cron_expression="*/5 * * * *",
             ),
         )
         await runtime.register(
@@ -165,17 +180,11 @@ class TestEveryCron:
             predicate=pred,
         )
         record = runtime._predicates["trig_dup"]
-        record.last_evaluated = (
-            datetime.now(timezone.utc) - timedelta(minutes=2)
-        )
+        record.last_evaluated = _last_evaluated_for_one_fire(5)
         fired_first = await runtime.evaluate_now()
-        # Roll last_evaluated back again so the walk would re-fire
-        # the same windows. Outbox dedup must catch this.
-        record.last_evaluated = (
-            datetime.now(timezone.utc) - timedelta(minutes=2)
-        )
+        record.last_evaluated = _last_evaluated_for_one_fire(5)
         fired_second = await runtime.evaluate_now()
-        assert fired_first >= 1
+        assert fired_first == 1
         assert fired_second == 0
 
 
