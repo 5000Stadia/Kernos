@@ -1,9 +1,9 @@
 ## NOW
 
-**Status:** Multi-member V1 live. Stewardship, sensitivity, relationships (2c.1) shipped. 4684 tests.
+**Status:** EXTERNAL-AGENT-CONSULTATION v1 shipped; multi-member V1 done; Drafter v2 + STS + CRB live; CLEANUP-BATCH-V1 in flight.
 **Owner:** Founder
-**Action:** Live test relationships + sensitivity. Next: Phase 2c.2 (invite-time proposals) or Phase 2d (cross-member decision procedure).
-**Tests:** 4684
+**Action:** Live verify EXTERNAL-AGENT-CONSULTATION v1 per standing policy. Next spec: select from CLEANUP-BATCH-V1 (in flight) → KERNOS-DOMAIN-PASS v1 → WORKFLOW-TRIGGERS-CONSOLIDATION (when external review verdict in).
+**Tests:** see Phase Summary table
 
 > **Rule:** This block is always the first thing in the file. Whoever completes a step updates it before handing off. Format is always: Status (what), Owner (who), Action (next thing to do).
 
@@ -70,6 +70,7 @@ None currently active. Next spec will be assigned by founder.
 | MM-P2c1 | Multi-Member Pass 2c.1 — relationships table, declare/list actions, permission profiles, STATE injection | 1808 | 2026-04-16 |
 | ABUSE | Escalating Abuse Prevention — The 24 Escalation (24s→24m→24h→24d→24y→24c) | 1808 | 2026-04-14 |
 | WIPE | /wipe me + /wipe all with exact-phrase confirmation, /disconnect, /restart cross-platform | 1808 | 2026-04-15 |
+| EAC | EXTERNAL-AGENT-CONSULTATION v1 — consult tool, code_exec backends, reentrancy guard, consultation_log audit, agent-surface wiring | 4922 | 2026-04-30 |
 
 ---
 
