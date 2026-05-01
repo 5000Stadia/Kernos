@@ -26,6 +26,32 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE="$SCRIPT_DIR/scripts/kernos.service.template"
 
+# Load KERNOS_* values from .env so `apply` can toggle from a
+# config file instead of requiring shell exports. Defensive
+# parser: only KERNOS_* lines are imported; never sources the
+# whole .env (avoids executing shell metacharacters in API keys
+# / tokens). Already-exported shell vars win over .env.
+_load_kernos_env() {
+    local env_file="$SCRIPT_DIR/.env"
+    [ -f "$env_file" ] || return 0
+    local line key val
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+            KERNOS_*=*)
+                key="${line%%=*}"
+                val="${line#*=}"
+                val="${val%\"}"; val="${val#\"}"
+                val="${val%\'}"; val="${val#\'}"
+                if [ -z "${!key+x}" ]; then
+                    export "$key=$val"
+                fi
+                ;;
+        esac
+    done < "$env_file"
+}
+_load_kernos_env
+
 # Folder-scoped unit name so a dev clone and a production clone
 # can each install independently without name collision.
 DIR_HASH=$(echo -n "$SCRIPT_DIR" | sha256sum | cut -c1-8)

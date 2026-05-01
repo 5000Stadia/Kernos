@@ -15,6 +15,36 @@
 cd "$(dirname "$0")"
 SCRIPT_DIR="$(pwd)"
 
+# Load Kernos-specific values from .env so the user can toggle
+# behavior by editing .env instead of remembering to export shell
+# vars. Only KERNOS_* lines are imported, and we never source the
+# whole .env (avoids executing shell metacharacters in API keys
+# or tokens). Existing shell-exported KERNOS_* values win — set -a
+# does not overwrite already-set vars when used with the conditional
+# pattern below.
+_load_kernos_env() {
+    local env_file="$SCRIPT_DIR/.env"
+    [ -f "$env_file" ] || return 0
+    local line key val
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+            KERNOS_*=*)
+                key="${line%%=*}"
+                val="${line#*=}"
+                # Strip surrounding quotes (single or double) if present.
+                val="${val%\"}"; val="${val#\"}"
+                val="${val%\'}"; val="${val#\'}"
+                # Only set if not already exported — shell wins over .env.
+                if [ -z "${!key+x}" ]; then
+                    export "$key=$val"
+                fi
+                ;;
+        esac
+    done < "$env_file"
+}
+_load_kernos_env
+
 # Helper: emit space-separated PIDs of processes matching $1
 # whose /proc/PID/cwd resolves to SCRIPT_DIR.
 _pids_in_this_dir() {
