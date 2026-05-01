@@ -27,11 +27,12 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 import aiosqlite
+
+from kernos.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +102,6 @@ class ConsultationRecord:
     error: str
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _new_consultation_id() -> str:
     return f"cns_{uuid.uuid4().hex[:16]}"
 
@@ -167,7 +164,7 @@ class ConsultationLog:
                 session_id or None, question, context or None,
                 json.dumps(metadata or {}),
                 workspace_dir or None, timeout_seconds,
-                _now_iso(),
+                utc_now(),
             ),
         )
         return cid
@@ -202,7 +199,7 @@ class ConsultationLog:
                 native_session_ref or None,
                 1 if truncated else 0,
                 json.dumps(metadata) if metadata is not None else None,
-                _now_iso(), exit_status,
+                utc_now(), exit_status,
                 consultation_id,
             ),
         )
@@ -233,7 +230,7 @@ class ConsultationLog:
                 partial_response or "",
                 error,
                 json.dumps(metadata) if metadata is not None else None,
-                _now_iso(), exit_status,
+                utc_now(), exit_status,
                 consultation_id,
             ),
         )
@@ -267,7 +264,7 @@ class ConsultationLog:
                 partial_response or "",
                 error_text,
                 json.dumps(metadata) if metadata is not None else None,
-                _now_iso(),
+                utc_now(),
                 consultation_id,
             ),
         )

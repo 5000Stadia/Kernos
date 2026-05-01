@@ -13,6 +13,7 @@ sessions; live integration tests in C6 cover it end-to-end.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -87,11 +88,43 @@ class ClaudeCodeHarness:
             cmd.extend(["--session-id", _hex_to_uuid(session_id)])
         if workspace_dir:
             cmd.extend(["--add-dir", str(workspace_dir)])
+        # `--` separates flags from the positional prompt. Without
+        # it, claude treats the prompt as a value for the prior
+        # flag (--add-dir consumed it as a second directory).
+        # Codex spec-review fold (optional hardening, made
+        # mandatory by live-test discovery in C6).
+        cmd.append("--")
         cmd.append(prompt)
+        # Scrub the parent's Claude Code env vars so the spawned
+        # `claude` doesn't detect a recursive parent and refuse to
+        # run. Discovered during C6 live test sweep: when Kernos's
+        # primary agent runs INSIDE a Claude Code session and the
+        # consult harness invokes `claude --print`, the child sees
+        # `CLAUDECODE=1` etc. on the inherited env and exits 1
+        # silently. Stripping these signals "fresh CLI invocation."
+        scrubbed_env = {
+            k: v for k, v in os.environ.items()
+            if not (
+                k == "CLAUDECODE"
+                or k == "AI_AGENT"
+                or k.startswith("CLAUDE_CODE_")
+                or k == "CLAUDE_PLUGIN_DATA"
+                # ANTHROPIC_API_KEY: claude reads it directly; if the
+                # parent process has a non-functional value (e.g.
+                # "test-key" planted by Kernos's conftest.py for unit
+                # tests), claude tries to use it and silently exits 1.
+                # Scrubbing forces claude back to its own
+                # keychain/oauth/cred file resolution. This lets
+                # consultation work even under pytest's environment
+                # contamination.
+                or k == "ANTHROPIC_API_KEY"
+            )
+        }
         try:
             result = await run_subprocess(
                 cmd,
                 cwd=workspace_dir if workspace_dir else None,
+                env=scrubbed_env,
                 timeout_seconds=timeout_seconds,
             )
         except (OSError, FileNotFoundError) as exc:

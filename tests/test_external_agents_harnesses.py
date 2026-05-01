@@ -589,9 +589,30 @@ class TestCodexLive:
         assert out.native_session_ref
 
 
+def _gemini_authed() -> bool:
+    """Gemini CLI requires GEMINI_API_KEY or a settings.json with
+    auth method configured. Without auth, calls fail with exit 41
+    even though the binary is installed. Live test gates on the
+    binary being present AND auth being plausible."""
+    if not shutil.which("gemini"):
+        return False
+    if os.environ.get("GEMINI_API_KEY"):
+        return True
+    if os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
+        return True
+    if os.environ.get("GOOGLE_GENAI_USE_GCA"):
+        return True
+    settings = Path.home() / ".gemini" / "settings.json"
+    return settings.exists() and settings.stat().st_size > 0
+
+
 @pytest.mark.skipif(
-    not _live_tests_enabled() or not shutil.which("gemini"),
-    reason="live agent tests require KERNOS_LIVE_AGENT_TESTS=1 and gemini on PATH",
+    not _live_tests_enabled() or not _gemini_authed(),
+    reason=(
+        "live gemini test requires KERNOS_LIVE_AGENT_TESTS=1 + an "
+        "authenticated gemini install (GEMINI_API_KEY / Vertex AI / "
+        "GCA / ~/.gemini/settings.json)"
+    ),
 )
 class TestGeminiLive:
     async def test_live_consult_returns_response(self, tmp_path):

@@ -106,7 +106,15 @@ async def run_subprocess(
         *cmd,
         cwd=str(cwd) if cwd is not None else None,
         env=dict(env) if env is not None else os.environ.copy(),
-        stdin=asyncio.subprocess.PIPE if stdin_text else None,
+        # When no stdin_text is supplied, give the child a closed
+        # stdin (DEVNULL) rather than inheriting the parent's. Some
+        # CLIs (notably claude --print) check stdin readability and
+        # error on inherited-but-broken stdin under pytest. DEVNULL
+        # is the explicit "no input" signal.
+        stdin=(
+            asyncio.subprocess.PIPE if stdin_text
+            else asyncio.subprocess.DEVNULL
+        ),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
