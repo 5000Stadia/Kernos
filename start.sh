@@ -34,8 +34,12 @@ _pids_in_this_dir() {
 }
 
 # --- Kill any prior Kernos instance from THIS folder ----------
+# Opt-out: set KERNOS_START_KILL_PRIOR=0 to disable. Default on.
 SELF_PID=$$
-EXISTING_SERVERS=$(_pids_in_this_dir "python kernos/server\.py")
+EXISTING_SERVERS=""
+if [ "${KERNOS_START_KILL_PRIOR:-1}" = "1" ]; then
+    EXISTING_SERVERS=$(_pids_in_this_dir "python kernos/server\.py")
+fi
 if [ -n "$EXISTING_SERVERS" ]; then
     echo "Found running Kernos in $SCRIPT_DIR: PIDs $EXISTING_SERVERS — terminating before restart..."
     # Graceful first.

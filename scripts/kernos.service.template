@@ -1,0 +1,28 @@
+[Unit]
+Description=Kernos Discord Bot (auto-restart, opt-in via env var)
+# Wait for network to come up so the Discord bot can connect on boot.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__KERNOS_DIR__
+# start.sh handles its own kill-prior, venv activation, and env-var
+# defaults. The service simply runs it.
+ExecStart=/bin/bash __KERNOS_DIR__/start.sh
+# Restart on crash but not on clean exit (so manual `systemctl --user
+# stop` actually stops). 5-second cooldown avoids tight crashloops.
+Restart=on-failure
+RestartSec=5
+# Cap restarts so a fundamentally-broken state doesn't burn power.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+# Forward stdout/stderr to the user's journal.
+StandardOutput=journal
+StandardError=journal
+# Hard timeout for graceful shutdown — Discord client takes a few
+# seconds to close cleanly.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
