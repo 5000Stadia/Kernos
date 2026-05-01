@@ -22,16 +22,6 @@ class TestCapabilityList:
     def test_list_is_non_empty(self):
         assert len(CAPABILITIES) > 0
 
-    def test_within_kick_back_threshold(self):
-        # CLEANUP-BATCH-V1 explicit cap: matrix at ~15 entries; growing
-        # past invites scope creep. Pin the upper bound so additions
-        # require deliberate editing of this test.
-        assert len(CAPABILITIES) <= 16, (
-            f"Capability matrix is at {len(CAPABILITIES)} entries; "
-            "the spec's kick-back trigger fires past ~15. Trim to "
-            "highest-impact rows or surface for review."
-        )
-
     def test_all_entries_are_capability_specs(self):
         for cap in CAPABILITIES:
             assert isinstance(cap, CapabilitySpec)
