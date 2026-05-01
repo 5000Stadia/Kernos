@@ -229,9 +229,13 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
 );
 CREATE INDEX IF NOT EXISTS idx_executions_state
     ON workflow_executions(instance_id, state);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_executions_fire_id
-    ON workflow_executions(fire_id) WHERE fire_id != '';
 """
+# WTC v1 C1 (Kit must-fix): the partial unique index on fire_id is
+# DELIBERATELY NOT in the schema string — legacy DBs without the
+# fire_id column would fail at this CREATE INDEX before the
+# migration block below has a chance to ALTER the column in. The
+# migration block creates the index after the ALTER, so both
+# fresh installs and migrating-from-legacy take the same path.
 
 
 async def _ensure_schema(db: aiosqlite.Connection) -> None:
