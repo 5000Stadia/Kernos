@@ -56,6 +56,12 @@ from kernos.kernel.triggers.predicate import (
     validate_predicate,
     validate_temporal,
 )
+from kernos.kernel.triggers.adapters import (
+    CompiledTrigger,
+    compile_descriptor_triggers,
+    compile_trigger_descriptor,
+    derive_trigger_id,
+)
 from kernos.kernel.triggers.external_sources import (
     EVENT_TYPE_EMAIL_MESSAGE_OBSERVED,
     EVENT_TYPE_NOTION_PAGE_OBSERVED,
@@ -75,6 +81,7 @@ from kernos.kernel.triggers.sources import (
 
 __all__ = [
     "CalendarSource",
+    "CompiledTrigger",
     "DispatchFailed",
     "DispatchPolicy",
     "DispatchPolicyError",
@@ -99,7 +106,10 @@ __all__ = [
     "TriggerError",
     "TriggerEvaluationRuntime",
     "TriggerPredicate",
+    "compile_descriptor_triggers",
+    "compile_trigger_descriptor",
     "derive_fire_id",
+    "derive_trigger_id",
     "ensure_outbox_schema",
     "fire_window_key_for_after",
     "fire_window_key_for_before",
