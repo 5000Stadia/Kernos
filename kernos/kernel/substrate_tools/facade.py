@@ -45,6 +45,7 @@ from kernos.kernel.substrate_tools.registration.validation import DryRunResult
 if TYPE_CHECKING:  # pragma: no cover
     from kernos.kernel.agents.registry import AgentRecord, AgentRegistry
     from kernos.kernel.drafts.registry import DraftRegistry, WorkflowDraft
+    from kernos.kernel.triggers.runtime import TriggerEvaluationRuntime
     from kernos.kernel.workflows.workflow_registry import (
         Workflow,
         WorkflowRegistry,
@@ -79,12 +80,19 @@ class SubstrateTools:
         draft_registry: "DraftRegistry",
         provider_registry: ProviderRegistry,
         context_brief_registry: ContextBriefRegistry,
+        runtime: "TriggerEvaluationRuntime | None" = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._workflow_registry = workflow_registry
         self._draft_registry = draft_registry
         self._provider_registry = provider_registry
         self._context_brief_registry = context_brief_registry
+        # WTC v1 C5b: optional unified TriggerEvaluationRuntime.
+        # When wired, register_workflow registers descriptor.triggers
+        # atomically with the workflow. When None, trigger
+        # registration is skipped — legacy callers continue working
+        # without modification.
+        self._runtime = runtime
 
     # === Query surfaces ===
 
@@ -192,6 +200,7 @@ class SubstrateTools:
             descriptor=descriptor,
             workflow_registry=self._workflow_registry,
             agent_registry=self._agent_registry,
+            runtime=self._runtime,
             dry_run=dry_run,
             approval_event_id=approval_event_id,
         )
