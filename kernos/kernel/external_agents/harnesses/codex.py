@@ -69,7 +69,12 @@ class CodexHarness:
                 f"codex binary not on PATH; install Codex CLI "
                 f"or pass binary= to the harness constructor"
             )
-        prompt = _compose_prompt(question, context)
+        try:
+            prompt = _compose_prompt(question, context)
+        except (TypeError, ValueError) as exc:
+            raise ConsultationFailed(
+                f"codex: context not JSON-serializable: {exc}"
+            ) from exc
         prior_native_ref = (harness_options or {}).get(
             "prior_native_session_ref", ""
         )
@@ -85,11 +90,16 @@ class CodexHarness:
             cmd.extend(["resume", prior_native_ref])
         cmd.append(prompt)
 
-        result = await run_subprocess(
-            cmd,
-            cwd=workspace_dir if workspace_dir else None,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            result = await run_subprocess(
+                cmd,
+                cwd=workspace_dir if workspace_dir else None,
+                timeout_seconds=timeout_seconds,
+            )
+        except (OSError, FileNotFoundError) as exc:
+            raise HarnessUnavailable(
+                f"codex subprocess spawn failed: {exc}"
+            ) from exc
         if result.timed_out:
             raise ConsultationTimeout(
                 f"codex consultation timed out after {timeout_seconds}s"
@@ -155,17 +165,23 @@ def _parse_codex_jsonl(stdout: str) -> tuple[str, str, dict]:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(event, dict):
+            continue
         kind = event.get("type")
         if kind == "thread.started":
-            thread_id = str(event.get("thread_id", "") or "")
+            tid = event.get("thread_id")
+            if isinstance(tid, str):
+                thread_id = tid
         elif kind == "item.completed":
-            item = event.get("item") or {}
-            if item.get("type") == "agent_message":
-                text = item.get("text", "") or ""
-                if text:
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str) and text:
                     response_parts.append(text)
         elif kind == "turn.completed":
-            usage = event.get("usage") or {}
+            usage_field = event.get("usage")
+            if isinstance(usage_field, dict):
+                usage = usage_field
     return thread_id, "\n".join(response_parts), usage
 
 

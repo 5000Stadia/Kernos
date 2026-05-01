@@ -374,6 +374,131 @@ class TestGeminiHarness:
         # No history file created
         assert list(tmp_path.glob("**/gemini.jsonl")) == []
 
+    async def test_unsanitized_session_id_rejected(
+        self, gemini_stub, tmp_path,
+    ):
+        """Codex mid-batch fold: harness enforces sanitized hex
+        session_id format to prevent path traversal."""
+        h = GeminiHarness(binary=str(gemini_stub), history_root=tmp_path)
+        with pytest.raises(ConsultationFailed, match="sanitized"):
+            await h.consult(
+                question="x", context="",
+                session_id="../../etc/passwd",  # path traversal attempt
+                workspace_dir=tmp_path,
+                timeout_seconds=10, harness_options={},
+            )
+
+    async def test_short_unsanitized_session_id_rejected(
+        self, gemini_stub, tmp_path,
+    ):
+        h = GeminiHarness(binary=str(gemini_stub), history_root=tmp_path)
+        with pytest.raises(ConsultationFailed, match="sanitized"):
+            await h.consult(
+                question="x", context="",
+                session_id="not-a-hex-string",
+                workspace_dir=tmp_path,
+                timeout_seconds=10, harness_options={},
+            )
+
+
+# ===========================================================================
+# Fold pinning — Codex mid-batch C2 review folds
+# ===========================================================================
+
+
+class TestSpawnFailureWrapping:
+    """Codex mid-batch fold: spawn OSError must surface as
+    HarnessUnavailable, not bubble untyped."""
+
+    async def test_claude_spawn_failure_raises_unavailable(self, tmp_path):
+        # Pass a binary path that resolves via shutil.which() but the
+        # actual exec will fail (e.g., a non-executable file)
+        non_exec = tmp_path / "claude_unrunnable"
+        non_exec.write_text("not a script")
+        # No chmod +x — exec will fail
+        h = ClaudeCodeHarness(binary=str(non_exec))
+        # health_check sees missing because shutil.which won't
+        # promote a non-executable; that's fine — the binary-missing
+        # path also raises HarnessUnavailable.
+        with pytest.raises(HarnessUnavailable):
+            await h.consult(
+                question="x", context="", session_id="",
+                workspace_dir=tmp_path, timeout_seconds=10,
+                harness_options={},
+            )
+
+
+class TestNonSerializableContextWrapping:
+    """Codex mid-batch fold: context with non-JSON-serializable values
+    raises ConsultationFailed, not a generic TypeError."""
+
+    async def test_codex_non_serializable_context_raises_typed(
+        self, codex_stub, tmp_path,
+    ):
+        h = CodexHarness(binary=str(codex_stub))
+        # Pass a non-serializable dict (e.g., a set)
+        with pytest.raises(ConsultationFailed, match="JSON-serializable"):
+            await h.consult(
+                question="x",
+                context={"bad": {1, 2, 3}},  # set is not JSON-serializable
+                session_id="",
+                workspace_dir=tmp_path,
+                timeout_seconds=10, harness_options={},
+            )
+
+
+class TestCodexParserRobustness:
+    """Codex mid-batch fold: parser must defensively handle malformed
+    event shapes (non-dict event, non-dict item, non-string text,
+    non-dict usage) without crashing or polluting metadata."""
+
+    def test_non_dict_event_skipped(self):
+        from kernos.kernel.external_agents.harnesses.codex import (
+            _parse_codex_jsonl,
+        )
+        stdout = "\n".join([
+            "[1, 2, 3]",  # JSON array, not dict
+            '"just a string"',
+            'true',
+            '{"type": "thread.started", "thread_id": "ok"}',
+        ])
+        thread_id, response, usage = _parse_codex_jsonl(stdout)
+        assert thread_id == "ok"
+
+    def test_non_dict_item_skipped(self):
+        from kernos.kernel.external_agents.harnesses.codex import (
+            _parse_codex_jsonl,
+        )
+        stdout = "\n".join([
+            '{"type": "item.completed", "item": "not a dict"}',
+            '{"type": "item.completed", "item": null}',
+            '{"type": "item.completed",'
+            ' "item": {"type": "agent_message", "text": "valid"}}',
+        ])
+        _, response, _ = _parse_codex_jsonl(stdout)
+        assert response == "valid"
+
+    def test_non_string_text_skipped(self):
+        from kernos.kernel.external_agents.harnesses.codex import (
+            _parse_codex_jsonl,
+        )
+        stdout = "\n".join([
+            '{"type": "item.completed",'
+            ' "item": {"type": "agent_message", "text": {"weird": true}}}',
+            '{"type": "item.completed",'
+            ' "item": {"type": "agent_message", "text": "ok"}}',
+        ])
+        _, response, _ = _parse_codex_jsonl(stdout)
+        assert response == "ok"
+
+    def test_non_dict_usage_ignored(self):
+        from kernos.kernel.external_agents.harnesses.codex import (
+            _parse_codex_jsonl,
+        )
+        stdout = '{"type": "turn.completed", "usage": "not-a-dict"}'
+        _, _, usage = _parse_codex_jsonl(stdout)
+        assert usage == {}
+
 
 # ===========================================================================
 # Live-CLI integration tests (skip when binary missing or env unset)

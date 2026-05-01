@@ -78,20 +78,45 @@ class GeminiHarness:
                 f"gemini binary not on PATH; install Gemini CLI "
                 f"or pass binary= to the harness constructor"
             )
+        if session_id:
+            # Codex mid-batch fold: harness boundary enforces sanitized
+            # session_id format. Caller MUST sanitize via
+            # sanitize_session_id() before invoking; raw session_id
+            # could path-traverse otherwise. v1 expects exactly the
+            # 64-char lowercase hex SHA-256 produced by
+            # sanitize_session_id.
+            if not _is_safe_session_id(session_id):
+                raise ConsultationFailed(
+                    f"gemini: session_id {session_id!r} is not in "
+                    f"the sanitized 64-char hex format the harness "
+                    f"requires; orchestrator must call "
+                    f"sanitize_session_id() before invoking"
+                )
         history_file = self._history_path(session_id) if session_id else None
         prior_turns = _load_history(history_file) if history_file else []
-        prompt = _compose_prompt(question, context, prior_turns)
+
+        try:
+            prompt = _compose_prompt(question, context, prior_turns)
+        except (TypeError, ValueError) as exc:
+            raise ConsultationFailed(
+                f"gemini: context not JSON-serializable: {exc}"
+            ) from exc
 
         cmd = [
             self._binary,
             "--prompt", prompt,
             "--yolo",  # auto-approve for non-interactive use
         ]
-        result = await run_subprocess(
-            cmd,
-            cwd=workspace_dir if workspace_dir else None,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            result = await run_subprocess(
+                cmd,
+                cwd=workspace_dir if workspace_dir else None,
+                timeout_seconds=timeout_seconds,
+            )
+        except (OSError, FileNotFoundError) as exc:
+            raise HarnessUnavailable(
+                f"gemini subprocess spawn failed: {exc}"
+            ) from exc
         if result.timed_out:
             raise ConsultationTimeout(
                 f"gemini consultation timed out after {timeout_seconds}s"
@@ -103,10 +128,19 @@ class GeminiHarness:
             )
 
         if history_file:
-            _append_history(
-                history_file,
-                user=question, assistant=result.stdout,
-            )
+            try:
+                _append_history(
+                    history_file,
+                    user=question, assistant=result.stdout,
+                )
+            except OSError as exc:
+                # History persistence failure is non-fatal — the
+                # consultation succeeded, but threading on the next
+                # call will lose this turn. Log and continue.
+                logger.warning(
+                    "gemini: history append failed for %s: %s",
+                    history_file, exc,
+                )
 
         return ConsultResult(
             response=result.stdout,
@@ -130,6 +164,16 @@ class GeminiHarness:
         if self._history_root is None:
             return Path("/tmp") / "kernos" / "consultations" / session_id / "gemini.jsonl"
         return self._history_root / session_id / "gemini.jsonl"
+
+
+def _is_safe_session_id(session_id: str) -> bool:
+    """Codex mid-batch fold: enforce that session_id is in the
+    sanitized 64-char lowercase hex format produced by
+    :func:`sanitize_session_id`. Anything else risks path traversal
+    when the value is interpolated into the on-disk history path."""
+    if len(session_id) != 64:
+        return False
+    return all(c in "0123456789abcdef" for c in session_id)
 
 
 def _compose_prompt(

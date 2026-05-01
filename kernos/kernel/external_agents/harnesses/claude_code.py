@@ -70,7 +70,12 @@ class ClaudeCodeHarness:
                 f"claude binary not on PATH; install Claude Code "
                 f"or pass binary= to the harness constructor"
             )
-        prompt = _compose_prompt(question, context)
+        try:
+            prompt = _compose_prompt(question, context)
+        except (TypeError, ValueError) as exc:
+            raise ConsultationFailed(
+                f"claude_code: context not JSON-serializable: {exc}"
+            ) from exc
         cmd = [
             self._binary, "--print",
             "--output-format", "text",
@@ -83,11 +88,16 @@ class ClaudeCodeHarness:
         if workspace_dir:
             cmd.extend(["--add-dir", str(workspace_dir)])
         cmd.append(prompt)
-        result = await run_subprocess(
-            cmd,
-            cwd=workspace_dir if workspace_dir else None,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            result = await run_subprocess(
+                cmd,
+                cwd=workspace_dir if workspace_dir else None,
+                timeout_seconds=timeout_seconds,
+            )
+        except (OSError, FileNotFoundError) as exc:
+            raise HarnessUnavailable(
+                f"claude subprocess spawn failed: {exc}"
+            ) from exc
         if result.timed_out:
             raise ConsultationTimeout(
                 f"claude consultation timed out after "
