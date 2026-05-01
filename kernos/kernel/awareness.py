@@ -138,6 +138,7 @@ class AwarenessEvaluator:
         trigger_interval_seconds: int = 15,  # 15 seconds for trigger evaluation
         trigger_store=None,  # TriggerStore — set for scheduler support
         handler=None,  # MessageHandler — set for scheduler outbound delivery
+        runtime=None,  # WTC v1: TriggerEvaluationRuntime — additive heartbeat
     ) -> None:
         self._state = state
         self._events = events
@@ -145,6 +146,12 @@ class AwarenessEvaluator:
         self._trigger_interval = trigger_interval_seconds
         self._trigger_store = trigger_store
         self._handler = handler
+        # WTC v1 C5c: optional unified runtime. When wired, the
+        # awareness loop drives runtime.evaluate_now() on the same
+        # cadence as the legacy trigger evaluation. Additive — the
+        # legacy path continues to run for backward compat. The
+        # full Pattern 05 strike lands in C7.
+        self._runtime = runtime
         self._running = False
         self._task: asyncio.Task | None = None
         self._awareness_tick_count = 0
@@ -156,6 +163,23 @@ class AwarenessEvaluator:
 
     async def start(self, instance_id: str) -> None:
         """Start the periodic evaluator for an instance."""
+        # WTC v1 C5c: run the unified runtime's recovery sweep once
+        # before the heartbeat loop begins. Closes the Kit must-fix
+        # seam (AC6 scenarios) — pending outbox rows past their
+        # claim lease are reconciled or reclaimed before any new
+        # fires are evaluated.
+        if self._runtime is not None:
+            try:
+                recovered = await self._runtime.recover()
+                if recovered:
+                    logger.info(
+                        "WTC_TRIGGER_RECOVER: instance=%s reconciled=%d",
+                        instance_id, recovered,
+                    )
+            except Exception as e:
+                logger.error(
+                    "WTC trigger recovery sweep error: %s", e,
+                )
         self._running = True
         self._task = asyncio.create_task(self._run_loop(instance_id))
         logger.info("AWARENESS: evaluator started for instance=%s awareness=%ds triggers=%ds",
@@ -268,6 +292,27 @@ class AwarenessEvaluator:
                     raise
                 except Exception as e:
                     logger.error("Trigger evaluation error: %s", e)
+
+            # Phase 2b (WTC v1 C5c): unified TriggerEvaluationRuntime
+            # heartbeat. Drives every(cron) walks + drains pending
+            # before/after fires. Additive to Phase 2 — the legacy
+            # path is untouched. CRB-registered workflows (via STS
+            # C5b) flow through this path; manage_schedule's legacy
+            # path still uses Phase 2.
+            if self._runtime is not None:
+                try:
+                    runtime_fired = await self._runtime.evaluate_now()
+                    if runtime_fired:
+                        logger.info(
+                            "WTC_TRIGGER_EVAL: instance=%s fired=%d",
+                            instance_id, runtime_fired,
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(
+                        "WTC trigger evaluation error: %s", e,
+                    )
 
             # Phase 3: Event trigger evaluation (adaptive cadence)
             _event_tick_count += 1
