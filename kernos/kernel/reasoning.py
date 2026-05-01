@@ -747,6 +747,86 @@ class ReasoningService:
     # Kernel tools: intercepted before MCP, never passed through to external servers
     _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult"}
 
+    # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
+    #
+    # Each tool name in `_KERNEL_TOOLS` declares which dispatch paths
+    # carry it. Three valid path tokens:
+    #
+    #   "loop"      — the main reason() tool loop (Chain 2). Wraps
+    #                 handler in try/except with friendly fallback
+    #                 strings. Used by the agent's regular tool calls.
+    #   "confirmed" — execute_tool() (Chain 1). Used when the gate
+    #                 surfaces a PendingAction and the user confirms;
+    #                 also called from scheduler triggers. Returns
+    #                 strings (no try/except wrapping); callers route
+    #                 the result through classify_trigger_failure.
+    #   "helper"    — dispatched through a helper method
+    #                 (_handle_canvas_tool) rather than a direct elif
+    #                 branch. Canvas tools follow this path because
+    #                 their dispatch is shared between contexts.
+    #
+    # Why a registry instead of a single dispatch table: the two elif
+    # chains have legitimately different error semantics (loop wraps,
+    # confirmed raises). Unifying them at the handler layer would
+    # silently change behavior on one path. The registry documents the
+    # intentional divergence and a structural test
+    # (tests/test_kernel_tool_dispatch_paths.py) pins both chains to
+    # this declaration so adding or moving a tool to one chain without
+    # updating its paths fails CI. Full handler extraction is parked
+    # as a follow-on spec with explicit error-semantic decisions.
+    #
+    # Five tools intentionally declared "loop"-only: read-only or
+    # chain-management surfaces that never produce confirmable
+    # PendingActions. They appear only in Chain 2.
+    _KERNEL_TOOL_PATHS: dict[str, frozenset[str]] = {
+        # Loop + confirmed (general kernel tools)
+        "write_file":                  frozenset({"loop", "confirmed"}),
+        "read_file":                   frozenset({"loop", "confirmed"}),
+        "list_files":                  frozenset({"loop", "confirmed"}),
+        "delete_file":                 frozenset({"loop", "confirmed"}),
+        "execute_code":                frozenset({"loop", "confirmed"}),
+        "consult":                     frozenset({"loop", "confirmed"}),
+        "manage_workspace":            frozenset({"loop", "confirmed"}),
+        "register_tool":               frozenset({"loop", "confirmed"}),
+        "manage_plan":                 frozenset({"loop", "confirmed"}),
+        "read_runtime_trace":          frozenset({"loop", "confirmed"}),
+        "diagnose_issue":              frozenset({"loop", "confirmed"}),
+        "propose_fix":                 frozenset({"loop", "confirmed"}),
+        "submit_spec":                 frozenset({"loop", "confirmed"}),
+        "manage_members":              frozenset({"loop", "confirmed"}),
+        "send_relational_message":     frozenset({"loop", "confirmed"}),
+        "resolve_relational_message":  frozenset({"loop", "confirmed"}),
+        "remember":                    frozenset({"loop", "confirmed"}),
+        "dismiss_whisper":             frozenset({"loop", "confirmed"}),
+        "read_source":                 frozenset({"loop", "confirmed"}),
+        "read_doc":                    frozenset({"loop", "confirmed"}),
+        "read_soul":                   frozenset({"loop", "confirmed"}),
+        "update_soul":                 frozenset({"loop", "confirmed"}),
+        "manage_covenants":            frozenset({"loop", "confirmed"}),
+        "manage_capabilities":         frozenset({"loop", "confirmed"}),
+        "manage_channels":             frozenset({"loop", "confirmed"}),
+        "send_to_channel":             frozenset({"loop", "confirmed"}),
+        "manage_schedule":             frozenset({"loop", "confirmed"}),
+        "request_tool":                frozenset({"loop", "confirmed"}),
+        # Loop only — read-only or chain-management; never produce
+        # confirmable PendingActions.
+        "remember_details":            frozenset({"loop"}),
+        "inspect_state":               frozenset({"loop"}),
+        "set_chain_model":             frozenset({"loop"}),
+        "diagnose_llm_chain":          frozenset({"loop"}),
+        "diagnose_messenger":          frozenset({"loop"}),
+        # Helper-routed (canvas tools share dispatch through
+        # _handle_canvas_tool from execute_tool's confirmed path).
+        "canvas_list":                 frozenset({"confirmed", "helper"}),
+        "canvas_create":               frozenset({"confirmed", "helper"}),
+        "page_read":                   frozenset({"confirmed", "helper"}),
+        "page_write":                  frozenset({"confirmed", "helper"}),
+        "page_list":                   frozenset({"confirmed", "helper"}),
+        "page_search":                 frozenset({"confirmed", "helper"}),
+        "canvas_preference_extract":   frozenset({"confirmed", "helper"}),
+        "canvas_preference_confirm":   frozenset({"confirmed", "helper"}),
+    }
+
     # ---------------------------------------------------------------------------
     # Dispatch Gate (3D-HOTFIX)
     # ---------------------------------------------------------------------------
