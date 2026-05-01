@@ -1,8 +1,8 @@
 ## NOW
 
-**Status:** EXTERNAL-AGENT-CONSULTATION v1 shipped; multi-member V1 done; Drafter v2 + STS + CRB live; CLEANUP-BATCH-V1 in flight.
+**Status:** EXTERNAL-AGENT-CONSULTATION v1 shipped; CLEANUP-BATCH-V1 shipped; multi-member V1 done; Drafter v2 + STS + CRB live.
 **Owner:** Founder
-**Action:** Live verify EXTERNAL-AGENT-CONSULTATION v1 per standing policy. Next spec: select from CLEANUP-BATCH-V1 (in flight) → KERNOS-DOMAIN-PASS v1 → WORKFLOW-TRIGGERS-CONSOLIDATION (when external review verdict in).
+**Action:** Live verify EXTERNAL-AGENT-CONSULTATION v1 per standing policy. Next spec: KERNOS-DOMAIN-PASS v1 → WORKFLOW-TRIGGERS-CONSOLIDATION (when external review verdict in) → REASONING-DISPATCH-EXTRACT (parked from CLEANUP-BATCH-V1 Pass 5).
 **Tests:** see Phase Summary table
 
 > **Rule:** This block is always the first thing in the file. Whoever completes a step updates it before handing off. Format is always: Status (what), Owner (who), Action (next thing to do).
@@ -71,6 +71,7 @@ None currently active. Next spec will be assigned by founder.
 | ABUSE | Escalating Abuse Prevention — The 24 Escalation (24s→24m→24h→24d→24y→24c) | 1808 | 2026-04-14 |
 | WIPE | /wipe me + /wipe all with exact-phrase confirmation, /disconnect, /restart cross-platform | 1808 | 2026-04-15 |
 | EAC | EXTERNAL-AGENT-CONSULTATION v1 — consult tool, code_exec backends, reentrancy guard, consultation_log audit, agent-surface wiring | 4922 | 2026-04-30 |
+| CB1 | CLEANUP-BATCH-V1 — public-surface canonical links, launcher-split docs, capability matrix + /capabilities, DECISIONS.md refresh, compaction follow-up receipts, command-parity drift test, kernel-tool dispatch path registry, NOW-block CI guard | 4952 | 2026-04-30 |
 
 ---
 
