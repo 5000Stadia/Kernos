@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 from kernos.kernel.builders.aider import AiderBuilder
-from kernos.kernel.builders.base import BuildResult as LegacyBuildResult
 from kernos.kernel.external_agents.errors import HarnessUnavailable
 from kernos.kernel.external_agents.harness import (
     BuildResult,
@@ -78,6 +77,17 @@ class AiderHarness:
         timeout_seconds: int,
         harness_options: dict[str, Any],
     ) -> BuildResult:
+        # AC18: missing aider binary raises HarnessUnavailable, not a
+        # silent BuildResult(success=False). Triage queries can then
+        # distinguish "aider is not installed" from "aider ran and
+        # the build legitimately failed."
+        import shutil
+        if not shutil.which("aider"):
+            raise HarnessUnavailable(
+                "aider binary not on PATH; install `aider-chat` "
+                "(`pip install aider-chat`) before invoking the "
+                "aider harness in build mode"
+            )
         # The legacy AiderBuilder takes instance_id / space_id /
         # data_dir to compute the space directory. The harness
         # interface gives us workspace_dir directly. Map back via
@@ -91,7 +101,10 @@ class AiderHarness:
         scope = opts.get("scope", "isolated")
         write_file_name = opts.get("write_file_name")
 
-        legacy: LegacyBuildResult = await self._builder.build(
+        # The legacy AiderBuilder returns the same BuildResult class
+        # ``external_agents.harness`` re-exports (Codex post-impl
+        # review fold), so no field translation is needed.
+        return await self._builder.build(
             instance_id=instance_id,
             space_id=space_id,
             code=task,
@@ -99,14 +112,6 @@ class AiderHarness:
             write_file_name=write_file_name,
             data_dir=data_dir,
             scope=scope,
-        )
-        return BuildResult(
-            success=legacy.success,
-            stdout=legacy.stdout,
-            stderr=legacy.stderr,
-            exit_code=legacy.exit_code,
-            error=legacy.error,
-            files_modified=list(legacy.files_modified),
         )
 
 

@@ -139,7 +139,8 @@ class ClaudeCodeHarness:
         if result.exit_code != 0:
             raise ConsultationFailed(
                 f"claude exited {result.exit_code}: "
-                f"{(result.stderr or 'no stderr')[:500]}"
+                f"{(result.stderr or 'no stderr')[:500]}",
+                exit_status=result.exit_code,
             )
         return ConsultResult(
             response=result.stdout,

@@ -67,7 +67,19 @@ class TaskEngine:
             logger.warning("Failed to emit task.created: %s", exc)
 
         try:
-            result = await self._reasoning.reason(request)
+            # EXTERNAL-AGENT-CONSULTATION v1: mark this async task as a
+            # conversational turn so the consult reentrancy guard
+            # permits external-agent calls from the agent's tool loop
+            # (default is UNKNOWN which blocks). The token resets on
+            # exit; nested consults track depth via consult_depth.
+            from kernos.kernel.external_agents.reentrancy import (
+                CallingContext, set_calling_context, reset_calling_context,
+            )
+            _ext_token = set_calling_context(CallingContext.CONVERSATIONAL)
+            try:
+                result = await self._reasoning.reason(request)
+            finally:
+                reset_calling_context(_ext_token)
 
             task.status = TaskStatus.COMPLETED
             task.completed_at = utc_now()

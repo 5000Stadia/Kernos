@@ -398,6 +398,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     from kernos.kernel.code_exec import EXECUTE_CODE_TOOL
     from kernos.kernel.workspace import MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL
     from kernos.kernel.execution import MANAGE_PLAN_TOOL
+    from kernos.kernel.external_agents.tool import CONSULT_TOOL
     _all_kernel = FILE_TOOLS + [REQUEST_TOOL, READ_DOC_TOOL, DISMISS_WHISPER_TOOL,
                             MANAGE_CAPABILITIES_TOOL, REMEMBER_DETAILS_TOOL,
                             READ_SOURCE_TOOL, READ_SOUL_TOOL, UPDATE_SOUL_TOOL,
@@ -405,7 +406,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                             SEND_TO_CHANNEL_TOOL, MANAGE_SCHEDULE_TOOL,
                             INSPECT_STATE_TOOL, EXECUTE_CODE_TOOL,
                             MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL,
-                            MANAGE_PLAN_TOOL]
+                            MANAGE_PLAN_TOOL, CONSULT_TOOL]
     from kernos.kernel.runtime_trace import READ_RUNTIME_TRACE_TOOL
     from kernos.kernel.diagnostics import DIAGNOSE_ISSUE_TOOL, PROPOSE_FIX_TOOL, SUBMIT_SPEC_TOOL
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL

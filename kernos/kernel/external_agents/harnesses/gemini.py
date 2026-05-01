@@ -124,7 +124,8 @@ class GeminiHarness:
         if result.exit_code != 0:
             raise ConsultationFailed(
                 f"gemini exited {result.exit_code}: "
-                f"{(result.stderr or 'no stderr')[:500]}"
+                f"{(result.stderr or 'no stderr')[:500]}",
+                exit_status=result.exit_code,
             )
 
         if history_file:

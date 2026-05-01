@@ -119,9 +119,18 @@ class ConsultationOrchestrator:
 
             # Look up prior native_session_ref for resume-capable
             # harnesses (codex). Other harnesses ignore the option.
+            # Codex post-impl review fold: scope the lookup by
+            # (instance_id, member_id, harness) to prevent
+            # cross-tenant / cross-member native-session reuse if
+            # session_id_hex collides (sanitized hash collisions are
+            # negligible but instance+member scoping is the right
+            # boundary regardless).
             if session_id_hex and harness in ("codex",):
                 prior = await self._lookup_prior_native_ref(
-                    session_id_hex,
+                    session_id_hex=session_id_hex,
+                    instance_id=instance_id,
+                    member_id=member_id,
+                    harness=harness,
                 )
                 if prior:
                     options.setdefault(
@@ -148,6 +157,14 @@ class ConsultationOrchestrator:
             )
 
             # ---- 5. Invoke harness + record outcome -------------
+            # AC7/AC19: every mark_* call carries the begin-time
+            # metadata (session_id_raw, harness_options_keys) along
+            # with any new fields, so the raw id and option set
+            # remain queryable on succeeded/failed/timed_out rows.
+            base_meta = {
+                "session_id_raw": session_id_raw,
+                "harness_options_keys": sorted(options.keys()),
+            }
             try:
                 result = await backend.consult(
                     question=question,
@@ -161,7 +178,7 @@ class ConsultationOrchestrator:
                 await self._log.mark_timed_out(
                     consultation_id=consultation_id,
                     timeout_seconds=timeout_clamped,
-                    metadata={"error_repr": repr(exc)},
+                    metadata={**base_meta, "error_repr": repr(exc)},
                 )
                 raise
             except ConsultationFailed as exc:
@@ -169,23 +186,25 @@ class ConsultationOrchestrator:
                     consultation_id=consultation_id,
                     error=str(exc),
                     exit_status=getattr(exc, "exit_status", 0) or 0,
-                    metadata={"error_repr": repr(exc)},
+                    metadata={**base_meta, "error_repr": repr(exc)},
                 )
                 raise
             except HarnessUnavailable as exc:
                 await self._log.mark_failed(
                     consultation_id=consultation_id,
                     error=f"HarnessUnavailable: {exc}",
-                    metadata={"error_repr": repr(exc)},
+                    metadata={**base_meta, "error_repr": repr(exc)},
                 )
                 raise
 
+            success_meta = {**base_meta, **(dict(result.metadata or {}))}
             await self._log.mark_succeeded(
                 consultation_id=consultation_id,
                 response=result.response,
                 native_session_ref=result.native_session_ref,
                 truncated=result.truncated,
-                metadata=dict(result.metadata or {}),
+                metadata=success_meta,
+                exit_status=int(success_meta.get("exit_status", 0) or 0),
             )
             return result
         finally:
@@ -232,16 +251,30 @@ class ConsultationOrchestrator:
         return max(1, min(_TIMEOUT_SECONDS_MAX, int(value)))
 
     async def _lookup_prior_native_ref(
-        self, session_id_hex: str,
+        self,
+        *,
+        session_id_hex: str,
+        instance_id: str,
+        member_id: str,
+        harness: str,
     ) -> str:
         """Find the most-recent successful row's native_session_ref
         for a session. Used so codex can resume the captured
-        thread_id on subsequent calls."""
+        thread_id on subsequent calls. Scoped by
+        (instance_id, member_id, harness) so a session_id collision
+        across tenants/members/harnesses cannot leak a native ref."""
         rows = await self._log.find_by_session(session_id=session_id_hex)
         # Iterate from newest to oldest; pick the first non-empty
-        # native_session_ref from a row that succeeded.
+        # native_session_ref from a row that succeeded AND matches
+        # the calling tenant/member/harness.
         for row in reversed(rows):
-            if row.status == "succeeded" and row.native_session_ref:
+            if (
+                row.status == "succeeded"
+                and row.native_session_ref
+                and row.instance_id == instance_id
+                and row.member_id == member_id
+                and row.harness == harness
+            ):
                 return row.native_session_ref
         return ""
 

@@ -22,7 +22,12 @@ class ConsultationTimeout(ExternalAgentError):
 
 class ConsultationFailed(ExternalAgentError):
     """Subprocess exited non-zero; stderr captured in ``args[1]``
-    when available."""
+    when available. ``exit_status`` carries the subprocess return
+    code so audit rows distinguish exit codes (AC16)."""
+
+    def __init__(self, *args: object, exit_status: int = 0) -> None:
+        super().__init__(*args)
+        self.exit_status = exit_status
 
 
 class WorkspaceNotAllowed(ExternalAgentError):

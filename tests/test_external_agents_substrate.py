@@ -61,10 +61,16 @@ class TestResultTypes:
         with pytest.raises(Exception):
             r.response = "changed"  # type: ignore[misc]
 
-    def test_build_result_frozen(self):
+    def test_build_result_unified_with_legacy(self):
+        # AC9 alignment: external_agents.harness.BuildResult is the
+        # same class as builders.base.BuildResult (single source of
+        # truth). The legacy class is mutable, so this is too — by
+        # design. The frozen-result invariant only applies to
+        # ConsultResult / HarnessHealth.
+        from kernos.kernel.builders.base import BuildResult as LegacyBR
+        assert BuildResult is LegacyBR
         r = BuildResult(success=True)
-        with pytest.raises(Exception):
-            r.success = False  # type: ignore[misc]
+        r.success = False  # mutable — by design
 
     def test_harness_health_frozen(self):
         h = HarnessHealth(name="x", installed=True)

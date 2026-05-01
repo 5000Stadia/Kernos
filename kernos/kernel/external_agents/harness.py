@@ -55,19 +55,15 @@ class ConsultResult:
     truncated: bool = False
 
 
-@dataclass(frozen=True)
-class BuildResult:
-    """Mirror of :class:`kernos.kernel.builders.base.BuildResult` so
-    the existing builders/ facade can re-export this type without
-    changing callers' imports.
-    """
-
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    exit_code: int = 0
-    error: str = ""
-    files_modified: list[str] = field(default_factory=list)
+# Codex post-impl review fold (AC9 alignment): the new harness
+# layer reuses the legacy ``builders.base.BuildResult`` rather than
+# defining a parallel dataclass. This keeps a single source of
+# truth — both ``kernos.kernel.builders`` (legacy facade) and
+# ``kernos.kernel.external_agents`` expose the same class, so the
+# AiderHarness build adapter doesn't need to translate fields and
+# downstream callers see one ``BuildResult`` shape regardless of
+# which import path they used.
+from kernos.kernel.builders.base import BuildResult  # noqa: E402, F401
 
 
 # ---------------------------------------------------------------------------

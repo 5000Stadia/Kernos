@@ -107,7 +107,8 @@ class CodexHarness:
         if result.exit_code != 0:
             raise ConsultationFailed(
                 f"codex exited {result.exit_code}: "
-                f"{(result.stderr or 'no stderr')[:500]}"
+                f"{(result.stderr or 'no stderr')[:500]}",
+                exit_status=result.exit_code,
             )
 
         thread_id, response_text, usage = _parse_codex_jsonl(result.stdout)

@@ -745,7 +745,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult"}
 
     # ---------------------------------------------------------------------------
     # Dispatch Gate (3D-HOTFIX)
@@ -835,8 +835,42 @@ class ReasoningService:
                     timeout_seconds=tool_input.get("timeout_seconds", 30),
                     write_file_name=tool_input.get("write_file"),
                     data_dir=data_dir,
+                    backend=tool_input.get("backend"),
                 )
                 return _json.dumps(result)
+            elif tool_name == "consult":
+                import json as _json
+                from kernos.kernel.external_agents.tool import (
+                    get_service as _ext_get_service,
+                )
+                from kernos.kernel.external_agents.errors import (
+                    ExternalAgentError as _ExtError,
+                )
+                try:
+                    _svc = await _ext_get_service()
+                    _consult_result = await _svc.orchestrator.consult(
+                        instance_id=request.instance_id,
+                        member_id=getattr(request, "member_id", "")
+                                  or request.instance_id,
+                        harness=tool_input.get("harness", ""),
+                        question=tool_input.get("question", ""),
+                        context=tool_input.get("context", ""),
+                        session_id_raw=tool_input.get("session_id", ""),
+                        workspace_dir=tool_input.get("workspace_dir") or None,
+                        timeout_seconds=tool_input.get("timeout_seconds"),
+                    )
+                    return _json.dumps({
+                        "response": _consult_result.response,
+                        "harness": _consult_result.harness,
+                        "session_id": _consult_result.session_id,
+                        "truncated": _consult_result.truncated,
+                        "metadata": _consult_result.metadata,
+                    })
+                except _ExtError as exc:
+                    return _json.dumps({
+                        "error": type(exc).__name__,
+                        "message": str(exc),
+                    })
             elif tool_name == "manage_workspace":
                 if self._workspace:
                     action = tool_input.get("action", "list")
@@ -1404,11 +1438,52 @@ class ReasoningService:
                         timeout_seconds=tool_args.get("timeout_seconds", 30),
                         write_file_name=tool_args.get("write_file"),
                         data_dir=_data_dir,
+                        backend=tool_args.get("backend"),
                     )
                     result = _json.dumps(_exec_result)
                 except Exception as exc:
                     logger.warning("Kernel tool 'execute_code' failed: %s", exc)
                     result = f"Code execution failed: {exc}"
+            elif block.name == "consult":
+                try:
+                    import json as _json
+                    from kernos.kernel.external_agents.tool import (
+                        get_service as _ext_get_service,
+                    )
+                    from kernos.kernel.external_agents.errors import (
+                        ExternalAgentError as _ExtError,
+                    )
+                    _svc = await _ext_get_service()
+                    _cresult = await _svc.orchestrator.consult(
+                        instance_id=request.instance_id,
+                        member_id=getattr(request, "member_id", "")
+                                  or request.instance_id,
+                        harness=tool_args.get("harness", ""),
+                        question=tool_args.get("question", ""),
+                        context=tool_args.get("context", ""),
+                        session_id_raw=tool_args.get("session_id", ""),
+                        workspace_dir=tool_args.get("workspace_dir") or None,
+                        timeout_seconds=tool_args.get("timeout_seconds"),
+                    )
+                    result = _json.dumps({
+                        "response": _cresult.response,
+                        "harness": _cresult.harness,
+                        "session_id": _cresult.session_id,
+                        "truncated": _cresult.truncated,
+                        "metadata": _cresult.metadata,
+                    })
+                except _ExtError as exc:
+                    logger.info(
+                        "consult tool returned typed error: %s: %s",
+                        type(exc).__name__, exc,
+                    )
+                    result = _json.dumps({
+                        "error": type(exc).__name__,
+                        "message": str(exc),
+                    })
+                except Exception as exc:
+                    logger.warning("Kernel tool 'consult' failed: %s", exc)
+                    result = f"Consult failed: {exc}"
             elif block.name == "manage_workspace":
                 if hasattr(self, '_workspace') and self._workspace:
                     try:

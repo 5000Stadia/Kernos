@@ -76,6 +76,18 @@ EXECUTE_CODE_TOOL = {
                     "for creating persistent scripts and tools."
                 ),
             },
+            "backend": {
+                "type": "string",
+                "enum": ["native", "aider", "claude-code", "codex"],
+                "description": (
+                    "Optional: which builder backend to route to. "
+                    "Defaults to KERNOS_BUILDER (typically 'native'). "
+                    "Use 'aider' for task-shaped CLI edits to "
+                    "specific files; 'claude-code' / 'codex' for "
+                    "agentic build loops; 'native' for direct "
+                    "Python execution in the sandbox."
+                ),
+            },
         },
         "required": ["code"],
     },
