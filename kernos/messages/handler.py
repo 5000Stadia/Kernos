@@ -3318,6 +3318,11 @@ class MessageHandler:
         """Process follow-ups extracted from compaction → create triggers.
 
         Deduplicates against existing triggers (description + due within 2 days).
+
+        CLEANUP-BATCH-V1 item 8: emits a COMPACTION_FOLLOW_UP_PROCESSED
+        receipt event regardless of outcome (succeeded / empty / failed)
+        so silent-no-op regressions are observable in the event stream
+        instead of disappearing into log noise.
         """
         from kernos.kernel.scheduler import Trigger, _trigger_id, compute_next_fire
         from datetime import timedelta
@@ -3325,111 +3330,175 @@ class MessageHandler:
 
         now = utc_now_dt()
 
-        # Load existing triggers for dedup
-        existing = await self._trigger_store.list_all(instance_id)
-        existing_descs = [(t.action_description.lower(), t.next_fire_at) for t in existing if t.status == "active"]
+        # Empty-input receipt — emit and return so callers don't have to
+        # know whether the work even ran.
+        if not commitments:
+            try:
+                await emit_event(
+                    self.events, EventType.COMPACTION_FOLLOW_UP_PROCESSED,
+                    instance_id, "compaction",
+                    payload={
+                        "status": "empty",
+                        "space_id": space_id,
+                        "input_count": 0,
+                        "created_count": 0,
+                        "skipped_count": 0,
+                        "skip_reasons": [],
+                    },
+                )
+            except Exception as exc:
+                logger.warning("FOLLOW_UP_RECEIPT: emit failed: %s", exc)
+            return
 
-        _type_messages = {
-            "USER_COMMITMENT": "You mentioned you'd {desc}. Just a reminder.",
-            "AGENT_COMMITMENT": "I committed to {desc}. Following up now.",
-            "EXTERNAL_DEADLINE": "Deadline approaching: {desc}.",
-            "FOLLOW_UP": "Time to check back on: {desc}.",
-        }
-
+        skip_reasons: list[str] = []
         created = 0
-        for c in commitments:
-            desc = c.get("description", "")
-            if not desc:
-                continue
-            ctype = c.get("type", "FOLLOW_UP")
-            due_raw = c.get("due", "")
-            context = c.get("context", "")
 
-            # Parse due date
-            due_dt = None
-            if due_raw:
-                due_lower = due_raw.lower().strip()
-                if due_lower == "soon":
-                    due_dt = now + timedelta(days=1)
-                elif due_lower == "next_week":
-                    due_dt = now + timedelta(days=7)
-                elif due_lower.startswith("20"):
-                    try:
-                        from datetime import datetime as _dt
-                        due_dt = _dt.fromisoformat(due_lower.replace("Z", "+00:00"))
-                        if due_dt.tzinfo is None:
-                            due_dt = due_dt.replace(tzinfo=timezone.utc)
-                    except (ValueError, TypeError):
+        try:
+            # Load existing triggers for dedup
+            existing = await self._trigger_store.list_all(instance_id)
+            existing_descs = [(t.action_description.lower(), t.next_fire_at) for t in existing if t.status == "active"]
+
+            _type_messages = {
+                "USER_COMMITMENT": "You mentioned you'd {desc}. Just a reminder.",
+                "AGENT_COMMITMENT": "I committed to {desc}. Following up now.",
+                "EXTERNAL_DEADLINE": "Deadline approaching: {desc}.",
+                "FOLLOW_UP": "Time to check back on: {desc}.",
+            }
+
+            for c in commitments:
+                desc = c.get("description", "")
+                if not desc:
+                    skip_reasons.append("missing_description")
+                    continue
+                ctype = c.get("type", "FOLLOW_UP")
+                due_raw = c.get("due", "")
+                context = c.get("context", "")
+
+                # Parse due date
+                due_dt = None
+                if due_raw:
+                    due_lower = due_raw.lower().strip()
+                    if due_lower == "soon":
+                        due_dt = now + timedelta(days=1)
+                    elif due_lower == "next_week":
+                        due_dt = now + timedelta(days=7)
+                    elif due_lower.startswith("20"):
+                        try:
+                            from datetime import datetime as _dt
+                            due_dt = _dt.fromisoformat(due_lower.replace("Z", "+00:00"))
+                            if due_dt.tzinfo is None:
+                                due_dt = due_dt.replace(tzinfo=timezone.utc)
+                        except (ValueError, TypeError):
+                            due_dt = now + timedelta(days=3)
+                    else:
                         due_dt = now + timedelta(days=3)
                 else:
                     due_dt = now + timedelta(days=3)
-            else:
-                due_dt = now + timedelta(days=3)
 
-            # 90-day horizon check
-            if due_dt and (due_dt - now).days > 90:
-                logger.info("FOLLOW_UP_SKIP: desc=%r reason=beyond_90_days", desc[:60])
-                continue
+                # 90-day horizon check
+                if due_dt and (due_dt - now).days > 90:
+                    logger.info("FOLLOW_UP_SKIP: desc=%r reason=beyond_90_days", desc[:60])
+                    skip_reasons.append("beyond_90_days")
+                    continue
 
-            # Dedup: check if similar trigger exists
-            _dup = False
-            due_iso = due_dt.isoformat() if due_dt else ""
-            for ex_desc, ex_due in existing_descs:
-                if desc.lower()[:40] in ex_desc or ex_desc[:40] in desc.lower():
-                    # Similar description — check date proximity
-                    if ex_due and due_iso:
-                        try:
-                            from datetime import datetime as _dt
-                            ex_dt = _dt.fromisoformat(ex_due.replace("Z", "+00:00"))
-                            if ex_dt.tzinfo is None:
-                                ex_dt = ex_dt.replace(tzinfo=timezone.utc)
-                            if abs((due_dt - ex_dt).days) <= 2:
-                                _dup = True
-                                break
-                        except (ValueError, TypeError):
-                            pass
-                    elif not ex_due and not due_iso:
-                        _dup = True
-                        break
-            if _dup:
-                logger.info("FOLLOW_UP_DUPLICATE: desc=%r", desc[:60])
-                continue
+                # Dedup: check if similar trigger exists
+                _dup = False
+                due_iso = due_dt.isoformat() if due_dt else ""
+                for ex_desc, ex_due in existing_descs:
+                    if desc.lower()[:40] in ex_desc or ex_desc[:40] in desc.lower():
+                        # Similar description — check date proximity
+                        if ex_due and due_iso:
+                            try:
+                                from datetime import datetime as _dt
+                                ex_dt = _dt.fromisoformat(ex_due.replace("Z", "+00:00"))
+                                if ex_dt.tzinfo is None:
+                                    ex_dt = ex_dt.replace(tzinfo=timezone.utc)
+                                if abs((due_dt - ex_dt).days) <= 2:
+                                    _dup = True
+                                    break
+                            except (ValueError, TypeError):
+                                pass
+                        elif not ex_due and not due_iso:
+                            _dup = True
+                            break
+                if _dup:
+                    logger.info("FOLLOW_UP_DUPLICATE: desc=%r", desc[:60])
+                    skip_reasons.append("duplicate")
+                    continue
 
-            # Build trigger message
-            msg_template = _type_messages.get(ctype, "Reminder: {desc}.")
-            msg = msg_template.format(desc=desc)
-            if context:
-                msg += f" (Context: {context})"
+                # Build trigger message
+                msg_template = _type_messages.get(ctype, "Reminder: {desc}.")
+                msg = msg_template.format(desc=desc)
+                if context:
+                    msg += f" (Context: {context})"
 
-            # Determine delivery class
-            delivery_class = "ambient"  # Default: whisper
-            if ctype == "EXTERNAL_DEADLINE" and due_dt and (due_dt - now).days <= 1:
-                delivery_class = "interrupt"  # Urgent deadline
+                # Determine delivery class
+                delivery_class = "ambient"  # Default: whisper
+                if ctype == "EXTERNAL_DEADLINE" and due_dt and (due_dt - now).days <= 1:
+                    delivery_class = "interrupt"  # Urgent deadline
 
-            # Create trigger
-            trigger = Trigger(
-                trigger_id=_trigger_id(),
-                instance_id=instance_id,
-                space_id=space_id,
-                condition_type="time",
-                condition=due_iso,
-                next_fire_at=due_iso,
-                recurrence="",  # One-shot
-                action_type="notify",
-                action_description=msg,
-                action_params={},
-                delivery_class=delivery_class,
-                status="active",
-                created_at=utc_now(),
-                source="compaction_follow_up",
+                # Create trigger
+                trigger = Trigger(
+                    trigger_id=_trigger_id(),
+                    instance_id=instance_id,
+                    space_id=space_id,
+                    condition_type="time",
+                    condition=due_iso,
+                    next_fire_at=due_iso,
+                    recurrence="",  # One-shot
+                    action_type="notify",
+                    action_description=msg,
+                    action_params={},
+                    delivery_class=delivery_class,
+                    status="active",
+                    created_at=utc_now(),
+                    source="compaction_follow_up",
+                )
+                await self._trigger_store.save(trigger)
+                created += 1
+                logger.info("FOLLOW_UP_CREATED: type=%s desc=%r due=%s source=compaction",
+                    ctype, desc[:60], due_iso[:10])
+
+            if created:
+                logger.info("FOLLOW_UP_TOTAL: created=%d from_compaction=%d", created, len(commitments))
+
+        except Exception as exc:
+            logger.warning("FOLLOW_UP: processing raised: %s", exc)
+            try:
+                await emit_event(
+                    self.events, EventType.COMPACTION_FOLLOW_UP_PROCESSED,
+                    instance_id, "compaction",
+                    payload={
+                        "status": "failed",
+                        "space_id": space_id,
+                        "input_count": len(commitments),
+                        "created_count": created,
+                        "skipped_count": len(skip_reasons),
+                        "skip_reasons": skip_reasons,
+                        "error": str(exc),
+                    },
+                )
+            except Exception as emit_exc:
+                logger.warning("FOLLOW_UP_RECEIPT: emit failed: %s", emit_exc)
+            raise
+
+        # Success-path receipt — emitted regardless of whether
+        # individual rows were skipped vs created.
+        try:
+            await emit_event(
+                self.events, EventType.COMPACTION_FOLLOW_UP_PROCESSED,
+                instance_id, "compaction",
+                payload={
+                    "status": "succeeded",
+                    "space_id": space_id,
+                    "input_count": len(commitments),
+                    "created_count": created,
+                    "skipped_count": len(skip_reasons),
+                    "skip_reasons": skip_reasons,
+                },
             )
-            await self._trigger_store.save(trigger)
-            created += 1
-            logger.info("FOLLOW_UP_CREATED: type=%s desc=%r due=%s source=compaction",
-                ctype, desc[:60], due_iso[:10])
-
-        if created:
-            logger.info("FOLLOW_UP_TOTAL: created=%d from_compaction=%d", created, len(commitments))
+        except Exception as exc:
+            logger.warning("FOLLOW_UP_RECEIPT: emit failed: %s", exc)
 
     async def _assess_domain_creation(
         self, instance_id: str, space_id: str, space: ContextSpace, comp_state: "CompactionState",

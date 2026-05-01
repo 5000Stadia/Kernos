@@ -77,6 +77,13 @@ class EventType(str, Enum):
     COMPACTION_TRIGGERED = "compaction.triggered"
     COMPACTION_COMPLETED = "compaction.completed"
     COMPACTION_ROTATION = "compaction.rotation"
+    # CLEANUP-BATCH-V1 item 8: explicit receipt around compaction
+    # follow-up processing. Distinguishes "ran with N commitments and
+    # emitted M triggers" from "ran with empty input" from "raised."
+    # Payload: status (succeeded|empty|failed), input_count,
+    #          created_count, skipped_count, skip_reasons (list[str]),
+    #          error (str, only on failed).
+    COMPACTION_FOLLOW_UP_PROCESSED = "compaction.follow_up.processed"
 
     # --- Phase 3D: Dispatch Interceptor ---
     DISPATCH_GATE = "dispatch.gate"
