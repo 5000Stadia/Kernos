@@ -70,8 +70,10 @@ from kernos.kernel.triggers.external_sources import (
 )
 from kernos.kernel.triggers.runtime import TriggerEvaluationRuntime
 from kernos.kernel.triggers.sources import (
+    CALENDAR_SOURCE_MODULE,
     EVENT_TYPE_CALENDAR_OBSERVED,
     EVENT_TYPE_SCHEDULER_TICK_DUE,
+    SCHEDULER_SOURCE_MODULE,
     CalendarSource,
     EventSource,
     InternalEventAdapter,
@@ -80,6 +82,7 @@ from kernos.kernel.triggers.sources import (
 
 
 __all__ = [
+    "CALENDAR_SOURCE_MODULE",
     "CalendarSource",
     "CompiledTrigger",
     "DispatchFailed",
@@ -98,6 +101,7 @@ __all__ = [
     "InternalEventAdapter",
     "NotionPageSource",
     "PredicateValidationError",
+    "SCHEDULER_SOURCE_MODULE",
     "SchedulerHeartbeatSource",
     "StaleClaimError",
     "StaleFireRecovery",

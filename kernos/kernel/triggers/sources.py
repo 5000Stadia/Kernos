@@ -21,6 +21,13 @@ sources of events plug in via:
   C5 strips scheduler.py's direct firing and routes everything
   through this source.
 
+Source authority (Codex mid-batch fold #7): CalendarSource and
+SchedulerHeartbeatSource go through the :class:`EmitterRegistry`
+with typed source authority (``"calendar"`` / ``"scheduler"``).
+This mirrors the CRB pattern and unblocks future source-authority
+gates from special-casing trust on UNREGISTERED events from these
+substrates.
+
 Out of scope for C3:
 
 * Polling logic itself (calendar API calls, cron parsing) — those
@@ -36,11 +43,44 @@ from typing import Any, Protocol, runtime_checkable
 
 from kernos.kernel.event_stream import (
     Event,
+    EmitterAlreadyRegistered,
     register_post_flush_hook,
     unregister_post_flush_hook,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Source authority — registered source_module identities for the v1
+# substrate-controlled sources.
+# ---------------------------------------------------------------------------
+
+
+CALENDAR_SOURCE_MODULE: str = "calendar"
+SCHEDULER_SOURCE_MODULE: str = "scheduler"
+
+
+def _get_or_register_emitter(source_module: str):
+    """Fetch the EmitterRegistry-bound emitter for ``source_module``,
+    registering it if absent. Idempotent across multiple Source
+    instances (test fixtures construct fresh sources per test; the
+    registry is process-global and persists)."""
+    from kernos.kernel.event_stream import emitter_registry
+    registry = emitter_registry()
+    existing = registry.get(source_module)
+    if existing is not None:
+        return existing
+    try:
+        return registry.register(source_module)
+    except EmitterAlreadyRegistered:
+        # Race against a concurrent first-call. Read back what won.
+        winner = registry.get(source_module)
+        if winner is None:
+            # Should never happen — register raised
+            # EmitterAlreadyRegistered, so the registry must hold it.
+            raise
+        return winner
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +228,10 @@ class CalendarSource:
     def __init__(self, *, instance_id: str) -> None:
         self._instance_id = instance_id
         self._started: bool = False
+        # Bound to the EmitterRegistry-issued emitter on first
+        # access; lazy so test fixtures that reset the registry
+        # between tests don't latch onto a stale handle.
+        self._emitter = None
 
     async def start(self) -> None:
         # No-op in C3; scheduler.py owns the polling loop today.
@@ -196,6 +240,13 @@ class CalendarSource:
 
     async def stop(self) -> None:
         self._started = False
+
+    def _get_emitter(self):
+        if self._emitter is None:
+            self._emitter = _get_or_register_emitter(
+                CALENDAR_SOURCE_MODULE,
+            )
+        return self._emitter
 
     async def emit_observed(
         self,
@@ -208,11 +259,11 @@ class CalendarSource:
         extra: dict[str, Any] | None = None,
     ) -> str:
         """Emit a ``calendar.event_observed`` event into the
-        durable stream. Returns the substrate-generated event_id
-        so callers can correlate the emission with the eventual
-        Event row read back via the stream.
+        durable stream with ``envelope.source_module="calendar"``
+        (Codex mid-batch fold #7). Returns the substrate-generated
+        event_id so callers can correlate the emission with the
+        eventual Event row read back via the stream.
         """
-        from kernos.kernel import event_stream
         payload: dict[str, Any] = {
             "calendar_event_id": calendar_event_id,
             "summary": summary,
@@ -222,11 +273,7 @@ class CalendarSource:
         }
         if extra:
             payload.update(extra)
-        # event_stream.emit constructs the Event with substrate-
-        # set fields (event_id, timestamp, source_module). The
-        # caller's start_iso lives in the payload — that's
-        # Y.timestamp from the predicate's perspective.
-        return await event_stream.emit(
+        return await self._get_emitter().emit(
             instance_id=self._instance_id,
             event_type=EVENT_TYPE_CALENDAR_OBSERVED,
             payload=payload,
@@ -262,12 +309,20 @@ class SchedulerHeartbeatSource:
     def __init__(self, *, instance_id: str) -> None:
         self._instance_id = instance_id
         self._started: bool = False
+        self._emitter = None
 
     async def start(self) -> None:
         self._started = True
 
     async def stop(self) -> None:
         self._started = False
+
+    def _get_emitter(self):
+        if self._emitter is None:
+            self._emitter = _get_or_register_emitter(
+                SCHEDULER_SOURCE_MODULE,
+            )
+        return self._emitter
 
     async def emit_tick(
         self,
@@ -276,16 +331,16 @@ class SchedulerHeartbeatSource:
         reason: str = "heartbeat",
         extra: dict[str, Any] | None = None,
     ) -> str:
-        """Emit a ``scheduler.tick_due`` event. Returns the
-        substrate-generated event_id."""
-        from kernos.kernel import event_stream
+        """Emit a ``scheduler.tick_due`` event with
+        ``envelope.source_module="scheduler"`` (Codex mid-batch
+        fold #7). Returns the substrate-generated event_id."""
         payload: dict[str, Any] = {
             "tick_timestamp": tick_timestamp_iso,
             "reason": reason,
         }
         if extra:
             payload.update(extra)
-        return await event_stream.emit(
+        return await self._get_emitter().emit(
             instance_id=self._instance_id,
             event_type=EVENT_TYPE_SCHEDULER_TICK_DUE,
             payload=payload,
@@ -293,10 +348,12 @@ class SchedulerHeartbeatSource:
 
 
 __all__ = [
+    "CALENDAR_SOURCE_MODULE",
     "CalendarSource",
     "EVENT_TYPE_CALENDAR_OBSERVED",
     "EVENT_TYPE_SCHEDULER_TICK_DUE",
     "EventSource",
     "InternalEventAdapter",
+    "SCHEDULER_SOURCE_MODULE",
     "SchedulerHeartbeatSource",
 ]

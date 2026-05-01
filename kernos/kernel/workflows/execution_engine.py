@@ -286,19 +286,45 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
     # block above on fresh installs. For previously-installed DBs
     # that didn't have the index (because the column didn't exist),
     # CREATE UNIQUE INDEX IF NOT EXISTS is the idempotent path.
+    #
+    # Fail-closed posture (Codex mid-batch fold #1): the WTC v1
+    # fire_id idempotency invariant depends on this partial unique
+    # index catching SELECT-then-INSERT races. Without it, two
+    # concurrent execute_workflow callers with the same fire_id can
+    # both pre-read empty and both insert — producing duplicate
+    # executions. App-layer SELECT alone is not race-safe. If the
+    # CREATE statement raises (e.g. unsupported SQLite version),
+    # abort engine startup rather than silently degrading.
     try:
         await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_executions_fire_id "
             "ON workflow_executions(fire_id) WHERE fire_id != ''"
         )
     except aiosqlite.OperationalError as exc:
-        # Tolerant: on extremely old SQLite versions partial indexes
-        # are unsupported. Log and skip — the application-level
-        # SELECT-by-fire_id check still catches duplicates.
-        logger.warning(
-            "WTC v1: failed to create idx_executions_fire_id partial "
-            "unique index (likely SQLite version): %s — relying on "
-            "application-layer dedup", exc,
+        raise RuntimeError(
+            "WTC v1 fire_id idempotency requires the partial unique "
+            "index idx_executions_fire_id, which failed to create. "
+            "This typically indicates an unsupported SQLite version "
+            "(partial indexes require SQLite 3.8.0+). Engine startup "
+            f"aborted to prevent silent dedup degradation. "
+            f"Underlying error: {exc}"
+        ) from exc
+
+    # Defensive verification: confirm the index is actually present
+    # in the schema. CREATE UNIQUE INDEX IF NOT EXISTS is normally
+    # idempotent, but a malformed pre-existing index of the same
+    # name could survive without enforcing the partial constraint.
+    # Belt-and-suspenders for an invariant the substrate is
+    # required to uphold.
+    async with db.execute(
+        "SELECT name FROM pragma_index_list('workflow_executions')"
+    ) as cur:
+        existing_indexes = {row[0] for row in await cur.fetchall()}
+    if "idx_executions_fire_id" not in existing_indexes:
+        raise RuntimeError(
+            "WTC v1 fire_id idempotency invariant cannot be confirmed: "
+            "idx_executions_fire_id is not present in workflow_executions "
+            "after schema setup. Aborting engine startup."
         )
 
 

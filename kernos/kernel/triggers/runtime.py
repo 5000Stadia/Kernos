@@ -32,6 +32,14 @@ outbox row without re-invoking WLP.
 
 C1 evaluator stubs (``evaluate_now``, ``recover``) are replaced.
 The interface signatures stay the same so callers don't change.
+
+Concurrency model (Codex mid-batch fold #6): the runtime is
+designed for a single-process, single-asyncio-loop deployment.
+``_predicates`` and ``_pending_due_fires`` mutation paths are
+cooperative — register / deactivate / on_event_observed /
+evaluate_now never preempt each other across an ``await`` to the
+same in-memory dict / list. Cross-process safety is provided by
+SQLite at the outbox layer, not by in-memory locks.
 """
 from __future__ import annotations
 
@@ -97,6 +105,33 @@ def _generate_claim_owner() -> str:
     )
 
 
+def _extract_event_type_filter(
+    event_selector: dict[str, Any] | None,
+) -> str | None:
+    """Return the event_type value when the selector is a simple
+    ``{"op": "eq", "path": "event_type", "value": X}`` (the default
+    shape produced by the CRB Compiler for minimal trigger
+    descriptors). Returns None for richer selectors — those land
+    in the unfiltered bucket and walk on every event.
+
+    Codex mid-batch fold #5: this is the prefilter key for the
+    runtime's event_type index. Common case (CRB descriptors with
+    ``{"event_type": "X"}``) translates to a simple eq selector
+    and benefits; complex AND/OR/payload-field selectors stay
+    in the all-walk path.
+    """
+    if not isinstance(event_selector, dict):
+        return None
+    if event_selector.get("op") != "eq":
+        return None
+    if event_selector.get("path") != "event_type":
+        return None
+    value = event_selector.get("value")
+    if not isinstance(value, str) or not value:
+        return None
+    return value
+
+
 @dataclass
 class _RegisteredPredicate:
     """In-memory record of a registered predicate. C5 will wire
@@ -126,6 +161,17 @@ class TriggerEvaluationRuntime:
         self._stop_event: asyncio.Event | None = None
         self._claim_owner: str = ""
         self._predicates: dict[str, _RegisteredPredicate] = {}
+        # Event-type prefilter index (Codex mid-batch fold #5).
+        # Maps event_type → set of trigger_ids whose event_selector
+        # is a simple ``eq event_type==X``. Predicates with richer
+        # selectors (composite AST, payload-field filters, etc.)
+        # land in ``_predicates_unfiltered`` and walk on every event.
+        # on_event_observed walks only the union of the matching
+        # event_type bucket and the unfiltered set, converting the
+        # common case from O(events × predicates) to O(events ×
+        # matching_predicates).
+        self._predicates_by_event_type: dict[str, set[str]] = {}
+        self._predicates_unfiltered: set[str] = set()
         # Pending future-dated fires from before/after temporal
         # matches. evaluate_now() drains these on each tick.
         self._pending_due_fires: list[PendingDueFire] = []
@@ -168,6 +214,8 @@ class TriggerEvaluationRuntime:
             await self._outbox.stop()
             self._outbox = None
         self._predicates.clear()
+        self._predicates_by_event_type.clear()
+        self._predicates_unfiltered.clear()
         self._pending_due_fires.clear()
 
     @property
@@ -202,6 +250,11 @@ class TriggerEvaluationRuntime:
 
         validate_predicate(predicate)
 
+        # Drop any prior index entry for this trigger_id — register
+        # is idempotent; re-registration with a different selector
+        # must move the trigger between buckets cleanly.
+        self._unindex_event_type(trigger_id)
+
         self._predicates[trigger_id] = _RegisteredPredicate(
             trigger_id=trigger_id,
             instance_id=instance_id,
@@ -216,10 +269,46 @@ class TriggerEvaluationRuntime:
             last_evaluated=datetime.now(timezone.utc),
         )
 
+        # Index by simple event_type when the selector permits;
+        # otherwise add to the unfiltered bucket. ``every``
+        # predicates never fire on the event-driven path, so they
+        # stay out of the index entirely (the cron walk in
+        # evaluate_now() iterates _predicates directly).
+        if predicate.temporal_relation.kind != "every":
+            event_type = _extract_event_type_filter(
+                predicate.event_selector,
+            )
+            if event_type is not None:
+                self._predicates_by_event_type.setdefault(
+                    event_type, set(),
+                ).add(trigger_id)
+            else:
+                self._predicates_unfiltered.add(trigger_id)
+
+    def _unindex_event_type(self, trigger_id: str) -> None:
+        """Remove a trigger_id from the event_type prefilter index.
+        Called on register (idempotent re-registration) and
+        deactivate."""
+        # Walk both buckets; one or zero will contain the id. Cost
+        # is bounded by the small number of distinct event_type keys,
+        # not by the total predicate count.
+        for event_type, ids in list(
+            self._predicates_by_event_type.items()
+        ):
+            if trigger_id in ids:
+                ids.discard(trigger_id)
+                if not ids:
+                    self._predicates_by_event_type.pop(event_type, None)
+        self._predicates_unfiltered.discard(trigger_id)
+
     async def deactivate(self, trigger_id: str) -> None:
         record = self._predicates.get(trigger_id)
         if record is not None:
             record.active = False
+            # Drop from the prefilter index so on_event_observed
+            # doesn't walk a deactivated predicate's bucket. Active
+            # check inside the walk is belt-and-suspenders.
+            self._unindex_event_type(trigger_id)
 
     async def list_active(self) -> list[dict[str, Any]]:
         return [
@@ -249,13 +338,30 @@ class TriggerEvaluationRuntime:
 
         Returns count of fires claimed during this call (immediate
         + already-due enqueued).
+
+        Codex mid-batch fold #5: the candidate set is the union of
+        the event_type prefilter bucket and the unfiltered bucket
+        (predicates with rich selectors). Predicates whose simple
+        eq selector targets a different event_type are skipped
+        without invoking ``event_matches_selector`` at all.
         """
         if self._outbox is None:
             return 0
         fired = 0
         now = datetime.now(timezone.utc)
-        for record in list(self._predicates.values()):
-            if not record.active:
+        # Build the candidate trigger_id set for this event:
+        # event_type bucket ∪ unfiltered bucket. Snapshot via copy()
+        # so concurrent register/deactivate during await points
+        # below doesn't mutate the iteration target.
+        candidate_ids: set[str] = (
+            self._predicates_by_event_type
+            .get(getattr(event, "event_type", ""), set())
+            .copy()
+        )
+        candidate_ids.update(self._predicates_unfiltered)
+        for trigger_id in candidate_ids:
+            record = self._predicates.get(trigger_id)
+            if record is None or not record.active:
                 continue
             kind = record.predicate.temporal_relation.kind
             if kind == "every":
