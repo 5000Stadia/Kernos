@@ -85,6 +85,16 @@ class EventType(str, Enum):
     #          error (str, only on failed).
     COMPACTION_FOLLOW_UP_PROCESSED = "compaction.follow_up.processed"
 
+    # CROSS_SPACE_REQUESTS_V1: emitted into target's event stream
+    # whenever a kernel-dispatched cross-space request applies.
+    # Surfaces in target's awareness preamble on next entry so the
+    # target agent can answer "why is this here?" using only
+    # target-local provenance + audit.
+    # Payload: request_id, origin_space_id, target_space_id,
+    #          action_kind, initiating_member_id, source_turn_id,
+    #          work_order, receipt (full CrossSpaceReceipt dict).
+    CROSS_SPACE_ACTION = "cross_space.action"
+
     # --- Phase 3D: Dispatch Interceptor ---
     DISPATCH_GATE = "dispatch.gate"
     # Payload: tool_name, effect, allowed, reason, method
