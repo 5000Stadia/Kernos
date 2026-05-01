@@ -1,8 +1,8 @@
 ## NOW
 
-**Status:** EXTERNAL-AGENT-CONSULTATION v1 shipped; CLEANUP-BATCH-V1 shipped; multi-member V1 done; Drafter v2 + STS + CRB live.
+**Status:** EXTERNAL-AGENT-CONSULTATION v1, CLEANUP-BATCH-V1, AUTO-UPDATE-INFORMING-V1, and CROSS_SPACE_REQUESTS_V1 all shipped. Multi-member V1 done; Drafter v2 + STS + CRB live.
 **Owner:** Founder
-**Action:** Live verify EXTERNAL-AGENT-CONSULTATION v1 per standing policy. Next spec: KERNOS-DOMAIN-PASS v1 → WORKFLOW-TRIGGERS-CONSOLIDATION (when external review verdict in) → REASONING-DISPATCH-EXTRACT (parked from CLEANUP-BATCH-V1 Pass 5).
+**Action:** Live verify CROSS_SPACE_REQUESTS_V1 per standing policy. Next spec: WORKFLOW-TRIGGERS-CONSOLIDATION (when external review verdict in) → REASONING-DISPATCH-EXTRACT (parked from CLEANUP-BATCH-V1 Pass 5) → plan-step `target_space` follow-on (parked from CROSS_SPACE_REQUESTS_V1).
 **Tests:** see Phase Summary table
 
 > **Rule:** This block is always the first thing in the file. Whoever completes a step updates it before handing off. Format is always: Status (what), Owner (who), Action (next thing to do).
@@ -72,6 +72,8 @@ None currently active. Next spec will be assigned by founder.
 | WIPE | /wipe me + /wipe all with exact-phrase confirmation, /disconnect, /restart cross-platform | 1808 | 2026-04-15 |
 | EAC | EXTERNAL-AGENT-CONSULTATION v1 — consult tool, code_exec backends, reentrancy guard, consultation_log audit, agent-surface wiring | 4922 | 2026-04-30 |
 | CB1 | CLEANUP-BATCH-V1 — public-surface canonical links, launcher-split docs, capability matrix + /capabilities, DECISIONS.md refresh, compaction follow-up receipts, command-parity drift test, kernel-tool dispatch path registry, NOW-block CI guard | 4952 | 2026-04-30 |
+| AUB | AUTO-UPDATE-BEHAVIOR-V1 + AUTO-UPDATE-INFORMING-V1 — daily background pull at KERNOS_AUTO_UPDATE_TIME, structured substrate-event whisper carrying update data, default "tell me about updates" covenant, KERNOS_AUTO_UPDATE_VERBOSE master opt-out | 4975 | 2026-05-01 |
+| CSR | CROSS_SPACE_REQUESTS_V1 — bounded cross-space mutation primitive: request_space_action tool, 4 action-kind whitelist (write_knowledge, propose_covenant, create_plan_draft, create_workflow_draft), per-space lock with bounded timeout, target covenant evaluation, target re-entry awareness preamble, idempotency via request_id | 5011 | 2026-05-01 |
 
 ---
 

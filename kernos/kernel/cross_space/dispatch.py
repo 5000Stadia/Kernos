@@ -231,16 +231,13 @@ async def _find_idempotent_receipt(
     """Look for a prior cross_space_action event for this
     request_id. Returns the original receipt if found, None
     otherwise."""
-    if not engine.events:
+    if not engine.events or not hasattr(engine.events, "query"):
         return None
     try:
-        # The events module's query surface — cross-instance sweep
-        # would be wrong here; we scope to the same instance_id.
-        # The event payload was stamped with request_id; we recover
-        # the receipt fields from the payload.
-        from kernos.kernel.events import EventStream
-        if not isinstance(engine.events, EventStream):
-            return None
+        # The events module's query surface — scoped to this
+        # instance_id. The event payload was stamped with
+        # request_id; we recover the receipt fields from the
+        # payload.
         events = await engine.events.query(
             req.instance_id,
             event_types=[_CROSS_SPACE_EVENT_TYPE],
