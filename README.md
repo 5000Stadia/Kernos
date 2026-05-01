@@ -128,6 +128,30 @@ The developing system itself runs through one of these workflows: the architect 
 
 ---
 
+## Capability status
+
+Honest status of every major surface, sourced from `kernos/kernel/capabilities.py` (the same list the `/capabilities` slash command reads). The README copy is regenerated when the canonical list changes; if these drift, the in-code list wins.
+
+| Capability | Status | What it gives | Notes |
+| --- | --- | --- | --- |
+| Messaging adapters | Live | Conversational turns over Discord, Twilio SMS, Telegram, and CLI | Discord-native slash commands (e.g. /debug); text commands universal across adapters |
+| Workspace code execution | Live | Agent writes Python in a subprocess with best-effort isolation; registers tools | Best-effort isolation, not a hard sandbox; hostile code can escape via ctypes |
+| Builder: Aider | Live | code_exec(backend='aider') hands task-shaped CLI work to Aider | Build mode only; consult is unsupported |
+| External-agent consultation | Live | Agent invokes Claude Code / Codex / Gemini for review or task delegation | consult tool + code_exec(backend=...); reentrancy guard scopes by calling context |
+| Memory recall + compaction | Live | remember tool over accumulated knowledge; ledger + facts + personality at compaction | Bjork dual-strength ranking; FTS5 over event stream parked for follow-on |
+| Workflow loops (WLP) | Live | Approval-gated workflow execution, restart-resume, action library | — |
+| AgentInbox | Live | Workflow route_to_agent verb persists into the AgentInbox | Provider unavailability surfaces as typed AgentInboxUnavailable |
+| Scheduler + triggers | Live | Time-based + event-driven trigger evaluation; manage_schedule tool | — |
+| Cohort: Drafter v2 | Live | Tool-starved cohort that consumes shared context surfaces and proposes drafts | — |
+| Cohort: Friction Observer | Live | Post-turn signal detection for friction patterns + diagnostic reports | — |
+| Cohort: Stewardship + sensitivity | Live | Value extraction + tension detection at compaction; sensitivity classification at harvest | — |
+| Event stream durability | Live | Per-instance SQLite event stream with flush + graceful-shutdown guarantees | Durable after flush; up to 2 seconds of in-flight events lost on ungraceful crash |
+| Multi-member identity | Live | Per-member profiles, spaces, conversations, hatching, relationships | — |
+| Decoupled turn runner | Partial | Thin-path turns succeed; full-machinery dispatch awaits workshop binding | INTEGRATION-WIRE-LIVE-WORKSHOP-BINDING follow-up; loud-error placeholders mark the seam |
+| Domain pass | Planned | Agent or workflow acts inside another space without the user manually entering it | KERNOS-DOMAIN-PASS v1 follow-on spec |
+
+---
+
 ## Docs
 
 - **[Canonical introduction](docs/kernos-introduction.md)** — what the running agent reaches when asked what Kernos is. Innovation overview plus a navigable map.

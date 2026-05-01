@@ -4104,6 +4104,9 @@ class MessageHandler:
                         primary_ctx.is_diagnostic_response = True
                     elif _cmd_lower == "/status":
                         response = await self._handle_status(primary_ctx)
+                    elif _cmd_lower == "/capabilities":
+                        response = self._handle_capabilities()
+                        primary_ctx.is_diagnostic_response = True
                     elif _cmd_lower == "/help":
                         response = self._handle_help()
                     elif _cmd_lower.startswith("/spaces"):
@@ -4551,6 +4554,21 @@ class MessageHandler:
         return f"Context dumped to {dump_path}"
 
     @staticmethod
+    def _handle_capabilities() -> str:
+        """Render the capability matrix from the in-code source of
+        truth. CLEANUP-BATCH-V1 item 9: inspect-only — reads the
+        static ``CapabilitySpec`` list authored in
+        ``kernos/kernel/capabilities.py``. Same source the README
+        matrix renders from, so the two cannot drift."""
+        from kernos.kernel.capabilities import render_status_text
+        return (
+            "**Kernos capability matrix**\n\n"
+            f"{render_status_text()}\n\n"
+            "Source: `kernos/kernel/capabilities.py`. "
+            "README matrix is regenerated from the same list."
+        )
+
+    @staticmethod
     def _handle_help() -> str:
         """Return a summary of available slash commands."""
         return (
@@ -4563,6 +4581,9 @@ class MessageHandler:
             "file. Shows active preferences, triggers, covenants, key facts, "
             "connected capabilities, legacy artifacts, stale reconciliation, "
             "and degraded services. Skips reasoning.\n\n"
+            "**/capabilities** — Show the capability matrix (Live / "
+            "Partial / Experimental / Planned) sourced from the canonical "
+            "in-code list. Inspect-only.\n\n"
             "**/spaces** — List all context spaces with status.\n"
             '**/spaces create "Name" "Description"** — Manually create a '
             "new context space for testing multi-space routing.\n\n"
