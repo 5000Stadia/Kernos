@@ -413,7 +413,7 @@ async def test_newinstance_gets_profile_and_default_contracts(tmp_path):
     assert profile.status == "active"
 
     rules = await state.get_contract_rules(instance_id)
-    assert len(rules) == 8  # spirit + 3 must_not + 2 must + 1 preference + 1 escalation
+    assert len(rules) == 9  # spirit + 3 must_not + 2 must + 2 preference + 1 escalation
 
 
 async def test_newinstance_emits_provisioned_event(tmp_path):

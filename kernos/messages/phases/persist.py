@@ -262,25 +262,5 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     except Exception as exc:
         logger.warning("Failed to emit message.sent: %s", exc)
 
-    # AUTO-UPDATE-BEHAVIOR-V1: deliver pending verbose-mode ephemeral
-    # announcement (if any) on the same channel the user just used.
-    # Bypasses conversation log + harvest + compaction by routing
-    # directly through the adapter rather than the persisted message
-    # path. Fires once per restart and clears itself.
-    pending_announcement = getattr(handler, "_pending_verbose_announcement", "")
-    if pending_announcement:
-        try:
-            adapter = handler._adapters.get(message.platform)
-            if adapter:
-                await adapter.send_outbound(
-                    instance_id, ctx.conversation_id, pending_announcement,
-                )
-        except Exception as exc:
-            logger.warning(
-                "AUTO_UPDATE_VERBOSE_DELIVER_FAILED: %s", exc,
-            )
-        finally:
-            handler._pending_verbose_announcement = ""
-
     await handler._update_conversation_summary(instance_id, ctx.conversation_id, message.platform)
     return ctx

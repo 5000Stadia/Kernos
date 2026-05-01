@@ -232,7 +232,7 @@ async def test_contracts_default_provisioning_isolated(tmp_path):
     for rule in default_contract_rules("tenant_a", _now()):
         await store.add_contract_rule(rule)
     assert len(await store.get_contract_rules("tenant_b")) == 0
-    assert len(await store.get_contract_rules("tenant_a")) == 8
+    assert len(await store.get_contract_rules("tenant_a")) == 9
 
 
 async def test_contract_update_a_does_not_affect_b(tmp_path):
@@ -246,7 +246,7 @@ async def test_contract_update_a_does_not_affect_b(tmp_path):
         await store.add_contract_rule(rule)
     await store.update_contract_rule("tenant_a", rules_a[0].id, {"active": False})
     result_b = await store.get_contract_rules("tenant_b", active_only=True)
-    assert len(result_b) == 8
+    assert len(result_b) == 9
 
 
 # ============================================================================

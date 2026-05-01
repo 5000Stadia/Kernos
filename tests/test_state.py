@@ -208,7 +208,7 @@ async def test_update_knowledge_shadow_archive(tmp_path):
 def test_default_contract_rules_count():
     now = _now()
     rules = default_contract_rules("t1", now)
-    assert len(rules) == 8
+    assert len(rules) == 9  # 8 base + 1 update-notification (INFORMING-V1)
 
 
 def test_default_contract_rules_all_active():
@@ -243,7 +243,7 @@ async def test_add_and_get_contract_rules(tmp_path):
         await store.add_contract_rule(rule)
 
     all_rules = await store.get_contract_rules("t1")
-    assert len(all_rules) == 8
+    assert len(all_rules) == 9
 
 
 async def test_get_contract_rules_by_type(tmp_path):
@@ -268,8 +268,8 @@ async def test_get_contract_rules_active_only(tmp_path):
 
     active = await store.get_contract_rules("t1", active_only=True)
     all_r = await store.get_contract_rules("t1", active_only=False)
-    assert len(active) == 7
-    assert len(all_r) == 8
+    assert len(active) == 8
+    assert len(all_r) == 9
 
 
 async def test_update_contract_rule(tmp_path):

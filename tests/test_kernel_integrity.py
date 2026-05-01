@@ -127,7 +127,7 @@ async def test_restart_contracts_survive(tmp_path):
     for rule in default_contract_rules("t1", _now()):
         await store.add_contract_rule(rule)
     store2 = JsonStateStore(tmp_path)
-    assert len(await store2.get_contract_rules("t1")) == 8
+    assert len(await store2.get_contract_rules("t1")) == 9
 
 
 async def test_restart_events_queryable(tmp_path):
@@ -330,7 +330,7 @@ async def test_shadow_archive_noop_for_missing_conversation(tmp_path):
 
 
 def test_default_contract_rules_count():
-    assert len(default_contract_rules("t1", _now())) == 8
+    assert len(default_contract_rules("t1", _now())) == 9
 
 
 def test_default_contract_rules_all_active():
@@ -349,7 +349,7 @@ def test_default_contract_rules_type_breakdown():
     rules = default_contract_rules("t1", _now())
     assert len([r for r in rules if r.rule_type == "must_not"]) == 3
     assert len([r for r in rules if r.rule_type == "must"]) == 2
-    assert len([r for r in rules if r.rule_type == "preference"]) == 1
+    assert len([r for r in rules if r.rule_type == "preference"]) == 2
     assert len([r for r in rules if r.rule_type == "escalation"]) == 1
 
 
@@ -362,6 +362,6 @@ async def test_newinstance_provisioned_with_seven_default_rules(tmp_path):
 
     instance_id = "discord:123456789"
     rules = await state.get_contract_rules(instance_id)
-    assert len(rules) == 8
+    assert len(rules) == 9
     assert all(r.instance_id == instance_id for r in rules)
     assert all(r.active for r in rules)

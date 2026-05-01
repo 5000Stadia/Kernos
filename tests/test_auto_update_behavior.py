@@ -1,13 +1,18 @@
-"""AUTO-UPDATE-BEHAVIOR-V1 tests.
+"""AUTO-UPDATE-BEHAVIOR-V1 + AUTO-UPDATE-INFORMING-V1 tests.
 
-Covers the three new pieces:
-  1. KERNOS_AUTO_UPDATE_TIME parsing + fallback.
-  2. KERNOS_AUTO_UPDATE_VERBOSE gating + ephemeral message format.
-  3. Scheduled-update loop disable + sleep contract.
+Covers:
+  1. KERNOS_AUTO_UPDATE_TIME parsing + fallback (V1).
+  2. Scheduled-update loop disable + sleep contract (V1).
+  3. format_update_event_text shape — substrate event description
+     for the agent's situation context (INFORMING-V1).
+  4. The default "tell me about updates" covenant ships in the
+     starter rule set (INFORMING-V1).
+
+KERNOS_AUTO_UPDATE_VERBOSE is gone — its tests were removed when
+the verbose ephemeral path was retired.
 
 Does NOT exercise the real subprocess pull — those are covered by
-the existing self_update test suite. This file pins the new env
-vars + the announcement-formatting + the scheduled-loop behavior.
+the existing self_update test suite.
 """
 from __future__ import annotations
 
@@ -56,27 +61,41 @@ class TestParseUpdateTime:
 
 
 # ---------------------------------------------------------------------------
-# KERNOS_AUTO_UPDATE_VERBOSE flag
+# KERNOS_AUTO_UPDATE_VERBOSE master toggle (AUTO-UPDATE-INFORMING-V1
+# revision: env var stays as the operator-level opt-out; new
+# semantics gate the post-update whisper instead of a parallel
+# ephemeral path)
 # ---------------------------------------------------------------------------
 
 
 class TestVerboseFlag:
-    def test_off_when_unset(self, monkeypatch):
+    def test_on_when_unset(self, monkeypatch):
+        # New semantics: default is ON. Operators get update
+        # notifications by default; opt out by setting off.
         monkeypatch.delenv("KERNOS_AUTO_UPDATE_VERBOSE", raising=False)
-        assert self_update._verbose_enabled() is False
+        assert self_update._verbose_enabled() is True
+
+    def test_on_when_empty(self, monkeypatch):
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_VERBOSE", "")
+        assert self_update._verbose_enabled() is True
 
     def test_on_when_on(self, monkeypatch):
         monkeypatch.setenv("KERNOS_AUTO_UPDATE_VERBOSE", "on")
         assert self_update._verbose_enabled() is True
 
+    def test_off_when_off(self, monkeypatch):
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_VERBOSE", "off")
+        assert self_update._verbose_enabled() is False
+
     def test_off_on_anything_else(self, monkeypatch):
-        for value in ("off", "true", "1", "yes", "garbage"):
+        # Anything other than "on" turns it off — conservative.
+        for value in ("true", "1", "yes", "garbage"):
             monkeypatch.setenv("KERNOS_AUTO_UPDATE_VERBOSE", value)
             assert self_update._verbose_enabled() is False, value
 
 
 # ---------------------------------------------------------------------------
-# Verbose announcement format
+# Substrate-event format (AUTO-UPDATE-INFORMING-V1)
 # ---------------------------------------------------------------------------
 
 
@@ -98,45 +117,169 @@ d8f0b28 CLEANUP-BATCH-V1 close
 """
 
 
-class TestFormatVerboseAnnouncement:
+class TestFormatUpdateEventText:
+    def test_includes_substrate_event_marker(self):
+        text = self_update.format_update_event_text(_LOG_TEMPLATE)
+        assert "[SUBSTRATE_EVENT: kernos_self_updated]" in text
+
     def test_includes_head_commit_hash(self):
-        msg = self_update.format_verbose_announcement(_LOG_TEMPLATE)
-        assert "3b053f3" in msg
+        text = self_update.format_update_event_text(_LOG_TEMPLATE)
+        assert "3b053f3" in text
 
     def test_caps_at_five_commit_subjects(self):
-        msg = self_update.format_verbose_announcement(_LOG_TEMPLATE)
-        # Spec: cap at 5 most recent commit subjects.
-        # Commit subjects with quotes — count quoted strings.
-        quoted_count = msg.count('"')
-        # Each subject contributes 2 quotes (open + close).
-        assert quoted_count <= 10, (
-            f"more than 5 commit subjects in {msg!r}"
+        text = self_update.format_update_event_text(_LOG_TEMPLATE)
+        # Cap at 5 most recent commit subjects. Each commit appears
+        # on its own bulleted line; count those.
+        bullet_lines = [l for l in text.splitlines() if l.startswith("  - ")]
+        assert len(bullet_lines) <= 5, (
+            f"more than 5 commit lines in {text!r}"
         )
 
-    def test_total_count_reflects_all_commits(self):
-        msg = self_update.format_verbose_announcement(_LOG_TEMPLATE)
-        # Log has 7 commits; "7 changes pulled" should appear.
-        assert "7 change" in msg
+    def test_reports_total_commit_count(self):
+        text = self_update.format_update_event_text(_LOG_TEMPLATE)
+        # Log has 7 commits.
+        assert "7 commit" in text
 
-    def test_empty_log_returns_graceful_fallback(self):
-        msg = self_update.format_verbose_announcement("")
-        assert "Updated" in msg
-        assert "unavailable" in msg
+    def test_marks_truncation_when_capped(self):
+        text = self_update.format_update_event_text(_LOG_TEMPLATE)
+        # 7 total > 5 cap → text should mention "showing N most recent"
+        assert "showing" in text
 
-    def test_log_with_no_commit_block_falls_back(self):
-        msg = self_update.format_verbose_announcement(
-            "# Auto-update header only\nBranch: main\n"
+    def test_no_truncation_marker_when_under_cap(self):
+        small_log = (
+            "# Auto-update\n\n## Commits pulled\n\n```\n"
+            "abc1234 first\nbcd5678 second\n```\n"
         )
-        assert "Updated" in msg
+        text = self_update.format_update_event_text(small_log)
+        assert "showing" not in text
 
-    def test_singular_change_grammar(self):
+    def test_empty_log_still_produces_event_marker(self):
+        text = self_update.format_update_event_text("")
+        # Even with no commits, the agent should see the event marker
+        # so its covenant logic can still recognize the event.
+        assert "[SUBSTRATE_EVENT: kernos_self_updated]" in text
+
+    def test_does_not_pre_phrase_in_first_person(self):
+        # Spec invariant: substrate does NOT put words in the agent's
+        # mouth. The old _format_whisper_summary started with "I just
+        # auto-updated."; the refit must NOT do that — the agent
+        # phrases in its own voice.
+        text = self_update.format_update_event_text(_LOG_TEMPLATE)
+        assert "I just auto-updated" not in text
+
+    def test_singular_commit_grammar(self):
         single_log = (
             "# Auto-update\n\n## Commits pulled\n\n```\n"
             "abc1234 single commit\n```\n"
         )
-        msg = self_update.format_verbose_announcement(single_log)
-        assert "1 change " in msg
-        assert "1 changes " not in msg
+        text = self_update.format_update_event_text(single_log)
+        assert "1 commit " in text
+        assert "1 commits " not in text
+
+
+# ---------------------------------------------------------------------------
+# queue_pending_whisper gating by KERNOS_AUTO_UPDATE_VERBOSE
+# ---------------------------------------------------------------------------
+
+
+class TestQueuePendingWhisperVerboseGate:
+    """The whisper queueing path is the master entry for
+    update-notification awareness. When verbose=off, no whisper —
+    agent never knows the update happened."""
+
+    async def test_verbose_off_skips_queue(self, tmp_path, monkeypatch):
+        from kernos.setup.self_update import (
+            LOG_FILENAME, MARKER_FILENAME, queue_pending_whisper,
+        )
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_VERBOSE", "off")
+        (tmp_path / LOG_FILENAME).write_text(
+            "## Commits pulled\n\n```\nabc feat: thing\n```\n"
+        )
+        (tmp_path / MARKER_FILENAME).write_text("2026-05-01T00:00:00Z")
+
+        save_calls = []
+
+        class _State:
+            async def save_whisper(self, instance_id, whisper):
+                save_calls.append((instance_id, whisper))
+
+        queued = await queue_pending_whisper(
+            state=_State(), instance_id="inst1", data_dir=str(tmp_path),
+        )
+        assert queued is False
+        assert save_calls == []
+        # Marker is consumed even when verbose=off so subsequent
+        # restarts don't try to queue either.
+        assert not (tmp_path / MARKER_FILENAME).exists()
+
+    async def test_verbose_on_queues_normally(self, tmp_path, monkeypatch):
+        from kernos.setup.self_update import (
+            LOG_FILENAME, MARKER_FILENAME, queue_pending_whisper,
+        )
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_VERBOSE", "on")
+        (tmp_path / LOG_FILENAME).write_text(
+            "## Commits pulled\n\n```\nabc feat: thing\n```\n"
+        )
+        (tmp_path / MARKER_FILENAME).write_text("2026-05-01T00:00:00Z")
+
+        save_calls = []
+
+        class _State:
+            async def save_whisper(self, instance_id, whisper):
+                save_calls.append((instance_id, whisper))
+
+        queued = await queue_pending_whisper(
+            state=_State(), instance_id="inst1", data_dir=str(tmp_path),
+        )
+        assert queued is True
+        assert len(save_calls) == 1
+        # Whisper carries the substrate-event marker.
+        _, whisper = save_calls[0]
+        assert "[SUBSTRATE_EVENT: kernos_self_updated]" in whisper.insight_text
+
+
+# ---------------------------------------------------------------------------
+# Default covenant for update notifications (AUTO-UPDATE-INFORMING-V1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultUpdateCovenant:
+    def test_covenant_ships_in_default_rules(self):
+        from kernos.kernel.state import default_covenant_rules
+
+        rules = default_covenant_rules("inst1", "2026-05-01T00:00:00Z")
+        # The update covenant should be present, identifiable by
+        # description content (not by ID — IDs are random per call).
+        update_rules = [
+            r for r in rules
+            if "update" in r.description.lower()
+            and "kernos" in r.description.lower()
+        ]
+        assert len(update_rules) == 1, (
+            "expected exactly one default covenant about Kernos "
+            f"updates; got {len(update_rules)}: "
+            f"{[r.description[:80] for r in update_rules]}"
+        )
+        rule = update_rules[0]
+        assert rule.source == "default"
+        assert rule.active is True
+        assert rule.rule_type == "preference"
+
+    def test_covenant_text_invites_user_revision(self):
+        # The covenant should explicitly tell the agent (and through
+        # the agent's reading, the user) that the rule is editable.
+        from kernos.kernel.state import default_covenant_rules
+
+        rules = default_covenant_rules("inst1", "2026-05-01T00:00:00Z")
+        update_rule = next(
+            r for r in rules
+            if "update" in r.description.lower()
+            and "kernos" in r.description.lower()
+        )
+        # Look for hints that the agent should treat user requests
+        # to change the rule as actionable.
+        text = update_rule.description.lower()
+        assert "archive" in text or "revise" in text or "edit" in text or "stop" in text
 
 
 # ---------------------------------------------------------------------------

@@ -307,6 +307,7 @@ def default_covenant_rules(instance_id: str, now: str) -> list[CovenantRule]:
         ("must", "general", "Confirm before spending money unless the owner specified the amount and recipient in their request. When the spend is confirmed, complete it — the confirmation is the authorization event, don't re-confirm."),
         ("must", "general", "Show drafts before sending to third parties on open channels (SMS, email, social). Once the draft is approved, send it — approval is the authorization event. No draft needed for owner-directed channel delivery, and no draft needed for send_relational_message — that tool routes to another member's AGENT through the permission-matrix dispatcher, not to the person directly, and the receiving agent applies its own judgment."),
         ("preference", "general", "Match the depth of your response to what the moment needs. Don't over-explain simple things or under-deliver on complex ones."),
+        ("preference", "general", "When you see a substrate event indicating Kernos updated itself with new code, mention the update naturally in conversation and summarize what changed in your own words. The user wants to be kept in the loop on updates. If they ask you to stop telling them, or only mention certain kinds of updates, archive or revise this rule accordingly."),
         ("escalation", "general", "When a request is genuinely ambiguous AND involves irreversible consequences, money, or third-party impact, clarify before acting. If the request is clear, act."),
     ]
     return [

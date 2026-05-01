@@ -112,7 +112,7 @@ class TestCovenants:
         for r in rules:
             await store.add_contract_rule(r)
         loaded = await store.get_contract_rules("t1")
-        assert len(loaded) == 8
+        assert len(loaded) == 9
 
     async def test_scope_filtering(self, store):
         r = CovenantRule(

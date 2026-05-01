@@ -223,21 +223,17 @@ Format is 24-hour `HH:MM` in the server's local clock. Malformed values fall bac
 
 If a pull fails (network down, divergence, dirty tree), the daily window logs and skips — there's no retry, no escalation. The next day's window tries again.
 
-### Verbose announcements — `KERNOS_AUTO_UPDATE_VERBOSE`
+### Update notifications
 
-When on, the next interaction after an update lands surfaces an ephemeral message naming the new commit and recent subjects:
+When an update applies, Kernos surfaces a substrate event into the agent's situation context. The agent reads the event alongside its covenants — a default `preference` covenant tells the agent to mention updates in conversation when they occur — and the agent surfaces in its own voice.
 
-```
-Updated to commit 3b053f3. 7 changes pulled: "Pass 5: dispatch path registry", ...
-```
+The behavior is editable in conversation, not via env var. Examples:
 
-The announcement is **ephemeral** — it does not persist in conversation log, is not harvested into memory, and does not pass through compaction. It fires once per restart and clears itself.
+- *"only tell me about updates that affect tools"* — agent revises the covenant
+- *"stop telling me about updates"* — agent archives the covenant
+- *"be more verbose about what changed"* — agent expands the covenant
 
-```
-KERNOS_AUTO_UPDATE_VERBOSE=on
-```
-
-Default `off`. The persistent whisper-based summary continues to fire when verbose is off.
+There is no `KERNOS_AUTO_UPDATE_VERBOSE` toggle (removed in AUTO-UPDATE-INFORMING-V1). The covenant replaces the env var. Surfacing happens on the user's next interaction after an update lands, persists in conversation log normally, and is harvested normally.
 
 ### `KERNOS_UPDATE_BRANCH`
 

@@ -60,11 +60,24 @@ def _auto_update_enabled() -> bool:
 
 
 def _verbose_enabled() -> bool:
-    """``KERNOS_AUTO_UPDATE_VERBOSE`` toggles ephemeral user-facing
-    announcements when an update applies. Default off — operators
-    opt in if they want the immediate "what just changed" callout.
+    """``KERNOS_AUTO_UPDATE_VERBOSE`` is the operator-level master
+    toggle for update notifications. Default ``on`` — the substrate
+    queues a post-update whisper carrying the substrate-event data,
+    and the agent's covenants decide what to surface in the agent's
+    voice.
+
+    AUTO-UPDATE-INFORMING-V1 revision: the env var was originally
+    proposed for removal, but it has a real role as the
+    pre-conversation operator opt-out. ``off`` means no whisper is
+    queued at all — the agent never knows the update happened. The
+    covenant layer, by contrast, governs *what* the agent says
+    about updates that DO reach it (granularity and conditionality).
+
+    Set ``off`` if you don't want update notifications at all.
+    Leave ``on`` (default) and edit the agent's covenant in
+    conversation to tune phrasing or scope.
     """
-    val = (os.getenv("KERNOS_AUTO_UPDATE_VERBOSE", "") or "off").strip().lower()
+    val = (os.getenv("KERNOS_AUTO_UPDATE_VERBOSE", "") or "on").strip().lower()
     return val == "on"
 
 
@@ -601,23 +614,28 @@ async def scheduled_update_loop(
 
 
 # ---------------------------------------------------------------------------
-# Verbose ephemeral announcement (gated by KERNOS_AUTO_UPDATE_VERBOSE)
+# Post-restart whisper queueing — substrate event delivery to the agent
 # ---------------------------------------------------------------------------
 
 
-_VERBOSE_COMMIT_CAP = 5
+_UPDATE_EVENT_COMMIT_CAP = 5
 
 
-def format_verbose_announcement(log_text: str) -> str:
-    """Build the ephemeral announcement string from the auto-update
-    log. Caps at ``_VERBOSE_COMMIT_CAP`` most recent commit subjects.
+def format_update_event_text(log_text: str) -> str:
+    """Render the auto-update log as a structured substrate-event
+    description for the agent's situation context.
 
-    Format: ``Updated to commit <short_hash>. <N> changes pulled:
-    "<first>", "<second>", ...``.
+    AUTO-UPDATE-INFORMING-V1: the substrate does NOT pre-phrase a
+    user-facing message. The agent reads this event description
+    plus its covenants (which include a default "tell me about
+    updates" rule) and produces the user-facing surfacing in its
+    own voice.
 
-    Empty / malformed logs return a graceful fallback rather than
-    raising — the caller is post-startup and shouldn't crash on a
-    bad log.
+    The text is event-shaped (data + marker), not response-shaped
+    (no "I just updated" first-person framing). The marker
+    ``[SUBSTRATE_EVENT: kernos_self_updated]`` lets the agent
+    recognize this as an event to optionally surface, not a
+    pre-rendered message to deliver verbatim.
     """
     in_code = False
     commits: list[tuple[str, str]] = []  # (short_hash, subject)
@@ -632,110 +650,28 @@ def format_verbose_announcement(log_text: str) -> str:
                 commits.append((parts[0], parts[1]))
             elif parts:
                 commits.append((parts[0], ""))
-    if not commits:
-        return "Updated. Commit details unavailable."
-    head_hash = commits[0][0]
-    capped = commits[:_VERBOSE_COMMIT_CAP]
-    quoted_subjects = ", ".join(f'"{subj}"' for _, subj in capped if subj)
-    if quoted_subjects:
-        return (
-            f"Updated to commit {head_hash}. "
-            f"{len(commits)} change{'s' if len(commits) != 1 else ''} "
-            f"pulled: {quoted_subjects}"
-        )
-    return f"Updated to commit {head_hash}."
 
-
-async def deliver_pending_announcement_if_verbose(
-    *,
-    handler,
-    instance_id: str,
-    data_dir: str,
-) -> bool:
-    """If an auto-update log is pending and verbose mode is on,
-    deliver an ephemeral announcement via the handler's
-    :meth:`send_outbound` (no conversation log write, no harvest,
-    no compaction).
-
-    Returns True if a message was sent, False otherwise. Removes
-    the pending marker on success or when verbose is off (so the
-    log doesn't keep firing).
-    """
-    log_path = Path(data_dir) / LOG_FILENAME
-    marker_path = Path(data_dir) / MARKER_FILENAME
-    if not marker_path.exists() or not log_path.exists():
-        return False
-
-    if not _verbose_enabled():
-        # Verbose off — leave both files in place for queue_pending_whisper
-        # to consume on its parallel path. No-op for this surface.
-        return False
-
-    try:
-        log_text = log_path.read_text(encoding="utf-8")
-    except Exception as exc:
-        logger.warning("%s_LOG_READ_FAILED: %s", _LOG_PREFIX, exc)
-        return False
-
-    message = format_verbose_announcement(log_text)
-    try:
-        msg_id = await handler.send_outbound(
-            instance_id=instance_id,
-            member_id="",  # owner default
-            channel_name=None,
-            message=message,
-        )
-    except Exception as exc:
-        logger.warning("%s_VERBOSE_SEND_FAILED: %s", _LOG_PREFIX, exc)
-        return False
-
-    if not msg_id:
-        logger.warning(
-            "%s_VERBOSE_NOT_DELIVERED: send_outbound returned 0",
-            _LOG_PREFIX,
-        )
-        return False
-
-    logger.info(
-        "%s_VERBOSE_DELIVERED: instance=%s msg_id=%s",
-        _LOG_PREFIX, instance_id, msg_id,
-    )
-    # Remove marker so we don't re-announce on subsequent restarts.
-    # Log file stays as a durable diagnostic artifact (parallels
-    # queue_pending_whisper's behavior).
-    try:
-        marker_path.unlink()
-    except Exception:
-        pass
-    return True
-
-
-# ---------------------------------------------------------------------------
-# Post-restart whisper queueing
-# ---------------------------------------------------------------------------
-
-
-def _format_whisper_summary(log_text: str) -> str:
-    """Extract a top-3-lines summary for the whisper text."""
-    in_code = False
-    commits: list[str] = []
-    for line in log_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            in_code = not in_code
-            continue
-        if in_code and stripped:
-            commits.append(stripped)
-        if len(commits) >= 3:
-            break
-    top = "\n".join(f"- {c}" for c in commits[:3])
-    if not top:
-        top = "(commit range empty)"
+    head = commits[0] if commits else None
+    capped = commits[:_UPDATE_EVENT_COMMIT_CAP]
+    commit_lines = "\n".join(
+        f"  - {h} {s}" if s else f"  - {h}"
+        for h, s in capped
+    ) or "  (commit range empty)"
+    head_hash = head[0] if head else "(unknown)"
+    total = len(commits)
     return (
-        "I just auto-updated. Recent commits:\n"
-        f"{top}\n"
-        f"Full list at `{LOG_FILENAME}` in the data directory."
+        "[SUBSTRATE_EVENT: kernos_self_updated]\n"
+        f"Kernos pulled new code from origin and applied it. "
+        f"Now at commit {head_hash}.\n"
+        f"{total} commit{'s' if total != 1 else ''} since previous head"
+        + (f" (showing {len(capped)} most recent):" if total > len(capped) else ":")
+        + f"\n{commit_lines}\n"
+        f"Full log persisted at `{LOG_FILENAME}` in the data directory."
     )
+
+
+# Backwards-compatibility alias for tests that referenced the old name.
+_format_whisper_summary = format_update_event_text
 
 
 async def queue_pending_whisper(
@@ -747,6 +683,13 @@ async def queue_pending_whisper(
     but before the handler starts receiving turns. Returns True if a
     whisper was queued, False otherwise.
 
+    AUTO-UPDATE-INFORMING-V1: gated by ``KERNOS_AUTO_UPDATE_VERBOSE``.
+    When verbose is ``off``, no whisper is queued — the operator opted
+    out at the substrate level and the agent never sees the event.
+    When ``on`` (default), the whisper is queued carrying the
+    substrate-event data; the agent's covenants govern what it
+    surfaces in its own voice.
+
     The log file is left in place as a persistent record. Only the
     pending marker gets removed — the whisper is a one-time surface, the
     log is durable diagnostic artifact.
@@ -754,6 +697,21 @@ async def queue_pending_whisper(
     log_path = Path(data_dir) / LOG_FILENAME
     marker_path = Path(data_dir) / MARKER_FILENAME
     if not marker_path.exists() or not log_path.exists():
+        return False
+
+    if not _verbose_enabled():
+        # Operator-level opt-out. Clear the marker so we don't queue
+        # on subsequent restarts either, but leave the log file as
+        # the durable diagnostic artifact.
+        logger.info(
+            "%s_WHISPER_SKIP: KERNOS_AUTO_UPDATE_VERBOSE=off — "
+            "skipping post-update whisper queue",
+            _LOG_PREFIX,
+        )
+        try:
+            marker_path.unlink()
+        except Exception:
+            pass
         return False
 
     try:
@@ -766,20 +724,26 @@ async def queue_pending_whisper(
             pass
         return False
 
-    summary = _format_whisper_summary(log_text)
+    event_text = format_update_event_text(log_text)
     from kernos.kernel.awareness import Whisper, generate_whisper_id
     from kernos.utils import utc_now
 
+    # AUTO-UPDATE-INFORMING-V1: the whisper carries the substrate
+    # event for the agent's situation context. The agent reads this
+    # alongside its covenants (which include a default "tell me
+    # about updates" preference) and produces user-facing
+    # phrasing in its own voice. Substrate does not pre-phrase.
     whisper = Whisper(
         whisper_id=generate_whisper_id(),
-        insight_text=summary,
+        insight_text=event_text,
         delivery_class="ambient",
         source_space_id="",
         target_space_id="",
         supporting_evidence=[],
         reasoning_trace=(
-            "Auto-update applied on previous startup. "
-            f"Commit range written to {LOG_FILENAME}."
+            "Substrate event: kernos_self_updated. "
+            "The user's covenants determine whether and how to surface "
+            f"this in conversation. Full log at {LOG_FILENAME}."
         ),
         knowledge_entry_id="",
         foresight_signal="auto_update:applied",

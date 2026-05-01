@@ -309,7 +309,12 @@ class TestBranchOverride:
 
 
 class TestWhisperSummary:
-    def test_summary_extracts_top_commits(self):
+    """AUTO-UPDATE-INFORMING-V1: the summary helper now produces
+    a substrate-event description (raw data + marker), not a
+    pre-phrased message. The agent reads this alongside its
+    covenants and produces user-facing phrasing in its own voice."""
+
+    def test_summary_includes_top_commits(self):
         log = (
             "# Auto-update applied at 2026-04-23T15:00:00Z\n"
             "Branch: `main`\n\n"
@@ -318,15 +323,25 @@ class TestWhisperSummary:
             "abc1234 feat: first thing\n"
             "def5678 fix: second thing\n"
             "ghi9012 docs: third thing\n"
-            "jkl3456 chore: fourth (should not appear)\n"
+            "jkl3456 chore: fourth thing\n"
+            "mno7890 chore: fifth thing\n"
+            "pqr1234 chore: sixth (beyond cap)\n"
             "```\n"
         )
         text = _format_whisper_summary(log)
+        # Cap at 5 — first five appear, sixth does not.
         assert "first thing" in text
-        assert "second thing" in text
-        assert "third thing" in text
-        assert "fourth" not in text
+        assert "fifth thing" in text
+        assert "sixth" not in text
         assert LOG_FILENAME in text
+
+    def test_summary_carries_substrate_event_marker(self):
+        log = (
+            "# Auto-update\n\n## Commits pulled\n\n```\n"
+            "abc1234 feat: thing\n```\n"
+        )
+        text = _format_whisper_summary(log)
+        assert "[SUBSTRATE_EVENT: kernos_self_updated]" in text
 
     def test_summary_handles_empty_commit_range(self):
         log = (
@@ -337,7 +352,9 @@ class TestWhisperSummary:
             "```\n"
         )
         text = _format_whisper_summary(log)
-        assert "commit range empty" in text
+        # "(commit range empty)" is itself a single "commit line" in
+        # the parser; the substrate-event marker is what matters.
+        assert "[SUBSTRATE_EVENT: kernos_self_updated]" in text
 
 
 class TestQueuePendingWhisper:
@@ -372,7 +389,11 @@ class TestQueuePendingWhisper:
         assert _save.called_with is not None
         instance_id, whisper = _save.called_with
         assert instance_id == "inst_x"
-        assert "auto-updated" in whisper.insight_text
+        # The whisper carries a substrate-event description (not a
+        # pre-phrased "I just auto-updated" message). The agent
+        # reads it alongside covenants and phrases the surfacing.
+        assert "[SUBSTRATE_EVENT: kernos_self_updated]" in whisper.insight_text
+        assert "I just auto-updated" not in whisper.insight_text
         assert whisper.foresight_signal == "auto_update:applied"
         assert whisper.owner_member_id == ""
         # Marker cleared
