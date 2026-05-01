@@ -1,9 +1,9 @@
 ## NOW
 
-**Status:** EXTERNAL-AGENT-CONSULTATION v1, CLEANUP-BATCH-V1, AUTO-UPDATE-INFORMING-V1, and CROSS_SPACE_REQUESTS_V1 all shipped. Multi-member V1 done; Drafter v2 + STS + CRB live.
+**Status:** WORKFLOW-TRIGGERS-CONSOLIDATION-V1 mid-batch — substrate landed (C1–C6) plus STS atomic registration (C5b), heartbeat consolidation (C5c-1), Codex-fold cleanup, and manage_schedule translation prep (C5c-2-prep). Pre-WTC v1: EXTERNAL-AGENT-CONSULTATION v1, CLEANUP-BATCH-V1, AUTO-UPDATE-INFORMING-V1, CROSS_SPACE_REQUESTS_V1 all shipped. Multi-member V1 done; Drafter v2 + STS + CRB live.
 **Owner:** Founder
-**Action:** Live verify CROSS_SPACE_REQUESTS_V1 per standing policy. Next spec: WORKFLOW-TRIGGERS-CONSOLIDATION (when external review verdict in) → REASONING-DISPATCH-EXTRACT (parked from CLEANUP-BATCH-V1 Pass 5) → plan-step `target_space` follow-on (parked from CROSS_SPACE_REQUESTS_V1).
-**Tests:** see Phase Summary table
+**Action:** Architect call pending on C5c-2 + C7 staging — atomic strike vs. further sub-commits (NotifyUserAction wiring + CalendarSource lifecycle + Pattern 05 strike + AC13 grep-pin + AC14 full-repo green). Mid-batch Codex audit running on stale-elements / dead-scaffolding survey. Parked: REASONING-DISPATCH-EXTRACT (from CLEANUP-BATCH-V1 Pass 5), plan-step `target_space` follow-on (from CROSS_SPACE_REQUESTS_V1).
+**Tests:** 5181 passing. See Phase Summary table for per-batch counts.
 
 > **Rule:** This block is always the first thing in the file. Whoever completes a step updates it before handing off. Format is always: Status (what), Owner (who), Action (next thing to do).
 
@@ -74,6 +74,16 @@ None currently active. Next spec will be assigned by founder.
 | CB1 | CLEANUP-BATCH-V1 — public-surface canonical links, launcher-split docs, capability matrix + /capabilities, DECISIONS.md refresh, compaction follow-up receipts, command-parity drift test, kernel-tool dispatch path registry, NOW-block CI guard | 4952 | 2026-04-30 |
 | AUB | AUTO-UPDATE-BEHAVIOR-V1 + AUTO-UPDATE-INFORMING-V1 — daily background pull at KERNOS_AUTO_UPDATE_TIME, structured substrate-event whisper carrying update data, default "tell me about updates" covenant, KERNOS_AUTO_UPDATE_VERBOSE master opt-out | 4975 | 2026-05-01 |
 | CSR | CROSS_SPACE_REQUESTS_V1 — bounded cross-space mutation primitive: request_space_action tool, 4 action-kind whitelist (write_knowledge, propose_covenant, create_plan_draft, create_workflow_draft), per-space lock with bounded timeout, target covenant evaluation, target re-entry awareness preamble, idempotency via request_id | 5011 | 2026-05-01 |
+| WTC-C1 | WTC v1 C1 — WLP fire_id idempotency substrate (partial unique index) + triggers/ module skeleton: predicate model, FireOutbox CAS state machine, errors, runtime shell | n/a | 2026-05-01 |
+| WTC-C2 | WTC v1 C2 — predicate evaluator + four temporal relations (every/on/before/after) + runtime cron walk + recovery sweep with WLP fire_id reconciliation closing the Kit must-fix seam | n/a | 2026-05-01 |
+| WTC-C3 | WTC v1 C3 — first-class event sources: EventSource protocol, InternalEventAdapter (post-flush hook → runtime.on_event_observed), CalendarSource + SchedulerHeartbeatSource emit-only stubs | n/a | 2026-05-01 |
+| WTC-C4 | WTC v1 C4 — external source contracts: email.message_observed + notion.page_observed payload shape stubs (no polling); predicate language verified against the shapes | n/a | 2026-05-01 |
+| WTC-C5a | WTC v1 C5a — CRB Compiler descriptor.triggers → TriggerPredicate translation adapter (deterministic trigger_id derivation, backward-compatible with minimal {"event_type": X}) | n/a | 2026-05-01 |
+| WTC-FOLD | WTC v1 Codex mid-batch fold — fail-closed fire_id partial unique index (was log-and-continue, race-unsafe), event_type prefilter index in runtime (O(events × predicates) → O(events × matching)), CalendarSource/SchedulerHeartbeatSource promoted to EmitterRegistry-bound source authority | n/a | 2026-05-01 |
+| WTC-C5b | WTC v1 C5b — STS register_workflow atomic trigger registration (step 1b pre-compile + step 10 runtime hydration); descriptor.triggers register or fail together with the workflow row | n/a | 2026-05-01 |
+| WTC-C5c-1 | WTC v1 C5c-1 — AwarenessEvaluator drives unified runtime heartbeat (additive Phase 2b after legacy Phase 2; recovery sweep runs once at start; error-isolated) | n/a | 2026-05-01 |
+| WTC-C6 | WTC v1 C6 — missed-window semantics + catch_up: cron walk honors DispatchPolicy.missed_window; skip emits workflow.missed_fire / dispatches none; catch_up emits + dispatches latest as one catch-up; no fan-out for long downtime | 5164 | 2026-05-01 |
+| WTC-C5c-2-prep | WTC v1 C5c-2-prep — manage_schedule → unified-runtime translation adapter + register_managed_schedule_workflow helper (synthetic workflows via _register_workflow_unbound). Pre-staging only: handle_manage_schedule rewire + Pattern 05 strike pending C5c-2 + C7 atomic commit | 5181 | 2026-05-01 |
 
 ---
 

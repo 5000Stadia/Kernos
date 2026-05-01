@@ -25,7 +25,7 @@ TWILIO_AUTH_TOKEN=your_auth_token_here
 TWILIO_PHONE_NUMBER=+1XXXXXXXXXX
 OWNER_PHONE_NUMBER=+1XXXXXXXXXX
 AUTHORIZED_NUMBERS=+1XXXXXXXXXX,+1YYYYYYYYYY
-KERNOS_SMS_POLL_INTERVAL=5          # optional, default 5 seconds
+KERNOS_SMS_POLL_INTERVAL=30         # optional, default 30 seconds
 ```
 
 No webhook URL, no public server, no ngrok needed.
