@@ -1,13 +1,23 @@
-"""Builder backend package.
+"""Builder backend package — compatibility facade.
 
-Exports the dispatcher ``get_builder(name)`` which returns a backend
-implementing the ``BuilderBackend`` protocol.
+EXTERNAL-AGENT-CONSULTATION v1 C3 (spec D1 fold + AC9):
+``kernos/kernel/external_agents/`` is the unified primitive that
+covers both build and consult modes for external coding-agent CLIs.
+This module is preserved as the **compatibility facade** so:
 
-Current backends:
-    native       — real implementation
-    aider        — stub (adapter ships later)
-    claude-code  — stub (adapter ships later)
-    codex        — stub (adapter ships later)
+* ``KERNOS_BUILDER`` env var keeps working unchanged.
+* ``kernos.kernel.code_exec`` keeps importing
+  ``BuilderBackend``, ``BuildResult``, ``UnknownBuilderError``, and
+  ``get_builder`` without modification.
+* ``kernos.kernel.setup.workspace_config`` keeps importing
+  ``BUILDER_TIER`` and ``VALID_BUILDERS`` without modification.
+
+The facade re-exports the exact name set existing callers depend
+on. AC9 verifies every import path with a structural test.
+
+For NEW code, prefer ``kernos.kernel.external_agents``: it covers
+both build and consult; the registry exposes per-call backend
+choice; the substrate composes uniformly across harnesses.
 """
 from __future__ import annotations
 
@@ -23,13 +33,18 @@ from kernos.kernel.builders.native import NativeBuilder
 
 
 class UnknownBuilderError(ValueError):
-    """Raised when ``KERNOS_BUILDER`` names a backend that does not exist."""
+    """Raised when ``KERNOS_BUILDER`` names a backend that does not
+    exist. Preserved at this import path for compatibility with
+    existing callers (``kernos.kernel.code_exec``)."""
 
 
 def get_builder(name: str) -> BuilderBackend:
     """Return a backend instance for ``name``.
 
-    Raises ``UnknownBuilderError`` if ``name`` is not in ``VALID_BUILDERS``.
+    Raises ``UnknownBuilderError`` if ``name`` is not in
+    ``VALID_BUILDERS``. Behavior is unchanged from the pre-facade
+    implementation; existing callers keep working without
+    modification.
     """
     if name not in VALID_BUILDERS:
         raise UnknownBuilderError(
