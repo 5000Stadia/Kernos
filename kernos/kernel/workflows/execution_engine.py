@@ -130,6 +130,14 @@ class WorkflowExecution:
     # consults the in-memory waiter table, never SQL nonce values,
     # so this is hygienic debt rather than a wake vector.
     gate_nonce: str = ""
+    # WTC v1 C1 (Kit must-fix): fire_id is the application-layer
+    # idempotency key supplied by the unified trigger runtime when
+    # dispatching through the outbox. Empty for the legacy
+    # _on_trigger_match path. The partial unique index on the
+    # workflow_executions table catches duplicate execute_workflow
+    # calls with the same fire_id and lets us return the original
+    # execution_id without creating a second row.
+    fire_id: str = ""
 
     def to_row(self) -> tuple:
         return (
@@ -138,7 +146,7 @@ class WorkflowExecution:
             json.dumps(self.intermediate_state), self.last_heartbeat,
             self.aborted_reason, self.started_at, self.terminated_at,
             json.dumps(self.trigger_event_payload), self.trigger_event_id,
-            self.member_id, self.gate_nonce,
+            self.member_id, self.gate_nonce, self.fire_id,
         )
 
     @classmethod
@@ -158,6 +166,13 @@ class WorkflowExecution:
             gate_nonce = row["gate_nonce"] or ""
         except (KeyError, IndexError):
             gate_nonce = ""
+        # WTC v1 C1: fire_id added for outbox idempotency. Rows from
+        # before the migration get "" (legacy in-process Trigger-
+        # matched executions don't carry an outbox fire_id).
+        try:
+            fire_id = row["fire_id"] or ""
+        except (KeyError, IndexError):
+            fire_id = ""
         return cls(
             execution_id=row["execution_id"],
             workflow_id=row["workflow_id"],
@@ -174,6 +189,7 @@ class WorkflowExecution:
             trigger_event_id=row["trigger_event_id"] or "",
             member_id=row["member_id"] or "",
             gate_nonce=gate_nonce,
+            fire_id=fire_id,
         )
 
 
@@ -182,6 +198,16 @@ class WorkflowExecution:
 # ---------------------------------------------------------------------------
 
 
+# WTC v1 C1 (Kit must-fix): the ``fire_id`` column is the
+# application-layer idempotency key for cross-process WLP dispatch
+# dedup. Empty for legacy in-process Trigger-matched executions
+# (those don't carry an outbox fire_id). Non-empty values are
+# unique by partial index below — the legacy path with empty
+# fire_id is exempt from the constraint by design. The schema
+# string deliberately holds no SQL line comments (``--``) because
+# this module's split-by-``;`` evaluator would mis-handle a
+# semicolon embedded in comment prose. Keep the documentation in
+# Python comments; keep the SQL minimal.
 _EXECUTIONS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS workflow_executions (
     execution_id            TEXT PRIMARY KEY,
@@ -198,10 +224,13 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
     trigger_event_payload   TEXT DEFAULT '{}',
     trigger_event_id        TEXT DEFAULT '',
     member_id               TEXT DEFAULT '',
-    gate_nonce              TEXT DEFAULT ''
+    gate_nonce              TEXT DEFAULT '',
+    fire_id                 TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_executions_state
     ON workflow_executions(instance_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executions_fire_id
+    ON workflow_executions(fire_id) WHERE fire_id != '';
 """
 
 
@@ -235,6 +264,38 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
         except aiosqlite.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+
+    # WTC v1 C1 (Kit must-fix): same idempotent ALTER pattern for
+    # fire_id. Pre-existing executions get an empty fire_id and are
+    # therefore exempt from the partial unique index — only outbox-
+    # driven dispatch (execute_workflow) populates the column.
+    if "fire_id" not in existing_columns:
+        try:
+            await db.execute(
+                "ALTER TABLE workflow_executions "
+                "ADD COLUMN fire_id TEXT DEFAULT ''"
+            )
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+    # The partial unique index gets created by the CREATE TABLE
+    # block above on fresh installs. For previously-installed DBs
+    # that didn't have the index (because the column didn't exist),
+    # CREATE UNIQUE INDEX IF NOT EXISTS is the idempotent path.
+    try:
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_executions_fire_id "
+            "ON workflow_executions(fire_id) WHERE fire_id != ''"
+        )
+    except aiosqlite.OperationalError as exc:
+        # Tolerant: on extremely old SQLite versions partial indexes
+        # are unsupported. Log and skip — the application-level
+        # SELECT-by-fire_id check still catches duplicates.
+        logger.warning(
+            "WTC v1: failed to create idx_executions_fire_id partial "
+            "unique index (likely SQLite version): %s — relying on "
+            "application-layer dedup", exc,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -409,8 +470,8 @@ class ExecutionEngine:
             " state, action_index_completed, intermediate_state,"
             " last_heartbeat, aborted_reason, started_at, terminated_at,"
             " trigger_event_payload, trigger_event_id, member_id,"
-            " gate_nonce"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " gate_nonce, fire_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             execution.to_row(),
         )
         self._queue.put_nowait(execution)
@@ -892,6 +953,130 @@ class ExecutionEngine:
             instance_id=execution.instance_id,
             produced_at=execution.started_at,
         )
+
+    # -- WTC v1: outbox-driven dispatch entry point ---------------------
+
+    async def execute_workflow(
+        self,
+        *,
+        fire_id: str,
+        workflow_id: str,
+        instance_id: str,
+        trigger_event_payload: dict | None = None,
+        trigger_event_id: str = "",
+        member_id: str = "",
+    ) -> str:
+        """Public entry point used by the unified trigger runtime
+        (WTC v1) for outbox-driven cross-process dispatch.
+
+        Idempotent on ``fire_id`` (Kit must-fix, post-fold). Behaviour:
+
+        1. SELECT the row with this ``fire_id`` first. If present,
+           return its ``execution_id`` — the original execution
+           created by the prior call. No second row, no second
+           workflow run.
+        2. Otherwise INSERT a fresh execution_id with the supplied
+           ``fire_id`` and queue it for the worker.
+
+        ``fire_id`` MUST be non-empty. Empty ``fire_id`` is the
+        legacy in-process Trigger-matched path's signal — that path
+        uses ``_on_trigger_match`` and is exempt from the partial
+        unique index by design. Callers must supply a stable
+        ``fire_id`` derived from ``(trigger_id, fire_window_key)``.
+
+        Race tolerance: if two callers race the SELECT-then-INSERT
+        with the same ``fire_id``, the partial unique index catches
+        the loser at INSERT time. The loser then re-runs the SELECT
+        and returns the winner's ``execution_id``. Net effect:
+        exactly one execution per ``fire_id``.
+        """
+        if self._db is None:
+            raise RuntimeError("ExecutionEngine not started")
+        if not fire_id:
+            raise ValueError(
+                "execute_workflow requires a non-empty fire_id; "
+                "the legacy in-process path uses _on_trigger_match"
+            )
+
+        # Idempotency check — return original execution_id if the
+        # fire_id has already been registered.
+        existing = await self._find_execution_by_fire_id_unlocked(fire_id)
+        if existing is not None:
+            return existing
+
+        execution = WorkflowExecution(
+            execution_id=str(uuid.uuid4()),
+            workflow_id=workflow_id,
+            instance_id=instance_id,
+            correlation_id=str(uuid.uuid4()),
+            state="queued",
+            started_at=_now(),
+            trigger_event_payload=trigger_event_payload or {},
+            trigger_event_id=trigger_event_id,
+            member_id=member_id,
+            fire_id=fire_id,
+        )
+        try:
+            await self._db.execute(
+                "INSERT INTO workflow_executions ("
+                " execution_id, workflow_id, instance_id, correlation_id,"
+                " state, action_index_completed, intermediate_state,"
+                " last_heartbeat, aborted_reason, started_at, terminated_at,"
+                " trigger_event_payload, trigger_event_id, member_id,"
+                " gate_nonce, fire_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                execution.to_row(),
+            )
+        except aiosqlite.IntegrityError as exc:
+            # Partial-unique-index race: another caller won the
+            # INSERT. Re-fetch and return their execution_id.
+            if "fire_id" not in str(exc).lower() and "unique" not in str(exc).lower():
+                raise
+            existing = await self._find_execution_by_fire_id_unlocked(fire_id)
+            if existing is None:
+                # Pathological: index hit but row not visible. Fail
+                # loudly rather than silently double-dispatch.
+                raise RuntimeError(
+                    f"execute_workflow race: fire_id={fire_id!r} hit "
+                    "the unique index but no row visible on re-read"
+                ) from exc
+            return existing
+
+        self._queue.put_nowait(execution)
+        return execution.execution_id
+
+    async def find_execution_by_fire_id(
+        self, fire_id: str,
+    ) -> str | None:
+        """Public lookup used by the recovery sweep before
+        re-dispatching a still-pending outbox row past its
+        claim_lease. Returns the workflow_execution_id for the
+        supplied fire_id, or None when no execution exists.
+
+        WTC v1 (Kit must-fix). Closes the seam between WLP accept
+        and trigger-runtime mark_dispatched: the recovery sweep
+        consults this method first, reconciles to dispatched/
+        completed without re-invoking execute_workflow when the
+        WLP execution already exists.
+        """
+        if self._db is None:
+            return None
+        if not fire_id:
+            return None
+        return await self._find_execution_by_fire_id_unlocked(fire_id)
+
+    async def _find_execution_by_fire_id_unlocked(
+        self, fire_id: str,
+    ) -> str | None:
+        async with self._db.execute(
+            "SELECT execution_id FROM workflow_executions "
+            "WHERE fire_id = ? LIMIT 1",
+            (fire_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return row["execution_id"] if hasattr(row, "keys") else row[0]
 
     # -- queries --------------------------------------------------------
 
