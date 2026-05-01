@@ -44,6 +44,16 @@ class GateResult:
 
 
 @dataclass
+class _CrossSpaceGateDecision:
+    """CROSS_SPACE_REQUESTS_V1 (Q2): result shape returned by
+    :meth:`DispatchGate.evaluate_cross_space`. Kept narrow — the
+    dispatch flow only needs the decision token + reason."""
+
+    decision: str   # "approved" | "covenant_conflict" | "needs_confirmation"
+    reason: str = ""
+
+
+@dataclass
 class ApprovalToken:
     """Single-use token issued when the dispatch gate blocks an action."""
 
@@ -454,6 +464,71 @@ class DispatchGate:
         return GateResult(
             allowed=False, reason="confirm", method="model_check",
             proposed_action=action_desc, raw_response=raw,
+        )
+
+    async def evaluate_cross_space(
+        self,
+        *,
+        instance_id: str,
+        target_space_id: str,
+        action_kind: str,
+        work_order: dict,
+        initiating_member_id: str = "",
+    ) -> "_CrossSpaceGateDecision":
+        """Evaluate target-space covenants for a cross-space request.
+
+        CROSS_SPACE_REQUESTS_V1 (Q2): wraps the LLM-based covenant
+        evaluator with target_space_id scope, translating
+        GateResult into dispatch tokens (approved / covenant_conflict
+        / needs_confirmation). The dispatch flow consumes the
+        ``decision`` + ``reason`` fields.
+
+        Action kinds with the bypass-target-covenants safety valve
+        (``propose_covenant``) skip this method entirely; the
+        dispatch module checks the registry flag before calling
+        here.
+        """
+        gate_result = await self._evaluate_model(
+            tool_name=f"cross_space:{action_kind}",
+            tool_input=dict(work_order or {}),
+            effect="hard_write",
+            messages=None,
+            agent_reasoning=(
+                f"Cross-space request from member {initiating_member_id} "
+                f"targeting {target_space_id} with action_kind="
+                f"{action_kind}."
+            ),
+            instance_id=instance_id,
+            active_space_id=target_space_id,  # scope to TARGET, not origin
+            user_message="",
+        )
+
+        if gate_result.allowed:
+            return _CrossSpaceGateDecision(
+                decision="approved",
+                reason=gate_result.reason or "approved",
+            )
+        # Map blocked/confirm/clarify → dispatch tokens.
+        if gate_result.reason == "covenant_conflict":
+            return _CrossSpaceGateDecision(
+                decision="covenant_conflict",
+                reason=(
+                    gate_result.conflicting_rule
+                    or "blocked by target covenant"
+                ),
+            )
+        if gate_result.reason in ("confirm", "clarify"):
+            return _CrossSpaceGateDecision(
+                decision="needs_confirmation",
+                reason=(
+                    gate_result.proposed_action
+                    or "target covenant requires confirmation"
+                ),
+            )
+        # Unknown shape — fail closed.
+        return _CrossSpaceGateDecision(
+            decision="covenant_conflict",
+            reason=f"unrecognized gate result reason: {gate_result.reason!r}",
         )
 
     def reset_denial_counts(self) -> None:

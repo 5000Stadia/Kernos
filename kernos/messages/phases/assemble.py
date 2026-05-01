@@ -29,6 +29,87 @@ from kernos.utils import utc_now
 logger = logging.getLogger(__name__)
 
 
+_CROSS_SPACE_AWARENESS_LOOKBACK_HOURS = 24
+_CROSS_SPACE_AWARENESS_MAX_ENTRIES = 5
+
+
+async def _cross_space_awareness_block(
+    handler, instance_id: str, active_space_id: str,
+) -> str:
+    """CROSS_SPACE_REQUESTS_V1 (target re-entry awareness).
+
+    Query recent cross_space.action events that targeted the
+    currently-active space and render a short block describing
+    them. The agent reads this in its situation context and can
+    answer "why is this here?" with target-local provenance +
+    audit alone — no origin conversation pollutes target.
+
+    Bounded: at most the 5 most recent events within the last 24h.
+    Returns "" when no relevant events.
+    """
+    if not active_space_id:
+        return ""
+    if not getattr(handler, "events", None):
+        return ""
+
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(hours=_CROSS_SPACE_AWARENESS_LOOKBACK_HOURS)
+        ).isoformat()
+        events = await handler.events.query(
+            instance_id,
+            event_types=["cross_space.action"],
+            after=cutoff,
+            limit=50,
+        )
+    except Exception as exc:
+        logger.debug("CROSS_SPACE_AWARENESS_QUERY_FAILED: %s", exc)
+        return ""
+
+    relevant: list = []
+    for evt in events:
+        payload = getattr(evt, "payload", None) or {}
+        if payload.get("target_space_id") != active_space_id:
+            continue
+        relevant.append((evt, payload))
+
+    if not relevant:
+        return ""
+
+    # Most-recent first, capped.
+    relevant = relevant[-_CROSS_SPACE_AWARENESS_MAX_ENTRIES:]
+
+    lines: list[str] = [
+        "[CROSS_SPACE_INBOUND] This space recently received "
+        "kernel-dispatched cross-space requests from origin spaces. "
+        "When asked 'why is this here?' about any of the entries "
+        "below, answer using only target-local provenance + audit; "
+        "you do not have origin's conversation."
+    ]
+    for evt, payload in relevant:
+        ts = getattr(evt, "timestamp", "") or ""
+        action_kind = payload.get("action_kind", "")
+        origin = payload.get("origin_space_id", "")
+        member = payload.get("initiating_member_id", "")
+        request_id = payload.get("request_id", "")
+        receipt = payload.get("receipt", {}) or {}
+        status = receipt.get("status", "")
+        refs = receipt.get("created_refs", []) or []
+        ref_summary = ", ".join(
+            f"{r.get('type')}={r.get('id')}"
+            for r in refs if isinstance(r, dict)
+        ) or "(no refs)"
+        lines.append(
+            f"  - {ts[:19]} action={action_kind} status={status} "
+            f"from={origin} member={member} request_id={request_id} "
+            f"refs=[{ref_summary}]"
+        )
+    return "\n".join(lines)
+
+
 async def run(ctx: PhaseContext) -> PhaseContext:
     """Phase 3: Build Cognitive UI blocks — system prompt, tools, messages."""
     handler = ctx.handler
@@ -111,6 +192,24 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             ctx.results_prefix = rm_block_text + "\n\n" + ctx.results_prefix
         else:
             ctx.results_prefix = rm_block_text
+
+    # CROSS_SPACE_REQUESTS_V1: target re-entry awareness. When the
+    # active space has received cross-space mutations, surface the
+    # most recent ones to the agent's situation context so the
+    # agent can answer "why is this here?" from target-local
+    # provenance + audit alone (no origin conversation context
+    # needed). Bounded — 5 most recent within 24h.
+    try:
+        cs_block = await _cross_space_awareness_block(
+            handler, instance_id, active_space_id,
+        )
+        if cs_block:
+            if ctx.results_prefix:
+                ctx.results_prefix = cs_block + "\n\n" + ctx.results_prefix
+            else:
+                ctx.results_prefix = cs_block
+    except Exception as exc:
+        logger.warning("CROSS_SPACE_AWARENESS_BLOCK_FAILED: %s", exc)
 
     # Emit message.received
     try:
@@ -399,6 +498,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     from kernos.kernel.workspace import MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL
     from kernos.kernel.execution import MANAGE_PLAN_TOOL
     from kernos.kernel.external_agents.tool import CONSULT_TOOL
+    from kernos.kernel.cross_space.tool import REQUEST_SPACE_ACTION_TOOL
     _all_kernel = FILE_TOOLS + [REQUEST_TOOL, READ_DOC_TOOL, DISMISS_WHISPER_TOOL,
                             MANAGE_CAPABILITIES_TOOL, REMEMBER_DETAILS_TOOL,
                             READ_SOURCE_TOOL, READ_SOUL_TOOL, UPDATE_SOUL_TOOL,
@@ -406,7 +506,8 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                             SEND_TO_CHANNEL_TOOL, MANAGE_SCHEDULE_TOOL,
                             INSPECT_STATE_TOOL, EXECUTE_CODE_TOOL,
                             MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL,
-                            MANAGE_PLAN_TOOL, CONSULT_TOOL]
+                            MANAGE_PLAN_TOOL, CONSULT_TOOL,
+                            REQUEST_SPACE_ACTION_TOOL]
     from kernos.kernel.runtime_trace import READ_RUNTIME_TRACE_TOOL
     from kernos.kernel.diagnostics import DIAGNOSE_ISSUE_TOOL, PROPOSE_FIX_TOOL, SUBMIT_SPEC_TOOL
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL

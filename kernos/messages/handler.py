@@ -841,6 +841,13 @@ class MessageHandler:
         self._turn_counter: int = 0  # monotonic turn counter for tool LRU tracking
         self.preference_parsing_enabled: bool = True  # Bypassable (Agent Card principle)
         self._runners: dict[str, SpaceRunner] = {}  # "tenant:space" → SpaceRunner
+        # CROSS_SPACE_REQUESTS_V1 (Q1): per-(instance, space) lock for
+        # mutation serialization. Turn processor acquires the origin
+        # space's lock around the turn body; cross-space dispatch
+        # acquires the target space's lock with bounded timeout.
+        # Same lock dict shared with the CrossSpaceService's
+        # DispatchEngine via get_service.
+        self._space_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._adapters: dict[str, "BaseAdapter"] = {}  # platform → adapter
         from kernos.kernel.channels import ChannelRegistry
         self._channel_registry = ChannelRegistry()
@@ -4074,6 +4081,22 @@ class MessageHandler:
     # Turn Serialization — Per-Space Mailbox/Runner
     # -----------------------------------------------------------------------
 
+    def _get_space_lock(self, instance_id: str, space_id: str) -> asyncio.Lock:
+        """Per-(instance, space) mutation lock. Lazily created.
+
+        CROSS_SPACE_REQUESTS_V1 (Q1): the turn processor wraps the
+        body of each turn in ``async with self._get_space_lock(...)``
+        so cross-space requests targeting that space wait until the
+        current turn completes. Cross-space dispatch acquires the
+        target's lock with a bounded timeout (default 30s) and
+        returns ``failed`` / ``timeout_waiting_for_target`` when
+        the wait exceeds the bound.
+        """
+        key = (instance_id, space_id)
+        if key not in self._space_locks:
+            self._space_locks[key] = asyncio.Lock()
+        return self._space_locks[key]
+
     def _get_runner(self, instance_id: str, space_id: str) -> SpaceRunner:
         """Get or create the runner for a (tenant, space) pair."""
         key = f"{instance_id}:{space_id}"
@@ -4098,6 +4121,13 @@ class MessageHandler:
         """
         while True:
             merged_messages: list[tuple[NormalizedMessage, TurnContext, asyncio.Future]] = []
+            # CROSS_SPACE_REQUESTS_V1 (Q1): lock acquired after merge
+            # handling, released in the iteration's finally so cross-
+            # space requests targeting this space wait until the
+            # current turn completes regardless of how the iteration
+            # exits.
+            _space_lock: asyncio.Lock | None = None
+            _lock_acquired: bool = False
             try:
                 # Block until at least one message arrives
                 msg, ctx, future = await runner.mailbox.get()
@@ -4127,6 +4157,19 @@ class MessageHandler:
                 if (primary_msg.context and isinstance(primary_msg.context, dict)
                         and primary_msg.context.get("execution_envelope", {}).get("source") == "self_directed"):
                     primary_ctx.is_self_directed = True
+
+                # CROSS_SPACE_REQUESTS_V1 (Q1): acquire the per-space
+                # mutation lock for the duration of the turn body.
+                # Cross-space requests targeting this space will
+                # await this lock with bounded timeout, ensuring
+                # they queue behind the current turn rather than
+                # racing it. Released in the iteration's finally
+                # below.
+                _space_lock = self._get_space_lock(
+                    runner.instance_id, runner.space_id,
+                )
+                await _space_lock.acquire()
+                _lock_acquired = True
 
                 # Log merged messages to conversation log so agent sees them
                 for extra_msg, extra_ctx, extra_future in merged_messages[1:]:
@@ -4412,6 +4455,18 @@ class MessageHandler:
                     _, _, f = item
                     if not f.done():
                         f.set_result("Something went wrong. Try again.")
+            finally:
+                # CROSS_SPACE_REQUESTS_V1 (Q1): release the per-space
+                # mutation lock on every iteration exit (success,
+                # exception, cancellation). Cross-space requests
+                # waiting on this lock proceed once released.
+                if _lock_acquired and _space_lock is not None:
+                    try:
+                        _space_lock.release()
+                    except RuntimeError:
+                        # asyncio.Lock raises if called when not
+                        # acquired by this task — defensive only.
+                        pass
 
     async def shutdown_runners(self) -> None:
         """Cancel all space runners. Call on application shutdown."""

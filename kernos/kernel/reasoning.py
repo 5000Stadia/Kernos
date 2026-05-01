@@ -745,7 +745,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -786,6 +786,7 @@ class ReasoningService:
         "delete_file":                 frozenset({"loop", "confirmed"}),
         "execute_code":                frozenset({"loop", "confirmed"}),
         "consult":                     frozenset({"loop", "confirmed"}),
+        "request_space_action":        frozenset({"loop", "confirmed"}),
         "manage_workspace":            frozenset({"loop", "confirmed"}),
         "register_tool":               frozenset({"loop", "confirmed"}),
         "manage_plan":                 frozenset({"loop", "confirmed"}),
@@ -951,6 +952,10 @@ class ReasoningService:
                         "error": type(exc).__name__,
                         "message": str(exc),
                     })
+            elif tool_name == "request_space_action":
+                return await self._dispatch_cross_space_request(
+                    tool_input, request,
+                )
             elif tool_name == "manage_workspace":
                 if self._workspace:
                     action = tool_input.get("action", "list")
@@ -1564,6 +1569,16 @@ class ReasoningService:
                 except Exception as exc:
                     logger.warning("Kernel tool 'consult' failed: %s", exc)
                     result = f"Consult failed: {exc}"
+            elif block.name == "request_space_action":
+                try:
+                    result = await self._dispatch_cross_space_request(
+                        tool_args, request,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Kernel tool 'request_space_action' failed: %s", exc,
+                    )
+                    result = f"Cross-space request failed: {exc}"
             elif block.name == "manage_workspace":
                 if hasattr(self, '_workspace') and self._workspace:
                     try:
@@ -2119,6 +2134,49 @@ class ReasoningService:
             "tool_use_id": block.id,
             "content": injected,
         }
+
+    async def _dispatch_cross_space_request(
+        self, tool_input: dict, request: "ReasoningRequest",
+    ) -> str:
+        """Shared dispatch for the ``request_space_action`` tool.
+        Both the legacy and decoupled tool-loop paths route through
+        this helper. Returns a JSON string of the receipt
+        (suitable as a tool_result content)."""
+        import json as _json
+        from kernos.kernel.cross_space.tool import (
+            build_request_from_tool_input,
+            get_service as _cs_get_service,
+        )
+        from kernos.kernel.external_agents.errors import (
+            ExternalAgentError as _ExtError,
+        )
+        try:
+            svc = await _cs_get_service(
+                state=self._state,
+                events=self._events,
+                audit=self._audit,
+                gate=self._get_gate(),
+                space_locks=getattr(self._handler, "_space_locks", None),
+            )
+            req = build_request_from_tool_input(
+                tool_input=tool_input,
+                instance_id=request.instance_id,
+                origin_space_id=request.active_space_id,
+                initiating_member_id=getattr(request, "member_id", "")
+                                     or request.instance_id,
+                source_turn_id=getattr(request, "conversation_id", "") or "",
+            )
+            receipt = await svc.dispatch(req)
+            return _json.dumps(receipt.to_tool_result())
+        except _ExtError as exc:
+            logger.info(
+                "request_space_action returned typed error: %s: %s",
+                type(exc).__name__, exc,
+            )
+            return _json.dumps({
+                "error": type(exc).__name__,
+                "message": str(exc),
+            })
 
     async def _handle_request_tool(
         self,
