@@ -319,14 +319,20 @@ async def execute_code(
     timeout_seconds: int = DEFAULT_TIMEOUT,
     write_file_name: str | None = None,
     data_dir: str = "./data",
+    backend: str | None = None,
 ) -> dict[str, Any]:
-    """Execute code via the configured builder backend.
+    """Execute code via a builder backend.
 
-    Reads ``KERNOS_BUILDER`` + ``KERNOS_WORKSPACE_SCOPE`` at call time. The
-    default (``native`` / ``isolated``) matches the shipped behavior of
-    every earlier batch; other backends route through the builder dispatcher
-    and — until their adapter batches ship — return a structured
-    not-implemented response from a shared stub.
+    Backend selection (EXTERNAL-AGENT-CONSULTATION v1 C5):
+
+    1. **Per-call ``backend`` param** wins when supplied. Lets the
+       agent pick "native" / "aider" / "claude-code" / "codex" per
+       call instead of relying on the global env var.
+    2. **``KERNOS_BUILDER`` env var** preserved as the fallback when
+       ``backend`` is not supplied. Existing operator workflows
+       continue working unchanged.
+    3. ``KERNOS_WORKSPACE_SCOPE`` continues to govern sandbox scope
+       independently of backend choice.
 
     Returns dict with: success, stdout, stderr, exit_code, error (optional).
     """
@@ -335,12 +341,15 @@ async def execute_code(
     from kernos.kernel.builders import UnknownBuilderError, get_builder
 
     scope = _effective_scope()
-    builder_name = _effective_builder()
+    builder_name = (
+        backend.strip().lower() if backend else _effective_builder()
+    )
 
     try:
-        backend = get_builder(builder_name)
+        backend_obj = get_builder(builder_name)
     except UnknownBuilderError as exc:
-        # Startup validation should have caught this; fall back to a safe
+        # Startup validation catches the env-var path; per-call
+        # invalid backend lands here. Either way, return a
         # structured error rather than crashing the turn.
         logger.warning("CODE_EXEC: %s", exc)
         return {
@@ -349,7 +358,7 @@ async def execute_code(
             "exit_code": -1,
         }
 
-    result = await backend.build(
+    result = await backend_obj.build(
         instance_id=instance_id,
         space_id=space_id,
         code=code,
