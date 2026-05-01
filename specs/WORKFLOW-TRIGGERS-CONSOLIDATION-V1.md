@@ -485,12 +485,53 @@ Mirrors CRB approval→STS pattern (framing must-fix #6):
 Same trigger + same Y → same key → UNIQUE constraint catches
 duplicates. Replay produces identical key.
 
+### WLP idempotent dispatch (Kit must-fix, post-fold)
+
+The dispatch boundary has two distinct idempotency layers and they
+must compose cleanly across the crash window between
+`WLP.execute_workflow` accepting the request and the trigger-runtime
+`mark_dispatched` persisting `workflow_execution_id`:
+
+1. **Runtime side (trigger_fires):** the `fire_id` (= the
+   deterministic `fire_window_key` above) is the row's primary
+   identity. Replay produces identical key, UNIQUE catches
+   duplicates at claim time.
+2. **WLP side (workflow_executions):** `WLP.execute_workflow`
+   accepts `fire_id` as a stable idempotency key. WLP stores
+   incoming requests by `fire_id` and returns the original
+   `workflow_execution_id` on a duplicate request — never creates
+   a second execution row for the same `fire_id`.
+
+Because `fire_id` is derived from `(trigger_id, fire_window_key)`,
+the same logical fire produces the same `fire_id` across crashes
+and recovery passes. This mirrors the CRB approval-to-STS pattern
+the spec already cites: explicit idempotency key is what makes
+that pattern survive crash windows.
+
+**Recovery sweep contract.** Before re-dispatching any
+`status='pending'` row past its `claim_lease`, the sweep queries
+WLP by `fire_id`:
+
+* WLP reports an existing execution → outbox row reconciles
+  directly to `dispatched` (or `completed`) with that
+  `workflow_execution_id`; no second WLP invocation.
+* WLP has no record → re-dispatch with the same `fire_id`. The
+  re-dispatch is itself idempotent at WLP, so a network-retry
+  storm cannot produce duplicate executions.
+
+This closes the seam Kit identified: a crash between WLP accept
+and `mark_dispatched` no longer looks like a re-dispatch
+opportunity to the recovery sweep.
+
 ### Restart resume
 
 `runtime.recover()` runs on engine startup:
 
 * `status='pending'` AND `claimed_at` older than `claim_lease`
-  (default 60s): re-dispatch. (Crash before dispatch.)
+  (default 60s): query WLP by `fire_id` first; reconcile to
+  `dispatched`/`completed` if WLP has the execution, otherwise
+  re-dispatch. (Covers crash before dispatch AND crash after
+  WLP accept before `mark_dispatched`.)
 * `status='dispatched'` AND `dispatched_at` older than `dispatch_lease`
   (default 600s): query WLP for execution outcome; transition to
   `completed` if WLP done, else re-dispatch. (Crash after dispatch
@@ -505,20 +546,35 @@ duplicates. Replay produces identical key.
   same event twice in overlapping polls) → fire_window_key is a
   function of `Y_event_id` which is durable → second observation
   hits UNIQUE → no-op.
+* WLP receives the same `fire_id` twice (e.g., recovery sweep
+  re-dispatches before WLP's first response lands) → WLP returns
+  the original `workflow_execution_id` from the first call; no
+  second execution row.
 
-### Three required crash-recovery test scenarios
+### Four required crash-recovery test scenarios
 
 1. **Crash before dispatch.** Runtime claims fire (`pending`); crash.
-   Restart: sweep finds pending; verifies WLP execution did NOT
-   start; re-dispatches.
-2. **Crash after dispatch, before mark-complete.** Runtime claims +
+   Restart: sweep finds pending; queries WLP by `fire_id` (no
+   record); re-dispatches.
+2. **Crash after WLP accept before mark-dispatched.** Runtime
+   claims fire (`pending`); calls `WLP.execute_workflow(fire_id)`;
+   WLP creates the execution row and returns; runtime crashes
+   before persisting `workflow_execution_id` / `status='dispatched'`
+   on `trigger_fires`. Restart: sweep finds pending past lease;
+   queries WLP by `fire_id`; WLP returns the existing
+   `workflow_execution_id`; outbox row reconciles to `dispatched`
+   without a second `execute_workflow` call. **Exactly one
+   workflow execution.**
+3. **Crash after dispatch, before mark-complete.** Runtime claims +
    dispatches (`dispatched`); WLP runs to completion; crash before
    `mark_completed`. Restart: sweep finds dispatched; queries WLP
    for execution result; marks completed WITHOUT re-firing.
-3. **Duplicate event observation.** Two `calendar.event_observed`
+4. **Duplicate event observation.** Two `calendar.event_observed`
    events with same `Y_event_id` flush in overlapping batches.
    Idempotency key catches the second; only one fire intent
    created; only one dispatch.
+
+Each scenario must produce **exactly one workflow execution**.
 
 ## Missed-window semantics (must-fix W10)
 
@@ -567,14 +623,27 @@ duplicates. Replay produces identical key.
    None; only the winner can `mark_dispatched` (loser's attempt
    raises StaleClaimError). Recovery from an expired pending
    claim transitions ownership atomically.
-6. **AC6** — Three crash-recovery scenarios verified by integration
-   tests: (1) crash before dispatch, (2) crash after dispatch
-   before mark-complete, (3) duplicate event observation. Each
-   produces exactly one workflow execution.
+6. **AC6** — Four crash-recovery scenarios verified by integration
+   tests, each producing exactly one workflow execution:
+   (1) crash before dispatch;
+   (2) crash after WLP accept before `mark_dispatched` — runtime
+       claims fire, calls `WLP.execute_workflow(fire_id)`, WLP
+       creates execution row and returns, runtime crashes before
+       persisting `workflow_execution_id`. Restart sweep queries
+       WLP by `fire_id`, gets the existing execution_id, reconciles
+       outbox row to `dispatched` without a second WLP call.
+       **Test pin:** assert exactly one row in WLP's
+       `workflow_executions` table for that `fire_id`, even though
+       recovery would otherwise have re-dispatched the
+       still-`pending` outbox row;
+   (3) crash after dispatch before mark-complete;
+   (4) duplicate event observation.
 7. **AC7** — Missed-window default `skip` produces no execution +
-   `workflow.missed_fire` diagnostic event. `catch_up` produces
-   exactly one execution with `catch_up=1` flag, regardless of
-   downtime length.
+   `workflow.missed_fire` diagnostic event. `catch_up` fires
+   exactly once **per actual missed window** (keyed by the missed
+   window itself, not by the restart event) regardless of
+   downtime length. 30 days of downtime ≠ 30 catch-up fires; the
+   most recent missed window wins.
 8. **AC8** — Existing `manage_schedule` tool surface unchanged; user
    reminders continue firing; behavior identical from user
    perspective. **Test pin:** when a `manage_schedule` cron fires,
@@ -627,7 +696,7 @@ duplicates. Replay produces identical key.
 
 * End-to-end happy path per predicate kind: register → predicate
   matches → claim → dispatch → workflow executes → completed.
-* Three crash-recovery scenarios (AC6).
+* Four crash-recovery scenarios (AC6).
 * Missed-window skip + catch_up (AC7).
 * CRB workflow registration produces working triggers (AC10).
 * Adapter migration tests: manage_schedule + calendar reminders
