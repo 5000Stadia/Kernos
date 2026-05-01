@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-4%2C600%2B-brightgreen.svg)](#engineering-proof)
-[![Last Commit](https://img.shields.io/github/last-commit/theman8631/Kernos.svg)](https://github.com/theman8631/Kernos/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/5000Stadia/Kernos.svg)](https://github.com/5000Stadia/Kernos/commits/main)
 [![Status](https://img.shields.io/badge/status-active%20development-blue.svg)](#engineering-proof)
 
 </div>
@@ -120,7 +120,7 @@ The developing system itself runs through one of these workflows: the architect 
 |  |  |
 | --- | --- |
 | **Multi-channel presence** | Discord, SMS via Twilio, Telegram. One handler, one identity across channels. Adding a new platform is ~150 lines. |
-| **Agentic workspace** | The agent writes Python in a sandboxed subprocess, exercises it live, and registers it as a first-class tool in the universal catalog. 50-line helpers, not frameworks. |
+| **Agentic workspace** | The agent writes Python in a subprocess with best-effort isolation (clean env, scoped cwd, restricted PYTHONPATH), exercises it live, and registers it as a first-class tool in the universal catalog. 50-line helpers, not frameworks. |
 | **Self-directed execution** | `manage_plan` creates multi-phase plans with budget ceilings. Three-tier resilience: provider failover, step retries with exponential backoff, hourly slow-poll. Plans survive restarts. |
 | **Event-driven workflows** | Long-running workflow loops triggered by events on the stream, with bounded action sequences, approval gates, per-execution nonce binding, restart-resume, and portable descriptors. |
 | **Friction-driven improvement** | A friction observer watches the turn trace. When patterns emerge — repeated failures, recurring confusions, missing primitives — the system proposes covenant changes and concrete spec drafts grounded in live evidence. |
@@ -143,7 +143,7 @@ The developing system itself runs through one of these workflows: the architect 
 ## Quick install
 
 ```bash
-git clone https://github.com/theman8631/Kernos.git
+git clone https://github.com/5000Stadia/Kernos.git
 cd Kernos
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -159,12 +159,12 @@ Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and 
 
 ## Engineering proof
 
-- **4,600+ tests** across the runtime, with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance).
+- **Comprehensive test suite** across the runtime — see the phase summary in [`DECISIONS.md`](DECISIONS.md) for the canonical count — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance).
 - **Durable per-instance event stream** backed by SQLite, with `instance_id` / `member_id` / `space_id` / `correlation_id` schema and a post-flush hook contract for trigger registries that doesn't poison event persistence on workflow code failure.
 - **Workflow primitive with approval gates** — per-gate nonce binding so an approval can't wake an unintended execution; restart-resume per workflow descriptor with conservative default; safe-deny on `auto_proceed_with_default` for irreversible post-gate continuations.
 - **Local/test-provider containment** for live test sweeps so edge-case observation doesn't produce accidental public side effects.
 - **Spec-first development** with multi-round substrate-correctness review and code-correctness review on every batch. Six real correctness bugs caught during the workflow-loop primitive batch (WLP); seven more during the gate-scoping batch that followed (WLP-GS) — every one before it shipped.
-- **Self-hosted single-process runtime.** No managed cloud. Your data stays on your hardware.
+- **Self-hosted single-host orchestrator with subprocesses.** No managed cloud. Your data stays on your hardware.
 
 ---
 
@@ -180,7 +180,7 @@ V1's covenant system, dispatch gate, Messenger cohort, sensitivity classificatio
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Built by [@theman8631](https://github.com/theman8631).
+MIT — see [LICENSE](LICENSE). Built by [@5000Stadia](https://github.com/5000Stadia).
 
 ---
 

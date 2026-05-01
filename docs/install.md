@@ -20,7 +20,7 @@ A minimal setup runs on Anthropic + Discord and needs nothing else. Everything b
 ## Quick install
 
 ```
-git clone https://github.com/theman8631/Kernos.git
+git clone https://github.com/5000Stadia/Kernos.git
 cd Kernos
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -36,6 +36,67 @@ python kernos/server.py
 ```
 
 On first run, Kernos creates its data directory (default `./data`) and initializes the SQLite databases for instance state, knowledge facts, relational messages, and conversation logs.
+
+## Launcher paths
+
+Kernos ships three distinct launchers. Pick the one that matches how you'll talk to it.
+
+### Discord (default) — `python kernos/server.py`
+
+The full runtime: Discord adapter, scheduler, awareness, optional Twilio SMS adapter (when credentials are present), optional Telegram adapter (when token is present). This is what most operators run.
+
+```
+python kernos/server.py
+```
+
+**Required env:**
+- `DISCORD_BOT_TOKEN` — bot credential
+- `DISCORD_OWNER_ID` — the user-id Kernos accepts as owner
+- `KERNOS_INSTANCE_ID=discord:<owner-id>` — instance identity
+
+**First-run checklist:**
+1. Create a Discord application + bot at the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Enable the **Message Content Intent** under the bot's "Privileged Gateway Intents."
+3. Generate an OAuth invite URL with `bot` scope + `Send Messages` / `Read Message History` permissions; invite the bot to a server you control, or DM it directly.
+4. Copy the bot token into `.env` as `DISCORD_BOT_TOKEN`.
+5. Set `DISCORD_OWNER_ID` to your Discord user id and `KERNOS_INSTANCE_ID` to `discord:<that-id>`.
+6. Start the server. The first DM you send begins onboarding.
+
+### Twilio webhook (SMS-first) — `uvicorn kernos.app:app`
+
+Lighter footprint, exposes a Twilio-compatible HTTP webhook. Use when SMS is the primary surface and you don't want the Discord runtime running.
+
+```
+uvicorn kernos.app:app --host 0.0.0.0 --port 8000
+```
+
+**Required env:**
+- `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_PHONE_NUMBER` — Twilio credentials
+- `OWNER_PHONE_NUMBER` — your phone, in E.164 format
+- `KERNOS_INSTANCE_ID=sms:<owner-phone>` — instance identity
+
+**First-run checklist:**
+1. Buy a Twilio phone number with SMS capability.
+2. Configure the number's "A message comes in" webhook to point at your public URL plus `/twilio/sms` (use ngrok or similar for local development).
+3. Drop the credentials and your phone number into `.env`.
+4. Run `uvicorn kernos.app:app`. Text the Twilio number — Kernos onboards the same way Discord does.
+
+### CLI chat — `python -m kernos.chat`
+
+Local terminal chat. No adapter, no scheduler, no awareness — just turn-by-turn conversation against the same handler + reasoning service. Useful for testing prompts, exercising tools, and offline development.
+
+```
+python -m kernos.chat
+```
+
+**Required env:** an LLM provider credential (`ANTHROPIC_API_KEY` or equivalent — see [LLM Provider](#llm-provider)). No adapter credentials needed.
+
+**First-run checklist:**
+1. Install + configure the LLM provider as you would for any other launcher.
+2. Optionally set `KERNOS_INSTANCE_ID=cli:<your-name>` to give the local instance a stable id.
+3. Run `python -m kernos.chat`. Type to talk; Ctrl-C to exit.
+
+---
 
 ## Environment Configuration
 
@@ -178,7 +239,7 @@ Use this for: single-user operator setups where the agent is an extension of you
 
 ### `native` (default)
 
-Kernos's own sandboxed Python subprocess. No external dependencies.
+Kernos's own Python subprocess with best-effort isolation (clean env, scoped cwd, restricted PYTHONPATH). No external dependencies. Not a hard sandbox against hostile code execution — see [Workspace Scope](#workspace-scope) for the scope-vs-security boundary.
 
 ### `aider`
 
@@ -218,7 +279,7 @@ A clean install with all dependencies present should show a green test run.
 
 ## Running in Production
 
-Kernos is a single-process runtime. Deployment options:
+Kernos is a single-host orchestrator (one main process, with subprocesses for code execution and external builders). Deployment options:
 
 - **Local machine** — run under `tmux` or similar; simple, low-overhead
 - **Always-on VPS** — run under systemd or supervisor; recommended for actual personal use
@@ -257,7 +318,7 @@ Seeding is idempotent — canvases already present at boot are skipped. Delete a
 
 ## Getting Help
 
-Kernos is a single-maintainer project at early-access stage. Report issues at the [GitHub repo](https://github.com/theman8631/Kernos).
+Kernos is a single-maintainer project at early-access stage. Report issues at the [GitHub repo](https://github.com/5000Stadia/Kernos).
 
 ## Related
 
