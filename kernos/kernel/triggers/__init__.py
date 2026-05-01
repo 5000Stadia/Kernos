@@ -56,6 +56,12 @@ from kernos.kernel.triggers.predicate import (
     validate_predicate,
     validate_temporal,
 )
+from kernos.kernel.triggers.external_sources import (
+    EVENT_TYPE_EMAIL_MESSAGE_OBSERVED,
+    EVENT_TYPE_NOTION_PAGE_OBSERVED,
+    EmailMessageSource,
+    NotionPageSource,
+)
 from kernos.kernel.triggers.runtime import TriggerEvaluationRuntime
 from kernos.kernel.triggers.sources import (
     EVENT_TYPE_CALENDAR_OBSERVED,
@@ -73,13 +79,17 @@ __all__ = [
     "DispatchPolicy",
     "DispatchPolicyError",
     "EVENT_TYPE_CALENDAR_OBSERVED",
+    "EVENT_TYPE_EMAIL_MESSAGE_OBSERVED",
+    "EVENT_TYPE_NOTION_PAGE_OBSERVED",
     "EVENT_TYPE_SCHEDULER_TICK_DUE",
+    "EmailMessageSource",
     "EventSource",
     "FireOutbox",
     "FireOutboxError",
     "FireRecord",
     "FireWindowConflict",
     "InternalEventAdapter",
+    "NotionPageSource",
     "PredicateValidationError",
     "SchedulerHeartbeatSource",
     "StaleClaimError",
