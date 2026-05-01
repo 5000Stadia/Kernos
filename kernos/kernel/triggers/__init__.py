@@ -1,6 +1,6 @@
 """Unified time + event trigger runtime — WORKFLOW-TRIGGERS-CONSOLIDATION v1.
 
-C1 ships:
+Shipped through C3:
 
 * :mod:`predicate` — three-part predicate model (event_selector,
   temporal_relation, dispatch_policy) + deterministic
@@ -8,16 +8,22 @@ C1 ships:
 * :mod:`outbox` — :class:`FireOutbox` durable dispatch outbox over
   the existing ``trigger_fires`` table; CAS-based status
   transitions; recovery sweep helpers.
-* :mod:`runtime` — :class:`TriggerEvaluationRuntime` interface
-  shell (start / stop / register / deactivate / evaluate_now /
-  recover). C1's evaluate_now and recover are no-ops; C2 fills
-  them in.
+* :mod:`runtime` — :class:`TriggerEvaluationRuntime` (start / stop
+  / register / deactivate / on_event_observed / evaluate_now /
+  recover). C2 filled in cron walk + event-driven match path +
+  WLP-fire_id reconciliation.
+* :mod:`evaluator` — per-temporal-kind evaluation helpers
+  (cron windowing, event-selector match, due-time math).
+* :mod:`sources` — :class:`EventSource` protocol +
+  :class:`InternalEventAdapter` (post-flush → on_event_observed)
+  + :class:`CalendarSource` and :class:`SchedulerHeartbeatSource`
+  emitters. C3 substrate.
 * :mod:`errors` — typed error hierarchy.
 
-Out of scope for C1: cron walk, before/after due-time math,
-event-driven match path, recovery-sweep WLP reconciliation,
-adapters (CRB compiler / scheduler / calendar). Those land in
-C2-C7.
+Out of scope through C3: external source contracts (C4),
+scheduler.py refactor + CRB compiler integration (C5),
+missed-window catch_up semantics (C6), Pattern 05 strike + live
+test sweep (C7).
 """
 from __future__ import annotations
 
@@ -51,17 +57,31 @@ from kernos.kernel.triggers.predicate import (
     validate_temporal,
 )
 from kernos.kernel.triggers.runtime import TriggerEvaluationRuntime
+from kernos.kernel.triggers.sources import (
+    EVENT_TYPE_CALENDAR_OBSERVED,
+    EVENT_TYPE_SCHEDULER_TICK_DUE,
+    CalendarSource,
+    EventSource,
+    InternalEventAdapter,
+    SchedulerHeartbeatSource,
+)
 
 
 __all__ = [
+    "CalendarSource",
     "DispatchFailed",
     "DispatchPolicy",
     "DispatchPolicyError",
+    "EVENT_TYPE_CALENDAR_OBSERVED",
+    "EVENT_TYPE_SCHEDULER_TICK_DUE",
+    "EventSource",
     "FireOutbox",
     "FireOutboxError",
     "FireRecord",
     "FireWindowConflict",
+    "InternalEventAdapter",
     "PredicateValidationError",
+    "SchedulerHeartbeatSource",
     "StaleClaimError",
     "StaleFireRecovery",
     "TemporalRelation",
