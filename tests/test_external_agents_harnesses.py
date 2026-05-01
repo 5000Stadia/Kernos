@@ -408,19 +408,59 @@ class TestGeminiHarness:
 
 class TestSpawnFailureWrapping:
     """Codex mid-batch fold: spawn OSError must surface as
-    HarnessUnavailable, not bubble untyped."""
+    HarnessUnavailable, not bubble untyped.
 
-    async def test_claude_spawn_failure_raises_unavailable(self, tmp_path):
-        # Pass a binary path that resolves via shutil.which() but the
-        # actual exec will fail (e.g., a non-executable file)
-        non_exec = tmp_path / "claude_unrunnable"
-        non_exec.write_text("not a script")
-        # No chmod +x — exec will fail
-        h = ClaudeCodeHarness(binary=str(non_exec))
-        # health_check sees missing because shutil.which won't
-        # promote a non-executable; that's fine — the binary-missing
-        # path also raises HarnessUnavailable.
-        with pytest.raises(HarnessUnavailable):
+    Monkeypatches ``run_subprocess`` directly to inject the OSError
+    we want to test the wrapping for. The earlier "non-executable
+    binary" approach was rejected by ``shutil.which`` before the
+    spawn ever happened, so it tested the binary-missing path
+    rather than the spawn-error path."""
+
+    async def test_claude_spawn_oserror_wrapped(
+        self, claude_stub, tmp_path, monkeypatch,
+    ):
+        from kernos.kernel.external_agents.harnesses import claude_code
+
+        async def boom(*args, **kwargs):
+            raise OSError("simulated exec failure")
+
+        monkeypatch.setattr(claude_code, "run_subprocess", boom)
+        h = ClaudeCodeHarness(binary=str(claude_stub))
+        with pytest.raises(HarnessUnavailable, match="spawn failed"):
+            await h.consult(
+                question="x", context="", session_id="",
+                workspace_dir=tmp_path, timeout_seconds=10,
+                harness_options={},
+            )
+
+    async def test_codex_spawn_oserror_wrapped(
+        self, codex_stub, tmp_path, monkeypatch,
+    ):
+        from kernos.kernel.external_agents.harnesses import codex as codex_mod
+
+        async def boom(*args, **kwargs):
+            raise FileNotFoundError("simulated exec failure")
+
+        monkeypatch.setattr(codex_mod, "run_subprocess", boom)
+        h = CodexHarness(binary=str(codex_stub))
+        with pytest.raises(HarnessUnavailable, match="spawn failed"):
+            await h.consult(
+                question="x", context="", session_id="",
+                workspace_dir=tmp_path, timeout_seconds=10,
+                harness_options={},
+            )
+
+    async def test_gemini_spawn_oserror_wrapped(
+        self, gemini_stub, tmp_path, monkeypatch,
+    ):
+        from kernos.kernel.external_agents.harnesses import gemini as gemini_mod
+
+        async def boom(*args, **kwargs):
+            raise OSError("simulated exec failure")
+
+        monkeypatch.setattr(gemini_mod, "run_subprocess", boom)
+        h = GeminiHarness(binary=str(gemini_stub), history_root=tmp_path)
+        with pytest.raises(HarnessUnavailable, match="spawn failed"):
             await h.consult(
                 question="x", context="", session_id="",
                 workspace_dir=tmp_path, timeout_seconds=10,
