@@ -21,11 +21,29 @@ from kernos.kernel.triggers.adapters.crb_compiler import (
     compile_trigger_descriptor,
     derive_trigger_id,
 )
+from kernos.kernel.triggers.adapters.manage_schedule import (
+    MANAGE_SCHEDULE_ACTION_NOTIFY,
+    MANAGE_SCHEDULE_ACTION_TOOL_CALL,
+    MANAGED_SCHEDULE_METADATA_KEY,
+    is_managed_schedule_workflow,
+    mint_managed_schedule_workflow_id,
+    read_managed_schedule_metadata,
+    register_managed_schedule_workflow,
+    schedule_to_descriptor,
+)
 
 
 __all__ = [
     "CompiledTrigger",
+    "MANAGE_SCHEDULE_ACTION_NOTIFY",
+    "MANAGE_SCHEDULE_ACTION_TOOL_CALL",
+    "MANAGED_SCHEDULE_METADATA_KEY",
     "compile_descriptor_triggers",
     "compile_trigger_descriptor",
     "derive_trigger_id",
+    "is_managed_schedule_workflow",
+    "mint_managed_schedule_workflow_id",
+    "read_managed_schedule_metadata",
+    "register_managed_schedule_workflow",
+    "schedule_to_descriptor",
 ]
