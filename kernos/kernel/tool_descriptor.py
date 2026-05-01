@@ -73,12 +73,23 @@ class GateClassification(str, Enum):
     delete are the v1 categories. A separate destructive_irreversible
     category was considered and not added in v1 — Kit's view was that
     delete plus runtime confirmation suffices for the v1 surface.
+
+    EXTERNAL-AGENT-CONSULTATION v1 (additive, AC5 + Codex spec-review
+    fold #2): ``external_agent_read`` distinguishes consultation +
+    non-native code_exec from plain ``read``. Kernos doesn't write
+    anything in either case, but the operation discloses sensitive
+    repo / state context to an external process AND triggers a paid,
+    stateful subprocess. The dispatch gate routes
+    ``external_agent_read`` through a stricter authority gate while
+    deriving ``read_only`` safety for integration's catalog (same as
+    READ).
     """
 
     READ = "read"
     SOFT_WRITE = "soft_write"
     HARD_WRITE = "hard_write"
     DELETE = "delete"
+    EXTERNAL_AGENT_READ = "external_agent_read"
 
 
 class Aggregation(str, Enum):
@@ -141,6 +152,11 @@ SAFETY_FOR_GATE: dict[GateClassification, OperationSafety] = {
     GateClassification.SOFT_WRITE: OperationSafety.MUTATING,
     GateClassification.HARD_WRITE: OperationSafety.MUTATING,
     GateClassification.DELETE: OperationSafety.SENSITIVE_ACTION,
+    # external_agent_read derives read_only safety for catalog
+    # filtering purposes (it doesn't mutate Kernos state) but the
+    # dispatch gate routes it through a stricter authority pre-check
+    # because of context disclosure + paid-subprocess implications.
+    GateClassification.EXTERNAL_AGENT_READ: OperationSafety.READ_ONLY,
 }
 
 

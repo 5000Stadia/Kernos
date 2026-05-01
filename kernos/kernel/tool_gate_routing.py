@@ -40,6 +40,12 @@ GATE_EFFECT_FOR_CLASSIFICATION: dict[GateClassification, str] = {
     # Promoting to a separate destructive_irreversible category is a
     # future spec; this mapping changes when that lands.
     GateClassification.DELETE: "hard_write",
+    # EXTERNAL-AGENT-CONSULTATION v1 (additive): external_agent_read
+    # routes through the gate as a read-class operation for blast-
+    # radius purposes, but the agent surface (consult tool) carries
+    # a separate authority that the dispatch gate enforces before
+    # the effect-token lookup runs.
+    GateClassification.EXTERNAL_AGENT_READ: "read",
 }
 
 

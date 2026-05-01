@@ -37,6 +37,10 @@ from kernos.kernel.external_agents.harness import (
     Harness,
     HarnessHealth,
 )
+from kernos.kernel.external_agents.orchestrator import (
+    ConsultationOrchestrator,
+    WorkspacePolicy,
+)
 from kernos.kernel.external_agents.reentrancy import (
     CallingContext,
     current_calling_context,
@@ -62,6 +66,7 @@ __all__ = [
     "ConsultResult",
     "ConsultationFailed",
     "ConsultationLog",
+    "ConsultationOrchestrator",
     "ConsultationRecord",
     "ConsultationStatus",
     "ConsultationTimeout",
@@ -76,6 +81,7 @@ __all__ = [
     "ReentrancyBlocked",
     "SubprocessResult",
     "WorkspaceNotAllowed",
+    "WorkspacePolicy",
     "current_calling_context",
     "current_consult_depth",
     "enter_consult",
