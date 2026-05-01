@@ -297,6 +297,13 @@ async def on_ready():
     # a pending-marker + commit-range log sit in {data_dir}. Convert to a
     # queued Whisper so the first member turn after restart surfaces a
     # brief summary of what changed.
+    #
+    # AUTO-UPDATE-BEHAVIOR-V1: when KERNOS_AUTO_UPDATE_VERBOSE=on, the
+    # ephemeral announcement (delivered post-turn via send_outbound,
+    # not persisted) is queued here too. The verbose path runs in
+    # parallel with the whisper path — verbose=off preserves today's
+    # whisper-based summary; verbose=on adds the immediate ephemeral
+    # callout on the user's next interaction.
     try:
         from kernos.setup.self_update import queue_pending_whisper
         if _instance_id:
@@ -746,6 +753,48 @@ async def on_ready():
         name="cli", display_name="CLI Terminal", platform="cli",
         can_send_outbound=False,
     )
+
+    # AUTO-UPDATE-BEHAVIOR-V1: queue verbose-mode ephemeral announcement
+    # (when KERNOS_AUTO_UPDATE_VERBOSE=on) for delivery on the user's
+    # next inbound message. Stored in handler memory only — the persist
+    # phase reads + clears the flag.
+    try:
+        from kernos.setup.self_update import (
+            LOG_FILENAME as _AU_LOG, MARKER_FILENAME as _AU_MARKER,
+            _verbose_enabled, format_verbose_announcement,
+        )
+        _au_marker = Path(data_dir) / _AU_MARKER
+        _au_log = Path(data_dir) / _AU_LOG
+        if _verbose_enabled() and _au_marker.exists() and _au_log.exists():
+            try:
+                _au_text = _au_log.read_text(encoding="utf-8")
+                handler._pending_verbose_announcement = (
+                    format_verbose_announcement(_au_text)
+                )
+                logger.info(
+                    "AUTO_UPDATE_VERBOSE_QUEUED: announcement primed for "
+                    "next turn (KERNOS_AUTO_UPDATE_VERBOSE=on)"
+                )
+                # Marker cleared so we don't re-queue on subsequent
+                # restarts; the log file persists as a diagnostic.
+                _au_marker.unlink()
+            except Exception as exc:
+                logger.warning(
+                    "AUTO_UPDATE_VERBOSE_QUEUE_FAILED: %s", exc,
+                )
+    except Exception as exc:
+        logger.warning("AUTO_UPDATE_VERBOSE_IMPORT_FAILED: %s", exc)
+
+    # AUTO-UPDATE-BEHAVIOR-V1: launch the daily scheduled background
+    # pull. Pulls origin/{branch} at KERNOS_AUTO_UPDATE_TIME local
+    # time; new code applies on the next natural restart, NOT mid-
+    # flight. No-op when KERNOS_AUTO_UPDATE=off.
+    try:
+        import asyncio as _au_asyncio
+        from kernos.setup.self_update import scheduled_update_loop
+        _au_asyncio.create_task(scheduled_update_loop(data_dir=data_dir))
+    except Exception as exc:
+        logger.warning("AUTO_UPDATE_CRON_LAUNCH_FAILED: %s", exc)
 
     # Send pending confirmation from a prior /restart or /wipe
     if _PENDING_CONFIRMATION_PATH.is_file():

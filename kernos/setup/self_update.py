@@ -59,6 +59,42 @@ def _auto_update_enabled() -> bool:
     return val == "on"
 
 
+def _verbose_enabled() -> bool:
+    """``KERNOS_AUTO_UPDATE_VERBOSE`` toggles ephemeral user-facing
+    announcements when an update applies. Default off — operators
+    opt in if they want the immediate "what just changed" callout.
+    """
+    val = (os.getenv("KERNOS_AUTO_UPDATE_VERBOSE", "") or "off").strip().lower()
+    return val == "on"
+
+
+_DEFAULT_UPDATE_TIME = (3, 0)
+
+
+def _parse_update_time() -> tuple[int, int]:
+    """Parse ``KERNOS_AUTO_UPDATE_TIME`` (``HH:MM`` 24-hour, server
+    local clock) into a (hour, minute) tuple. Falls back to
+    ``03:00`` and logs a warning on malformed input."""
+    raw = (os.getenv("KERNOS_AUTO_UPDATE_TIME", "") or "").strip()
+    if not raw:
+        return _DEFAULT_UPDATE_TIME
+    try:
+        h_str, m_str = raw.split(":", 1)
+        hour = int(h_str)
+        minute = int(m_str)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(f"out of range: {raw!r}")
+    except (ValueError, AttributeError):
+        logger.warning(
+            "%s_TIME_PARSE_FAILED: KERNOS_AUTO_UPDATE_TIME=%r is not "
+            "valid HH:MM (24-hour) — falling back to default %02d:%02d",
+            _LOG_PREFIX, raw,
+            _DEFAULT_UPDATE_TIME[0], _DEFAULT_UPDATE_TIME[1],
+        )
+        return _DEFAULT_UPDATE_TIME
+    return (hour, minute)
+
+
 def _run_git(
     args: list[str], *, cwd: Path, timeout: int = 60,
 ) -> subprocess.CompletedProcess:
@@ -389,6 +425,289 @@ def enforce_or_continue(
     execv = _execv or os.execv
     execv(sys.executable, [sys.executable, *(_argv or sys.argv)])
     # Unreachable in real execution; tests with a mock execv fall through.
+
+
+# ---------------------------------------------------------------------------
+# Scheduled background pull (no execv — applies on next natural restart)
+# ---------------------------------------------------------------------------
+
+
+def _pull_only(*, data_dir: str | None = None) -> bool:
+    """Run the same fetch + ancestry check + ff-only pull + reinstall
+    sequence as :func:`enforce_or_continue`, but stop short of
+    ``os.execv``. New code lands on disk; the running process keeps
+    its old imports until next natural restart.
+
+    Returns True if a pull applied (and the update log was written),
+    False otherwise. Every failure mode is logged and absorbed —
+    the scheduler retries on its next tick.
+
+    AUTO-UPDATE-BEHAVIOR-V1: used by the daily cron task. Distinct
+    from ``enforce_or_continue`` because the cron must NOT restart
+    the process — that's the structural difference the spec calls
+    for.
+    """
+    source_dir = _kernos_source_dir()
+    branch = _effective_branch()
+
+    if not _is_git_checkout(source_dir):
+        logger.debug(
+            "%s_CRON_NOT_GIT: %s is not a git checkout — skipping",
+            _LOG_PREFIX, source_dir,
+        )
+        return False
+
+    clean, status = _working_tree_clean(source_dir)
+    if not clean:
+        logger.warning(
+            "%s_CRON_DIRTY: working tree has uncommitted changes — "
+            "skipping scheduled pull:\n%s",
+            _LOG_PREFIX, status[:500],
+        )
+        return False
+
+    ok, reason = _fetch(source_dir, branch)
+    if not ok:
+        logger.warning(
+            "%s_CRON_FETCH_FAILED: %s — skipping this window",
+            _LOG_PREFIX, reason[:500],
+        )
+        return False
+
+    local = _local_head(source_dir)
+    remote = _remote_head(source_dir, branch)
+    if not local or not remote:
+        logger.warning(
+            "%s_CRON_REV_LOOKUP_FAILED: local=%r remote=%r",
+            _LOG_PREFIX, local, remote,
+        )
+        return False
+
+    if local == remote:
+        logger.info(
+            "%s_CRON_CURRENT: local and origin/%s both at %s",
+            _LOG_PREFIX, branch, local[:12],
+        )
+        return False
+
+    if not _is_ancestor(source_dir, local, remote):
+        logger.warning(
+            "%s_CRON_DIVERGED: local %s not an ancestor of origin/%s "
+            "%s — skipping",
+            _LOG_PREFIX, local[:12], branch, remote[:12],
+        )
+        return False
+
+    pre_pull_head = local
+    logger.info(
+        "%s_CRON_PULLING: %s → %s on origin/%s",
+        _LOG_PREFIX, local[:12], remote[:12], branch,
+    )
+    ok, reason = _pull(source_dir, branch)
+    if not ok:
+        logger.warning(
+            "%s_CRON_PULL_FAILED: %s",
+            _LOG_PREFIX, reason[:500],
+        )
+        return False
+
+    ok, reason = _reinstall(source_dir)
+    if not ok:
+        logger.warning(
+            "%s_CRON_REINSTALL_FAILED: %s — pull landed but deps may be "
+            "inconsistent until next natural restart",
+            _LOG_PREFIX, reason,
+        )
+
+    resolved_data_dir = data_dir or os.getenv("KERNOS_DATA_DIR", "./data")
+    try:
+        commits = _commit_range_log(source_dir, pre_pull_head)
+        _write_update_log(resolved_data_dir, pre_pull_head, branch, commits)
+    except Exception as exc:
+        logger.warning(
+            "%s_CRON_LOG_WRITE_FAILED: %s — pull still applied",
+            _LOG_PREFIX, exc,
+        )
+    logger.info(
+        "%s_CRON_APPLIED: %s → %s. New code applies on next restart.",
+        _LOG_PREFIX, pre_pull_head[:12], remote[:12],
+    )
+    return True
+
+
+def _seconds_until_next(hour: int, minute: int) -> float:
+    """Compute seconds from now until the next occurrence of
+    ``hour:minute`` in server local time. If we're already past
+    today's slot, returns the offset to tomorrow's."""
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+async def scheduled_update_loop(
+    *,
+    data_dir: str | None = None,
+    _pull: callable | None = None,
+    _sleep: callable | None = None,
+) -> None:
+    """Daily background pull at ``KERNOS_AUTO_UPDATE_TIME``. Runs as
+    an asyncio task launched at server startup; loops indefinitely
+    until cancelled.
+
+    Disabled when ``KERNOS_AUTO_UPDATE=off`` — the loop logs once
+    and returns. Distinct from :func:`enforce_or_continue` (cold
+    start / pre-bind) — this is the long-running daily window.
+
+    Test hooks: ``_pull`` overrides :func:`_pull_only`; ``_sleep``
+    overrides :func:`asyncio.sleep`.
+    """
+    import asyncio
+
+    if not _auto_update_enabled():
+        logger.info(
+            "%s_CRON_DISABLED: KERNOS_AUTO_UPDATE=off — scheduled "
+            "loop not started",
+            _LOG_PREFIX,
+        )
+        return
+
+    pull_fn = _pull or _pull_only
+    sleep_fn = _sleep or asyncio.sleep
+    hour, minute = _parse_update_time()
+
+    logger.info(
+        "%s_CRON_SCHEDULED: daily pull at %02d:%02d (server local)",
+        _LOG_PREFIX, hour, minute,
+    )
+
+    while True:
+        seconds = _seconds_until_next(hour, minute)
+        try:
+            await sleep_fn(seconds)
+        except asyncio.CancelledError:
+            logger.info("%s_CRON_CANCELLED: scheduled loop stopped", _LOG_PREFIX)
+            raise
+        try:
+            pull_fn(data_dir=data_dir)
+        except Exception as exc:
+            logger.warning(
+                "%s_CRON_RAISED: pull task raised %s — continuing loop",
+                _LOG_PREFIX, exc,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Verbose ephemeral announcement (gated by KERNOS_AUTO_UPDATE_VERBOSE)
+# ---------------------------------------------------------------------------
+
+
+_VERBOSE_COMMIT_CAP = 5
+
+
+def format_verbose_announcement(log_text: str) -> str:
+    """Build the ephemeral announcement string from the auto-update
+    log. Caps at ``_VERBOSE_COMMIT_CAP`` most recent commit subjects.
+
+    Format: ``Updated to commit <short_hash>. <N> changes pulled:
+    "<first>", "<second>", ...``.
+
+    Empty / malformed logs return a graceful fallback rather than
+    raising — the caller is post-startup and shouldn't crash on a
+    bad log.
+    """
+    in_code = False
+    commits: list[tuple[str, str]] = []  # (short_hash, subject)
+    for line in log_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code and stripped:
+            parts = stripped.split(maxsplit=1)
+            if len(parts) >= 2:
+                commits.append((parts[0], parts[1]))
+            elif parts:
+                commits.append((parts[0], ""))
+    if not commits:
+        return "Updated. Commit details unavailable."
+    head_hash = commits[0][0]
+    capped = commits[:_VERBOSE_COMMIT_CAP]
+    quoted_subjects = ", ".join(f'"{subj}"' for _, subj in capped if subj)
+    if quoted_subjects:
+        return (
+            f"Updated to commit {head_hash}. "
+            f"{len(commits)} change{'s' if len(commits) != 1 else ''} "
+            f"pulled: {quoted_subjects}"
+        )
+    return f"Updated to commit {head_hash}."
+
+
+async def deliver_pending_announcement_if_verbose(
+    *,
+    handler,
+    instance_id: str,
+    data_dir: str,
+) -> bool:
+    """If an auto-update log is pending and verbose mode is on,
+    deliver an ephemeral announcement via the handler's
+    :meth:`send_outbound` (no conversation log write, no harvest,
+    no compaction).
+
+    Returns True if a message was sent, False otherwise. Removes
+    the pending marker on success or when verbose is off (so the
+    log doesn't keep firing).
+    """
+    log_path = Path(data_dir) / LOG_FILENAME
+    marker_path = Path(data_dir) / MARKER_FILENAME
+    if not marker_path.exists() or not log_path.exists():
+        return False
+
+    if not _verbose_enabled():
+        # Verbose off — leave both files in place for queue_pending_whisper
+        # to consume on its parallel path. No-op for this surface.
+        return False
+
+    try:
+        log_text = log_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.warning("%s_LOG_READ_FAILED: %s", _LOG_PREFIX, exc)
+        return False
+
+    message = format_verbose_announcement(log_text)
+    try:
+        msg_id = await handler.send_outbound(
+            instance_id=instance_id,
+            member_id="",  # owner default
+            channel_name=None,
+            message=message,
+        )
+    except Exception as exc:
+        logger.warning("%s_VERBOSE_SEND_FAILED: %s", _LOG_PREFIX, exc)
+        return False
+
+    if not msg_id:
+        logger.warning(
+            "%s_VERBOSE_NOT_DELIVERED: send_outbound returned 0",
+            _LOG_PREFIX,
+        )
+        return False
+
+    logger.info(
+        "%s_VERBOSE_DELIVERED: instance=%s msg_id=%s",
+        _LOG_PREFIX, instance_id, msg_id,
+    )
+    # Remove marker so we don't re-announce on subsequent restarts.
+    # Log file stays as a durable diagnostic artifact (parallels
+    # queue_pending_whisper's behavior).
+    try:
+        marker_path.unlink()
+    except Exception:
+        pass
+    return True
 
 
 # ---------------------------------------------------------------------------

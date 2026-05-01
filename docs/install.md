@@ -211,6 +211,34 @@ The update is skipped without blocking startup if:
 
 Skip the startup update check entirely. Use this when you want to control update cadence manually (running `git pull && pip install -e . && systemctl restart kernos` on your own schedule).
 
+### Daily background pull — `KERNOS_AUTO_UPDATE_TIME`
+
+When `KERNOS_AUTO_UPDATE=on`, Kernos also runs a daily background pull at the configured local time. Default `03:00`. The pull lands code on disk and **applies on the next natural restart** — it does not force a mid-flight restart. Pick an hour you don't expect to be active.
+
+```
+KERNOS_AUTO_UPDATE_TIME=04:00
+```
+
+Format is 24-hour `HH:MM` in the server's local clock. Malformed values fall back to `03:00` with a log warning.
+
+If a pull fails (network down, divergence, dirty tree), the daily window logs and skips — there's no retry, no escalation. The next day's window tries again.
+
+### Verbose announcements — `KERNOS_AUTO_UPDATE_VERBOSE`
+
+When on, the next interaction after an update lands surfaces an ephemeral message naming the new commit and recent subjects:
+
+```
+Updated to commit 3b053f3. 7 changes pulled: "Pass 5: dispatch path registry", ...
+```
+
+The announcement is **ephemeral** — it does not persist in conversation log, is not harvested into memory, and does not pass through compaction. It fires once per restart and clears itself.
+
+```
+KERNOS_AUTO_UPDATE_VERBOSE=on
+```
+
+Default `off`. The persistent whisper-based summary continues to fire when verbose is off.
+
 ### `KERNOS_UPDATE_BRANCH`
 
 Optional override. Defaults to `main`. Set to a different branch name if you want to track a non-main line (e.g., `dogfood`, `pre-release`).
