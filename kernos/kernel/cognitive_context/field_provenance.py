@@ -1,0 +1,756 @@
+"""Field-provenance map for :class:`CognitiveContext`.
+
+For each packet field, documents the deterministic source that
+populates it. The map is the architectural contract per the
+COGNITIVE-CONTEXT-V1 spec's field-provenance table.
+
+C1 (this commit) ships the map + a :func:`populate_field` helper
+that resolves sources at call time. No consumer reads the packet
+yet; C3a-c wires the packet through the production path. C1's
+tests prove each documented source is a real, importable symbol
+that produces content of the expected type.
+
+The ``populate_field`` function takes a :class:`PopulationContext`
+(handle to the running substrate: state store, instance_db, member
+context, etc.) and returns the field content. It's the single
+seam through which all field population flows; future C-arc work
+that adds new sources (e.g., gardener cohort wired in C4) extends
+this function rather than fanning the wiring across multiple files.
+
+Why ship the map separately from the dataclass: keeping types in
+:mod:`types` pure-data (frozen dataclasses, no behavior) lets
+tests + the integration layer reason about the structure without
+pulling the substrate's runtime dependencies. The behavior side
+lives here, isolated.
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:  # pragma: no cover
+    from kernos.kernel.cognitive_context.types import CognitiveContext
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Provenance descriptor — what a field's source looks like
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FieldProvenance:
+    """Documents a packet field's deterministic content source.
+
+    * ``field_path`` — dotted path on the packet
+      (e.g. ``"rules.operating_principles"``).
+    * ``source_module`` — Python module the source lives in.
+    * ``source_symbol`` — symbol name within the module. May be a
+      dotted path to walk into a constant struct
+      (e.g. ``"PRIMARY_TEMPLATE.operating_principles"``).
+    * ``source_kind`` — ``"constant"``, ``"method"``, ``"function"``.
+      Used by the symbol-resolution test (constants are imported +
+      attribute-walked; methods resolve on a class; functions are
+      callable lookups).
+    * ``expected_type`` — a string description of the expected type
+      (kept as text rather than a runtime type so optional / union
+      types are documented without import gymnastics in the map).
+    * ``wiring_state`` (Kit-required, three-state):
+
+      - ``"wired"`` — populate_field has explicit routing returning
+        real content.
+      - ``"deferred"`` — explicitly deferred; ``deferred_until``
+        names the phase that will land the wiring. populate_field
+        returns the type-appropriate default; tests treat this as
+        intentional.
+      - ``"unwired_expected"`` — ESCAPE HATCH for entries added
+        without explicit classification. populate_field raises
+        :class:`NotImplementedError` so the gap surfaces. By end of
+        C5 the field-availability test pins zero unwired_expected
+        entries.
+
+    * ``deferred_until`` — required when ``wiring_state="deferred"``;
+      names the phase (e.g. ``"C3a"``, ``"C4"``, ``"C5"``).
+    * ``notes`` — human-readable notes about the source's wiring
+      status, defaulting behavior, or known follow-up phases.
+    """
+
+    field_path: str
+    source_module: str
+    source_symbol: str
+    source_kind: str  # constant | method | function
+    expected_type: str
+    wiring_state: str = "unwired_expected"  # wired | deferred | unwired_expected
+    deferred_until: str | None = None
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        # Validation: deferred entries must declare deferred_until;
+        # other states must not.
+        if self.wiring_state not in ("wired", "deferred", "unwired_expected"):
+            raise ValueError(
+                f"FieldProvenance({self.field_path!r}): wiring_state "
+                f"must be one of wired / deferred / unwired_expected; "
+                f"got {self.wiring_state!r}"
+            )
+        if self.wiring_state == "deferred" and not self.deferred_until:
+            raise ValueError(
+                f"FieldProvenance({self.field_path!r}): wiring_state="
+                f"'deferred' requires deferred_until to name the phase "
+                f"that will land the wiring (e.g. 'C3a', 'C5')"
+            )
+        if self.wiring_state != "deferred" and self.deferred_until:
+            raise ValueError(
+                f"FieldProvenance({self.field_path!r}): deferred_until "
+                f"is only valid when wiring_state='deferred'"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Authoritative provenance map. Each entry pins a deterministic source
+# and its kind. Tests at C1 walk this map and assert resolvability.
+# ---------------------------------------------------------------------------
+
+
+FIELD_PROVENANCE: dict[str, FieldProvenance] = {
+    # === RULES zone ===
+    "rules.operating_principles": FieldProvenance(
+        field_path="rules.operating_principles",
+        source_module="kernos.kernel.template",
+        source_symbol="PRIMARY_TEMPLATE.operating_principles",
+        source_kind="constant",
+        expected_type="str",
+        wiring_state="wired",
+        notes="Universal substrate principles — transparency, intent, stewardship.",
+    ),
+    "rules.bootstrap_prompt": FieldProvenance(
+        field_path="rules.bootstrap_prompt",
+        source_module="kernos.kernel.template",
+        source_symbol="PRIMARY_TEMPLATE.bootstrap_prompt",
+        source_kind="constant",
+        expected_type="str | None",
+        wiring_state="wired",
+        notes="Gated by member_profile.bootstrap_graduated. None when graduated.",
+    ),
+    "rules.hatching_prompt": FieldProvenance(
+        field_path="rules.hatching_prompt",
+        source_module="kernos.messages.handler",
+        source_symbol="_UNIQUE_HATCHING_PROMPT",
+        source_kind="constant",
+        expected_type="str | None",
+        wiring_state="wired",
+        notes=(
+            "Stored as the RAW template at C1; substitution with "
+            "display_name / agent_name / name_instruction happens at "
+            "C3c via NowBlock + StateBlock fields available to the "
+            "renderer (avoids storing rendered text on the packet, "
+            "preserves substitution flexibility). Selection is "
+            "structural: _UNIQUE_HATCHING_PROMPT when "
+            "member_profile.agent_name is empty; "
+            "_INHERIT_HATCHING_PROMPT when set. None when graduated."
+        ),
+    ),
+    "rules.covenants": FieldProvenance(
+        field_path="rules.covenants",
+        source_module="kernos.kernel.state",
+        source_symbol="StateStore.query_covenant_rules",
+        source_kind="method",
+        expected_type="tuple[CovenantRule, ...]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Active covenants in the current member + space scope. "
+            "Production selection is pinned + situational "
+            "(MessageAnalyzer-selected per turn, not 'all active') — "
+            "see assemble.py:404-417. C3a wiring honors that selection. "
+            "Deterministic ordering preserved; safety_class covenants "
+            "appear in BOTH this field AND "
+            "safety_constraints.sensitivity_gates for redundancy "
+            "(Kit's covenant verdict)."
+        ),
+    ),
+    "rules.space_names": FieldProvenance(
+        field_path="rules.space_names",
+        source_module="kernos.kernel.spaces",
+        source_symbol="ContextSpace",
+        source_kind="constant",
+        expected_type="dict[str, str]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Mapping space_id → space name. Used by _format_contracts to "
+            "render space-scoped covenants. Resolved at the assembly "
+            "seam from the spaces a member has access to."
+        ),
+    ),
+    "rules.instance_stewardship": FieldProvenance(
+        field_path="rules.instance_stewardship",
+        source_module="kernos.kernel.instance_db",
+        source_symbol="InstanceDB.get_instance_stewardship",
+        source_kind="method",
+        expected_type="str",
+        wiring_state="wired",
+        notes=(
+            "Per-instance purpose statement. Note: spec field-provenance "
+            "table identified template.py as source; current production "
+            "reads via instance_db (handler.py:747). Map reflects code "
+            "reality. Wired in populate_field at C1; returns empty "
+            "string when ctx.instance_db is None (test contexts)."
+        ),
+    ),
+    # === NOW zone ===
+    "now": FieldProvenance(
+        field_path="now",
+        source_module="kernos.kernel.cognitive_context.field_provenance",
+        source_symbol="_construct_now_block",
+        source_kind="function",
+        expected_type="NowBlock",
+        wiring_state="wired",
+        notes=(
+            "Constructed from turn provisioning context (member_id, "
+            "space_id, platform, message timestamp, auth_level). The "
+            "construction helper lives in this module so the source "
+            "is self-contained."
+        ),
+    ),
+    # === STATE zone ===
+    "state.soul": FieldProvenance(
+        field_path="state.soul",
+        source_module="kernos.kernel.state",
+        source_symbol="StateStore.get_soul",
+        source_kind="method",
+        expected_type="Soul | None",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes="Deprecated for identity (per multi-member migration); kept for compat.",
+    ),
+    "state.member_profile": FieldProvenance(
+        field_path="state.member_profile",
+        source_module="kernos.kernel.instance_db",
+        source_symbol="InstanceDB.get_member_profile",
+        source_kind="method",
+        expected_type="dict[str, Any]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Dict-typed at C1 — production read shape. Future C-arc may "
+            "promote to typed dataclass."
+        ),
+    ),
+    "state.relationships": FieldProvenance(
+        field_path="state.relationships",
+        source_module="kernos.kernel.instance_db",
+        source_symbol="InstanceDB.list_relationships",
+        source_kind="method",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes="Pairwise relationship records visible to the active member.",
+    ),
+    "state.knowledge_entries": FieldProvenance(
+        field_path="state.knowledge_entries",
+        source_module="kernos.kernel.retrieval",
+        source_symbol="RetrievalService.search",
+        source_kind="method",
+        expected_type="tuple[KnowledgeEntry, ...]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Knowledge selected for the turn via retrieval — invokes "
+            "RetrievalService.search with the turn's auto-derived query."
+        ),
+    ),
+    # === RESULTS zone ===
+    "results.results_prefix": FieldProvenance(
+        field_path="results.results_prefix",
+        source_module="kernos.messages.handler",
+        source_symbol="_build_results_block",
+        source_kind="function",
+        expected_type="str",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Rendered prefix from prior-turn results. Stored as text "
+            "because the legacy block-builder produces text; future "
+            "decomposition into structured records is out-of-scope for "
+            "CCV1."
+        ),
+    ),
+    # === ACTIONS zone ===
+    "actions.capability_prompt": FieldProvenance(
+        field_path="actions.capability_prompt",
+        source_module="kernos.capability.registry",
+        source_symbol="CapabilityRegistry.build_tool_directory",
+        source_kind="method",
+        expected_type="str",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Capability descriptions for the active context space. "
+            "Production source is handler.registry.build_tool_directory "
+            "(legacy path uses this at assemble.py:718). The "
+            "CapabilityRegistry also exposes build_capability_prompt as "
+            "an alternate render; pin the legacy-used one for parity."
+        ),
+    ),
+    "actions.channel_registry": FieldProvenance(
+        field_path="actions.channel_registry",
+        source_module="kernos.kernel.channels",
+        source_symbol="ChannelRegistry.get_outbound_capable",
+        source_kind="method",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes="Outbound-capable channels for the active member.",
+    ),
+    # === MEMORY zone ===
+    "memory.compaction_carry": FieldProvenance(
+        field_path="memory.compaction_carry",
+        source_module="kernos.kernel.compaction",
+        source_symbol="CompactionService.load_state",
+        source_kind="method",
+        expected_type="str",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Living State accumulated at the active space's last compact "
+            "boundary. Method returns the state dict; the carry text is "
+            "extracted from the 'living_state' field."
+        ),
+    ),
+    "memory.awareness_whispers": FieldProvenance(
+        field_path="memory.awareness_whispers",
+        source_module="kernos.kernel.scheduler",
+        source_symbol="TriggerStore.list_all",
+        source_kind="method",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Pending whispers queued for delivery. Filtered by "
+            "status=pending + member scope. Legacy injection at "
+            "assemble.py:805-814; legacy renders to RESULTS zone — "
+            "renderer at C3c preserves that placement when emitting "
+            "from the packet."
+        ),
+    ),
+    "memory.gardener_observations": FieldProvenance(
+        field_path="memory.gardener_observations",
+        source_module="kernos.kernel.cohorts.gardener_cohort",
+        source_symbol="register_gardener_cohort",
+        source_kind="function",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C4",
+        notes=(
+            "Gardener-cohort output. Empty tuple until C4 registers "
+            "register_gardener_cohort in production server.py and wires "
+            "its CohortOutput into this field."
+        ),
+    ),
+    "memory.procedures": FieldProvenance(
+        field_path="memory.procedures",
+        source_module="kernos.messages.handler",
+        source_symbol="_build_procedures_block",
+        source_kind="function",
+        expected_type="str",
+        wiring_state="deferred",
+        deferred_until="C3b",
+        notes=(
+            "Active procedures (_procedures.md content) for the member/"
+            "space scope. Codex C1 review flagged as missing from the "
+            "initial packet shape — added in fold."
+        ),
+    ),
+    "memory.canvases_summary": FieldProvenance(
+        field_path="memory.canvases_summary",
+        source_module="kernos.messages.handler",
+        source_symbol="_build_canvases_block",
+        source_kind="function",
+        expected_type="str",
+        wiring_state="deferred",
+        deferred_until="C3b",
+        notes=(
+            "Pinned canvases summary text. Codex C1 review flagged as "
+            "missing from the initial packet shape — added in fold."
+        ),
+    ),
+    # === CONVERSATION zone ===
+    "conversation.messages": FieldProvenance(
+        field_path="conversation.messages",
+        source_module="kernos.kernel.conversation_log",
+        source_symbol="ConversationLogger.read_recent",
+        source_kind="method",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C3a",
+        notes=(
+            "Messages array since last compact boundary, via "
+            "ConversationLogger.read_recent. Already reaches decoupled "
+            "path via TurnRunnerInputs.from_api_messages; centralized "
+            "here so the contract is testable."
+        ),
+    ),
+    # === TOOL SURFACE ===
+    "tool_surface.always_pinned": FieldProvenance(
+        field_path="tool_surface.always_pinned",
+        source_module="kernos.kernel.tool_catalog",
+        source_symbol="ALWAYS_PINNED",
+        source_kind="constant",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C5",
+        notes=(
+            "Tuple of tool SCHEMAS (dicts) — what the model invocation's "
+            "tools= argument needs. The ALWAYS_PINNED constant is a "
+            "set[str] of names; populate_field resolves names to schemas "
+            "via the assembly's _kernel_tool_map (assemble.py:490-526). "
+            "Schema resolution requires constructing _kernel_tool_map; "
+            "deferred to C5 alongside the thin-path tool surface "
+            "definition. Type alignment is the C1 Codex-review BLOCKER "
+            "fold."
+        ),
+    ),
+    "tool_surface.active_zone": FieldProvenance(
+        field_path="tool_surface.active_zone",
+        source_module="kernos.kernel.tool_catalog",
+        source_symbol="ToolCatalog.build_catalog_text",
+        source_kind="method",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C5",
+        notes=(
+            "Surfacer-selected tools for the active turn intent + scope "
+            "chain. The surfacer logic itself lives inline in "
+            "assemble.py:528-705 today (an LLM call selecting tool names "
+            "from build_catalog_text's output). C5 either factors that "
+            "into a method on ToolCatalog or pins the inline path here. "
+            "The build_catalog_text method is the canonical input the "
+            "surfacer reads, so its presence is what the C1 test pins."
+        ),
+    ),
+    "tool_surface.request_tool": FieldProvenance(
+        field_path="tool_surface.request_tool",
+        source_module="kernos.kernel.tools.schemas",
+        source_symbol="REQUEST_TOOL",
+        source_kind="constant",
+        expected_type="dict[str, Any]",
+        wiring_state="wired",
+        notes=(
+            "Always-present meta-tool for capability activation. "
+            "C5 moves into ALWAYS_PINNED; field stays for contract "
+            "test targeting."
+        ),
+    ),
+    # === SAFETY CONSTRAINTS ===
+    "safety_constraints.sensitivity_gates": FieldProvenance(
+        field_path="safety_constraints.sensitivity_gates",
+        source_module="kernos.kernel.state",
+        source_symbol="KnowledgeEntry",
+        source_kind="constant",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C3b",
+        notes=(
+            "Sensitivity classification rules relevant to active "
+            "member/space scope. Per-entry classification on "
+            "KnowledgeEntry.sensitivity field; this field aggregates "
+            "the rules the model must honor."
+        ),
+    ),
+    "safety_constraints.disclosure_layer": FieldProvenance(
+        field_path="safety_constraints.disclosure_layer",
+        source_module="kernos.kernel.disclosure_gate",
+        source_symbol="build_permission_map",
+        source_kind="function",
+        expected_type="dict[str, str]",
+        wiring_state="deferred",
+        deferred_until="C3b",
+        notes=(
+            "Viewer-aware permission profile for the active member, "
+            "mapping target_member_id → permission. Derived from "
+            "relationships via build_permission_map (Codex C1 review "
+            "fold — corrects earlier provenance pointing at "
+            "InstanceDB.list_relationships directly)."
+        ),
+    ),
+    "safety_constraints.cross_member_rules": FieldProvenance(
+        field_path="safety_constraints.cross_member_rules",
+        source_module="kernos.kernel.state",
+        source_symbol="StateStore.query_covenant_rules",
+        source_kind="method",
+        expected_type="tuple[dict[str, Any], ...]",
+        wiring_state="deferred",
+        deferred_until="C3b",
+        notes=(
+            "Cross-member visibility rules sourced from "
+            "covenants tagged with relationship: scope. Filter "
+            "function lives in disclosure_gate; this field carries "
+            "the rules as data the model can reason about."
+        ),
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Population context — the runtime substrate handle
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PopulationContext:
+    """Handle to the running substrate needed to populate the packet.
+
+    Mutable on purpose: C3a-c populate this incrementally during turn
+    construction. The frozen :class:`CognitiveContext` is built from
+    the populated context at the assembly seam.
+
+    Fields are typed loosely (``Any``) at C1 because the substrate's
+    public surface is a fluid mix of typed and dict-shaped APIs.
+    Future C-phase tightens types as the wiring lands.
+    """
+
+    instance_id: str = ""
+    member_id: str = ""
+    space_id: str = ""
+    state_store: Any = None
+    instance_db: Any = None
+    handler: Any = None  # for block-builder access (tool_catalog, channels)
+    retrieval_service: Any = None
+    compaction_service: Any = None
+    trigger_store: Any = None
+    member_profile: dict[str, Any] = field(default_factory=dict)
+    soul: Any = None
+    user_timezone: str = ""
+    platform: str = ""
+    auth_level: str = ""
+    timestamp_utc: datetime | None = None
+    active_space_name: str = ""
+    member_display_name: str = ""
+    agent_name: str = ""
+    execution_envelope: dict[str, Any] | None = None
+    conversation_messages: tuple[dict[str, Any], ...] = ()
+
+
+async def populate_field(name: str, ctx: PopulationContext) -> Any:
+    """Resolve a packet field from its documented source.
+
+    Single seam through which all field population flows. Routes by
+    ``wiring_state``:
+
+    * ``wired`` — explicit per-field routing returns real content.
+    * ``deferred`` — returns the type-appropriate default
+      (matches the ``deferred_until`` phase's not-yet-wired
+      contract).
+    * ``unwired_expected`` — raises :class:`NotImplementedError`.
+      The escape-hatch state catches entries added without
+      explicit classification; the field-availability test pins
+      zero ``unwired_expected`` entries by end of C5.
+
+    Raises :class:`KeyError` if ``name`` is not in
+    :data:`FIELD_PROVENANCE`.
+    """
+    if name not in FIELD_PROVENANCE:
+        raise KeyError(f"unknown packet field: {name!r}")
+    prov = FIELD_PROVENANCE[name]
+
+    if prov.wiring_state == "deferred":
+        return _default_for(prov.expected_type)
+
+    if prov.wiring_state == "unwired_expected":
+        raise NotImplementedError(
+            f"field {name!r} has wiring_state='unwired_expected' — "
+            f"either route it explicitly in populate_field or mark it "
+            f"deferred with deferred_until=<phase>"
+        )
+
+    # wiring_state == "wired" — explicit routing follows.
+    if name == "rules.operating_principles":
+        from kernos.kernel.template import PRIMARY_TEMPLATE
+        return PRIMARY_TEMPLATE.operating_principles
+    if name == "rules.bootstrap_prompt":
+        from kernos.kernel.template import PRIMARY_TEMPLATE
+        graduated = bool(ctx.member_profile.get("bootstrap_graduated", False))
+        return None if graduated else PRIMARY_TEMPLATE.bootstrap_prompt
+    if name == "rules.hatching_prompt":
+        from kernos.messages.handler import (
+            _INHERIT_HATCHING_PROMPT,
+            _UNIQUE_HATCHING_PROMPT,
+        )
+        graduated = bool(ctx.member_profile.get("bootstrap_graduated", False))
+        if graduated:
+            return None
+        return (
+            _INHERIT_HATCHING_PROMPT
+            if ctx.member_profile.get("agent_name")
+            else _UNIQUE_HATCHING_PROMPT
+        )
+    if name == "rules.covenants":
+        if ctx.state_store is None:
+            return ()
+        rules = await ctx.state_store.query_covenant_rules(
+            ctx.instance_id,
+            capability=None,
+            context_space_scope=[ctx.space_id, None] if ctx.space_id else [None],
+            active_only=True,
+        )
+        return tuple(rules)
+    if name == "rules.instance_stewardship":
+        if ctx.instance_db is None:
+            return ""
+        try:
+            return await ctx.instance_db.get_instance_stewardship()
+        except Exception:
+            return ""
+    if name == "now":
+        return _construct_now_block(ctx)
+    if name == "tool_surface.request_tool":
+        from kernos.kernel.tools.schemas import REQUEST_TOOL
+        return REQUEST_TOOL
+
+    # Wired entries must have explicit routing above. If we reach
+    # here, the entry's wiring_state was "wired" but no per-field
+    # branch matched — that's a bug in the map or in this function.
+    raise NotImplementedError(
+        f"field {name!r} has wiring_state='wired' but no explicit "
+        f"population route in populate_field. Either add the route "
+        f"above or change wiring_state to 'deferred'/'unwired_expected'."
+    )
+
+
+def _construct_now_block(ctx: PopulationContext) -> Any:
+    """Build a :class:`NowBlock` from the population context."""
+    from kernos.kernel.cognitive_context.types import NowBlock
+    return NowBlock(
+        timestamp_utc=ctx.timestamp_utc or datetime.now(timezone.utc),
+        user_timezone=ctx.user_timezone,
+        platform=ctx.platform,
+        auth_level=ctx.auth_level,
+        instance_id=ctx.instance_id,
+        member_id=ctx.member_id,
+        member_display_name=ctx.member_display_name,
+        active_space_id=ctx.space_id,
+        active_space_name=ctx.active_space_name,
+        agent_name=ctx.agent_name,
+        execution_envelope=ctx.execution_envelope,
+    )
+
+
+def _default_for(expected_type: str) -> Any:
+    """Return a type-appropriate default value for a field whose
+    population isn't wired at this commit. Used at C1 so contract
+    tests at C2 can walk the map and assert each documented source
+    resolves to something — even un-wired fields produce the right
+    SHAPE so the test for "field has expected type" can pass while
+    the test for "field has expected CONTENT" remains red until
+    the wiring lands."""
+    if expected_type.startswith("tuple"):
+        return ()
+    if expected_type.startswith("dict"):
+        return {}
+    if expected_type.startswith("set"):
+        return set()
+    if "None" in expected_type:
+        return None
+    if "str" in expected_type:
+        return ""
+    return None
+
+
+async def populate_packet(ctx: PopulationContext) -> "CognitiveContext":
+    """Populate the full packet from the substrate.
+
+    At C1 only the fields with ``wiring_state="wired"`` are routed
+    to real sources via :func:`populate_field`; deferred fields
+    populate to their type-appropriate default. C3a-c extends
+    routing as deferred fields graduate to wired.
+
+    The function calls :func:`populate_field` for every field — this
+    is intentional. The single-seam discipline keeps wiring changes
+    isolated to that function rather than fanning across packet
+    construction sites; the deferred default returns are part of
+    the contract.
+    """
+    from kernos.kernel.cognitive_context.types import (
+        ActionsBlock,
+        CognitiveContext,
+        ConversationBlock,
+        MemoryBlock,
+        ResultsBlock,
+        RulesBlock,
+        SafetyConstraints,
+        StateBlock,
+        ToolSurface,
+    )
+
+    rules = RulesBlock(
+        operating_principles=await populate_field("rules.operating_principles", ctx),
+        bootstrap_prompt=await populate_field("rules.bootstrap_prompt", ctx),
+        hatching_prompt=await populate_field("rules.hatching_prompt", ctx),
+        covenants=await populate_field("rules.covenants", ctx),
+        space_names=await populate_field("rules.space_names", ctx),
+        instance_stewardship=await populate_field("rules.instance_stewardship", ctx),
+    )
+    now = await populate_field("now", ctx)
+    state = StateBlock(
+        soul=await populate_field("state.soul", ctx),
+        member_profile=await populate_field("state.member_profile", ctx),
+        relationships=await populate_field("state.relationships", ctx),
+        knowledge_entries=await populate_field("state.knowledge_entries", ctx),
+    )
+    results = ResultsBlock(
+        results_prefix=await populate_field("results.results_prefix", ctx),
+    )
+    actions = ActionsBlock(
+        capability_prompt=await populate_field("actions.capability_prompt", ctx),
+        channel_registry=await populate_field("actions.channel_registry", ctx),
+    )
+    memory = MemoryBlock(
+        compaction_carry=await populate_field("memory.compaction_carry", ctx),
+        awareness_whispers=await populate_field("memory.awareness_whispers", ctx),
+        gardener_observations=await populate_field("memory.gardener_observations", ctx),
+        procedures=await populate_field("memory.procedures", ctx),
+        canvases_summary=await populate_field("memory.canvases_summary", ctx),
+    )
+    conversation = ConversationBlock(
+        messages=await populate_field("conversation.messages", ctx) or ctx.conversation_messages,
+    )
+    tool_surface = ToolSurface(
+        always_pinned=await populate_field("tool_surface.always_pinned", ctx),
+        active_zone=await populate_field("tool_surface.active_zone", ctx),
+        request_tool=await populate_field("tool_surface.request_tool", ctx),
+    )
+    safety = SafetyConstraints(
+        sensitivity_gates=await populate_field(
+            "safety_constraints.sensitivity_gates", ctx,
+        ),
+        disclosure_layer=await populate_field(
+            "safety_constraints.disclosure_layer", ctx,
+        ),
+        cross_member_rules=await populate_field(
+            "safety_constraints.cross_member_rules", ctx,
+        ),
+    )
+    return CognitiveContext(
+        rules=rules,
+        now=now,
+        state=state,
+        results=results,
+        actions=actions,
+        memory=memory,
+        conversation=conversation,
+        tool_surface=tool_surface,
+        safety_constraints=safety,
+    )
+
+
+__all__ = [
+    "FIELD_PROVENANCE",
+    "FieldProvenance",
+    "PopulationContext",
+    "populate_field",
+    "populate_packet",
+]
