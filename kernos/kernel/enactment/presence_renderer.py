@@ -503,6 +503,29 @@ def _render_substrate(packet: Any) -> str:
     if memory is not None and getattr(memory, "canvases_summary", ""):
         parts.append("## AVAILABLE CANVASES\n" + memory.canvases_summary)
 
+    # ---- C4: MEMORY (compaction carry + gardener observations) ----
+    if memory is not None:
+        memory_parts: list[str] = []
+        carry = getattr(memory, "compaction_carry", "")
+        if carry:
+            memory_parts.append(carry)
+        gardener = getattr(memory, "gardener_observations", ()) or ()
+        if gardener:
+            obs_lines: list[str] = []
+            for obs in gardener:
+                if isinstance(obs, dict):
+                    text = obs.get("rationale_short") or obs.get("text") or ""
+                else:
+                    text = getattr(obs, "rationale_short", "") or str(obs)
+                if text:
+                    obs_lines.append(f"- {text}")
+            if obs_lines:
+                memory_parts.append(
+                    "GARDENER OBSERVATIONS:\n" + "\n".join(obs_lines)
+                )
+        if memory_parts:
+            parts.append("## MEMORY\n" + "\n\n".join(memory_parts))
+
     return "\n\n".join(parts)
     # Defensive default — every ActionKind is handled.
     return _SYSTEM_PROMPT_RESPOND_ONLY

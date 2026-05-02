@@ -344,12 +344,15 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="register_gardener_cohort",
         source_kind="function",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C4",
+        wiring_state="wired",
         notes=(
-            "Gardener-cohort output. Empty tuple until C4 registers "
-            "register_gardener_cohort in production server.py and wires "
-            "its CohortOutput into this field."
+            "Gardener-cohort output. C4 graduates this field to wired "
+            "via PopulationContext.gardener_observations. Production "
+            "wiring (C4) registers register_gardener_cohort in server.py "
+            "and the integration runner copies the cohort output through "
+            "into the packet's memory zone. Pre-cohort-output turns see "
+            "an empty tuple — decoupled-only enrichment per Kit's spec "
+            "clarification (legacy doesn't render gardener observations)."
         ),
     ),
     "memory.procedures": FieldProvenance(
@@ -580,6 +583,12 @@ class PopulationContext:
     disclosure_layer: dict[str, str] = field(default_factory=dict)
     cross_member_rules: tuple[dict[str, Any], ...] = ()
 
+    # C4 additions — gardener cohort output. Empty until production
+    # wiring extracts the gardener_cohort's CohortOutput onto this
+    # field. Decoupled-only enrichment per Kit's spec clarification
+    # (legacy doesn't render gardener observations).
+    gardener_observations: tuple[dict[str, Any], ...] = ()
+
 
 async def populate_field(name: str, ctx: PopulationContext) -> Any:
     """Resolve a packet field from its documented source.
@@ -689,6 +698,8 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
         return ctx.procedures_prefix or ""
     if name == "memory.canvases_summary":
         return ctx.canvases_prefix or ""
+    if name == "memory.gardener_observations":
+        return tuple(ctx.gardener_observations or ())
     if name == "safety_constraints.sensitivity_gates":
         return tuple(ctx.sensitivity_gates or ())
     if name == "safety_constraints.disclosure_layer":
