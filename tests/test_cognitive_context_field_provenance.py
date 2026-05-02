@@ -287,11 +287,17 @@ def test_deferred_until_phases_match_wiring_ladder():
 
 
 def test_C5_wired_entries_match_expected_set():
-    """After C5, all 23 packet fields are classified as wired —
-    the full CCV1 wiring ladder is complete.
+    """After C5, every entry in FIELD_PROVENANCE is classified as
+    wired — the CCV1 wiring ladder is complete and the deferred
+    bucket is empty.
 
     Renamed from C4 to C5 at this commit; the pin now tracks the
-    terminal state of the spec arc."""
+    terminal state of the spec arc. Hard counts intentionally
+    omitted from the docstring — Codex C5-review NIT noted prior
+    wording said "23" but the actual entry count is FIELD_PROVENANCE-
+    derived, not a literal in the test. The exact set of expected
+    paths is below; counts will drift naturally as the map evolves
+    post-CCV1."""
     expected_wired = {
         # C1 wired (constants + NOW + request_tool)
         "rules.operating_principles",
@@ -420,10 +426,12 @@ async def test_populate_hatching_prompt_inherit_when_agent_named():
     assert "NEW MEMBER" in out
 
 
-async def test_populate_tool_surface_always_pinned_deferred_at_C1():
-    """At C1 always_pinned is deferred_until=C5 (schema resolution
-    requires constructing _kernel_tool_map). populate returns empty
-    tuple of the correct type; C5 wires the actual resolution."""
+async def test_populate_tool_surface_always_pinned_empty_when_unpopulated():
+    """tool_surface.always_pinned is wired (graduated at C5) but
+    returns an empty tuple when ``PopulationContext.tool_surface_pinned``
+    isn't supplied. Pre-C5 history: this field was deferred_until=C5
+    because schema resolution required ``_kernel_tool_map`` access;
+    C5 graduated it via the assembly-partition seam."""
     ctx = PopulationContext()
     out = await populate_field("tool_surface.always_pinned", ctx)
     assert out == ()

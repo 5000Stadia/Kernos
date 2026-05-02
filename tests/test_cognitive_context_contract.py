@@ -6,18 +6,19 @@ model provider on the final model call. Tests are parametrized over
 ``[("legacy", False), ("decoupled", True)]``:
 
 * ``legacy`` — ``KERNOS_USE_DECOUPLED_TURN_RUNNER`` unset; ``assemble.py``
-  builds the system prompt; the assertion currently passes for
-  tests 1-12 + 14 — proving the assertion is correctly written and
-  the legacy oracle delivers the substrate. Test 13
-  (``request_tool``) currently fails legacy too: it is not in
-  ``ALWAYS_PINNED`` on either path today; the C5 work adds it. That
-  variant is marked ``xfail(strict=True)`` until C5 lands.
+  builds the system prompt; all 14 assertions pass — the legacy
+  oracle delivers the substrate.
 
 * ``decoupled`` — ``KERNOS_USE_DECOUPLED_TURN_RUNNER=1`` + server-style
   ``turn_runner_provider`` wired; the decoupled ``TurnRunner`` path
-  runs; ``PresenceRenderer.render`` builds the system prompt; the
-  same assertion fails (currently — these are the red bars that
-  turn green progressively at C3a, C3b, C3c, C4, C5).
+  runs; ``PresenceRenderer.render`` builds the system prompt from
+  the typed CognitiveContext packet. As of CCV1 C5, all 14
+  assertions pass on the decoupled path too. Pre-C5 history: tests
+  flipped progressively at C3a (rules + now + state), C3b (results +
+  actions + procedures + canvases), C3c (additive directive), C4
+  (memory zone), C5 (always_pinned + request_tool). Test 13's
+  legacy variant carried a strict-xfail until C5 — removed when C5
+  added request_tool to ALWAYS_PINNED on both paths simultaneously.
 
 Wiring at a glance::
 

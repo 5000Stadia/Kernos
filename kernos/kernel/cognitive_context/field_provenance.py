@@ -406,34 +406,47 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
     # === TOOL SURFACE ===
     "tool_surface.always_pinned": FieldProvenance(
         field_path="tool_surface.always_pinned",
-        source_module="kernos.kernel.tool_catalog",
-        source_symbol="ALWAYS_PINNED",
-        source_kind="constant",
+        source_module="kernos.messages.phases.assemble",
+        source_symbol="run",
+        source_kind="function",
         expected_type="tuple[dict[str, Any], ...]",
         wiring_state="wired",
         notes=(
-            "Tuple of tool SCHEMAS (dicts) — the always-loaded subset of "
-            "ctx.tools matching the ALWAYS_PINNED name set. C5 wiring "
-            "reads from PopulationContext.tool_surface_pinned (assembly "
-            "partitions ctx.tools using the ALWAYS_PINNED set). "
+            "Tuple of tool SCHEMAS (dicts) — the always-loaded subset "
+            "of the final surfaced tool list. C5 wiring reads from "
+            "PopulationContext.tool_surface_pinned, which assembly's "
+            "run() partitions from ``ctx.tools`` using the "
+            "``kernos.kernel.tool_catalog.ALWAYS_PINNED`` name set "
+            "(schemas whose ``name`` is in ALWAYS_PINNED). "
             "PresenceRenderer reads tool_surface.all_tools() and passes "
             "to chain_caller's tools= argument (replaces the empty list "
-            "the renderer used pre-C5)."
+            "the renderer used pre-C5). C5-fold: source metadata "
+            "updated to point at the assembly partition site rather "
+            "than the ALWAYS_PINNED set constant — the constant is the "
+            "FILTER, not the SHAPE-of-content (which is schemas)."
         ),
     ),
     "tool_surface.active_zone": FieldProvenance(
         field_path="tool_surface.active_zone",
-        source_module="kernos.kernel.tool_catalog",
-        source_symbol="ToolCatalog.build_catalog_text",
-        source_kind="method",
+        source_module="kernos.messages.phases.assemble",
+        source_symbol="run",
+        source_kind="function",
         expected_type="tuple[dict[str, Any], ...]",
         wiring_state="wired",
         notes=(
-            "Surfacer-selected tools — the rest of ctx.tools beyond "
-            "the always_pinned subset. C5 wiring reads from "
-            "PopulationContext.tool_surface_active (assembly partitions "
-            "ctx.tools using the ALWAYS_PINNED set; everything not in "
-            "always_pinned lands here)."
+            "Surfacer-selected tools — the rest of ``ctx.tools`` "
+            "beyond the always_pinned subset. C5 wiring reads from "
+            "PopulationContext.tool_surface_active. The legacy "
+            "assembly's surfacer runs first (covering ALWAYS_PINNED + "
+            "COMMON_MCP_NAMES + local affordances + activated "
+            "capabilities + catalog-scan + budget/LRU eviction); the "
+            "C5 partition then splits the resulting final list into "
+            "pinned + active using the ALWAYS_PINNED name set. The "
+            "active zone therefore includes everything the assembler "
+            "surfaced that's not in ALWAYS_PINNED. C5-fold: source "
+            "metadata corrected to point at the assembly partition "
+            "rather than ``ToolCatalog.build_catalog_text`` (which is "
+            "only one input the surfacer consults)."
         ),
     ),
     "tool_surface.request_tool": FieldProvenance(

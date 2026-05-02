@@ -738,6 +738,13 @@ class PresenceRenderer:
         # returns ALWAYS_PINNED + active_zone + request_tool (deduped),
         # which the renderer now passes to the chain. Pre-C3a callers
         # with packet=None see no tools (unchanged behavior).
+        #
+        # Codex C5-review CONCERN fold: log the failure path loudly
+        # rather than silently swallowing. The C5 fix is "chain_caller
+        # receives a populated tools list, no longer empty"; a silent
+        # except would re-create the very empty-tools failure mode
+        # this commit closes. Log + fall back to empty so the
+        # operator sees the gap surface.
         tool_list: tuple[dict, ...] = ()
         if packet is not None:
             tool_surface = getattr(packet, "tool_surface", None)
@@ -745,6 +752,14 @@ class PresenceRenderer:
                 try:
                     tool_list = tool_surface.all_tools()
                 except Exception:
+                    logger.warning(
+                        "PRESENCE_RENDER_TOOL_SURFACE_READ_FAILED — "
+                        "falling back to empty tools list. This "
+                        "recreates the pre-C5 empty-tools failure "
+                        "mode the renderer fix was meant to close; "
+                        "investigate the packet's tool_surface state.",
+                        exc_info=True,
+                    )
                     tool_list = ()
         return await self._render(
             system, user_message, tools=tool_list,
