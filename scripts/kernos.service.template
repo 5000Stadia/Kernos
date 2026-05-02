@@ -3,6 +3,12 @@ Description=Kernos Discord Bot (auto-restart, opt-in via env var)
 # Wait for network to come up so the Discord bot can connect on boot.
 After=network-online.target
 Wants=network-online.target
+# Cap restarts so a fundamentally-broken state doesn't burn power.
+# StartLimit* directives belong to [Unit] in modern systemd; older
+# systemd versions accepted them in [Service] but recent ones warn
+# "Unknown key name" if they're misplaced.
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -14,9 +20,14 @@ ExecStart=/bin/bash __KERNOS_DIR__/start.sh
 # stop` actually stops). 5-second cooldown avoids tight crashloops.
 Restart=on-failure
 RestartSec=5
-# Cap restarts so a fundamentally-broken state doesn't burn power.
-StartLimitIntervalSec=600
-StartLimitBurst=10
+# Treat exit code 143 (SIGTERM-killed bash) and 130 (SIGINT/Ctrl+C)
+# as success. Without this, when a user runs ./start.sh in a
+# terminal, the kill-prior logic SIGTERMs the systemd-spawned
+# bash, which exits with code 143; systemd sees non-zero and
+# triggers Restart=on-failure, which then races the user's
+# foreground bot. Treating these signals as clean exits prevents
+# that restart cascade.
+SuccessExitStatus=130 143
 # Forward stdout/stderr to the user's journal.
 StandardOutput=journal
 StandardError=journal

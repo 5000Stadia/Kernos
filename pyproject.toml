@@ -25,6 +25,14 @@ dependencies = [
     "aider-chat>=0.86,<0.87",
     "playwright>=1.45",
     "markdownify>=0.11",
+    # Load-bearing runtime imports that were undeclared until now
+    # (caught during a fresh-deployment audit of /home/k/Kernos-main).
+    # Without these a clean `pip install -e .` produces an importable
+    # but non-runnable Kernos:
+    "aiosqlite>=0.20",      # state layer + WLP execution_engine — 14 files
+    "croniter>=2.0",        # cron predicate evaluator + scheduler.py
+    "cryptography>=42",     # Fernet key wrapping in credentials_member.py
+    "beautifulsoup4>=4.12", # browser/extractors.py HTML parsing
 ]
 
 [tool.pytest.ini_options]
