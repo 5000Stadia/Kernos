@@ -9,6 +9,10 @@ dist/
 build/
 credentials.json
 data/
+# Archived data dirs from clean-slate wipes (operational artifacts —
+# preserved per-instance for recovery, never committed). Pattern matches
+# both within-tree archives and accidentally-misplaced ones.
+data.archived-*/
 .claude/
 secrets/
 specs/completed/
