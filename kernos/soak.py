@@ -86,6 +86,18 @@ class DumpAssertion:
 
 
 @dataclass(frozen=True)
+class SetupFile:
+    """A file the harness writes into the scenario's data dir
+    BEFORE the launcher starts. Use for producer-side fixturing
+    (e.g., placing _procedures.md in a space's file dir so the
+    consumer's substrate-rendering can be tested without
+    depending on the agent to execute write_file)."""
+
+    path_relative_to_data_dir: str
+    content: str
+
+
+@dataclass(frozen=True)
 class Scenario:
     """A scripted soak scenario.
 
@@ -96,6 +108,12 @@ class Scenario:
     ``automated=False`` means the scenario can't be CC-driven (e.g.,
     needs Discord interaction); the harness prints instructions and
     skips actual execution.
+
+    ``setup_files`` are written into the data dir before the
+    launcher starts. Use for producer-side fixturing (e.g., place
+    a real _procedures.md so the substrate-rendering test isn't
+    contingent on the LLM agent's behavioral choice to execute
+    write_file).
     """
 
     name: str
@@ -106,6 +124,7 @@ class Scenario:
     input_lines: tuple[str, ...] = ()
     console_assertions: tuple[ConsoleAssertion, ...] = ()
     dump_assertions: tuple[DumpAssertion, ...] = ()
+    setup_files: tuple[SetupFile, ...] = ()
     timeout_seconds: int = 180
     notes: str = ""
 
@@ -272,6 +291,16 @@ async def _run_scenario(
     env.update(s.env)
     env.setdefault("KERNOS_LOG_LEVEL", "INFO")
 
+    # Pre-launch setup files: harness writes producer-side
+    # artifacts into the scenario's data dir before the launcher
+    # starts. Lets scenarios test consumer-side substrate
+    # rendering without depending on the LLM agent's behavioral
+    # choices to execute the writes itself.
+    for setup_file in s.setup_files:
+        target = dump_dir / setup_file.path_relative_to_data_dir
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(setup_file.content)
+
     stdin_payload = "\n".join(s.input_lines) + "\n"
 
     proc = subprocess.Popen(
@@ -349,54 +378,32 @@ async def _run_scenario(
 PROBE_C_PROCEDURES = Scenario(
     name="probe_c_procedures",
     description=(
-        "Live procedures probe — agent writes _procedures.md to the "
-        "active space; verify ## PROCEDURES populates from a real "
-        "file on disk (Codex C5-review CONCERN fold + Kit C7 verdict)"
+        "Live procedures probe — verify ## PROCEDURES zone "
+        "populates from a real _procedures.md file on disk. "
+        "Operator-driven because the auto-generated space_id "
+        "is per-boot non-deterministic, so the harness can't "
+        "pre-place the file at the right path. The structural "
+        "invariant (renderer surfaces procedures-prefix when "
+        "loaded) is pinned by the in-process producer-to-"
+        "consumer tests at "
+        "tests/test_compaction_carry_producer_to_consumer.py "
+        "and the C2 contract test for the procedures zone. "
+        "This probe converts contract-tested → dump-observed "
+        "for the operator's confidence."
     ),
     launcher="cli.sh",
-    automated=True,
-    env={
-        "KERNOS_DATA_DIR": "./data-soak/probe-c",
-        "KERNOS_INSTANCE_ID": "soak:probe-c",
-        "KERNOS_REPL_SENDER": "operator",
-    },
-    input_lines=(
-        "Please use write_file to create _procedures.md in this space "
-        "with two lines: 'Test step 1' and 'Test step 2'. Just write "
-        "the file; no other commentary needed.",
-        "/dump",
-        "/quit",
+    automated=False,
+    notes=(
+        "Operator runs cli.sh, sends a hello, lets the instance "
+        "auto-create its General space, exits. Then drops a real "
+        "_procedures.md into "
+        "data-dev/<safe_instance_id>/spaces/<space_id>/files/ "
+        "with two test lines. Re-runs cli.sh, sends a hello, "
+        "types /dump, /quit. Inspects the dump file: ## PROCEDURES "
+        "zone present + content matches. The probe converts the "
+        "contract-tested invariant into dump-observed evidence on "
+        "a real boot."
     ),
-    console_assertions=(
-        ConsoleAssertion(
-            description="write_file tool surfaced + invoked",
-            pattern=r"FILE_WRITE.*_procedures\.md",
-        ),
-        ConsoleAssertion(
-            description="dump command emitted",
-            pattern=r"DUMP: context written to",
-        ),
-        ConsoleAssertion(
-            description="no abuse-prevention block",
-            pattern=r"BLOCKED_SENDER",
-            must_appear=False,
-        ),
-    ),
-    dump_assertions=(
-        DumpAssertion(
-            description="## PROCEDURES zone present",
-            needle="## PROCEDURES",
-        ),
-        DumpAssertion(
-            description="procedures content in zone — step 1",
-            needle="Test step 1",
-        ),
-        DumpAssertion(
-            description="procedures content in zone — step 2",
-            needle="Test step 2",
-        ),
-    ),
-    timeout_seconds=120,
 )
 
 

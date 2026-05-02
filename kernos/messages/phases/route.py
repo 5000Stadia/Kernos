@@ -38,7 +38,41 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         "ROUTE_INPUT: message=%s recent=%d current_focus=%s",
         (message.content or "")[:80], len(recent_full), current_focus_id or "none",
     )
-    ctx.router_result = await handler._router.route(instance_id, message.content, recent_full, current_focus_id, member_id=ctx.member_id)
+
+    # SUBSTRATE-DIAGNOSTIC SLASH-COMMAND BYPASS:
+    # Diagnostic slash commands (``/dump``, ``/status``) MUST inspect
+    # the same space the operator is in — otherwise the captured
+    # diagnostic is for a different substrate than the conversation
+    # that produced it. The router cohort treats ``/dump`` as
+    # "diagnostic intent" and routes to the System space, which means
+    # ``/dump`` after several conversational turns in General captures
+    # the System-space substrate, NOT General's. That defeats
+    # substrate inspection.
+    #
+    # Codex C7 deliberation 2026-05-02 surfaced this during the
+    # CCV1 soak harness's probe_d_compaction run: compaction wrote
+    # General-space carry context, but ``/dump`` routed to System
+    # before assembly, so the dump showed an empty MEMORY zone for
+    # the wrong space. This bypass keeps the operator in their
+    # current space so the diagnostic captures what the conversation
+    # was actually building.
+    _content = (message.content or "").strip()
+    _first_word = _content.split()[0].lower() if _content else ""
+    _DIAGNOSTIC_BYPASS_COMMANDS = {"/dump", "/status"}
+    if _first_word in _DIAGNOSTIC_BYPASS_COMMANDS and current_focus_id:
+        logger.info(
+            "ROUTE_DIAGNOSTIC_BYPASS: cmd=%s staying in current_focus=%s "
+            "(skipped router cohort)",
+            _first_word, current_focus_id,
+        )
+        ctx.router_result = RouterResult(
+            tags=[current_focus_id],
+            focus=current_focus_id,
+            continuation=True,
+            query_mode=False,
+        )
+    else:
+        ctx.router_result = await handler._router.route(instance_id, message.content, recent_full, current_focus_id, member_id=ctx.member_id)
 
     # Query mode: quick question about another domain — stay in current space
     if ctx.router_result.query_mode and current_focus_id and ctx.router_result.focus != current_focus_id:
