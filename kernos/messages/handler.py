@@ -4328,8 +4328,29 @@ class MessageHandler:
                             if primary_ctx.trace:
                                 primary_ctx.trace.record("error", "handler", "RATE_LIMIT",
                                     str(exc)[:300], phase="reason")
+                            # Extract provider name from the exception text so
+                            # the user immediately knows it's a rate limit on
+                            # a specific provider, not a generic "overloaded"
+                            # bug. Provider strings in the exception come from
+                            # the underlying provider code (e.g.,
+                            # "Codex rate limited (429): ..." from
+                            # codex_provider.py, "Error code: 429 - ..." from
+                            # the Anthropic SDK, etc.).
+                            _exc_lower = str(exc).lower()
+                            if "codex" in _exc_lower:
+                                _provider_name = "Codex"
+                            elif "anthropic" in _exc_lower or "claude" in _exc_lower:
+                                _provider_name = "Anthropic"
+                            elif "ollama" in _exc_lower:
+                                _provider_name = "Ollama"
+                            else:
+                                _provider_name = "my reasoning provider"
+                            _rl_msg = (
+                                f"{_provider_name} is rate-limited right now — "
+                                "usually clears in a minute or two. Try again then."
+                            )
                             response = await self._handle_reasoning_error(
-                                primary_ctx, exc, "overloaded right now. Try again in a minute")
+                                primary_ctx, exc, _rl_msg)
                             if not primary_future.done():
                                 primary_future.set_result(response)
                             for _, _, ef in merged_messages[1:]:
