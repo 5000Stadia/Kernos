@@ -403,7 +403,7 @@ async def _emit_whisper(
             created_at=utc_now(),
             owner_member_id=member_id,
         )
-        await state_store.add_whisper(instance_id, whisper)
+        await state_store.save_whisper(instance_id, whisper)
         logger.info("%s_WHISPER: instance=%s member=%s text=%s",
                     whisper_type, instance_id, member_id or "(instance)", text[:80])
         return True
