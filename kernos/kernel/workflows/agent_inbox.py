@@ -203,18 +203,16 @@ class InMemoryAgentInbox:
 class NotionAgentInbox:
     """Concrete AgentInbox backed by Notion bridge inbox databases.
 
-    v1 ships this as a stub: real Notion API calls land in the C5
-    integration spec. The action library's Notion-independence pin
-    intentionally allows the string ``notion`` to appear in this
-    file because this IS the Notion concrete; the pin's scan
-    excludes this module.
-
     Construction takes a callable that posts to the configured
-    Notion inbox database and another that reads. Both should be
-    Notion-tool-shaped invocations the operator wires up at
-    install time. Provider-configuration-containment is enforced
-    at the route_to_agent level: if no NotionAgentInbox (or other
-    AgentInbox) is bound, the verb fails loudly.
+    Notion inbox database and another that reads — operator-supplied
+    at install time. Both should be Notion-tool-shaped invocations.
+    Provider-configuration-containment is enforced at the
+    route_to_agent level: if no NotionAgentInbox (or other
+    AgentInbox) is bound, the verb fails loudly via
+    ``AgentInboxUnavailable``. The action library's
+    Notion-independence pin intentionally allows the string
+    ``notion`` to appear in this file because this IS the Notion
+    concrete; the pin's scan excludes this module.
     """
 
     def __init__(
