@@ -774,6 +774,17 @@ async def main() -> int:
     arg) bypasses the prompt. Until the full ``kernos`` CLI lands,
     this function is the closest thing to ``kernos repl``.
     """
+    # Load .env so API keys (ANTHROPIC_API_KEY etc.) are available
+    # to the provider chain. cli.sh / dev-repl.sh's _load_kernos_env
+    # only loads KERNOS_* prefixed values; the LLM credentials live
+    # in the rest of the file. server.py + chat.py + cli.py all
+    # call load_dotenv at module-import time; the REPL does the
+    # same here.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
     logging.basicConfig(
         level=os.getenv("KERNOS_LOG_LEVEL", "WARNING"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
