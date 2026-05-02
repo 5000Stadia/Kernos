@@ -24,3 +24,8 @@ Research/
 # recommendation data) vs. these two files (per-install secrets wiring).
 config/llm_chains.yml
 config/storage_backend.yml
+
+# Async file-drop channel between Claude Code and the founder-side
+# Codex (see .codex_handoff/README.md). Operational artifacts —
+# review requests + responses — never committed.
+.codex_handoff/
