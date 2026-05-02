@@ -654,9 +654,21 @@ class PresenceRenderer:
         substrate = _render_substrate(
             getattr(briefing, "cognitive_context", None)
         )
-        system = (
-            f"{substrate}\n\n{kind_prompt}" if substrate else kind_prompt
-        )
+        # C3c: combine substrate + kind prompt + additive directive
+        # in the FINAL system render. The directive is turn-local
+        # framing posture; substrate is the cognitive primitive. Both
+        # reach the model via system; the user-message body still
+        # carries the directive too for backward compat with the
+        # kind_prompt's "consistent with briefing's directive"
+        # phrasing — additive in BOTH places, never silently dropped.
+        directive_text = (briefing.presence_directive or "").strip()
+        system_parts: list[str] = []
+        if substrate:
+            system_parts.append(substrate)
+        system_parts.append(kind_prompt)
+        if directive_text:
+            system_parts.append(f"## Directive\n{directive_text}")
+        system = "\n\n".join(system_parts)
         user_message = _user_message_for_briefing(briefing)
         return await self._render(system, user_message)
 
