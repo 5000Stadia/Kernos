@@ -414,6 +414,46 @@ def _render_substrate(packet: Any) -> str:
                 rel_lines.append(f"{name} ({perm} ← them)")
         if rel_lines:
             state_parts.append("RELATIONSHIPS:\n" + ", ".join(rel_lines))
+        # C3b-review CONCERN fold: render a compact safety
+        # subsection inside ## STATE when populated. Spec says
+        # safety_constraints are "rules the model must honor"; legacy
+        # has no explicit safety zone but the substrate must reach
+        # the model. A subsection inside STATE keeps the reader
+        # close to the relationships line without inventing a
+        # whole new top-level zone.
+        safety = getattr(packet, "safety_constraints", None)
+        if safety is not None:
+            sens = safety.sensitivity_gates or ()
+            cross = safety.cross_member_rules or ()
+            if sens or cross:
+                safety_lines: list[str] = []
+                if sens:
+                    safety_lines.append(
+                        "Sensitivity classifications in scope: "
+                        + ", ".join(
+                            sorted({
+                                str(g.get("sensitivity", ""))
+                                for g in sens
+                                if g.get("sensitivity")
+                            })
+                        )
+                    )
+                if cross:
+                    cross_lines = [
+                        f"- {r.get('description', '')}"
+                        for r in cross
+                        if r.get("description")
+                    ]
+                    if cross_lines:
+                        safety_lines.append(
+                            "Cross-member rules:\n"
+                            + "\n".join(cross_lines)
+                        )
+                if safety_lines:
+                    state_parts.append(
+                        "DISCLOSURE / SENSITIVITY:\n"
+                        + "\n".join(safety_lines)
+                    )
         if state_parts:
             parts.append("## STATE\n" + "\n\n".join(state_parts))
 

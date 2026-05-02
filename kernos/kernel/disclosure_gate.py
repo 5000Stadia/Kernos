@@ -67,17 +67,24 @@ async def build_permission_map(
     Fails soft: empty dict on any error. The gate fails closed when the
     map is empty (unknown authors → filter), so a failure here doesn't
     leak content.
+
+    Codex CCV1 C3b-review CONCERN fold: stable return type. Coerce
+    non-dict results (test fixtures sometimes wire MagicMock-shaped
+    instance_db whose list_permissions_for returns a MagicMock instead
+    of a dict) to ``{}``. The function's contract is dict-or-empty;
+    making the return shape stable is safer for every caller.
     """
     if not instance_db or not requesting_member_id:
         return {}
     try:
-        return await instance_db.list_permissions_for(requesting_member_id)
+        result = await instance_db.list_permissions_for(requesting_member_id)
     except Exception as exc:
         logger.warning(
             "DISCLOSURE_GATE: build_permission_map failed for %s: %s",
             requesting_member_id, exc,
         )
         return {}
+    return result if isinstance(result, dict) else {}
 
 
 def evaluate(

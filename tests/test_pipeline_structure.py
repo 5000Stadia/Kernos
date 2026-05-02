@@ -149,7 +149,7 @@ class TestPhaseFilesHaveSensibleSize:
         # intentional substrate work, not unrelated creep.
         ("provision", 30, 200),
         ("route", 80, 250),
-        ("assemble", 400, 1000),
+        ("assemble", 400, 1100),
         ("reason", 20, 100),
         ("consequence", 50, 200),
         ("persist", 150, 400),

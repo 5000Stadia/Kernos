@@ -794,127 +794,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     ctx.system_prompt_dynamic = _compose_blocks(now_block, state_block, results, procedures, canvases, memory)
     ctx.system_prompt = _compose_blocks(ctx.system_prompt_static, ctx.system_prompt_dynamic)
 
-    # COGNITIVE-CONTEXT-V1 C3a: construct the typed cognitive substrate
-    # alongside legacy string assembly. Codex C3a-design Q2: assembly
-    # owns the selected/filtered substrate; populate the packet from
-    # already-loaded locals rather than re-querying the substrate.
-    # Q4 (dual carry): legacy strings remain canonical for the legacy
-    # path; the packet is canonical for the decoupled path. Both are
-    # produced here from the same source data.
-    try:
-        from kernos.kernel.cognitive_context.field_provenance import (
-            PopulationContext,
-            populate_packet,
-        )
-        from kernos.utils import utc_now_dt
-        _channel_records: tuple = ()
-        if handler._channel_registry is not None:
-            try:
-                _channel_records = tuple(
-                    handler._channel_registry.get_outbound_capable()
-                )
-            except Exception:
-                _channel_records = ()
-        # C3b: derive sensitivity gates from the surfaced knowledge
-        # entries (entries the disclosure gate already passed; this
-        # field carries residual policy data the model must reason
-        # about).
-        _sensitivity_gates: tuple = ()
-        if user_knowledge_entries:
-            _sensitivity_gates = tuple(
-                {
-                    "entry_id": getattr(e, "id", ""),
-                    "author_member_id": getattr(e, "author_member_id", "")
-                    or getattr(e, "owner_member_id", ""),
-                    "sensitivity": getattr(e, "sensitivity", "") or "",
-                    "subject": getattr(e, "subject", ""),
-                }
-                for e in user_knowledge_entries
-                if getattr(e, "sensitivity", "")
-            )
-        # C3b: cross-member rules — covenants tagged with a
-        # "relationship:" context_space scope. Filtered from the
-        # already-loaded contract_rules.
-        _cross_member_rules: tuple = tuple(
-            {
-                "id": r.id,
-                "scope": r.context_space or "",
-                "rule_type": r.rule_type,
-                "description": r.description,
-            }
-            for r in (contract_rules or ())
-            if (r.context_space or "").startswith("relationship:")
-        )
-        # C3b: disclosure_layer reuses the permission map already
-        # built earlier in this phase (ctx._disclosure_perm_map set
-        # at line ~465). Defensive: in some test fixtures the upstream
-        # mock returns a non-dict (MagicMock), so we coerce to {}
-        # rather than letting dict() crash and abort packet build.
-        _raw_perm_map = getattr(ctx, "_disclosure_perm_map", None)
-        _disclosure_layer = (
-            _raw_perm_map if isinstance(_raw_perm_map, dict) else {}
-        )
-        _pop_ctx = PopulationContext(
-            instance_id=instance_id,
-            member_id=ctx.member_id,
-            space_id=active_space_id or "",
-            state_store=handler.state,
-            instance_db=getattr(handler, "_instance_db", None),
-            handler=handler,
-            user_timezone=(
-                (ctx.member_profile or {}).get("timezone", "")
-                or soul.timezone
-            ),
-            platform=message.platform,
-            auth_level=str(message.sender_auth_level.value),
-            timestamp_utc=utc_now_dt(),
-            active_space_name=(
-                active_space.name if active_space else ""
-            ),
-            member_display_name=(
-                (ctx.member_profile or {}).get("display_name", "")
-                or soul.user_name
-            ),
-            agent_name=(
-                (ctx.member_profile or {}).get("agent_name", "")
-                or soul.agent_name
-            ),
-            execution_envelope=_exec_envelope,
-            member_profile=dict(ctx.member_profile or {}),
-            soul=soul,
-            covenants=tuple(contract_rules),
-            space_names=dict(_space_names),
-            instance_stewardship=_stewardship,
-            relationships=tuple(_rels),
-            knowledge_entries=tuple(user_knowledge_entries or ()),
-            results_prefix=ctx.results_prefix or "",
-            capability_prompt=capability_prompt,
-            channel_registry=_channel_records,
-            compaction_carry=ctx.memory_prefix or "",
-            awareness_whispers=(),  # C3a: fields populated; renderer
-            # uses them at later phases. Empty here keeps the packet
-            # shape correct without re-walking awareness substrate
-            # (already rendered into ctx.results_prefix by the legacy
-            # path).
-            conversation_messages=tuple(ctx.messages or ()),
-            # C3b additions — procedures + canvases + safety substrate.
-            procedures_prefix=_procedures_prefix or "",
-            canvases_prefix=_canvases_prefix or "",
-            sensitivity_gates=_sensitivity_gates,
-            disclosure_layer=dict(_disclosure_layer),
-            cross_member_rules=_cross_member_rules,
-        )
-        ctx.cognitive_context = await populate_packet(_pop_ctx)
-    except Exception as exc:
-        # Construction of the packet is best-effort during the C3a
-        # rollout — if anything goes wrong, the legacy strings still
-        # carry the substrate so the legacy path is unaffected. Log
-        # so the gap surfaces in operator telemetry.
-        logger.warning(
-            "COGNITIVE_CONTEXT_C3A_CONSTRUCT_FAILED: %s", exc, exc_info=True,
-        )
-        ctx.cognitive_context = None
-
     # Developer mode: inject pending errors
     instance_profile = await handler.state.get_instance_profile(instance_id)
     if instance_profile and getattr(instance_profile, 'developer_mode', False):
@@ -973,4 +852,173 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         ctx.messages = [departure_msg] + space_messages + [{"role": "user", "content": final_user_content}]
     else:
         ctx.messages = space_messages + [{"role": "user", "content": final_user_content}]
+
+    # COGNITIVE-CONTEXT-V1: construct the typed cognitive substrate
+    # alongside the legacy string assembly. Codex C3a-design Q2:
+    # assembly owns the selected/filtered substrate; populate the
+    # packet from already-loaded locals rather than re-querying.
+    # Q4 (dual carry): legacy strings remain canonical for the legacy
+    # path; the packet is canonical for the decoupled path.
+    #
+    # Codex C3b-review BLOCKER (request 003 fold): packet construction
+    # was originally placed right after system_prompt build, BEFORE
+    # ctx.messages was assigned. ``conversation.messages`` was wired
+    # to read from ``ctx.messages or ()`` and silently came back
+    # empty — false provenance (the field-provenance map said
+    # "wired", reality said "always empty"). Construction now runs
+    # at the END of the phase so ``ctx.messages`` is finalized.
+    try:
+        from kernos.kernel.cognitive_context.field_provenance import (
+            PopulationContext,
+            populate_packet,
+        )
+        from kernos.utils import utc_now_dt
+        _channel_records: tuple = ()
+        if handler._channel_registry is not None:
+            try:
+                _channel_records = tuple(
+                    handler._channel_registry.get_outbound_capable()
+                )
+            except Exception:
+                _channel_records = ()
+        # C3b: derive sensitivity gates from the surfaced knowledge
+        # entries (entries the disclosure gate already passed; this
+        # field carries residual policy data the model must reason
+        # about). Codex C3b-review CONCERN: filter out "open"
+        # sensitivity (default classification, not actually a gate);
+        # only entries with non-default classification count as
+        # sensitivity gates the model must honor.
+        _sensitivity_gates: tuple = ()
+        if user_knowledge_entries:
+            _sensitivity_gates = tuple(
+                {
+                    "entry_id": getattr(e, "id", ""),
+                    "author_member_id": getattr(e, "author_member_id", "")
+                    or getattr(e, "owner_member_id", ""),
+                    "sensitivity": getattr(e, "sensitivity", "") or "",
+                    "subject": getattr(e, "subject", ""),
+                }
+                for e in user_knowledge_entries
+                if (getattr(e, "sensitivity", "") or "")
+                not in ("", "open")
+            )
+        # C3b: cross-member rules — covenants tagged with a
+        # "relationship:" context_space scope. Filtered from the
+        # already-loaded contract_rules. Codex C3b-review CONCERN:
+        # this only captures rules pre-selected into contract_rules;
+        # if the message-analyzer's selection misses a relationship-
+        # scope rule, the field misses it too. Acceptable per the
+        # selection contract; explicit broader fetch is a follow-up
+        # if needed.
+        _cross_member_rules: tuple = tuple(
+            {
+                "id": r.id,
+                "scope": r.context_space or "",
+                "rule_type": r.rule_type,
+                "description": r.description,
+            }
+            for r in (contract_rules or ())
+            if (r.context_space or "").startswith("relationship:")
+        )
+        # C3b: disclosure_layer reuses the permission map already
+        # built earlier in this phase (ctx._disclosure_perm_map set
+        # by build_permission_map). Defensive isinstance(dict) guard:
+        # some test fixtures wire a MagicMock for _instance_db whose
+        # list_permissions_for returns a default MagicMock (not a
+        # real dict). Without the guard, dict() on the MagicMock
+        # crashes the packet build. build_permission_map itself was
+        # also hardened to always return a real dict (Codex C3b-
+        # review CONCERN fold).
+        _raw_perm_map = getattr(ctx, "_disclosure_perm_map", None)
+        _disclosure_layer = (
+            _raw_perm_map if isinstance(_raw_perm_map, dict) else {}
+        )
+        # C3b-review BLOCKER fold: populate awareness_whispers from
+        # state.get_pending_whispers (filtered by member-scope) so
+        # the packet's memory.awareness_whispers field carries real
+        # records — was always () with a "wired" provenance mark
+        # before this fold (false provenance, exactly the drift
+        # CCV1 prevents).
+        _whisper_records: tuple = ()
+        try:
+            _pending_whispers = await handler.state.get_pending_whispers(instance_id)
+            if _pending_whispers:
+                _member = ctx.member_id or ""
+                _whisper_records = tuple(
+                    {
+                        "whisper_id": getattr(w, "whisper_id", ""),
+                        "insight_text": getattr(w, "insight_text", ""),
+                        "delivery_class": getattr(w, "delivery_class", ""),
+                        "owner_member_id": getattr(w, "owner_member_id", ""),
+                        "created_at": getattr(w, "created_at", ""),
+                    }
+                    for w in _pending_whispers
+                    if (
+                        not getattr(w, "owner_member_id", "")
+                        or getattr(w, "owner_member_id", "") == _member
+                    )
+                )
+        except Exception:
+            # Best-effort: legacy already filters whispers via
+            # _get_pending_awareness for results_prefix; failure here
+            # leaves memory.awareness_whispers empty without breaking
+            # the legacy substrate path.
+            _whisper_records = ()
+        _pop_ctx = PopulationContext(
+            instance_id=instance_id,
+            member_id=ctx.member_id,
+            space_id=active_space_id or "",
+            state_store=handler.state,
+            instance_db=getattr(handler, "_instance_db", None),
+            handler=handler,
+            user_timezone=(
+                (ctx.member_profile or {}).get("timezone", "")
+                or soul.timezone
+            ),
+            platform=message.platform,
+            auth_level=str(message.sender_auth_level.value),
+            timestamp_utc=utc_now_dt(),
+            active_space_name=(
+                active_space.name if active_space else ""
+            ),
+            member_display_name=(
+                (ctx.member_profile or {}).get("display_name", "")
+                or soul.user_name
+            ),
+            agent_name=(
+                (ctx.member_profile or {}).get("agent_name", "")
+                or soul.agent_name
+            ),
+            execution_envelope=_exec_envelope,
+            member_profile=dict(ctx.member_profile or {}),
+            soul=soul,
+            covenants=tuple(contract_rules),
+            space_names=dict(_space_names),
+            instance_stewardship=_stewardship,
+            relationships=tuple(_rels),
+            knowledge_entries=tuple(user_knowledge_entries or ()),
+            results_prefix=ctx.results_prefix or "",
+            capability_prompt=capability_prompt,
+            channel_registry=_channel_records,
+            compaction_carry=ctx.memory_prefix or "",
+            awareness_whispers=_whisper_records,
+            conversation_messages=tuple(ctx.messages or ()),
+            # C3b additions — procedures + canvases + safety substrate.
+            procedures_prefix=_procedures_prefix or "",
+            canvases_prefix=_canvases_prefix or "",
+            sensitivity_gates=_sensitivity_gates,
+            disclosure_layer=dict(_disclosure_layer),
+            cross_member_rules=_cross_member_rules,
+        )
+        ctx.cognitive_context = await populate_packet(_pop_ctx)
+    except Exception as exc:
+        # Construction of the packet is best-effort during the
+        # rollout — if anything goes wrong, the legacy strings still
+        # carry the substrate so the legacy path is unaffected. Log
+        # so the gap surfaces in operator telemetry.
+        logger.warning(
+            "COGNITIVE_CONTEXT_CONSTRUCT_FAILED: %s", exc, exc_info=True,
+        )
+        ctx.cognitive_context = None
+
     return ctx
