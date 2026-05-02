@@ -64,11 +64,41 @@ import dataclasses
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("kernos.repl")
+
+
+@dataclass(frozen=True)
+class ReplIdentity:
+    """Selected member identity for a REPL session.
+
+    Codex C5-review CONCERN fold: the prior ``select_member`` returned
+    only ``(sender, display)`` which dropped member_id, the platform
+    binding, and whether a new repl channel was registered. The
+    future ``kernos`` CLI needs all four to do its job
+    (``kernos repl --member <id> --space <space>``,
+    ``kernos members add ...``, etc.). This dataclass is the public
+    identity surface.
+
+    * ``member_id`` — the stable mem_xxx id for the selected member.
+    * ``display_name`` — the member's display name (banner / prompt).
+    * ``platform`` — the platform string the REPL builds messages
+      with. Always ``"repl"`` today; preserved on the dataclass so
+      the future CLI can extend without changing the message-build
+      shape.
+    * ``channel_id`` — the repl-platform channel id for this member.
+      Pre-registered in instance_db so abuse-prevention and member
+      resolution recognize the sender on every turn.
+    """
+
+    member_id: str
+    display_name: str
+    platform: str
+    channel_id: str
 
 
 async def build_dev_handler(
@@ -150,9 +180,16 @@ async def build_dev_handler(
     )
     from kernos.providers.chains import build_chains_from_env
 
-    # Sticky decoupled-flag. Soak's whole point is the CCV1 path.
-    if decoupled:
-        os.environ["KERNOS_USE_DECOUPLED_TURN_RUNNER"] = "1"
+    # Decoupled flag — set explicitly in BOTH directions. Codex
+    # C5-review BLOCKER fold: the prior implementation only set the
+    # env var when ``decoupled=True`` and never cleared it when
+    # ``decoupled=False``, so a legacy-oracle soak run that
+    # inherited ``KERNOS_USE_DECOUPLED_TURN_RUNNER=1`` from .env
+    # would silently still take the decoupled path. The C6 runbook
+    # requires both paths runnable; force the env to match the arg.
+    os.environ["KERNOS_USE_DECOUPLED_TURN_RUNNER"] = (
+        "1" if decoupled else "0"
+    )
 
     _data_dir = data_dir or os.getenv("KERNOS_DATA_DIR", "./data-dev")
     _instance_id = instance_id or os.getenv("KERNOS_INSTANCE_ID", "repl:dev")
@@ -179,23 +216,31 @@ async def build_dev_handler(
     except Exception as exc:
         logger.warning("repl: instance_db init failed (non-fatal): %s", exc)
 
-    # Pre-register the REPL sender as the instance's owner so the
-    # abuse-prevention guard (instance_db.check_sender_blocked +
-    # record_sender_failure) recognizes them on the first message.
-    # Without this every REPL turn would hit the
-    # "private Kernos instance" block path. Idempotent — ensure_owner
-    # finds an existing member by stable_id or creates one.
-    _sender = sender or os.getenv("KERNOS_REPL_SENDER", "founder")
+    # Codex C5-review CONCERN (Q4) fold: only ensure_owner when the
+    # instance has NO members yet. Previous behavior bound an
+    # arbitrary ``sender`` channel to the owner role at boot,
+    # regardless of whether the operator intended to act as a
+    # different member after selection. Owner pre-registration is
+    # only the "fresh-instance founder boots up" affordance. After
+    # boot, ``select_member`` handles binding the chosen sender to
+    # the selected member's repl channel — which may NOT be the
+    # owner.
     try:
-        await instance_db.ensure_owner(
-            member_id="",  # ensure_owner derives stable id
-            display_name=sender_display_name,
-            instance_id=_instance_id,
-            platform="repl",
-            channel_id=_sender,
-        )
-    except Exception as exc:
-        logger.warning("repl: ensure_owner failed (non-fatal): %s", exc)
+        existing_members = await instance_db.list_members()
+    except Exception:
+        existing_members = []
+    if not existing_members:
+        _bootstrap_sender = sender or os.getenv("KERNOS_REPL_SENDER", "founder")
+        try:
+            await instance_db.ensure_owner(
+                member_id="",  # ensure_owner derives stable id
+                display_name=sender_display_name,
+                instance_id=_instance_id,
+                platform="repl",
+                channel_id=_bootstrap_sender,
+            )
+        except Exception as exc:
+            logger.warning("repl: ensure_owner failed (non-fatal): %s", exc)
 
     try:
         from kernos.kernel import event_stream as _evstream_mod
@@ -386,21 +431,34 @@ async def build_dev_handler(
 
 async def shutdown_dev_handler(handler: Any) -> None:
     """Tear down the global side effects ``build_dev_handler``
-    started: event-stream writer task, awareness evaluator, MCP
-    clients, instance_db connection. Idempotent and best-effort —
-    each subsystem is wrapped in try/except.
+    started: event-stream writer task, awareness evaluators, MCP
+    clients, instance_db connection, state-store connections.
+    Idempotent and best-effort — each subsystem is wrapped in
+    try/except.
 
     Call this from REPL ``finally:`` blocks and from smoke-test
     fixtures so subsequent tests / processes don't see leaked
     background tasks.
+
+    Codex C5-review BLOCKER fold: ``MessageHandler`` stores live
+    awareness evaluators in ``handler._evaluators`` (a dict keyed by
+    instance_id), not the singular ``_evaluator``. The original
+    shutdown checked the wrong attribute, leaving the periodic task
+    leaked. This version iterates the dict + clears it.
     """
-    # Awareness evaluator (started lazily by handler when it begins
-    # background polling). Stop first so it doesn't try to write
+    # Awareness evaluators (started lazily by handler when it begins
+    # background polling per-instance — see provision phase's
+    # _maybe_start_evaluator). Stop first so they don't try to write
     # during teardown.
     try:
-        evaluator = getattr(handler, "_evaluator", None)
-        if evaluator is not None:
-            await evaluator.stop()
+        evaluators = getattr(handler, "_evaluators", None) or {}
+        for evaluator in list(evaluators.values()):
+            try:
+                await evaluator.stop()
+            except Exception:
+                pass
+        if isinstance(evaluators, dict):
+            evaluators.clear()
     except Exception:
         pass
     # MCP clients.
@@ -424,6 +482,15 @@ async def shutdown_dev_handler(handler: Any) -> None:
             await idb.close()
     except Exception:
         pass
+    # State store connections (SQLite has a connection pool;
+    # close_all releases handles so subsequent boots don't hit
+    # "database is locked").
+    try:
+        state = getattr(handler, "state", None)
+        if state is not None and hasattr(state, "close_all"):
+            await state.close_all()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -431,16 +498,26 @@ async def shutdown_dev_handler(handler: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_message(content: str, *, instance_id: str, sender: str) -> Any:
-    """Construct a ``NormalizedMessage`` for the REPL's input."""
+def _build_message(
+    content: str, *, instance_id: str, identity: ReplIdentity,
+) -> Any:
+    """Construct a ``NormalizedMessage`` from a ``ReplIdentity``.
+
+    Codex C5-review BLOCKER fold: ``platform`` and ``sender`` are
+    paired together via the identity dataclass so they cannot
+    drift. The prior implementation hardcoded ``platform="repl"``
+    while accepting any sender id — including discord/sms ids that
+    didn't match the platform — which broke
+    ``handler._resolve_member`` and tripped the abuse path.
+    """
     from kernos.messages.models import AuthLevel, NormalizedMessage
     return NormalizedMessage(
         content=content,
-        sender=sender,
+        sender=identity.channel_id,
         sender_auth_level=AuthLevel.owner_verified,
-        platform="repl",
+        platform=identity.platform,
         platform_capabilities=["text"],
-        conversation_id=sender,
+        conversation_id=identity.channel_id,
         timestamp=datetime.now(timezone.utc),
         instance_id=instance_id,
     )
@@ -457,33 +534,94 @@ async def select_member(
     handler: Any,
     *,
     explicit_sender: str | None = None,
-) -> tuple[str, str]:
-    """Multi-user member selection. Returns ``(sender_channel_id,
-    member_display_name)`` to use for REPL turns.
+) -> ReplIdentity:
+    """Multi-user member selection. Returns a :class:`ReplIdentity`
+    pinning the chosen member + their repl-platform channel id so
+    REPL message construction can pass a sender that
+    ``handler._resolve_member`` actually recognizes.
 
     Selection order:
 
-    1. If ``explicit_sender`` is non-empty, use it verbatim. Caller
-       passed a specific platform channel id (e.g., a known
-       Discord user id, an SMS phone number, the default
-       ``"founder"``).
+    1. If ``explicit_sender`` is non-empty, use it verbatim AS the
+       repl channel id. Caller passed a specific identifier they
+       know is registered (default ``"founder"`` from .env, an
+       explicit override, or CC's piped-input usage).
     2. If exactly one member exists on the instance, auto-select it.
-    3. Otherwise, list members on stdout and prompt for a selection
-       (numeric index or member_id substring match). The user picks
-       which member's space they want to "be" for this REPL session.
+    3. Otherwise, prompt for a selection. Codex C5-review fold:
+       refuse to prompt when stdin is non-TTY (e.g., piped input)
+       since the prompt would consume the first piped line as the
+       member-selection answer. In that case raise with a clear
+       message instructing the operator to set ``KERNOS_REPL_SENDER``.
 
-    The future ``kernos`` CLI will surface this same selection via
-    ``kernos repl --member <id>`` (skipping the prompt) or
-    ``kernos repl`` (interactive prompt). Multi-user awareness was
-    Kernos's V1 architectural pivot; the REPL needs the same
-    surface.
+    For the selected member, the function ensures a ``repl``-platform
+    channel exists in instance_db (registers one if absent) so that
+    ``_resolve_member(platform="repl", sender=channel_id)`` resolves
+    the right member every turn. Without this, ``_first_channel_id``
+    might return a discord/sms id that doesn't match the REPL's
+    hardcoded ``platform="repl"``, and turns would hit the abuse
+    path. (Codex Q3 BLOCKER fold.)
     """
-    if explicit_sender:
-        return explicit_sender, explicit_sender
-
     instance_db = getattr(handler, "_instance_db", None)
+
+    # Helper: resolve / register a repl channel for a given member.
+    # Returns the channel_id the REPL should use as sender.
+    async def _ensure_repl_channel(member: dict) -> str:
+        channels = member.get("channels", []) or []
+        for ch in channels:
+            if ch.get("platform") == "repl" and ch.get("channel_id"):
+                return ch["channel_id"]
+        # No repl channel yet — register a deterministic one keyed
+        # to the member id so multiple REPL sessions for the same
+        # member always resolve the same way.
+        mid = member.get("member_id", "")
+        new_channel = f"repl:{mid}" if mid else "repl"
+        if instance_db is not None and mid:
+            try:
+                await instance_db.register_channel(
+                    member_id=mid,
+                    platform="repl",
+                    channel_id=new_channel,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "repl: register_channel failed for %s — falling back "
+                    "to ad-hoc sender. Error: %s",
+                    mid, exc,
+                )
+        return new_channel
+
+    if explicit_sender:
+        # The caller asserts this sender is a valid repl channel.
+        # The match path: caller is using KERNOS_REPL_SENDER from
+        # .env / shell (likely ``founder`` from the fresh-instance
+        # ensure_owner path). Look up the member by repl channel
+        # if possible; fall back to using the sender verbatim.
+        if instance_db is not None:
+            try:
+                member = await instance_db.get_member_by_channel(
+                    "repl", explicit_sender,
+                )
+            except Exception:
+                member = None
+            if member is not None:
+                return ReplIdentity(
+                    member_id=member.get("member_id", ""),
+                    display_name=(
+                        member.get("display_name", "") or explicit_sender
+                    ),
+                    platform="repl",
+                    channel_id=explicit_sender,
+                )
+        return ReplIdentity(
+            member_id="", display_name=explicit_sender,
+            platform="repl", channel_id=explicit_sender,
+        )
+
     if instance_db is None:
-        return "founder", "founder"
+        return ReplIdentity(
+            member_id="", display_name="founder",
+            platform="repl", channel_id="founder",
+        )
 
     try:
         members = await instance_db.list_members()
@@ -491,16 +629,40 @@ async def select_member(
         members = []
 
     if not members:
-        return "founder", "founder"
+        return ReplIdentity(
+            member_id="", display_name="founder",
+            platform="repl", channel_id="founder",
+        )
 
     if len(members) == 1:
         m = members[0]
-        channel_id = _first_channel_id(m) or m.get("member_id", "founder")
+        channel_id = await _ensure_repl_channel(m)
         display = m.get("display_name", "") or m.get("member_id", "founder")
         print(f"REPL: auto-selected sole member: {display} ({channel_id})")
-        return channel_id, display
+        return ReplIdentity(
+            member_id=m.get("member_id", ""),
+            display_name=display,
+            platform="repl",
+            channel_id=channel_id,
+        )
 
-    # Multi-member: prompt.
+    # Multi-member: prompt — but only if stdin is interactive.
+    # Codex C5-review fold: piped use without ``KERNOS_REPL_SENDER``
+    # would otherwise consume the first piped line as the
+    # member-selection answer. Refuse to prompt and surface a clear
+    # error instead.
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "kernos.repl: multiple members found and stdin is not a "
+            "TTY. Set KERNOS_REPL_SENDER to a member's repl channel "
+            "id (or use --sender on the future kernos CLI) to "
+            "bypass interactive selection. Available members: "
+            + ", ".join(
+                f"{m.get('display_name','?')} ({m.get('member_id','?')})"
+                for m in members
+            )
+        )
+
     print("Members on this instance:")
     for i, m in enumerate(members, start=1):
         display = m.get("display_name", "") or m.get("member_id", "")
@@ -517,46 +679,40 @@ async def select_member(
         if not choice:
             choice = "1"
         # Numeric index
+        m = None
         try:
             idx = int(choice)
             if 1 <= idx <= len(members):
                 m = members[idx - 1]
-                channel_id = _first_channel_id(m) or m.get("member_id", "founder")
-                display = m.get("display_name", "") or m.get("member_id", "")
-                return channel_id, display
         except ValueError:
             pass
-        # member_id substring match
-        matches = [
-            m for m in members
-            if choice in (m.get("member_id", "") or "")
-            or choice.lower() in (m.get("display_name", "") or "").lower()
-        ]
-        if len(matches) == 1:
-            m = matches[0]
-            channel_id = _first_channel_id(m) or m.get("member_id", "founder")
-            display = m.get("display_name", "") or m.get("member_id", "")
-            return channel_id, display
-        print("No unique match. Try again, or Ctrl-C to bail.")
-
-
-def _first_channel_id(member: dict) -> str:
-    """Pick the first channel id from a member's connected channels.
-    Used to derive a sender id the abuse-prevention guard recognizes."""
-    channels = member.get("channels", []) or []
-    for ch in channels:
-        cid = ch.get("channel_id", "")
-        if cid:
-            return cid
-    return ""
+        if m is None:
+            # member_id / display_name substring match
+            matches = [
+                cand for cand in members
+                if choice in (cand.get("member_id", "") or "")
+                or choice.lower() in (cand.get("display_name", "") or "").lower()
+            ]
+            if len(matches) == 1:
+                m = matches[0]
+        if m is None:
+            print("No unique match. Try again, or Ctrl-C to bail.")
+            continue
+        channel_id = await _ensure_repl_channel(m)
+        display = m.get("display_name", "") or m.get("member_id", "")
+        return ReplIdentity(
+            member_id=m.get("member_id", ""),
+            display_name=display,
+            platform="repl",
+            channel_id=channel_id,
+        )
 
 
 async def repl_loop(
     handler: Any,
     *,
     instance_id: str,
-    sender: str = "founder",
-    sender_display: str = "",
+    identity: ReplIdentity,
 ) -> None:
     """Read-eval-print loop. Each line of stdin becomes a turn.
 
@@ -567,7 +723,11 @@ async def repl_loop(
     """
     print("Kernos REPL (Ctrl-D or /quit to exit)")
     print(f"  instance_id = {instance_id}")
-    print(f"  sender      = {sender}{f'  ({sender_display})' if sender_display else ''}")
+    print(
+        f"  member      = {identity.display_name} "
+        f"({identity.member_id or 'unbound'})"
+    )
+    print(f"  channel     = {identity.platform}:{identity.channel_id}")
     print()
     while True:
         try:
@@ -584,7 +744,9 @@ async def repl_loop(
         if not text.strip():
             continue
         try:
-            message = _build_message(text, instance_id=instance_id, sender=sender)
+            message = _build_message(
+                text, instance_id=instance_id, identity=identity,
+            )
             response = await handler.process(message)
         except Exception as exc:
             print(f"[error] {exc}")
@@ -622,14 +784,11 @@ async def main() -> int:
         instance_id=instance_id,
         sender=explicit_sender or "founder",
     )
-    sender, display = await select_member(
+    identity = await select_member(
         handler, explicit_sender=explicit_sender or None,
     )
     try:
-        await repl_loop(
-            handler, instance_id=instance_id,
-            sender=sender, sender_display=display,
-        )
+        await repl_loop(handler, instance_id=instance_id, identity=identity)
     finally:
         await shutdown_dev_handler(handler)
     return 0

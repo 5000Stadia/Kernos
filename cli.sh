@@ -15,14 +15,23 @@
 # own data-dir + instance id, so this clone's REPL never touches
 # the production folder's state.
 #
-# State isolation defaults:
+# State-isolation DEFAULTS (only fire when neither shell-exported
+# KERNOS_* env nor .env already sets them):
 #   KERNOS_DATA_DIR    = ./data-dev      (separate from prod ./data)
 #   KERNOS_INSTANCE_ID = repl:dev        (separate state keying)
 #   KERNOS_SECRETS_DIR = ./secrets-dev   (separate credentials)
 #   KERNOS_USE_DECOUPLED_TURN_RUNNER = 1 (the CCV1-shipped path)
 #
-# Override any of these via the environment OR via .env. Existing
-# shell-exported KERNOS_* values win over .env.
+# Precedence (highest to lowest):
+#   1. shell-exported KERNOS_* values (`export KERNOS_INSTANCE_ID=...`)
+#   2. .env file values (loaded by _load_kernos_env below)
+#   3. The defaults above (only when neither 1 nor 2 set the var)
+#
+# **If your .env sets any of these (e.g. KERNOS_INSTANCE_ID), THAT
+# value wins — the dev-isolation defaults below DO NOT override
+# .env.** This is intentional: .env is the per-clone config
+# surface. If you want guaranteed isolation, override at invocation
+# time: ``KERNOS_INSTANCE_ID=repl:dev ./cli.sh``.
 #
 # Multi-user: when the instance has multiple members, the REPL
 # prompts you to pick which member to "be" for the session. Set

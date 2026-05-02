@@ -8,14 +8,18 @@
 # fidelity arc (data/diagnostics/live-tests/COGNITIVE-CONTEXT-V1-live-test.md)
 # without setting up a second Discord/SMS/Telegram bot.
 #
-# Defaults:
+# Defaults (only fire when neither shell-exported KERNOS_* env nor
+# .env already sets them — .env wins over these defaults):
 #   KERNOS_DATA_DIR        = ./data-dev   (isolated from prod)
 #   KERNOS_INSTANCE_ID     = repl:dev     (state keying)
 #   KERNOS_USE_DECOUPLED_TURN_RUNNER = 1  (the CCV1 path)
 #   KERNOS_SECRETS_DIR     = ./secrets-dev (isolated credentials)
 #
-# Override any of these via the environment before invoking. .env
-# values are also respected (loaded the same way as start.sh).
+# Precedence: shell-exported KERNOS_* > .env > the defaults above.
+# **If your .env sets these, the .env values are used; the
+# isolation defaults DO NOT override.** Override at invocation
+# time for guaranteed isolation:
+#   KERNOS_INSTANCE_ID=repl:dev ./scripts/dev-repl.sh
 
 cd "$(dirname "$0")/.."
 SCRIPT_DIR="$(pwd)"

@@ -23,6 +23,7 @@ boot path preserves substrate fidelity.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -264,3 +265,126 @@ async def test_build_dev_handler_legacy_path_also_boots(isolated_env, monkeypatc
         assert handler.reasoning is not None
     finally:
         await shutdown_dev_handler(handler)
+
+
+# ---------------------------------------------------------------------------
+# Codex C5-review BLOCKER fold pins
+# ---------------------------------------------------------------------------
+
+
+async def test_decoupled_false_overrides_env_when_already_set(isolated_env, monkeypatch):
+    """Codex C5-review BLOCKER (Q1) pin: build_dev_handler(decoupled=False)
+    must force the legacy path even when KERNOS_USE_DECOUPLED_TURN_RUNNER
+    is already set to "1" in the env. The C6 runbook runs each
+    scenario twice (legacy oracle + decoupled); without this fix the
+    legacy run would silently still take the decoupled path on any
+    env where the flag was inherited from .env."""
+    from kernos.repl import build_dev_handler, shutdown_dev_handler
+
+    # Start with the decoupled flag set — simulating .env-inherited state.
+    monkeypatch.setenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", "1")
+
+    chains, _mock_provider = _make_chain_with_mock_provider()
+    with patch(
+        "kernos.providers.chains.build_chains_from_env",
+        return_value=(chains, None),
+    ):
+        handler = await build_dev_handler(decoupled=False)
+    try:
+        # The env var must have been forced to "0"/"" by the boot.
+        # use_decoupled_turn_runner() reads env each call; under
+        # decoupled=False the legacy reasoning loop must run.
+        assert os.environ.get("KERNOS_USE_DECOUPLED_TURN_RUNNER", "") == "0", (
+            "decoupled=False must force the env flag off even when "
+            "KERNOS_USE_DECOUPLED_TURN_RUNNER was already set"
+        )
+    finally:
+        await shutdown_dev_handler(handler)
+
+
+async def test_select_member_returns_repl_identity_with_repl_platform(isolated_env):
+    """Codex C5-review BLOCKER (Q3) pin: select_member returns a
+    ReplIdentity whose ``platform`` is "repl" (matches what
+    _build_message uses) AND whose ``channel_id`` is registered
+    under platform="repl" in instance_db, so handler._resolve_member
+    finds the right member and the abuse-prevention guard doesn't
+    fire."""
+    from kernos.repl import (
+        ReplIdentity,
+        build_dev_handler,
+        select_member,
+        shutdown_dev_handler,
+    )
+
+    chains, _mock_provider = _make_chain_with_mock_provider()
+    with patch(
+        "kernos.providers.chains.build_chains_from_env",
+        return_value=(chains, None),
+    ):
+        handler = await build_dev_handler(sender="founder")
+    try:
+        # Single-member auto-selection path. ensure_owner ran at boot
+        # because the instance had no members yet, so the founder is
+        # registered with a repl channel.
+        identity = await select_member(handler, explicit_sender=None)
+        assert isinstance(identity, ReplIdentity)
+        assert identity.platform == "repl", (
+            "selected channel must use platform='repl' so the REPL's "
+            "_build_message platform field matches"
+        )
+        # The channel id must resolve via instance_db on platform=repl.
+        member = await handler._instance_db.get_member_by_channel(
+            "repl", identity.channel_id,
+        )
+        assert member is not None, (
+            "select_member's chosen channel_id must be registered "
+            "under platform='repl' so handler._resolve_member finds "
+            "the right member"
+        )
+    finally:
+        await shutdown_dev_handler(handler)
+
+
+async def test_shutdown_stops_evaluators_via_evaluators_dict(isolated_env, monkeypatch):
+    """Codex C5-review BLOCKER (Q2) pin: shutdown_dev_handler must
+    stop awareness evaluators via the ``handler._evaluators`` dict
+    (the live attribute), not the singular ``handler._evaluator``
+    (which doesn't exist). Without this fix, awareness tasks
+    started lazily during turns leak into subsequent test runs and
+    cascade-fail the suite."""
+    from kernos.repl import build_dev_handler, shutdown_dev_handler
+
+    chains, _mock_provider = _make_chain_with_mock_provider()
+    with patch(
+        "kernos.providers.chains.build_chains_from_env",
+        return_value=(chains, None),
+    ):
+        handler = await build_dev_handler()
+
+    # Inject a mock evaluator into the dict the way the real handler
+    # does. The shutdown helper must iterate _evaluators.values() and
+    # call .stop() on each.
+    stopped: list[str] = []
+
+    class _MockEval:
+        def __init__(self, name): self.name = name
+        async def stop(self): stopped.append(self.name)
+
+    handler._evaluators = {
+        "instance-A": _MockEval("A"),
+        "instance-B": _MockEval("B"),
+    }
+
+    await shutdown_dev_handler(handler)
+
+    assert sorted(stopped) == ["A", "B"], (
+        f"shutdown_dev_handler must stop every evaluator in "
+        f"handler._evaluators (the live attribute) — got stopped="
+        f"{stopped!r}. The bug Codex caught: previous code checked "
+        f"handler._evaluator (singular, doesn't exist) so live "
+        f"awareness tasks leaked between sessions."
+    )
+    assert handler._evaluators == {}, (
+        "shutdown_dev_handler must clear the evaluators dict so a "
+        "subsequent boot starts fresh"
+    )
