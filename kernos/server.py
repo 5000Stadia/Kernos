@@ -642,6 +642,49 @@ async def on_ready():
 
     logger.info("MessageHandler ready (data_dir=%s)", data_dir)
 
+    # WTC v1 C5c-bringup: instantiate the WLP / runtime / STS substrate
+    # so it actually runs in production rather than only existing as
+    # shipped-but-unwired code. Failure is fail-loud-but-non-blocking:
+    # the legacy Pattern 05 path stays active even if substrate
+    # bring-up errors, so a startup regression in the new substrate
+    # doesn't take down the bot.
+    try:
+        from kernos.kernel.agents.registry import AgentRegistry
+        # AgentRegistry is constructed lazily by handler today; surface
+        # it explicitly for the substrate's STS facade. If handler
+        # already has one, reuse; otherwise construct fresh.
+        _agent_registry = getattr(handler, "_agent_registry", None)
+        if _agent_registry is None:
+            from kernos.kernel.agents.providers import (
+                ProviderRegistry as DARProviderRegistry,
+            )
+            _dar_pr = DARProviderRegistry()
+            _agent_registry = AgentRegistry(provider_registry=_dar_pr)
+            await _agent_registry.start(data_dir)
+            handler._agent_registry = _agent_registry
+        from kernos.setup.bring_up_substrate import bring_up_substrate
+        _substrate = await bring_up_substrate(
+            data_dir=data_dir,
+            handler=handler,
+            agent_registry=_agent_registry,
+        )
+        handler._wlp_substrate = _substrate
+        handler._wlp_runtime = _substrate.runtime
+        logger.info(
+            "WTC_C5C_BRINGUP_OK: substrate live (runtime=%s, "
+            "engine started, %d action verbs registered, "
+            "STS facade ready)",
+            _substrate.runtime.claim_owner,
+            len(_substrate.action_library._verbs),
+        )
+    except Exception as exc:
+        logger.warning(
+            "WTC_C5C_BRINGUP_FAILED: %s — legacy Pattern 05 path "
+            "remains authoritative; bot continues without unified "
+            "runtime. This is non-blocking but should be investigated.",
+            exc,
+        )
+
     # SYSTEM-REFERENCE-CANVAS-SEED: idempotent first-boot seeding of
     # System Reference + Our Procedures canvases. Safe to call on every
     # boot; skips canvases that already exist. Per-member My Tools seed

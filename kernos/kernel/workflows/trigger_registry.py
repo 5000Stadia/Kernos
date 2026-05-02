@@ -266,7 +266,23 @@ class TriggerRegistry:
 
     # -- lifecycle ------------------------------------------------------
 
-    async def start(self, data_dir: str) -> None:
+    async def start(
+        self,
+        data_dir: str,
+        *,
+        attach_post_flush_hook: bool = True,
+    ) -> None:
+        """Start the registry and (optionally) attach the legacy
+        post-flush hook for event-driven trigger evaluation.
+
+        ``attach_post_flush_hook`` defaults to True for backward
+        compatibility with the broad set of tests that assert the
+        hook is registered after start(). Production bring-up
+        (kernos/setup/bring_up_substrate.py, WTC v1 C5c-bringup)
+        passes ``False`` because the unified TriggerEvaluationRuntime
+        + InternalEventAdapter handle event flow there — running the
+        legacy hook in parallel would produce double evaluation.
+        """
         if self._db is not None:
             return
         self._db_path = Path(data_dir) / "instance.db"
@@ -275,9 +291,10 @@ class TriggerRegistry:
         self._db.row_factory = aiosqlite.Row
         await _ensure_schema(self._db)
         await self._reload_cache()
-        self._hook_callable = self._on_post_flush
-        event_stream.register_post_flush_hook(self._hook_callable)
-        self._hook_attached = True
+        if attach_post_flush_hook:
+            self._hook_callable = self._on_post_flush
+            event_stream.register_post_flush_hook(self._hook_callable)
+            self._hook_attached = True
 
     async def stop(self) -> None:
         if self._hook_attached and self._hook_callable is not None:

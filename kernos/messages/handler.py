@@ -858,6 +858,13 @@ class MessageHandler:
         reasoning.set_trigger_store(self._trigger_store)
         reasoning.set_handler(self)
 
+        # WTC v1 C5c-bringup: optional unified TriggerEvaluationRuntime,
+        # set by server.py after bring_up_substrate completes. None
+        # while substrate hasn't been brought up (legacy Pattern 05
+        # path is authoritative until then).
+        self._wlp_runtime: Any = None
+        self._wlp_substrate: Any = None
+
         from kernos.kernel.compaction import CompactionService
         from kernos.kernel.tokens import EstimateTokenAdapter
         self.compaction = CompactionService(
@@ -1403,6 +1410,7 @@ class MessageHandler:
                 trigger_interval_seconds=int(os.getenv("KERNOS_TRIGGER_INTERVAL", "15")),
                 trigger_store=self._trigger_store,
                 handler=self,
+                runtime=self._wlp_runtime,  # C5c-bringup: None until substrate is brought up
             )
             await evaluator.start(instance_id)
             self._evaluators[instance_id] = evaluator
