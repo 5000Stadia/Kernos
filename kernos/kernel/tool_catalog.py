@@ -41,6 +41,13 @@ TOOL_TOKEN_BUDGET = int(os.environ.get("KERNOS_TOOL_TOKEN_BUDGET", "8000"))
 
 # Pinned tools: always loaded, never evicted (~25% of budget)
 # These are the tools the agent needs on almost every turn.
+#
+# COGNITIVE-CONTEXT-V1 C5 added ``request_tool`` to this set per
+# spec: the meta-recovery activation tool must reach the model on
+# every turn so the agent can request a missing capability when
+# its current set lacks the right tool. Pre-C5 it was conditionally
+# surfaced by the assemble's analyzer (often missed); now it's
+# unconditionally pinned alongside the other always-loaded tools.
 ALWAYS_PINNED: set[str] = {
     "remember",           # memory retrieval
     "remember_details",   # deep memory retrieval
@@ -49,6 +56,7 @@ ALWAYS_PINNED: set[str] = {
     "list_files",         # file listing
     "execute_code",       # workspace engine
     "register_tool",      # tool registration
+    "request_tool",       # meta-recovery activation (CCV1 C5)
     "inspect_state",      # self-awareness + space listing
     "manage_workspace",   # artifact tracking
     "send_to_channel",    # communication

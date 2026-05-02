@@ -259,46 +259,39 @@ def test_no_unwired_expected_entries_at_C1():
 def test_deferred_until_phases_match_wiring_ladder():
     """Wiring-ladder pin tracking the current frontier.
 
-    After C4 (commit graduating memory.gardener_observations), only
-    C5 deferrals remain — the tool_surface fields whose schemas are
-    resolved by the thin-path tool surfacer.
+    After C5 (commit graduating tool_surface.always_pinned and
+    tool_surface.active_zone), all 23 packet fields are wired. Per
+    Kit's tweak, by end of C5 no deferred entries remain — only
+    intentional ones with explicit target-phase + reason. This pin
+    enforces the ladder's terminal state for the CCV1 spec arc.
 
-    The test enforces the ladder so re-classification (e.g. moving a
-    field from C5 to a follow-up phase) requires conscious update."""
-    expected_per_phase = {
-        # C3a + C3b + C4: empty after their graduation.
-        "C5": {"tool_surface.always_pinned", "tool_surface.active_zone"},
-    }
+    Future post-CCV1 work that adds new packet fields starts
+    deferred → wired graduation as a fresh ladder."""
     actual_per_phase: dict[str, set[str]] = {}
     for path, prov in FIELD_PROVENANCE.items():
         if prov.wiring_state != "deferred":
             continue
         actual_per_phase.setdefault(prov.deferred_until, set()).add(path)
-    for phase, expected in expected_per_phase.items():
-        actual = actual_per_phase.get(phase, set())
-        assert actual == expected, (
-            f"Wiring-ladder drift for phase {phase}:\n"
-            f"  expected: {sorted(expected)}\n"
-            f"  actual:   {sorted(actual)}\n"
-            f"  missing:  {sorted(expected - actual)}\n"
-            f"  extra:    {sorted(actual - expected)}"
-        )
-    # Pin: no C3a / C3b / C4 deferrals remain after their commits.
-    for graduated_phase in ("C3a", "C3b", "C4"):
+    # Pin: no C3a / C3b / C4 / C5 deferrals remain after their commits.
+    for graduated_phase in ("C3a", "C3b", "C4", "C5"):
         assert graduated_phase not in actual_per_phase, (
             f"{graduated_phase}-deferred fields still present after "
             f"that phase should have graduated them: "
             f"{sorted(actual_per_phase[graduated_phase])}"
         )
+    # Pin: the ladder is empty at C5 — no deferred fields anywhere.
+    assert not actual_per_phase, (
+        f"Unexpected deferred entries after C5 (the CCV1 arc is "
+        f"complete; deferrals here would be drift): {actual_per_phase}"
+    )
 
 
-def test_C4_wired_entries_match_expected_set():
-    """After C4, exactly these entries are classified as wired —
-    the C3b wired set (23 entries) PLUS memory.gardener_observations
-    graduated by C4's MEMORY zone work.
+def test_C5_wired_entries_match_expected_set():
+    """After C5, all 23 packet fields are classified as wired —
+    the full CCV1 wiring ladder is complete.
 
-    Renamed from C3b to C4 at this commit; the pin tracks the
-    current frontier so future C-phases can extend in lockstep."""
+    Renamed from C4 to C5 at this commit; the pin now tracks the
+    terminal state of the spec arc."""
     expected_wired = {
         # C1 wired (constants + NOW + request_tool)
         "rules.operating_principles",
@@ -328,13 +321,16 @@ def test_C4_wired_entries_match_expected_set():
         "safety_constraints.cross_member_rules",
         # C4 graduated (gardener cohort output)
         "memory.gardener_observations",
+        # C5 graduated (thin-path tool surface)
+        "tool_surface.always_pinned",
+        "tool_surface.active_zone",
     }
     actual_wired = {
         path for path, prov in FIELD_PROVENANCE.items()
         if prov.wiring_state == "wired"
     }
     assert actual_wired == expected_wired, (
-        f"C4 wired-entry drift:\n"
+        f"C5 wired-entry drift:\n"
         f"  expected: {sorted(expected_wired)}\n"
         f"  actual:   {sorted(actual_wired)}\n"
         f"  missing:  {sorted(expected_wired - actual_wired)}\n"

@@ -1128,41 +1128,13 @@ async def test_always_pinned_tools_present(decoupled, monkeypatch):
 # Test 13 — request_tool reaches model
 # Source: Hunt-list row 18. Green at: C5.
 #
-# Documented deviation: request_tool is NOT in ``ALWAYS_PINNED``
-# today on either path (legacy adds it only when the surfacer's
-# analyzer requests it; decoupled sends an empty tools list). The C5
-# work explicitly ships it INTO ``ALWAYS_PINNED`` per spec, at which
-# point both paths surface it on every turn.
-#
-# Codex C2-review CONCERN (Q4): keeping the assertion as-is is
-# directionally correct (the spec row says the model invocation
-# receives ``request_tool``, not "is registered"). The legacy
-# variant is marked ``xfail(strict=True)`` so the suite reports
-# 14/15-style equivalence with C2 acceptance until C5 lands; when
-# C5 ships ALWAYS_PINNED, BOTH variants flip green simultaneously
-# and the strict-xfail trips loudly to remind us to remove the
-# decorator.
+# C5 added ``request_tool`` to ALWAYS_PINNED. Both legacy and
+# decoupled paths now surface it on every turn — the strict-xfail
+# on the legacy variant (added at C2) was removed when C5 landed.
 # ---------------------------------------------------------------------------
 
 
-REQUEST_TOOL_PATHS = [
-    pytest.param(
-        False,
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason=(
-                "request_tool is not in ALWAYS_PINNED today on either "
-                "path; the C5 work adds it. Remove this xfail when C5 "
-                "lands; both variants will flip green simultaneously."
-            ),
-        ),
-        id="legacy",
-    ),
-    pytest.param(True, id="decoupled"),
-]
-
-
-@pytest.mark.parametrize("decoupled", REQUEST_TOOL_PATHS)
+@pytest.mark.parametrize("decoupled", PATHS)
 async def test_request_tool_present(decoupled, monkeypatch):
     handler, mock_provider = _make_handler(
         decoupled=decoupled, monkeypatch=monkeypatch,

@@ -410,17 +410,15 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="ALWAYS_PINNED",
         source_kind="constant",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C5",
+        wiring_state="wired",
         notes=(
-            "Tuple of tool SCHEMAS (dicts) — what the model invocation's "
-            "tools= argument needs. The ALWAYS_PINNED constant is a "
-            "set[str] of names; populate_field resolves names to schemas "
-            "via the assembly's _kernel_tool_map (assemble.py:490-526). "
-            "Schema resolution requires constructing _kernel_tool_map; "
-            "deferred to C5 alongside the thin-path tool surface "
-            "definition. Type alignment is the C1 Codex-review BLOCKER "
-            "fold."
+            "Tuple of tool SCHEMAS (dicts) — the always-loaded subset of "
+            "ctx.tools matching the ALWAYS_PINNED name set. C5 wiring "
+            "reads from PopulationContext.tool_surface_pinned (assembly "
+            "partitions ctx.tools using the ALWAYS_PINNED set). "
+            "PresenceRenderer reads tool_surface.all_tools() and passes "
+            "to chain_caller's tools= argument (replaces the empty list "
+            "the renderer used pre-C5)."
         ),
     ),
     "tool_surface.active_zone": FieldProvenance(
@@ -429,16 +427,13 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="ToolCatalog.build_catalog_text",
         source_kind="method",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C5",
+        wiring_state="wired",
         notes=(
-            "Surfacer-selected tools for the active turn intent + scope "
-            "chain. The surfacer logic itself lives inline in "
-            "assemble.py:528-705 today (an LLM call selecting tool names "
-            "from build_catalog_text's output). C5 either factors that "
-            "into a method on ToolCatalog or pins the inline path here. "
-            "The build_catalog_text method is the canonical input the "
-            "surfacer reads, so its presence is what the C1 test pins."
+            "Surfacer-selected tools — the rest of ctx.tools beyond "
+            "the always_pinned subset. C5 wiring reads from "
+            "PopulationContext.tool_surface_active (assembly partitions "
+            "ctx.tools using the ALWAYS_PINNED set; everything not in "
+            "always_pinned lands here)."
         ),
     ),
     "tool_surface.request_tool": FieldProvenance(
@@ -589,6 +584,13 @@ class PopulationContext:
     # (legacy doesn't render gardener observations).
     gardener_observations: tuple[dict[str, Any], ...] = ()
 
+    # C5 additions — tool surface partitions. Assembly partitions
+    # ctx.tools using the ALWAYS_PINNED name set: schemas whose name
+    # is in ALWAYS_PINNED land in ``tool_surface_pinned``; the rest
+    # (surfacer-selected dynamic zone) lands in ``tool_surface_active``.
+    tool_surface_pinned: tuple[dict[str, Any], ...] = ()
+    tool_surface_active: tuple[dict[str, Any], ...] = ()
+
 
 async def populate_field(name: str, ctx: PopulationContext) -> Any:
     """Resolve a packet field from its documented source.
@@ -706,6 +708,10 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
         return dict(ctx.disclosure_layer or {})
     if name == "safety_constraints.cross_member_rules":
         return tuple(ctx.cross_member_rules or ())
+    if name == "tool_surface.always_pinned":
+        return tuple(ctx.tool_surface_pinned or ())
+    if name == "tool_surface.active_zone":
+        return tuple(ctx.tool_surface_active or ())
     if name == "tool_surface.request_tool":
         from kernos.kernel.tools.schemas import REQUEST_TOOL
         return REQUEST_TOOL

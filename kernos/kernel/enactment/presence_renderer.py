@@ -714,9 +714,8 @@ class PresenceRenderer:
         """
         kind = briefing.decided_action.kind
         kind_prompt = _system_prompt_for_kind(kind)
-        substrate = _render_substrate(
-            getattr(briefing, "cognitive_context", None)
-        )
+        packet = getattr(briefing, "cognitive_context", None)
+        substrate = _render_substrate(packet)
         # C3c: combine substrate + kind prompt + additive directive
         # in the FINAL system render. The directive is turn-local
         # framing posture; substrate is the cognitive primitive. Both
@@ -733,7 +732,23 @@ class PresenceRenderer:
             system_parts.append(f"## Directive\n{directive_text}")
         system = "\n\n".join(system_parts)
         user_message = _user_message_for_briefing(briefing)
-        return await self._render(system, user_message)
+        # C5: thin-path tool surface. PresenceRenderer's chain_caller
+        # used to receive an empty tools list — the load-bearing bug
+        # CCV1 C5 closes. The packet's tool_surface.all_tools()
+        # returns ALWAYS_PINNED + active_zone + request_tool (deduped),
+        # which the renderer now passes to the chain. Pre-C3a callers
+        # with packet=None see no tools (unchanged behavior).
+        tool_list: tuple[dict, ...] = ()
+        if packet is not None:
+            tool_surface = getattr(packet, "tool_surface", None)
+            if tool_surface is not None:
+                try:
+                    tool_list = tool_surface.all_tools()
+                except Exception:
+                    tool_list = ()
+        return await self._render(
+            system, user_message, tools=tool_list,
+        )
 
     async def render_b2(
         self, briefing: Briefing, safe: B2RenderInputs
@@ -756,17 +771,27 @@ class PresenceRenderer:
         return await self._render(system, user_message)
 
     async def _render(
-        self, system: str, user_message: str
+        self,
+        system: str,
+        user_message: str,
+        *,
+        tools: list[dict] | tuple[dict, ...] = (),
     ) -> PresenceRenderResult:
         """Internal helper: invoke the chain and extract text.
 
         Streaming flag: defaults to False here. Production wiring
         (IWL C5) wraps this call in an adapter that streams to the
         user-facing surface and sets the flag accordingly.
+
+        COGNITIVE-CONTEXT-V1 C5: ``tools`` is now a deliberate
+        argument (defaults to empty for backward compat with the
+        B1 / B2 paths that don't surface tools). Thin-path render()
+        passes the tool surface from ``briefing.cognitive_context``;
+        legacy / pre-C5 callers see empty tools, unchanged.
         """
         messages: list[dict] = [{"role": "user", "content": user_message}]
         response = await self._chain_caller(
-            system, messages, [], self._max_tokens
+            system, messages, list(tools), self._max_tokens
         )
         text = _extract_text_from_response(response)
         return PresenceRenderResult(text=text, streamed=False)

@@ -881,6 +881,24 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                 )
             except Exception:
                 _channel_records = ()
+        # C5: partition ctx.tools into the always-pinned subset
+        # (matching ALWAYS_PINNED + request_tool) and the
+        # surfacer-selected active zone. PresenceRenderer reads
+        # tool_surface.all_tools() and passes to chain_caller's
+        # tools= argument (replaces the empty list pre-C5).
+        from kernos.kernel.tool_catalog import (
+            ALWAYS_PINNED as _ALWAYS_PINNED,
+        )
+        _tool_surface_pinned: tuple = tuple(
+            t for t in (ctx.tools or [])
+            if isinstance(t, dict) and t.get("name") in _ALWAYS_PINNED
+        )
+        _tool_surface_active: tuple = tuple(
+            t for t in (ctx.tools or [])
+            if not (
+                isinstance(t, dict) and t.get("name") in _ALWAYS_PINNED
+            )
+        )
         # C3b: derive sensitivity gates from the surfaced knowledge
         # entries (entries the disclosure gate already passed; this
         # field carries residual policy data the model must reason
@@ -1009,6 +1027,9 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             sensitivity_gates=_sensitivity_gates,
             disclosure_layer=dict(_disclosure_layer),
             cross_member_rules=_cross_member_rules,
+            # C5 additions — tool surface partitions.
+            tool_surface_pinned=_tool_surface_pinned,
+            tool_surface_active=_tool_surface_active,
         )
         ctx.cognitive_context = await populate_packet(_pop_ctx)
     except Exception as exc:
