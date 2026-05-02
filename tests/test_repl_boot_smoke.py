@@ -11,7 +11,7 @@ provider so:
 * CC catches boot-time issues that don't surface until a turn is
   actually processed (import cycles, dataclass misuse, missing
   service wiring, etc.) without spending real LLM tokens.
-* The REPL the founder uses for soak is exercised in CI, so a
+* The REPL the operator uses for soak is exercised in CI, so a
   regression that breaks the dev-soak path fails the build.
 
 These tests also validate the load-bearing CCV1 invariant from
@@ -321,10 +321,10 @@ async def test_select_member_returns_repl_identity_with_repl_platform(isolated_e
         "kernos.providers.chains.build_chains_from_env",
         return_value=(chains, None),
     ):
-        handler = await build_dev_handler(sender="founder")
+        handler = await build_dev_handler(sender="operator")
     try:
         # Single-member auto-selection path. ensure_owner ran at boot
-        # because the instance had no members yet, so the founder is
+        # because the instance had no members yet, so the operator is
         # registered with a repl channel.
         identity = await select_member(handler, explicit_sender=None)
         assert isinstance(identity, ReplIdentity)

@@ -38,7 +38,7 @@
 # KERNOS_REPL_SENDER to bypass the prompt (useful for piped
 # input):
 #
-#   echo "Hello" | KERNOS_REPL_SENDER=founder ./cli.sh
+#   echo "Hello" | KERNOS_REPL_SENDER=operator ./cli.sh
 #
 # Once a CLI subcommand layer ships (kernos repl --member ...),
 # this launcher will wrap it; today it invokes ``python -m
@@ -91,7 +91,7 @@ echo "  instance_id = $KERNOS_INSTANCE_ID"
 echo "  decoupled   = $KERNOS_USE_DECOUPLED_TURN_RUNNER"
 echo
 echo "Tip: pipe input with"
-echo "  echo 'your message' | KERNOS_REPL_SENDER=founder ./cli.sh"
+echo "  echo 'your message' | KERNOS_REPL_SENDER=operator ./cli.sh"
 echo
 
 # Run the REPL. Today this is python -m kernos.repl; once a CLI

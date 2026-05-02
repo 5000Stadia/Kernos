@@ -4,7 +4,7 @@ A self-contained CLI that boots Kernos with the same production
 wiring as ``server.py`` (decoupled cognitive substrate path,
 ReasoningService + per-turn TurnRunner factory, MessageHandler)
 but skips the Discord / SMS / Telegram adapter registration. Lets
-the founder talk to a dev Kernos instance directly without
+the operator talk to a dev Kernos instance directly without
 setting up second platform credentials, AND gives CC a
 programmatic boot path for smoke tests against the real boot
 (not the unit-test ``_make_handler`` mock).
@@ -20,7 +20,7 @@ same shape production runs.
 
 Two consumers:
 
-* **Founder REPL** — ``python -m kernos.repl`` reads stdin, sends
+* **Operator REPL** — ``python -m kernos.repl`` reads stdin, sends
   each line as a normalized message, prints the response. Used
   for the CCV1 C6 soak runbook scenarios.
 * **CC smoke test** — ``build_dev_handler()`` is a public seam.
@@ -107,7 +107,7 @@ async def build_dev_handler(
     instance_id: str | None = None,
     decoupled: bool = True,
     sender: str | None = None,
-    sender_display_name: str = "founder",
+    sender_display_name: str = "operator",
 ) -> Any:
     """Boot Kernos for REPL / smoke-test use. Returns a wired
     ``MessageHandler`` ready to call ``handler.process(message)``.
@@ -125,9 +125,9 @@ async def build_dev_handler(
       sender: the platform sender id for the REPL user. Pre-registered
         as the instance's owner so the abuse-prevention guard doesn't
         block the very first message. Defaults to
-        ``KERNOS_REPL_SENDER`` env or ``"founder"``.
+        ``KERNOS_REPL_SENDER`` env or ``"operator"``.
       sender_display_name: the display name to associate with the
-        registered owner. Defaults to ``"founder"``.
+        registered owner. Defaults to ``"operator"``.
 
     Returns: a ``MessageHandler`` instance with full reasoning, state,
     capability registry, and substrate wiring. Adapter registration is
@@ -216,21 +216,39 @@ async def build_dev_handler(
     except Exception as exc:
         logger.warning("repl: instance_db init failed (non-fatal): %s", exc)
 
-    # Codex C5-review CONCERN (Q4) fold: only ensure_owner when the
-    # instance has NO members yet. Previous behavior bound an
-    # arbitrary ``sender`` channel to the owner role at boot,
-    # regardless of whether the operator intended to act as a
-    # different member after selection. Owner pre-registration is
-    # only the "fresh-instance founder boots up" affordance. After
-    # boot, ``select_member`` handles binding the chosen sender to
-    # the selected member's repl channel — which may NOT be the
-    # owner.
+    # Bootstrap sender registration — only when the sender's
+    # channel isn't already bound. This is the right semantic for
+    # both Codex's CONCERN (don't over-bind operator-chosen senders
+    # to the owner role) and the practical REPL need (the
+    # abuse-prevention guard requires the sender to resolve to
+    # SOMEBODY).
+    #
+    # Three cases:
+    #
+    # 1. Sender already registered (for any member): no-op. The
+    #    operator picked an existing identity (e.g.,
+    #    ``KERNOS_REPL_SENDER=mem_xyz`` for a non-owner soak run).
+    #    ``select_member`` will resolve it to the right member;
+    #    no over-binding to owner occurs.
+    # 2. Sender NOT registered, instance has no owner yet (truly
+    #    fresh): ``ensure_owner`` creates the owner with this
+    #    sender as their repl channel. Standard fresh-operator
+    #    bootstrap.
+    # 3. Sender NOT registered, instance already has an owner
+    #    (e.g., a prod-derived data dir that hasn't seen REPL
+    #    use): ``ensure_owner`` registers the sender as an
+    #    additional repl channel for the existing owner. The
+    #    operator implicitly chose to act as the instance owner
+    #    by not picking a specific channel — this is the right
+    #    default for REPL.
+    _bootstrap_sender = sender or os.getenv("KERNOS_REPL_SENDER", "operator")
     try:
-        existing_members = await instance_db.list_members()
+        existing_for_channel = await instance_db.get_member_by_channel(
+            "repl", _bootstrap_sender,
+        )
     except Exception:
-        existing_members = []
-    if not existing_members:
-        _bootstrap_sender = sender or os.getenv("KERNOS_REPL_SENDER", "founder")
+        existing_for_channel = None
+    if existing_for_channel is None:
         try:
             await instance_db.ensure_owner(
                 member_id="",  # ensure_owner derives stable id
@@ -494,7 +512,7 @@ async def shutdown_dev_handler(handler: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# REPL loop — the founder-facing interactive surface
+# REPL loop — the operator-facing interactive surface
 # ---------------------------------------------------------------------------
 
 
@@ -544,7 +562,7 @@ async def select_member(
 
     1. If ``explicit_sender`` is non-empty, use it verbatim AS the
        repl channel id. Caller passed a specific identifier they
-       know is registered (default ``"founder"`` from .env, an
+       know is registered (default ``"operator"`` from .env, an
        explicit override, or CC's piped-input usage).
     2. If exactly one member exists on the instance, auto-select it.
     3. Otherwise, prompt for a selection. Codex C5-review fold:
@@ -593,7 +611,7 @@ async def select_member(
     if explicit_sender:
         # The caller asserts this sender is a valid repl channel.
         # The match path: caller is using KERNOS_REPL_SENDER from
-        # .env / shell (likely ``founder`` from the fresh-instance
+        # .env / shell (likely ``operator`` from the fresh-instance
         # ensure_owner path). Look up the member by repl channel
         # if possible; fall back to using the sender verbatim.
         if instance_db is not None:
@@ -619,8 +637,8 @@ async def select_member(
 
     if instance_db is None:
         return ReplIdentity(
-            member_id="", display_name="founder",
-            platform="repl", channel_id="founder",
+            member_id="", display_name="operator",
+            platform="repl", channel_id="operator",
         )
 
     try:
@@ -630,14 +648,14 @@ async def select_member(
 
     if not members:
         return ReplIdentity(
-            member_id="", display_name="founder",
-            platform="repl", channel_id="founder",
+            member_id="", display_name="operator",
+            platform="repl", channel_id="operator",
         )
 
     if len(members) == 1:
         m = members[0]
         channel_id = await _ensure_repl_channel(m)
-        display = m.get("display_name", "") or m.get("member_id", "founder")
+        display = m.get("display_name", "") or m.get("member_id", "operator")
         print(f"REPL: auto-selected sole member: {display} ({channel_id})")
         return ReplIdentity(
             member_id=m.get("member_id", ""),
@@ -793,7 +811,7 @@ async def main() -> int:
     explicit_sender = os.getenv("KERNOS_REPL_SENDER", "")
     handler = await build_dev_handler(
         instance_id=instance_id,
-        sender=explicit_sender or "founder",
+        sender=explicit_sender or "operator",
     )
     identity = await select_member(
         handler, explicit_sender=explicit_sender or None,
