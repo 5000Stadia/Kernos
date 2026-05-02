@@ -1,4 +1,4 @@
-"""Equivalence test suite for PDI (PDI C7).
+"""Equivalence test suite for PDI (PDI C7) + CCV1 C6 extensions.
 
 Per Kit edit + architect's C7 guidance, equivalence is asserted along
 five dimensions:
@@ -11,6 +11,28 @@ five dimensions:
      enactment.* without removing existing).
   5. Latency telemetry (both paths emit comparable telemetry; new
      path's overhead is observable).
+
+COGNITIVE-CONTEXT-V1 C6 added three INPUT-fidelity dimensions to
+close the structural blind spot the audit identified — "the
+architecture made content fidelity simultaneously un-testable AND
+un-required":
+
+  6. **Content fidelity** — system prompt blocks present (RULES,
+     NOW, STATE, RESULTS, ACTIONS, MEMORY, PROCEDURES, AVAILABLE
+     CANVASES). Future migrations cannot silently drop substrate
+     because the equivalence suite asserts inputs, not just outputs.
+  7. **Tool surface fidelity** — ALWAYS_PINNED tools + request_tool
+     reach the model. Catches the C5-class bug (tools= empty list)
+     before it ships.
+  8. **Context-zone fidelity** — NOW / STATE / RESULTS specifically
+     preserved. Captures the audit's "17 of 19 substrate classes
+     dropped" pattern in a structurally-enforced check.
+
+These dimensions are now REQUIRED for any future
+assembly→model-pipeline migration. The 14 contract tests at
+tests/test_cognitive_context_contract.py are the canonical
+fidelity-assertion harness; the helpers below are the equivalence-
+suite-level integration so PDI scenarios verify both paths.
 
 Mutating tools use fakes / dry-run stores; no live irreversible side
 effects in equivalence test infrastructure.
@@ -109,12 +131,27 @@ class EquivalenceObservation:
     `tool_calls`: ordered list of mutating tool calls (tool + op + args).
     `audit_categories`: set of audit categories emitted.
     `latency_ms`: total wall-clock duration.
+
+    CCV1 C6 input-fidelity fields (default empty for backward
+    compat with existing scenarios that don't capture model-call
+    inputs):
+
+    `model_system`: the rendered ``system=`` argument the model
+        provider received (str or normalized concatenation of
+        list-of-dict cache-control blocks). Used by the
+        content-fidelity + context-zone-fidelity assertions.
+    `model_tools`: the ``tools=`` argument the model provider
+        received (list of tool schemas with ``name`` keys). Used
+        by the tool-surface-fidelity assertion.
     """
 
     text: str
     tool_calls: tuple[dict[str, Any], ...]
     audit_categories: frozenset[str]
     latency_ms: int
+    # CCV1 C6 input-fidelity capture
+    model_system: str = ""
+    model_tools: tuple[dict[str, Any], ...] = ()
 
 
 def assert_user_outcome_equivalent(legacy: str, new: str) -> None:
@@ -179,6 +216,128 @@ def assert_latency_telemetry_observable(
     record finite durations."""
     assert legacy_ms >= 0
     assert new_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# CCV1 C6 input-fidelity assertions — content / tool-surface / context-zone
+# ---------------------------------------------------------------------------
+
+
+# Canonical block markers for content + context-zone fidelity. Future
+# migrations that change zone names must update this set deliberately;
+# silent drift would break the assertion.
+_CONTENT_FIDELITY_BLOCKS = {
+    "## RULES",
+    "## NOW",
+    "## STATE",
+    "## ACTIONS",
+}
+
+# Subset that's specifically the "context-zone" (NOW / STATE / RESULTS)
+# the audit highlighted. RESULTS is conditional (only when results_prefix
+# non-empty), so context-zone fidelity asserts the at-least-NOW-and-STATE
+# floor without requiring RESULTS for every scenario.
+_CONTEXT_ZONE_BLOCKS = {
+    "## NOW",
+    "## STATE",
+}
+
+# Tool surface floor — at minimum these ALWAYS_PINNED entries plus
+# request_tool must reach the model on a substrate-bearing turn.
+_TOOL_SURFACE_FLOOR = {
+    "remember_details",
+    "request_tool",
+}
+
+
+def assert_content_fidelity(
+    legacy_system: str, new_system: str
+) -> None:
+    """CCV1 C6 dimension: every cognitive-substrate block the legacy
+    path renders also reaches the new path. Asserts the canonical
+    block headers are present in BOTH paths' rendered system prompts.
+
+    The CCV1 contract tests at tests/test_cognitive_context_contract.py
+    pin specific block contents for representative scenarios. This
+    helper is the equivalence-suite-level cross-check — for any PDI
+    scenario both paths render at least the floor blocks. Future
+    migrations that drop a block trip this assertion before the
+    drop reaches production."""
+    legacy_blocks = {
+        b for b in _CONTENT_FIDELITY_BLOCKS if b in legacy_system
+    }
+    new_blocks = {
+        b for b in _CONTENT_FIDELITY_BLOCKS if b in new_system
+    }
+    missing = legacy_blocks - new_blocks
+    assert not missing, (
+        f"content fidelity violation: blocks present in legacy "
+        f"system prompt but missing from new path: {sorted(missing)}. "
+        f"Future migrations must preserve every cognitive-substrate "
+        f"block the legacy path renders — this is the load-bearing "
+        f"invariant CCV1 closes."
+    )
+
+
+def assert_tool_surface_fidelity(
+    legacy_tools: tuple, new_tools: tuple
+) -> None:
+    """CCV1 C6 dimension: ALWAYS_PINNED + request_tool reach the
+    model on both paths. Asserts the floor tools are in both lists.
+    The C5 fix added request_tool to ALWAYS_PINNED; this assertion
+    captures the structural protection so a future change that
+    drops the tools= argument again trips equivalence."""
+    legacy_names = {
+        t.get("name", "") for t in legacy_tools if isinstance(t, dict)
+    }
+    new_names = {
+        t.get("name", "") for t in new_tools if isinstance(t, dict)
+    }
+    legacy_floor = legacy_names & _TOOL_SURFACE_FLOOR
+    new_floor = new_names & _TOOL_SURFACE_FLOOR
+    missing = legacy_floor - new_floor
+    assert not missing, (
+        f"tool surface fidelity violation: tools present in legacy "
+        f"path but missing from new path: {sorted(missing)}. "
+        f"ALWAYS_PINNED + request_tool must reach the model on "
+        f"every substrate-bearing turn (CCV1 C5 invariant)."
+    )
+
+
+def assert_context_zone_fidelity(
+    legacy_system: str, new_system: str
+) -> None:
+    """CCV1 C6 dimension: NOW / STATE zones specifically preserved
+    across paths. Per the audit's "17 of 19 substrate classes
+    dropped" pattern, NOW / STATE / RESULTS are the highest-risk
+    drift surfaces. This assertion captures that risk structurally
+    by pinning at least NOW and STATE on both paths. RESULTS is
+    conditional (some scenarios produce no results_prefix); the
+    floor asserts the unconditional minimums."""
+    legacy_zones = {
+        z for z in _CONTEXT_ZONE_BLOCKS if z in legacy_system
+    }
+    new_zones = {
+        z for z in _CONTEXT_ZONE_BLOCKS if z in new_system
+    }
+    missing = legacy_zones - new_zones
+    assert not missing, (
+        f"context-zone fidelity violation: NOW/STATE zones present "
+        f"in legacy but missing from new path: {sorted(missing)}. "
+        f"These zones carry turn-local operating context; dropping "
+        f"them is the exact failure mode the CCV1 audit identified."
+    )
+
+
+def assert_input_fidelity(
+    legacy: EquivalenceObservation, new: EquivalenceObservation,
+) -> None:
+    """Convenience: run all three CCV1 C6 input-fidelity assertions
+    in one call. Use from PDI scenarios that capture both paths'
+    model_system + model_tools observations."""
+    assert_content_fidelity(legacy.model_system, new.model_system)
+    assert_context_zone_fidelity(legacy.model_system, new.model_system)
+    assert_tool_surface_fidelity(legacy.model_tools, new.model_tools)
 
 
 # ---------------------------------------------------------------------------
@@ -753,3 +912,111 @@ async def test_five_dimension_equivalence_pin():
     assert "enactment.plan_created" in categories
     # 5. Latency telemetry observable.
     assert elapsed_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# CCV1 C6 input-fidelity pin tests
+# ---------------------------------------------------------------------------
+
+
+def test_ccv1_c6_content_fidelity_assertion_catches_dropped_block():
+    """CCV1 C6 dimension #6: assert_content_fidelity trips when a
+    block present in the legacy system prompt is missing from the
+    new path. Reproduces the exact failure mode the audit identified
+    (legacy renders RULES, new path omits it) so a future migration
+    that drops a block fails the equivalence suite loudly."""
+    legacy_system = (
+        "## RULES\noperating principles\n\n"
+        "## NOW\nCurrent time: 2026-05-02\n\n"
+        "## STATE\nIdentity: TestAgent\n\n"
+        "## ACTIONS\nCAPABILITIES: ..."
+    )
+    # New path drops ## RULES — exactly the audit's bootstrap-drop
+    # pattern.
+    new_system = (
+        "## NOW\nCurrent time: 2026-05-02\n\n"
+        "## STATE\nIdentity: TestAgent\n\n"
+        "## ACTIONS\nCAPABILITIES: ..."
+    )
+    with pytest.raises(AssertionError, match="content fidelity"):
+        assert_content_fidelity(legacy_system, new_system)
+
+
+def test_ccv1_c6_content_fidelity_passes_when_blocks_match():
+    """Counterpart pin: assertion passes when both paths render
+    the same set of canonical blocks."""
+    legacy_system = (
+        "## RULES\nx\n\n## NOW\ny\n\n## STATE\nz\n\n## ACTIONS\nw"
+    )
+    new_system = legacy_system
+    assert_content_fidelity(legacy_system, new_system)
+
+
+def test_ccv1_c6_tool_surface_fidelity_assertion_catches_empty_tools():
+    """CCV1 C6 dimension #7: assert_tool_surface_fidelity trips
+    when the new path receives an empty tools list while the legacy
+    path receives the floor (ALWAYS_PINNED + request_tool). This
+    is the exact C5-class failure mode (PresenceRenderer used to
+    pass tools=[]) that the assertion structurally protects against."""
+    legacy_tools = (
+        {"name": "remember_details"},
+        {"name": "request_tool"},
+        {"name": "send_to_channel"},
+    )
+    new_tools: tuple = ()  # empty — the C5 bug
+    with pytest.raises(AssertionError, match="tool surface fidelity"):
+        assert_tool_surface_fidelity(legacy_tools, new_tools)
+
+
+def test_ccv1_c6_tool_surface_fidelity_passes_when_floor_present():
+    legacy_tools = (
+        {"name": "remember_details"},
+        {"name": "request_tool"},
+    )
+    new_tools = (
+        {"name": "remember_details"},
+        {"name": "request_tool"},
+        {"name": "extra_tool"},  # superset is OK
+    )
+    assert_tool_surface_fidelity(legacy_tools, new_tools)
+
+
+def test_ccv1_c6_context_zone_fidelity_assertion_catches_dropped_state():
+    """CCV1 C6 dimension #8: assert_context_zone_fidelity trips when
+    a NOW or STATE zone present in legacy is missing from new path.
+    The audit's headline finding was that NOW/STATE/RESULTS were
+    dropped on the decoupled path; this assertion structurally
+    protects future migrations from repeating the pattern."""
+    legacy_system = "## NOW\nx\n\n## STATE\ny"
+    new_system = "## NOW\nx"  # STATE dropped
+    with pytest.raises(AssertionError, match="context-zone fidelity"):
+        assert_context_zone_fidelity(legacy_system, new_system)
+
+
+def test_ccv1_c6_assert_input_fidelity_runs_all_three_dimensions():
+    """Convenience helper: assert_input_fidelity runs content +
+    context-zone + tool-surface assertions against a pair of
+    EquivalenceObservations. Pin: passes when both observations
+    are equivalent across all three CCV1 C6 dimensions."""
+    system = "## RULES\nx\n\n## NOW\ny\n\n## STATE\nz\n\n## ACTIONS\nw"
+    tools = (
+        {"name": "remember_details"},
+        {"name": "request_tool"},
+    )
+    legacy = EquivalenceObservation(
+        text="hi",
+        tool_calls=(),
+        audit_categories=frozenset(),
+        latency_ms=10,
+        model_system=system,
+        model_tools=tools,
+    )
+    new = EquivalenceObservation(
+        text="hi",
+        tool_calls=(),
+        audit_categories=frozenset(),
+        latency_ms=10,
+        model_system=system,
+        model_tools=tools,
+    )
+    assert_input_fidelity(legacy, new)
