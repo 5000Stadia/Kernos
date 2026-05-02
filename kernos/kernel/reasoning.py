@@ -101,6 +101,16 @@ class ReasoningRequest:
     #    "override_model": str | None, "set_at": str}
     # Consumed by _call_chain via resolve_effective_chain.
     model_override: dict | None = None
+    # COGNITIVE-CONTEXT-V1 C3a: typed cognitive substrate constructed
+    # by the assemble phase. The decoupled path threads this through
+    # _run_via_turn_runner_provider -> TurnRunnerInputs -> Integration
+    # -> Briefing -> PresenceRenderer. Legacy path keeps consuming
+    # system_prompt_static / system_prompt_dynamic strings (dual
+    # carry per Codex C3a-design Q4 — legacy as oracle, packet as
+    # canonical for decoupled). Optional + default-None preserves
+    # backward compat for non-handler ReasoningRequest construction
+    # sites (scheduler, plan execution, test fixtures).
+    cognitive_context: Any = None
 
 
 # GateResult and ApprovalToken extracted to kernos/kernel/gate.py (re-exported above)
@@ -3263,6 +3273,11 @@ class ReasoningService:
             active_space_ids=(
                 (request.active_space_id,) if request.active_space_id else ()
             ),
+            # COGNITIVE-CONTEXT-V1 C3a: thread the typed packet from
+            # ReasoningRequest into TurnRunnerInputs so the runner
+            # can pass it through to IntegrationInputs and onwards
+            # to Briefing.cognitive_context for the renderer.
+            cognitive_context=getattr(request, "cognitive_context", None),
         )
         outcome = await turn_runner.run_turn(inputs)
         # When the response_delivery hook is wired correctly, the
@@ -3307,6 +3322,7 @@ class ReasoningService:
             active_space_ids=(
                 (request.active_space_id,) if request.active_space_id else ()
             ),
+            cognitive_context=getattr(request, "cognitive_context", None),
         )
         outcome = await self._turn_runner.run_turn(inputs)
         # The translation back to ReasoningResult is the response-

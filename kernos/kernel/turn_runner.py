@@ -151,6 +151,12 @@ class TurnRunnerInputs:
     integration_active_spaces: tuple[dict[str, Any], ...] = ()
     surfaced_tools: tuple = ()
     produced_at: str = ""
+    # COGNITIVE-CONTEXT-V1 C3a: typed cognitive substrate carried
+    # alongside the existing inputs. The runner threads this into
+    # IntegrationInputs so integration's runner (real or stub) can
+    # copy it onto Briefing for the renderer. Optional + default-
+    # None preserves backward compat for existing callers.
+    cognitive_context: Any = None
 
     @staticmethod
     def from_api_messages(
@@ -164,6 +170,7 @@ class TurnRunnerInputs:
         active_space_ids: tuple[str, ...] = (),
         surfaced_tools: tuple = (),
         produced_at: str = "",
+        cognitive_context: Any = None,
     ) -> "TurnRunnerInputs":
         """Build inputs from the API-message thread shape callers
         usually have on hand. Synthesises cohort-shaped Turn entries
@@ -195,6 +202,7 @@ class TurnRunnerInputs:
             integration_active_spaces=integration_spaces,
             surfaced_tools=surfaced_tools,
             produced_at=produced_at,
+            cognitive_context=cognitive_context,
         )
 
 
@@ -294,6 +302,7 @@ class TurnRunner:
             instance_id=inputs.instance_id,
             space_id=inputs.space_id,
             turn_id=inputs.turn_id,
+            cognitive_context=inputs.cognitive_context,
         )
         return await self._integration_service.run(integration_inputs)
 

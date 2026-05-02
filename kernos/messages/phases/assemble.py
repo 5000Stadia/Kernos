@@ -794,6 +794,82 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     ctx.system_prompt_dynamic = _compose_blocks(now_block, state_block, results, procedures, canvases, memory)
     ctx.system_prompt = _compose_blocks(ctx.system_prompt_static, ctx.system_prompt_dynamic)
 
+    # COGNITIVE-CONTEXT-V1 C3a: construct the typed cognitive substrate
+    # alongside legacy string assembly. Codex C3a-design Q2: assembly
+    # owns the selected/filtered substrate; populate the packet from
+    # already-loaded locals rather than re-querying the substrate.
+    # Q4 (dual carry): legacy strings remain canonical for the legacy
+    # path; the packet is canonical for the decoupled path. Both are
+    # produced here from the same source data.
+    try:
+        from kernos.kernel.cognitive_context.field_provenance import (
+            PopulationContext,
+            populate_packet,
+        )
+        from kernos.utils import utc_now_dt
+        _channel_records: tuple = ()
+        if handler._channel_registry is not None:
+            try:
+                _channel_records = tuple(
+                    handler._channel_registry.get_outbound_capable()
+                )
+            except Exception:
+                _channel_records = ()
+        _pop_ctx = PopulationContext(
+            instance_id=instance_id,
+            member_id=ctx.member_id,
+            space_id=active_space_id or "",
+            state_store=handler.state,
+            instance_db=getattr(handler, "_instance_db", None),
+            handler=handler,
+            user_timezone=(
+                (ctx.member_profile or {}).get("timezone", "")
+                or soul.timezone
+            ),
+            platform=message.platform,
+            auth_level=str(message.sender_auth_level.value),
+            timestamp_utc=utc_now_dt(),
+            active_space_name=(
+                active_space.name if active_space else ""
+            ),
+            member_display_name=(
+                (ctx.member_profile or {}).get("display_name", "")
+                or soul.user_name
+            ),
+            agent_name=(
+                (ctx.member_profile or {}).get("agent_name", "")
+                or soul.agent_name
+            ),
+            execution_envelope=_exec_envelope,
+            member_profile=dict(ctx.member_profile or {}),
+            soul=soul,
+            covenants=tuple(contract_rules),
+            space_names=dict(_space_names),
+            instance_stewardship=_stewardship,
+            relationships=tuple(_rels),
+            knowledge_entries=tuple(user_knowledge_entries or ()),
+            results_prefix=ctx.results_prefix or "",
+            capability_prompt=capability_prompt,
+            channel_registry=_channel_records,
+            compaction_carry=ctx.memory_prefix or "",
+            awareness_whispers=(),  # C3a: fields populated; renderer
+            # uses them at later phases. Empty here keeps the packet
+            # shape correct without re-walking awareness substrate
+            # (already rendered into ctx.results_prefix by the legacy
+            # path).
+            conversation_messages=tuple(ctx.messages or ()),
+        )
+        ctx.cognitive_context = await populate_packet(_pop_ctx)
+    except Exception as exc:
+        # Construction of the packet is best-effort during the C3a
+        # rollout — if anything goes wrong, the legacy strings still
+        # carry the substrate so the legacy path is unaffected. Log
+        # so the gap surfaces in operator telemetry.
+        logger.warning(
+            "COGNITIVE_CONTEXT_C3A_CONSTRUCT_FAILED: %s", exc, exc_info=True,
+        )
+        ctx.cognitive_context = None
+
     # Developer mode: inject pending errors
     instance_profile = await handler.state.get_instance_profile(instance_id)
     if instance_profile and getattr(instance_profile, 'developer_mode', False):

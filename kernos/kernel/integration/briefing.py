@@ -1331,6 +1331,13 @@ class Briefing:
     turn_id: str = ""
     integration_run_id: str = ""
     action_envelope: ActionEnvelope | None = None
+    # COGNITIVE-CONTEXT-V1 C3a: typed cognitive substrate carried
+    # alongside presence_directive. PresenceRenderer (C3c) consumes
+    # both — substrate flows through the packet, behavioral framing
+    # flows through the directive. Optional + default-None for
+    # backward compat with existing Briefing construction sites
+    # (fail-soft path, tests, integration runner pre-C3a).
+    cognitive_context: Any = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.relevant_context, tuple):

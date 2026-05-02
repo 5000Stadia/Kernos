@@ -204,6 +204,12 @@ class _StubIntegrationService:
             audit_trace=AuditTrace(),
             turn_id="turn-contract",
             integration_run_id="ir-contract",
+            # COGNITIVE-CONTEXT-V1 C3a: copy the typed packet from
+            # IntegrationInputs onto the Briefing so PresenceRenderer
+            # can render its substrate. The real IntegrationService
+            # does the same at every Briefing construction site
+            # (see kernos/kernel/integration/runner.py).
+            cognitive_context=getattr(inputs, "cognitive_context", None),
         )
 
 
@@ -1173,18 +1179,22 @@ async def test_request_tool_present(decoupled, monkeypatch):
 # Test 14 — presence_directive ADDITIVELY (not replacing substrate)
 # Source: Architectural mental-model mismatch reconciliation. Green at: C3c.
 #
-# Codex C2-review CONCERN: original test only proved substrate
-# reached model — it would catch "directive replaced substrate" but
-# not "substrate replaced directive." The spec says
-# presence_directive is additive and "MUST NOT be the only carrier"
-# for substrate; equally, substrate must not strip the directive.
-# This version asserts BOTH:
+# Asserts both halves:
 #   1. the substrate (operating_principles head) reaches ``system``
-#   2. the presence_directive marker reaches model on the decoupled
-#      path (today via ``messages``; C3c will route it through
-#      ``system`` rendering)
+#   2. on the decoupled path, the presence_directive marker also
+#      reaches ``system`` — NOT messages. C3c is the phase that
+#      combines substrate + directive into a single deliberate
+#      system render; until C3c the directive lives in the user-
+#      message body and this half stays red.
 # Legacy doesn't produce a presence_directive at all, so the
 # directive-side assertion runs only on the decoupled path.
+#
+# Codex C3a-design CONCERN (Q5): the prior fold accepted directive
+# in ``system OR messages`` which would have flipped this test
+# green at C3a (renderer adds substrate to system; directive was
+# already in messages). Tightening to ``directive in system``
+# preserves the C3c flip-green moment as the deliberate combination
+# of substrate + directive.
 # ---------------------------------------------------------------------------
 
 
@@ -1195,11 +1205,7 @@ async def test_presence_directive_additive_not_replacing_substrate(
     handler, mock_provider = _make_handler(
         decoupled=decoupled, monkeypatch=monkeypatch,
     )
-    system, _tools, messages = await _run_capture(handler, mock_provider)
-    # Substrate-canonical anchor — the operating_principles head must
-    # reach the model regardless of whether a presence_directive
-    # exists alongside. Decoupled currently sends only the
-    # presence_directive (or hardcoded kind-prompt) and drops this.
+    system, _tools, _messages = await _run_capture(handler, mock_provider)
     head = (
         PRIMARY_TEMPLATE.operating_principles
         .strip()
@@ -1211,20 +1217,15 @@ async def test_presence_directive_additive_not_replacing_substrate(
         f"alongside any presence_directive. Looked for: {head!r}; "
         f"system head: {system[:400]!r}"
     )
-    # Decoupled-path additive check: the presence_directive must also
-    # reach the model (in either ``system`` or ``messages``). C3c
-    # routes it through system rendering; pre-C3c it lands in the
-    # user-message body. Legacy doesn't produce a directive, so
-    # this side runs only on the decoupled path.
     if decoupled:
-        msgs_text = _message_text(messages)
-        assert (
-            PRESENCE_DIRECTIVE_MARKER in system
-            or PRESENCE_DIRECTIVE_MARKER in msgs_text
-        ), (
-            f"presence_directive marker expected to reach the model "
-            f"(in system or messages) — substrate must not strip the "
-            f"directive. Looked for: {PRESENCE_DIRECTIVE_MARKER!r}; "
-            f"system head: {system[:300]!r}; messages head: "
-            f"{msgs_text[:300]!r}"
+        # Tightened per Codex C3a-design Q5: require the directive in
+        # ``system`` specifically. C3a will render substrate to system
+        # but leave the directive in messages; C3c is the phase that
+        # combines them into the same deliberate system render.
+        assert PRESENCE_DIRECTIVE_MARKER in system, (
+            f"presence_directive marker expected in system on the "
+            f"decoupled path — substrate + directive must be "
+            f"combined deliberately at the renderer (C3c). "
+            f"Looked for: {PRESENCE_DIRECTIVE_MARKER!r}; "
+            f"system head: {system[:300]!r}"
         )

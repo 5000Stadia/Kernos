@@ -159,17 +159,14 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="StateStore.query_covenant_rules",
         source_kind="method",
         expected_type="tuple[CovenantRule, ...]",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
             "Active covenants in the current member + space scope. "
             "Production selection is pinned + situational "
             "(MessageAnalyzer-selected per turn, not 'all active') — "
-            "see assemble.py:404-417. C3a wiring honors that selection. "
-            "Deterministic ordering preserved; safety_class covenants "
-            "appear in BOTH this field AND "
-            "safety_constraints.sensitivity_gates for redundancy "
-            "(Kit's covenant verdict)."
+            "see assemble.py:404-417. C3a wiring reads the selected "
+            "tuple from PopulationContext.covenants (assembly resolves "
+            "the selection; populate_field consumes the resolution)."
         ),
     ),
     "rules.space_names": FieldProvenance(
@@ -178,12 +175,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="ContextSpace",
         source_kind="constant",
         expected_type="dict[str, str]",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
             "Mapping space_id → space name. Used by _format_contracts to "
-            "render space-scoped covenants. Resolved at the assembly "
-            "seam from the spaces a member has access to."
+            "render space-scoped covenants. C3a wiring reads from "
+            "PopulationContext.space_names (assembly resolves from the "
+            "spaces a member has access to)."
         ),
     ),
     "rules.instance_stewardship": FieldProvenance(
@@ -223,9 +220,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="StateStore.get_soul",
         source_kind="method",
         expected_type="Soul | None",
-        wiring_state="deferred",
-        deferred_until="C3a",
-        notes="Deprecated for identity (per multi-member migration); kept for compat.",
+        wiring_state="wired",
+        notes=(
+            "Deprecated for identity (per multi-member migration); kept "
+            "for compat. C3a wiring reads from PopulationContext.soul "
+            "(assembly resolves via state_store.get_soul)."
+        ),
     ),
     "state.member_profile": FieldProvenance(
         field_path="state.member_profile",
@@ -233,11 +233,11 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="InstanceDB.get_member_profile",
         source_kind="method",
         expected_type="dict[str, Any]",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
-            "Dict-typed at C1 — production read shape. Future C-arc may "
-            "promote to typed dataclass."
+            "Dict-typed — production read shape. C3a wiring reads from "
+            "PopulationContext.member_profile (assembly resolves via "
+            "instance_db.get_member_profile in provision phase)."
         ),
     ),
     "state.relationships": FieldProvenance(
@@ -246,9 +246,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="InstanceDB.list_relationships",
         source_kind="method",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C3a",
-        notes="Pairwise relationship records visible to the active member.",
+        wiring_state="wired",
+        notes=(
+            "Pairwise relationship records visible to the active "
+            "member. C3a wiring reads from PopulationContext.relationships "
+            "(assembly resolves via instance_db.list_relationships)."
+        ),
     ),
     "state.knowledge_entries": FieldProvenance(
         field_path="state.knowledge_entries",
@@ -256,11 +259,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="RetrievalService.search",
         source_kind="method",
         expected_type="tuple[KnowledgeEntry, ...]",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
-            "Knowledge selected for the turn via retrieval — invokes "
-            "RetrievalService.search with the turn's auto-derived query."
+            "Knowledge selected for the turn via retrieval. C3a wiring "
+            "reads from PopulationContext.knowledge_entries (assembly's "
+            "MessageAnalyzer + disclosure-gate already filtered the "
+            "always-inject + ranked-relevant set)."
         ),
     ),
     # === RESULTS zone ===
@@ -270,13 +274,11 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="_build_results_block",
         source_kind="function",
         expected_type="str",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
-            "Rendered prefix from prior-turn results. Stored as text "
-            "because the legacy block-builder produces text; future "
-            "decomposition into structured records is out-of-scope for "
-            "CCV1."
+            "Rendered prefix from prior-turn results. C3a wiring reads "
+            "from PopulationContext.results_prefix (assembly resolves "
+            "via _assemble_space_context)."
         ),
     ),
     # === ACTIONS zone ===
@@ -286,14 +288,11 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="CapabilityRegistry.build_tool_directory",
         source_kind="method",
         expected_type="str",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
             "Capability descriptions for the active context space. "
-            "Production source is handler.registry.build_tool_directory "
-            "(legacy path uses this at assemble.py:718). The "
-            "CapabilityRegistry also exposes build_capability_prompt as "
-            "an alternate render; pin the legacy-used one for parity."
+            "C3a wiring reads from PopulationContext.capability_prompt "
+            "(assembly already calls registry.build_tool_directory)."
         ),
     ),
     "actions.channel_registry": FieldProvenance(
@@ -302,9 +301,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="ChannelRegistry.get_outbound_capable",
         source_kind="method",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C3a",
-        notes="Outbound-capable channels for the active member.",
+        wiring_state="wired",
+        notes=(
+            "Outbound-capable channels for the active member. C3a "
+            "wiring reads from PopulationContext.channel_registry "
+            "(assembly resolves via handler._channel_registry)."
+        ),
     ),
     # === MEMORY zone ===
     "memory.compaction_carry": FieldProvenance(
@@ -313,12 +315,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="CompactionService.load_state",
         source_kind="method",
         expected_type="str",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
-            "Living State accumulated at the active space's last compact "
-            "boundary. Method returns the state dict; the carry text is "
-            "extracted from the 'living_state' field."
+            "Living State accumulated at the active space's last "
+            "compact boundary. C3a wiring reads from "
+            "PopulationContext.compaction_carry (assembly's "
+            "_assemble_space_context already extracts the carry text)."
         ),
     ),
     "memory.awareness_whispers": FieldProvenance(
@@ -327,14 +329,13 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="TriggerStore.list_all",
         source_kind="method",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
-            "Pending whispers queued for delivery. Filtered by "
-            "status=pending + member scope. Legacy injection at "
-            "assemble.py:805-814; legacy renders to RESULTS zone — "
-            "renderer at C3c preserves that placement when emitting "
-            "from the packet."
+            "Pending whispers queued for delivery. C3a wiring reads "
+            "from PopulationContext.awareness_whispers (assembly's "
+            "_get_pending_awareness already filtered by status=pending "
+            "+ member scope). Legacy renders to RESULTS zone; renderer "
+            "at C3c preserves that placement when emitting from packet."
         ),
     ),
     "memory.gardener_observations": FieldProvenance(
@@ -385,13 +386,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="ConversationLogger.read_recent",
         source_kind="method",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C3a",
+        wiring_state="wired",
         notes=(
-            "Messages array since last compact boundary, via "
-            "ConversationLogger.read_recent. Already reaches decoupled "
-            "path via TurnRunnerInputs.from_api_messages; centralized "
-            "here so the contract is testable."
+            "Messages array since last compact boundary. C3a wiring "
+            "reads from PopulationContext.conversation_messages "
+            "(assembly resolves via ConversationLogger.read_recent + "
+            "_assemble_space_context)."
         ),
     ),
     # === TOOL SURFACE ===
@@ -504,26 +504,42 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
 class PopulationContext:
     """Handle to the running substrate needed to populate the packet.
 
-    Mutable on purpose: C3a-c populate this incrementally during turn
-    construction. The frozen :class:`CognitiveContext` is built from
-    the populated context at the assembly seam.
+    Mutable on purpose: assembly populates this incrementally during
+    turn construction. The frozen :class:`CognitiveContext` is built
+    from the populated context at the assembly seam.
 
     Fields are typed loosely (``Any``) at C1 because the substrate's
     public surface is a fluid mix of typed and dict-shaped APIs.
     Future C-phase tightens types as the wiring lands.
+
+    C3a expanded the resolved-substrate fields so populate_field can
+    read pre-resolved values from the context rather than re-querying
+    services. Codex C3a-design Q2 verdict: "construct in assemble.py
+    from already-loaded locals" — the assembly already owns the
+    selected substrate (covenant selection, knowledge entries after
+    MessageAnalyzer + disclosure gate, awareness whispers, results
+    prefix, compaction carry, etc.); populating PopulationContext
+    from those locals avoids re-querying and makes populate_field
+    a thin pass-through. Service handles (state_store, instance_db,
+    etc.) remain on the context so future fields with bespoke
+    queries can reach them without an additional construction site.
     """
 
+    # Identity / addressing.
     instance_id: str = ""
     member_id: str = ""
     space_id: str = ""
+
+    # Service handles (kept for fields that prefer direct queries
+    # over pre-resolved values).
     state_store: Any = None
     instance_db: Any = None
     handler: Any = None  # for block-builder access (tool_catalog, channels)
     retrieval_service: Any = None
     compaction_service: Any = None
     trigger_store: Any = None
-    member_profile: dict[str, Any] = field(default_factory=dict)
-    soul: Any = None
+
+    # NOW block raw fields.
     user_timezone: str = ""
     platform: str = ""
     auth_level: str = ""
@@ -532,6 +548,22 @@ class PopulationContext:
     member_display_name: str = ""
     agent_name: str = ""
     execution_envelope: dict[str, Any] | None = None
+
+    # Identity / state substrate (resolved by assembly).
+    member_profile: dict[str, Any] = field(default_factory=dict)
+    soul: Any = None
+
+    # Resolved substrate (filled by assembly's already-loaded locals).
+    covenants: tuple[Any, ...] = ()
+    space_names: dict[str, str] = field(default_factory=dict)
+    instance_stewardship: str = ""
+    relationships: tuple[dict[str, Any], ...] = ()
+    knowledge_entries: tuple[Any, ...] = ()
+    results_prefix: str = ""
+    capability_prompt: str = ""
+    channel_registry: tuple[dict[str, Any], ...] = ()
+    compaction_carry: str = ""
+    awareness_whispers: tuple[dict[str, Any], ...] = ()
     conversation_messages: tuple[dict[str, Any], ...] = ()
 
 
@@ -589,6 +621,12 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
             else _UNIQUE_HATCHING_PROMPT
         )
     if name == "rules.covenants":
+        # Assembly resolves the per-turn selection (pinned + situational)
+        # and stores the tuple on PopulationContext.covenants. C3a
+        # populate_field consumes the resolution; falls back to a direct
+        # query when no pre-resolved value is set (test fixtures).
+        if ctx.covenants:
+            return tuple(ctx.covenants)
         if ctx.state_store is None:
             return ()
         rules = await ctx.state_store.query_covenant_rules(
@@ -598,7 +636,13 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
             active_only=True,
         )
         return tuple(rules)
+    if name == "rules.space_names":
+        return dict(ctx.space_names or {})
     if name == "rules.instance_stewardship":
+        # Prefer the pre-resolved value from PopulationContext; fall
+        # back to a direct query for legacy callers.
+        if ctx.instance_stewardship:
+            return ctx.instance_stewardship
         if ctx.instance_db is None:
             return ""
         try:
@@ -607,6 +651,26 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
             return ""
     if name == "now":
         return _construct_now_block(ctx)
+    if name == "state.soul":
+        return ctx.soul
+    if name == "state.member_profile":
+        return dict(ctx.member_profile or {})
+    if name == "state.relationships":
+        return tuple(ctx.relationships or ())
+    if name == "state.knowledge_entries":
+        return tuple(ctx.knowledge_entries or ())
+    if name == "results.results_prefix":
+        return ctx.results_prefix or ""
+    if name == "actions.capability_prompt":
+        return ctx.capability_prompt or ""
+    if name == "actions.channel_registry":
+        return tuple(ctx.channel_registry or ())
+    if name == "memory.compaction_carry":
+        return ctx.compaction_carry or ""
+    if name == "memory.awareness_whispers":
+        return tuple(ctx.awareness_whispers or ())
+    if name == "conversation.messages":
+        return tuple(ctx.conversation_messages or ())
     if name == "tool_surface.request_tool":
         from kernos.kernel.tools.schemas import REQUEST_TOOL
         return REQUEST_TOOL

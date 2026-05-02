@@ -151,6 +151,12 @@ class TurnContext:
     results_prefix: str | None = None
     memory_prefix: str | None = None
     merged_count: int = 0  # Number of user messages merged into this turn
+    # COGNITIVE-CONTEXT-V1 C3a: typed cognitive substrate constructed
+    # by the assemble phase from already-loaded locals. Carried to
+    # ReasoningRequest so the decoupled path can thread it through
+    # TurnRunnerInputs -> Integration -> Briefing -> PresenceRenderer.
+    # None for legacy paths or pre-C3a contexts.
+    cognitive_context: Any = None
 
     # Phase 4: Reason
     response_text: str = ""

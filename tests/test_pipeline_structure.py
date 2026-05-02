@@ -142,10 +142,14 @@ class TestPhaseFilesHaveSensibleSize:
     @pytest.mark.parametrize("phase_name,min_lines,max_lines", [
         # Bounds measured after the verbatim move. Min guards against a
         # revert-to-stub; max flags accidental growth from unrelated code
-        # creeping into a phase.
+        # creeping into a phase. Upper bound for "assemble" was raised
+        # at COGNITIVE-CONTEXT-V1 C3a — the assemble phase now owns
+        # both legacy string construction and the typed cognitive
+        # substrate (CognitiveContext) build, so the size growth is
+        # intentional substrate work, not unrelated creep.
         ("provision", 30, 200),
         ("route", 80, 250),
-        ("assemble", 400, 900),
+        ("assemble", 400, 1000),
         ("reason", 20, 100),
         ("consequence", 50, 200),
         ("persist", 150, 400),

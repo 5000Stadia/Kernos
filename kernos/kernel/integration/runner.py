@@ -142,6 +142,14 @@ class IntegrationInputs:
     # Backwards-compatible: defaults to empty tuple; pre-CAC
     # callers see no behavior change.
     required_safety_cohort_failures: tuple[str, ...] = ()
+    # COGNITIVE-CONTEXT-V1 C3a: typed cognitive substrate produced
+    # by assembly. None when assembly hasn't constructed the packet
+    # (legacy paths or callers that pre-date C3a). The integration
+    # runner copies this through onto Briefing so the renderer at
+    # C3c can consume the canonical primitive. Optional + default-
+    # None preserves backward compat for the many existing
+    # IntegrationInputs construction sites.
+    cognitive_context: Any = None
 
 
 @dataclass(frozen=True)
@@ -582,6 +590,7 @@ class IntegrationRunner:
             turn_id=inputs.turn_id,
             integration_run_id=inputs.integration_run_id,
             action_envelope=envelope,
+            cognitive_context=inputs.cognitive_context,
         )
 
     def _check_redaction_invariant(
@@ -690,6 +699,7 @@ class IntegrationRunner:
                 ),
                 turn_id=inputs.turn_id,
                 integration_run_id=inputs.integration_run_id,
+                cognitive_context=inputs.cognitive_context,
             )
             await self._emit_audit(
                 briefing, success=False, error=error or notes,
@@ -720,6 +730,7 @@ class IntegrationRunner:
             ),
             turn_id=briefing.turn_id,
             integration_run_id=briefing.integration_run_id,
+            cognitive_context=inputs.cognitive_context,
         )
         await self._emit_audit(briefing, success=False, error=error or notes)
         return briefing
@@ -771,6 +782,14 @@ def _with_run_id(inputs: IntegrationInputs, run_id: str) -> IntegrationInputs:
         turn_id=inputs.turn_id,
         integration_run_id=run_id,
         required_safety_cohort_failures=inputs.required_safety_cohort_failures,
+        # COGNITIVE-CONTEXT-V1 C3a: preserve the typed packet across
+        # the run-id rebuild. The seam test
+        # ``test_real_integration_service_carries_packet_onto_briefing``
+        # caught this drop site (Codex C3a-design "not asked, but
+        # flagging" pin). Without this line the packet would be
+        # silently dropped on every IntegrationRunner.run call —
+        # exactly the bug class CCV1 was created to prevent.
+        cognitive_context=inputs.cognitive_context,
     )
 
 

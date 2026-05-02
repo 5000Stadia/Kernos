@@ -257,33 +257,19 @@ def test_no_unwired_expected_entries_at_C1():
 
 
 def test_deferred_until_phases_match_wiring_ladder():
-    """Wiring-ladder pin per the C1 deliberation outcome:
+    """Wiring-ladder pin tracking the current frontier.
 
-      C3a wires: covenants, space_names, state.*, results, actions.*,
-                 memory.compaction_carry, memory.awareness_whispers,
-                 conversation.messages
-      C3b wires: memory.procedures, memory.canvases_summary,
-                 safety_constraints.*
-      C4  wires: memory.gardener_observations
-      C5  wires: tool_surface.always_pinned, tool_surface.active_zone
+    After C3a (commit landing the typed packet through the reasoning
+    seam), the C3a-deferred fields are graduated to ``wired``. The
+    ladder advances: C3b / C4 / C5 still hold their respective
+    deferrals.
 
-    The test enforces the ladder so re-classification (e.g. moving
-    a field from C3a to C3b) requires conscious update."""
+    The test enforces the ladder so re-classification (e.g. moving a
+    field from C3b to C4) requires conscious update."""
     expected_per_phase = {
-        "C3a": {
-            "rules.covenants",
-            "rules.space_names",
-            "state.soul",
-            "state.member_profile",
-            "state.relationships",
-            "state.knowledge_entries",
-            "results.results_prefix",
-            "actions.capability_prompt",
-            "actions.channel_registry",
-            "memory.compaction_carry",
-            "memory.awareness_whispers",
-            "conversation.messages",
-        },
+        # C3a: empty after C3a graduation. The fields previously
+        # deferred to C3a are now wired (see
+        # test_C3a_wired_entries_match_expected_set).
         "C3b": {
             "memory.procedures",
             "memory.canvases_summary",
@@ -308,26 +294,49 @@ def test_deferred_until_phases_match_wiring_ladder():
             f"  missing:  {sorted(expected - actual)}\n"
             f"  extra:    {sorted(actual - expected)}"
         )
+    # Pin: no C3a deferrals remain after C3a ships.
+    assert "C3a" not in actual_per_phase, (
+        f"C3a-deferred fields still present after C3a should have "
+        f"graduated them: {sorted(actual_per_phase['C3a'])}"
+    )
 
 
-def test_C1_wired_entries_match_expected_set():
-    """At C1, exactly these entries should be classified as wired:
-    rules.* constants, NowBlock construction, request_tool constant.
-    Six entries total — the C1 wiring frontier per the deliberation."""
+def test_C3a_wired_entries_match_expected_set():
+    """After C3a, exactly these entries are classified as wired —
+    the original C1 wired set PLUS the 12 fields graduated by C3a's
+    population through the reasoning seam.
+
+    The pin is renamed from C1 to C3a (current frontier) so future
+    C-phases can extend the assertion in lockstep with their own
+    graduation work."""
     expected_wired = {
+        # C1 wired (constants + NOW + request_tool)
         "rules.operating_principles",
         "rules.bootstrap_prompt",
         "rules.hatching_prompt",
         "rules.instance_stewardship",
         "now",
         "tool_surface.request_tool",
+        # C3a graduated (substrate populated by assembly)
+        "rules.covenants",
+        "rules.space_names",
+        "state.soul",
+        "state.member_profile",
+        "state.relationships",
+        "state.knowledge_entries",
+        "results.results_prefix",
+        "actions.capability_prompt",
+        "actions.channel_registry",
+        "memory.compaction_carry",
+        "memory.awareness_whispers",
+        "conversation.messages",
     }
     actual_wired = {
         path for path, prov in FIELD_PROVENANCE.items()
         if prov.wiring_state == "wired"
     }
     assert actual_wired == expected_wired, (
-        f"C1 wired-entry drift:\n"
+        f"C3a wired-entry drift:\n"
         f"  expected: {sorted(expected_wired)}\n"
         f"  actual:   {sorted(actual_wired)}\n"
         f"  missing:  {sorted(expected_wired - actual_wired)}\n"

@@ -50,6 +50,11 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         user_timezone=_tz,
         trace=ctx.trace,
         model_override=model_override,
+        # COGNITIVE-CONTEXT-V1 C3a: pass the typed packet through so
+        # the decoupled path can route it via TurnRunnerInputs ->
+        # IntegrationInputs -> Briefing.cognitive_context to the
+        # renderer. None on legacy fixtures and pre-C3a callers.
+        cognitive_context=getattr(ctx, "cognitive_context", None),
     )
     ctx.task = await handler.engine.execute(ctx.task, request)
     ctx.response_text = ctx.task.result_text

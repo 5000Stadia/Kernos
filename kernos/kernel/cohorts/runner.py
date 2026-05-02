@@ -465,6 +465,7 @@ def build_integration_inputs_from_fan_out(
     instance_id: str,
     space_id: str,
     turn_id: str,
+    cognitive_context=None,
 ):
     """Construct IntegrationInputs from a CohortFanOutResult.
 
@@ -478,6 +479,11 @@ def build_integration_inputs_from_fan_out(
     production) should use this helper rather than constructing
     IntegrationInputs by hand so the safety-policy plumbing stays
     consistent across call sites.
+
+    COGNITIVE-CONTEXT-V1 C3a: optional ``cognitive_context`` arg
+    threads the typed packet from TurnRunnerInputs through into
+    IntegrationInputs, where the integration runner copies it onto
+    Briefing for the renderer to consume.
     """
     from kernos.kernel.integration.runner import IntegrationInputs
 
@@ -494,6 +500,7 @@ def build_integration_inputs_from_fan_out(
         required_safety_cohort_failures=tuple(
             fan_out_result.required_safety_cohort_failures
         ),
+        cognitive_context=cognitive_context,
     )
 
 

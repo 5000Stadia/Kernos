@@ -247,6 +247,165 @@ def _system_prompt_for_kind(kind: ActionKind) -> str:
         return _SYSTEM_PROMPT_CLARIFICATION_FIRST_PASS
     if kind is ActionKind.EXECUTE_TOOL:
         return _SYSTEM_PROMPT_FULL_MACHINERY_TERMINAL
+
+
+# ---------------------------------------------------------------------------
+# COGNITIVE-CONTEXT-V1 C3a — substrate rendering from the typed packet
+# ---------------------------------------------------------------------------
+
+
+def _render_c3a_substrate(packet: Any) -> str:
+    """Render the C3a-scope substrate (RULES + NOW + STATE) from the
+    typed CognitiveContext packet to a system-prompt-shaped string.
+
+    C3a deliberately renders ONLY rules + now + state. Other zones
+    (RESULTS / ACTIONS / MEMORY / PROCEDURES / CANVASES /
+    SAFETY_CONSTRAINTS) are populated on the packet at C3a but their
+    contract tests flip green at later phases (C3b / C4). Per Codex
+    C3a-design Q3 + "not asked, but flagging": "C3a may populate
+    more fields than C3a renders. ... do not render the whole packet
+    in C3a. If you render all populated fields, you may accidentally
+    flip C3b/C4 bars and lose the phase signal."
+
+    Returns an empty string when ``packet`` is None so legacy /
+    pre-C3a callers see the original kind-aware prompt unchanged.
+    """
+    if packet is None:
+        return ""
+
+    parts: list[str] = []
+
+    # ---- RULES ----
+    rules_parts: list[str] = []
+    rules = getattr(packet, "rules", None)
+    if rules is not None:
+        if rules.operating_principles:
+            rules_parts.append(rules.operating_principles)
+        if rules.instance_stewardship:
+            rules_parts.append(
+                f"INSTANCE PURPOSE:\n{rules.instance_stewardship}\n"
+                f"This is what this Kernos instance is for. When values "
+                f"conflict or tradeoffs exist, orient your judgment "
+                f"toward this purpose."
+            )
+        if rules.covenants:
+            cov_lines = []
+            for cov in rules.covenants:
+                desc = getattr(cov, "description", "")
+                if desc:
+                    cov_lines.append(f"- {desc}")
+            if cov_lines:
+                rules_parts.append("ACTIVE COVENANTS:\n" + "\n".join(cov_lines))
+        if rules.bootstrap_prompt:
+            rules_parts.append(rules.bootstrap_prompt)
+        if rules.hatching_prompt:
+            # The packet stores the raw template; substitute name +
+            # name-instruction fields available from the state /
+            # NOW slices (renderer handles substitution since the
+            # packet keeps templates raw — see C1 design pass).
+            state = getattr(packet, "state", None)
+            mp = (
+                state.member_profile if state is not None else {}
+            ) or {}
+            display_name = mp.get("display_name", "") or "there"
+            agent_name = mp.get("agent_name", "")
+            name_instruction = (
+                f"You already know their name — {display_name}. "
+                f"DO NOT ask for it again."
+                if display_name and display_name != "there"
+                else "You don't know their name yet. Ask naturally."
+            )
+            rendered = rules.hatching_prompt
+            try:
+                rendered = rendered.format(
+                    display_name=display_name,
+                    agent_name=agent_name,
+                    name_instruction=name_instruction,
+                )
+            except (KeyError, IndexError):
+                # Template has placeholders we don't know — keep the
+                # raw template; absence of substitution still preserves
+                # the substrate's reach to the model.
+                pass
+            rules_parts.append(rendered)
+    if rules_parts:
+        parts.append("## RULES\n" + "\n\n".join(rules_parts))
+
+    # ---- NOW ----
+    now = getattr(packet, "now", None)
+    if now is not None:
+        now_lines = []
+        ts = getattr(now, "timestamp_utc", None)
+        if ts is not None:
+            now_lines.append(
+                f"Current time: {ts.isoformat()} "
+                f"({now.user_timezone or 'UTC'})"
+            )
+        if now.platform:
+            now_lines.append(f"Platform: {now.platform}")
+        if now.auth_level:
+            now_lines.append(f"Sender auth level: {now.auth_level}")
+        if now.member_display_name:
+            now_lines.append(
+                f"Speaking with: {now.member_display_name}"
+            )
+        if now.active_space_name:
+            now_lines.append(
+                f"Active space: {now.active_space_name}"
+            )
+        if now_lines:
+            parts.append("## NOW\n" + "\n".join(now_lines))
+
+    # ---- STATE ----
+    state = getattr(packet, "state", None)
+    if state is not None:
+        state_parts: list[str] = []
+        mp = state.member_profile or {}
+        agent_name = mp.get("agent_name", "")
+        soul = state.soul
+        # Identity line: agent name + personality
+        personality = mp.get("personality_notes", "") or (
+            getattr(soul, "personality_notes", "") if soul else ""
+        )
+        if agent_name:
+            state_parts.append(
+                f"Identity: {agent_name}\n{personality}"
+                if personality else f"Identity: {agent_name}"
+            )
+        elif personality:
+            state_parts.append(personality)
+        # User context — name + knowledge entries
+        user_lines: list[str] = []
+        display_name = (
+            mp.get("display_name", "")
+            or (getattr(soul, "user_name", "") if soul else "")
+        )
+        if display_name:
+            user_lines.append(f"Name: {display_name}")
+        for entry in state.knowledge_entries or ():
+            content = getattr(entry, "content", "")
+            if content:
+                user_lines.append(content)
+        if user_lines:
+            state_parts.append("USER CONTEXT:\n" + "\n".join(user_lines))
+        # Relationships — only render non-default declarations
+        rel_lines: list[str] = []
+        active_id = mp.get("member_id", "")
+        for r in state.relationships or ():
+            perm = r.get("permission", "by-permission")
+            if perm == "by-permission":
+                continue
+            name = r.get("other_display_name", "?")
+            if active_id and r.get("declarer_member_id") == active_id:
+                rel_lines.append(f"{name} (you → {perm})")
+            else:
+                rel_lines.append(f"{name} ({perm} ← them)")
+        if rel_lines:
+            state_parts.append("RELATIONSHIPS:\n" + ", ".join(rel_lines))
+        if state_parts:
+            parts.append("## STATE\n" + "\n\n".join(state_parts))
+
+    return "\n\n".join(parts)
     # Defensive default — every ActionKind is handled.
     return _SYSTEM_PROMPT_RESPOND_ONLY
 
@@ -421,9 +580,25 @@ class PresenceRenderer:
         B2RenderInputs to engage structural redaction. The render()
         path for ClarificationNeeded handles first-pass (partial_state
         is None); B2-routed clarifications via render() do NOT receive
-        the partial state in the prompt (defensive)."""
+        the partial state in the prompt (defensive).
+
+        COGNITIVE-CONTEXT-V1 C3a: when ``briefing.cognitive_context`` is
+        populated, the renderer prepends the C3a substrate slice
+        (RULES + NOW + STATE) to the kind-aware prompt so the model
+        receives the canonical cognitive substrate. C3a deliberately
+        renders only those three zones; RESULTS / ACTIONS / MEMORY
+        / SAFETY land at C3b. Pre-C3a callers (legacy stub Briefings,
+        fail-soft path) pass cognitive_context=None and the renderer
+        falls back to the original kind-aware prompt unchanged.
+        """
         kind = briefing.decided_action.kind
-        system = _system_prompt_for_kind(kind)
+        kind_prompt = _system_prompt_for_kind(kind)
+        substrate = _render_c3a_substrate(
+            getattr(briefing, "cognitive_context", None)
+        )
+        system = (
+            f"{substrate}\n\n{kind_prompt}" if substrate else kind_prompt
+        )
         user_message = _user_message_for_briefing(briefing)
         return await self._render(system, user_message)
 
