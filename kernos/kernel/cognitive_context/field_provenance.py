@@ -358,12 +358,15 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="_build_procedures_block",
         source_kind="function",
         expected_type="str",
-        wiring_state="deferred",
-        deferred_until="C3b",
+        wiring_state="wired",
         notes=(
             "Active procedures (_procedures.md content) for the member/"
-            "space scope. Codex C1 review flagged as missing from the "
-            "initial packet shape — added in fold."
+            "space scope. C3b wiring reads from "
+            "PopulationContext.procedures_prefix (assembly's "
+            "_assemble_space_context already collects via "
+            "_files.read_file). Codex C1 review flagged as missing "
+            "from the initial packet shape — added in fold; "
+            "graduated to wired at C3b."
         ),
     ),
     "memory.canvases_summary": FieldProvenance(
@@ -372,11 +375,14 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="_build_canvases_block",
         source_kind="function",
         expected_type="str",
-        wiring_state="deferred",
-        deferred_until="C3b",
+        wiring_state="wired",
         notes=(
-            "Pinned canvases summary text. Codex C1 review flagged as "
-            "missing from the initial packet shape — added in fold."
+            "Pinned canvases summary text. C3b wiring reads from "
+            "PopulationContext.canvases_prefix (assembly's "
+            "_assemble_space_context already collects via "
+            "_build_canvases_prefix). Codex C1 review flagged as "
+            "missing from the initial packet shape — added in fold; "
+            "graduated to wired at C3b."
         ),
     ),
     # === CONVERSATION zone ===
@@ -452,13 +458,14 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="KnowledgeEntry",
         source_kind="constant",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C3b",
+        wiring_state="wired",
         notes=(
             "Sensitivity classification rules relevant to active "
-            "member/space scope. Per-entry classification on "
-            "KnowledgeEntry.sensitivity field; this field aggregates "
-            "the rules the model must honor."
+            "member/space scope. C3b wiring derives a tuple of "
+            "{author, sensitivity} records from the surfaced "
+            "knowledge entries (entries already filtered by the "
+            "disclosure gate; this field carries the residual "
+            "policy data the model must reason about)."
         ),
     ),
     "safety_constraints.disclosure_layer": FieldProvenance(
@@ -467,14 +474,14 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="build_permission_map",
         source_kind="function",
         expected_type="dict[str, str]",
-        wiring_state="deferred",
-        deferred_until="C3b",
+        wiring_state="wired",
         notes=(
             "Viewer-aware permission profile for the active member, "
-            "mapping target_member_id → permission. Derived from "
-            "relationships via build_permission_map (Codex C1 review "
-            "fold — corrects earlier provenance pointing at "
-            "InstanceDB.list_relationships directly)."
+            "mapping target_member_id → permission. C3b wiring reads "
+            "the pre-resolved map from PopulationContext.disclosure_layer "
+            "(assembly already calls build_permission_map at "
+            "ctx._disclosure_perm_map; we re-use that resolution to "
+            "avoid duplicate work)."
         ),
     ),
     "safety_constraints.cross_member_rules": FieldProvenance(
@@ -483,13 +490,13 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         source_symbol="StateStore.query_covenant_rules",
         source_kind="method",
         expected_type="tuple[dict[str, Any], ...]",
-        wiring_state="deferred",
-        deferred_until="C3b",
+        wiring_state="wired",
         notes=(
-            "Cross-member visibility rules sourced from "
-            "covenants tagged with relationship: scope. Filter "
-            "function lives in disclosure_gate; this field carries "
-            "the rules as data the model can reason about."
+            "Cross-member visibility rules — covenants tagged with "
+            "relationship: scope. C3b wiring reads from "
+            "PopulationContext.cross_member_rules (assembly resolves "
+            "by filtering covenants with rule.context_space starting "
+            "with 'relationship:')."
         ),
     ),
 }
@@ -565,6 +572,13 @@ class PopulationContext:
     compaction_carry: str = ""
     awareness_whispers: tuple[dict[str, Any], ...] = ()
     conversation_messages: tuple[dict[str, Any], ...] = ()
+
+    # C3b additions — procedures + canvases + safety substrate.
+    procedures_prefix: str = ""
+    canvases_prefix: str = ""
+    sensitivity_gates: tuple[dict[str, Any], ...] = ()
+    disclosure_layer: dict[str, str] = field(default_factory=dict)
+    cross_member_rules: tuple[dict[str, Any], ...] = ()
 
 
 async def populate_field(name: str, ctx: PopulationContext) -> Any:
@@ -671,6 +685,16 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
         return tuple(ctx.awareness_whispers or ())
     if name == "conversation.messages":
         return tuple(ctx.conversation_messages or ())
+    if name == "memory.procedures":
+        return ctx.procedures_prefix or ""
+    if name == "memory.canvases_summary":
+        return ctx.canvases_prefix or ""
+    if name == "safety_constraints.sensitivity_gates":
+        return tuple(ctx.sensitivity_gates or ())
+    if name == "safety_constraints.disclosure_layer":
+        return dict(ctx.disclosure_layer or {})
+    if name == "safety_constraints.cross_member_rules":
+        return tuple(ctx.cross_member_rules or ())
     if name == "tool_surface.request_tool":
         from kernos.kernel.tools.schemas import REQUEST_TOOL
         return REQUEST_TOOL

@@ -815,6 +815,45 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                 )
             except Exception:
                 _channel_records = ()
+        # C3b: derive sensitivity gates from the surfaced knowledge
+        # entries (entries the disclosure gate already passed; this
+        # field carries residual policy data the model must reason
+        # about).
+        _sensitivity_gates: tuple = ()
+        if user_knowledge_entries:
+            _sensitivity_gates = tuple(
+                {
+                    "entry_id": getattr(e, "id", ""),
+                    "author_member_id": getattr(e, "author_member_id", "")
+                    or getattr(e, "owner_member_id", ""),
+                    "sensitivity": getattr(e, "sensitivity", "") or "",
+                    "subject": getattr(e, "subject", ""),
+                }
+                for e in user_knowledge_entries
+                if getattr(e, "sensitivity", "")
+            )
+        # C3b: cross-member rules — covenants tagged with a
+        # "relationship:" context_space scope. Filtered from the
+        # already-loaded contract_rules.
+        _cross_member_rules: tuple = tuple(
+            {
+                "id": r.id,
+                "scope": r.context_space or "",
+                "rule_type": r.rule_type,
+                "description": r.description,
+            }
+            for r in (contract_rules or ())
+            if (r.context_space or "").startswith("relationship:")
+        )
+        # C3b: disclosure_layer reuses the permission map already
+        # built earlier in this phase (ctx._disclosure_perm_map set
+        # at line ~465). Defensive: in some test fixtures the upstream
+        # mock returns a non-dict (MagicMock), so we coerce to {}
+        # rather than letting dict() crash and abort packet build.
+        _raw_perm_map = getattr(ctx, "_disclosure_perm_map", None)
+        _disclosure_layer = (
+            _raw_perm_map if isinstance(_raw_perm_map, dict) else {}
+        )
         _pop_ctx = PopulationContext(
             instance_id=instance_id,
             member_id=ctx.member_id,
@@ -858,6 +897,12 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             # (already rendered into ctx.results_prefix by the legacy
             # path).
             conversation_messages=tuple(ctx.messages or ()),
+            # C3b additions — procedures + canvases + safety substrate.
+            procedures_prefix=_procedures_prefix or "",
+            canvases_prefix=_canvases_prefix or "",
+            sensitivity_gates=_sensitivity_gates,
+            disclosure_layer=dict(_disclosure_layer),
+            cross_member_rules=_cross_member_rules,
         )
         ctx.cognitive_context = await populate_packet(_pop_ctx)
     except Exception as exc:

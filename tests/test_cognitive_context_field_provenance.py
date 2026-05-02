@@ -259,24 +259,14 @@ def test_no_unwired_expected_entries_at_C1():
 def test_deferred_until_phases_match_wiring_ladder():
     """Wiring-ladder pin tracking the current frontier.
 
-    After C3a (commit landing the typed packet through the reasoning
-    seam), the C3a-deferred fields are graduated to ``wired``. The
-    ladder advances: C3b / C4 / C5 still hold their respective
-    deferrals.
+    After C3b (commit landing procedures + canvases + safety
+    substrate population), the C3a + C3b fields are all graduated.
+    Only C4 and C5 deferrals remain.
 
     The test enforces the ladder so re-classification (e.g. moving a
-    field from C3b to C4) requires conscious update."""
+    field from C4 to C5) requires conscious update."""
     expected_per_phase = {
-        # C3a: empty after C3a graduation. The fields previously
-        # deferred to C3a are now wired (see
-        # test_C3a_wired_entries_match_expected_set).
-        "C3b": {
-            "memory.procedures",
-            "memory.canvases_summary",
-            "safety_constraints.sensitivity_gates",
-            "safety_constraints.disclosure_layer",
-            "safety_constraints.cross_member_rules",
-        },
+        # C3a + C3b: empty after their graduation.
         "C4": {"memory.gardener_observations"},
         "C5": {"tool_surface.always_pinned", "tool_surface.active_zone"},
     }
@@ -294,21 +284,24 @@ def test_deferred_until_phases_match_wiring_ladder():
             f"  missing:  {sorted(expected - actual)}\n"
             f"  extra:    {sorted(actual - expected)}"
         )
-    # Pin: no C3a deferrals remain after C3a ships.
-    assert "C3a" not in actual_per_phase, (
-        f"C3a-deferred fields still present after C3a should have "
-        f"graduated them: {sorted(actual_per_phase['C3a'])}"
-    )
+    # Pin: no C3a / C3b deferrals remain after their commits.
+    for graduated_phase in ("C3a", "C3b"):
+        assert graduated_phase not in actual_per_phase, (
+            f"{graduated_phase}-deferred fields still present after "
+            f"that phase should have graduated them: "
+            f"{sorted(actual_per_phase[graduated_phase])}"
+        )
 
 
-def test_C3a_wired_entries_match_expected_set():
-    """After C3a, exactly these entries are classified as wired —
-    the original C1 wired set PLUS the 12 fields graduated by C3a's
-    population through the reasoning seam.
+def test_C3b_wired_entries_match_expected_set():
+    """After C3b, exactly these entries are classified as wired —
+    the C3a wired set (18 entries) PLUS the 5 fields graduated by
+    C3b: memory.procedures / memory.canvases_summary +
+    safety_constraints.* (sensitivity_gates / disclosure_layer /
+    cross_member_rules).
 
-    The pin is renamed from C1 to C3a (current frontier) so future
-    C-phases can extend the assertion in lockstep with their own
-    graduation work."""
+    Renamed from C3a to C3b at this commit; the pin tracks the
+    current frontier so future C-phases can extend in lockstep."""
     expected_wired = {
         # C1 wired (constants + NOW + request_tool)
         "rules.operating_principles",
@@ -330,13 +323,19 @@ def test_C3a_wired_entries_match_expected_set():
         "memory.compaction_carry",
         "memory.awareness_whispers",
         "conversation.messages",
+        # C3b graduated (procedures + canvases + safety substrate)
+        "memory.procedures",
+        "memory.canvases_summary",
+        "safety_constraints.sensitivity_gates",
+        "safety_constraints.disclosure_layer",
+        "safety_constraints.cross_member_rules",
     }
     actual_wired = {
         path for path, prov in FIELD_PROVENANCE.items()
         if prov.wiring_state == "wired"
     }
     assert actual_wired == expected_wired, (
-        f"C3a wired-entry drift:\n"
+        f"C3b wired-entry drift:\n"
         f"  expected: {sorted(expected_wired)}\n"
         f"  actual:   {sorted(actual_wired)}\n"
         f"  missing:  {sorted(expected_wired - actual_wired)}\n"

@@ -250,25 +250,37 @@ def _system_prompt_for_kind(kind: ActionKind) -> str:
 
 
 # ---------------------------------------------------------------------------
-# COGNITIVE-CONTEXT-V1 C3a — substrate rendering from the typed packet
+# COGNITIVE-CONTEXT-V1 C3a/C3b — substrate rendering from the typed packet
 # ---------------------------------------------------------------------------
 
 
-def _render_c3a_substrate(packet: Any) -> str:
-    """Render the C3a-scope substrate (RULES + NOW + STATE) from the
-    typed CognitiveContext packet to a system-prompt-shaped string.
+def _render_substrate(packet: Any) -> str:
+    """Render the cognitive substrate from the typed CognitiveContext
+    packet to a system-prompt-shaped string.
 
-    C3a deliberately renders ONLY rules + now + state. Other zones
-    (RESULTS / ACTIONS / MEMORY / PROCEDURES / CANVASES /
-    SAFETY_CONSTRAINTS) are populated on the packet at C3a but their
-    contract tests flip green at later phases (C3b / C4). Per Codex
-    C3a-design Q3 + "not asked, but flagging": "C3a may populate
-    more fields than C3a renders. ... do not render the whole packet
-    in C3a. If you render all populated fields, you may accidentally
-    flip C3b/C4 bars and lose the phase signal."
+    Phase scope (renamed from ``_render_c3a_substrate`` at C3b to
+    reflect expanded zone coverage):
+
+    * C3a renders RULES + NOW + STATE.
+    * C3b adds ## RESULTS + ## ACTIONS + ## PROCEDURES +
+      ## AVAILABLE CANVASES.
+    * C3c adds the additive presence_directive into the same final
+      system render.
+    * C4 expands MEMORY (compaction carry + gardener observations).
+    * C5 lands tool surface in the tools= argument (separate from
+      this substrate string).
 
     Returns an empty string when ``packet`` is None so legacy /
     pre-C3a callers see the original kind-aware prompt unchanged.
+
+    C3b renders RESULTS / ACTIONS / PROCEDURES / CANVASES but NOT
+    ## MEMORY (compaction_carry + awareness_whispers). MEMORY zone
+    rendering is deferred to C4 alongside the cohort registration
+    work — keeps the C4 phase signal meaningful. Note: awareness
+    whispers reach the model via legacy's results_prefix at C3b
+    (the legacy assemble flows them into RESULTS), which means
+    test 6 may flip green at C3b ahead of C4. That's a side-effect
+    of legacy's own zone placement, not a wiring-ladder violation.
     """
     if packet is None:
         return ""
@@ -404,6 +416,52 @@ def _render_c3a_substrate(packet: Any) -> str:
             state_parts.append("RELATIONSHIPS:\n" + ", ".join(rel_lines))
         if state_parts:
             parts.append("## STATE\n" + "\n\n".join(state_parts))
+
+    # ---- C3b: RESULTS ----
+    results = getattr(packet, "results", None)
+    if results is not None and results.results_prefix:
+        parts.append("## RESULTS\n" + results.results_prefix)
+
+    # ---- C3b: ACTIONS ----
+    actions = getattr(packet, "actions", None)
+    if actions is not None:
+        action_parts: list[str] = []
+        if actions.capability_prompt:
+            action_parts.append(actions.capability_prompt)
+        if actions.channel_registry:
+            channel_lines = []
+            for ch in actions.channel_registry:
+                if not isinstance(ch, dict):
+                    name = getattr(ch, "name", "")
+                    display = getattr(ch, "display_name", "")
+                    can_send = getattr(ch, "can_send_outbound", False)
+                else:
+                    name = ch.get("name", "")
+                    display = ch.get("display_name", "")
+                    can_send = ch.get("can_send_outbound", False)
+                if not name:
+                    continue
+                outbound = "can send" if can_send else "receive only"
+                channel_lines.append(
+                    f"- {name}: {display} [{outbound}]"
+                )
+            if channel_lines:
+                action_parts.append(
+                    "OUTBOUND CHANNELS (use send_to_channel to deliver to "
+                    "a specific channel):\n"
+                    + "\n".join(channel_lines)
+                )
+        if action_parts:
+            parts.append("## ACTIONS\n" + "\n\n".join(action_parts))
+
+    # ---- C3b: PROCEDURES ----
+    memory = getattr(packet, "memory", None)
+    if memory is not None and getattr(memory, "procedures", ""):
+        parts.append("## PROCEDURES\n" + memory.procedures)
+
+    # ---- C3b: AVAILABLE CANVASES ----
+    if memory is not None and getattr(memory, "canvases_summary", ""):
+        parts.append("## AVAILABLE CANVASES\n" + memory.canvases_summary)
 
     return "\n\n".join(parts)
     # Defensive default — every ActionKind is handled.
@@ -593,7 +651,7 @@ class PresenceRenderer:
         """
         kind = briefing.decided_action.kind
         kind_prompt = _system_prompt_for_kind(kind)
-        substrate = _render_c3a_substrate(
+        substrate = _render_substrate(
             getattr(briefing, "cognitive_context", None)
         )
         system = (
