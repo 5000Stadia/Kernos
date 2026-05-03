@@ -699,6 +699,36 @@ class ReasoningService:
         if count:
             logger.info("TOOL_UNLOAD: space=%s cleared=%d", space_id, count)
 
+    def _assert_admin_space(
+        self, request: "ReasoningRequest", tool_name: str,
+    ) -> str | None:
+        """Lightweight admin-space gate.
+
+        Several admin-only tools (set_chain_model, diagnose_llm_chain,
+        diagnose_messenger) restrict their dispatch to the System
+        space. The agent's DispatchGate already confines sensitive
+        tools by space at the surfacing layer; this is a defense-in-
+        depth check at dispatch time.
+
+        Returns the user-facing rejection string when the active
+        space is not "system"; returns None when the call is allowed
+        to proceed.
+
+        CONFIRMED-PATH-DISPATCH-PARITY-V1 (2026-05-03): extracted
+        from inline duplicates in the legacy reason() loop. Single
+        source of truth for the policy text per Kit's framing
+        (canonical-source-plus-derived-consumers).
+        """
+        space_type = ""
+        if getattr(request, "active_space", None) is not None:
+            space_type = getattr(request.active_space, "space_type", "") or ""
+        if space_type != "system":
+            return (
+                f"{tool_name} is admin-only and only available "
+                f"in the System space."
+            )
+        return None
+
     async def complete_simple(
         self,
         system_prompt: str,
@@ -853,13 +883,19 @@ class ReasoningService:
         "send_to_channel":             frozenset({"loop", "confirmed"}),
         "manage_schedule":             frozenset({"loop", "confirmed"}),
         "request_tool":                frozenset({"loop", "confirmed"}),
-        # Loop only — read-only or chain-management; never produce
-        # confirmable PendingActions.
-        "remember_details":            frozenset({"loop"}),
-        "inspect_state":               frozenset({"loop"}),
-        "set_chain_model":             frozenset({"loop"}),
-        "diagnose_llm_chain":          frozenset({"loop"}),
-        "diagnose_messenger":          frozenset({"loop"}),
+        # Previously loop-only — read-only or chain-management; never
+        # produced confirmable PendingActions on the legacy path.
+        # CONFIRMED-PATH-DISPATCH-PARITY-V1 (2026-05-03) wired them
+        # into execute_tool's confirmed elif chain so the legacy
+        # strike can remove "loop" from these entries cleanly. The
+        # three admin-gated tools (set_chain_model,
+        # diagnose_llm_chain, diagnose_messenger) share the
+        # _assert_admin_space helper at the dispatch site.
+        "remember_details":            frozenset({"loop", "confirmed"}),
+        "inspect_state":               frozenset({"loop", "confirmed"}),
+        "set_chain_model":             frozenset({"loop", "confirmed"}),
+        "diagnose_llm_chain":          frozenset({"loop", "confirmed"}),
+        "diagnose_messenger":          frozenset({"loop", "confirmed"}),
         # Helper-routed (canvas tools share dispatch through
         # _handle_canvas_tool from execute_tool's confirmed path).
         "canvas_list":                 frozenset({"confirmed", "helper"}),
@@ -1251,6 +1287,78 @@ class ReasoningService:
                     tool_input.get("capability_name", "unknown"),
                     tool_input.get("description", ""),
                 )
+            # CONFIRMED-PATH-DISPATCH-PARITY-V1 (2026-05-03): the
+            # following five tools were dispatched only inside the
+            # legacy reason() loop's elif chain. The legacy strike
+            # removes that loop; their dispatch parity moves here so
+            # the thin path retains reachability. Three of the five
+            # carry admin-only space gating — see _assert_admin_space.
+            elif tool_name == "remember_details":
+                return await self._handle_remember_details(
+                    request.instance_id,
+                    request.active_space_id,
+                    tool_input,
+                )
+            elif tool_name == "inspect_state":
+                from kernos.kernel.introspection import build_user_truth_view
+                return await build_user_truth_view(
+                    request.instance_id,
+                    self._state,
+                    self._trigger_store,
+                    self._registry,
+                )
+            elif tool_name == "set_chain_model":
+                _gate_msg = self._assert_admin_space(request, "set_chain_model")
+                if _gate_msg is not None:
+                    return _gate_msg
+                from kernos.setup.admin_tools import (
+                    set_chain_model as _set_chain_model,
+                )
+                admin_res = _set_chain_model(
+                    chain=tool_input.get("chain", ""),
+                    provider_id=tool_input.get("provider_id", ""),
+                    model_id=tool_input.get("model_id", ""),
+                )
+                return (
+                    admin_res.get("message")
+                    or admin_res.get("error")
+                    or "set_chain_model returned no result."
+                )
+            elif tool_name == "diagnose_llm_chain":
+                _gate_msg = self._assert_admin_space(request, "diagnose_llm_chain")
+                if _gate_msg is not None:
+                    return _gate_msg
+                import json as _json
+                from kernos.setup.admin_tools import (
+                    diagnose_llm_chain as _diagnose_llm_chain,
+                )
+                admin_res = _diagnose_llm_chain(
+                    include_fallback_events=bool(
+                        tool_input.get("include_fallback_events", False),
+                    ),
+                    instance_id=request.instance_id,
+                )
+                return _json.dumps(admin_res, indent=2, default=str)
+            elif tool_name == "diagnose_messenger":
+                _gate_msg = self._assert_admin_space(request, "diagnose_messenger")
+                if _gate_msg is not None:
+                    return _gate_msg
+                import json as _json
+                from kernos.cohorts.admin import (
+                    diagnose_messenger as _diagnose_messenger,
+                )
+                idb = (
+                    getattr(self._handler, "_instance_db", None)
+                    if hasattr(self, "_handler") else None
+                )
+                admin_res = await _diagnose_messenger(
+                    instance_id=request.instance_id,
+                    member_a_id=tool_input.get("member_a_id", ""),
+                    member_b_id=tool_input.get("member_b_id", ""),
+                    state=self._state,
+                    instance_db=idb,
+                )
+                return _json.dumps(admin_res, indent=2, default=str)
             elif tool_name in ("canvas_list", "canvas_create", "page_read",
                                 "page_write", "page_list", "page_search",
                                 "canvas_preference_extract",

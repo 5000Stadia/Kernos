@@ -211,13 +211,14 @@ class TestConfirmedChainConformance:
         )
 
 
-class TestIntentionalLoopOnlyTools:
-    """Pin the intentional Chain 1 omissions so future maintainers
-    don't accidentally move them. These five tools are read-only or
-    chain-management surfaces; they shouldn't produce confirmable
-    PendingActions, so they stay loop-only by design."""
+class TestPreviouslyLoopOnlyTools:
+    """The five tools that were loop-only on the legacy path moved
+    to the confirmed path via CONFIRMED-PATH-DISPATCH-PARITY-V1
+    (2026-05-03). Each carries both ``loop`` and ``confirmed`` during
+    the parity-V1-to-strike interval; the legacy strike removes
+    ``loop`` from these entries (and elsewhere) in one go."""
 
-    EXPECTED_LOOP_ONLY = frozenset({
+    PREVIOUSLY_LOOP_ONLY = frozenset({
         "remember_details",
         "inspect_state",
         "set_chain_model",
@@ -225,12 +226,13 @@ class TestIntentionalLoopOnlyTools:
         "diagnose_messenger",
     })
 
-    def test_expected_tools_are_loop_only(self):
-        for name in self.EXPECTED_LOOP_ONLY:
+    def test_previously_loop_only_have_confirmed_dispatch(self):
+        """All five carry ``confirmed`` post-parity-V1 so
+        execute_tool dispatches them on the thin path."""
+        for name in self.PREVIOUSLY_LOOP_ONLY:
             paths = ReasoningService._KERNEL_TOOL_PATHS[name]
-            assert paths == frozenset({"loop"}), (
-                f"tool {name!r} should remain loop-only by design "
-                f"(read-only / chain-management); got paths={paths}. "
-                "If this changed deliberately, also update "
-                "EXPECTED_LOOP_ONLY in this test."
+            assert "confirmed" in paths, (
+                f"tool {name!r} must carry 'confirmed' post-CONFIRMED-"
+                f"PATH-DISPATCH-PARITY-V1; got paths={paths}. "
+                "execute_tool must dispatch this tool."
             )
