@@ -565,13 +565,16 @@ async def on_ready():
         # can scan the buffer for tool activity.
         try:
             _t = payload.get("type", "?")
-            _tool = payload.get("tool_id", "?")
+            # Two emitters land here with different field names:
+            # StepDispatcher uses tool_name, LiveIntegrationDispatcher
+            # uses tool_id. Accept either so the log shows the real name.
+            _tool = payload.get("tool_name") or payload.get("tool_id") or "?"
             _seam = payload.get("seam", "")
             _err = payload.get("is_error", False)
             if _t == "tool.called":
                 logger.info(
                     "TOOL_CALLED: tool=%s seam=%s classification=%s",
-                    _tool, _seam, payload.get("classification", "?"),
+                    _tool, _seam, payload.get("classification", ""),
                 )
             else:
                 logger.info(
