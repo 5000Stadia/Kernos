@@ -555,7 +555,31 @@ async def on_ready():
     async def _dispatcher_event_emitter(payload: dict) -> None:
         """Bridge dispatcher's tool.called / tool.result emissions
         into the existing event stream so legacy consumers see them
-        with the right shape on the new path."""
+        with the right shape on the new path. Also logs at INFO so
+        the in-process log ring buffer (used by /dump's RECENT LOG
+        section) captures the events alongside the on-disk event
+        stream. Without the log line, tool dispatch was invisible
+        in /dump output even though it was firing correctly."""
+        # /dump-visibility log line: terse, structured, parseable.
+        # Mirrors the legacy CODEX_REQUEST line shape so operators
+        # can scan the buffer for tool activity.
+        try:
+            _t = payload.get("type", "?")
+            _tool = payload.get("tool_id", "?")
+            _seam = payload.get("seam", "")
+            _err = payload.get("is_error", False)
+            if _t == "tool.called":
+                logger.info(
+                    "TOOL_CALLED: tool=%s seam=%s classification=%s",
+                    _tool, _seam, payload.get("classification", "?"),
+                )
+            else:
+                logger.info(
+                    "TOOL_RESULT: tool=%s seam=%s is_error=%s",
+                    _tool, _seam, _err,
+                )
+        except Exception:
+            pass
         if events is None:
             return
         try:
@@ -583,7 +607,14 @@ async def on_ready():
         """Bridge dispatcher's audit entries into the existing audit
         store. AuditStore.log is async with signature
         (instance_id, entry); references-not-dumps already enforced
-        at the entry construction site."""
+        at the entry construction site. Also logs at INFO for /dump
+        ring-buffer visibility."""
+        try:
+            _t = entry.get("type", "?")
+            _tool = entry.get("tool_id", "?")
+            logger.info("DISPATCHER_AUDIT: type=%s tool=%s", _t, _tool)
+        except Exception:
+            pass
         try:
             if audit is None or not hasattr(audit, "log"):
                 return

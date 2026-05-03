@@ -378,6 +378,26 @@ async def build_dev_handler(
             pass
 
     async def _dispatcher_event_emitter(payload: dict) -> None:
+        # /dump-visibility log line — see server.py mirror for the
+        # full rationale. tool.called / tool.result events otherwise
+        # only land in the on-disk event stream, invisible in the
+        # log ring buffer that /dump's RECENT LOG section reads.
+        try:
+            _t = payload.get("type", "?")
+            _tool = payload.get("tool_id", "?")
+            _seam = payload.get("seam", "")
+            if _t == "tool.called":
+                logger.info(
+                    "TOOL_CALLED: tool=%s seam=%s classification=%s",
+                    _tool, _seam, payload.get("classification", "?"),
+                )
+            else:
+                logger.info(
+                    "TOOL_RESULT: tool=%s seam=%s is_error=%s",
+                    _tool, _seam, payload.get("is_error", False),
+                )
+        except Exception:
+            pass
         try:
             from kernos.kernel.events import emit_event as _emit
             from kernos.kernel.event_types import EventType as _ET
@@ -393,6 +413,13 @@ async def build_dev_handler(
             pass
 
     async def _dispatcher_audit_emitter(entry: dict) -> None:
+        try:
+            logger.info(
+                "DISPATCHER_AUDIT: type=%s tool=%s",
+                entry.get("type", "?"), entry.get("tool_id", "?"),
+            )
+        except Exception:
+            pass
         try:
             if audit is None or not hasattr(audit, "log"):
                 return
