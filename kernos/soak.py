@@ -342,6 +342,16 @@ class ScenarioComparison:
 # Tool call markers come from server.py + repl.py:
 #   TOOL_CALLED: tool=<name> seam=<seam> classification=<cls>
 #   TOOL_RESULT: tool=<name> seam=<seam> is_error=<bool>
+#
+# ARCHITECTURAL EXTENSION POINT — when new dispatcher seams ship
+# (e.g., a workshop-tool dispatcher distinct from
+# live_integration_dispatcher, or a subconscious-layer dispatcher),
+# the seam string in TOOL_CALLED widens. The regex below is
+# already permissive enough to capture any seam value, but the
+# classifier may want seam-specific routing rules (e.g., "tool fired
+# through workshop seam = check workshop registration as well").
+# When that happens, add a dispatch-seam fingerprint extractor here
+# and route the divergence rule in `_compare_scenario` accordingly.
 _TOOL_CALLED_RE = re.compile(
     r"TOOL_CALLED: tool=(\S+) seam=(\S*) classification=(\S*)"
 )
@@ -393,6 +403,17 @@ def _extract_dump_zones(dump_text: str) -> dict[str, str]:
 
     Body runs from the header until the next `## ` header or end.
     Returns ordered dict (insertion = source order).
+
+    ARCHITECTURAL EXTENSION POINT — zone-name regex below accepts
+    any uppercase header (`[A-Z][A-Z0-9 _\\-/]*`) so new zones from
+    future architecture surface automatically. When a new zone
+    type ships (subconscious, shared spaces, member capabilities,
+    canvases-as-active-zone, etc.), it appears in the comparison
+    without code change. If a zone needs special-cased shape
+    tolerance (e.g., MEMORY zone is LLM-driven and varies turn-to-
+    turn — see the 2026-05-03 soak's only structural divergence),
+    add a per-zone tolerance map and key off the zone name in the
+    shape-comparison block of `_compare_scenario`.
     """
     zones: dict[str, str] = {}
     if not dump_text:
@@ -870,6 +891,23 @@ def _format_diff_report(
 # mechanical surface for "did this turn fire correctly." Failures
 # here route to "structural / blocks-flip" by definition.
 
+# ARCHITECTURAL EXTENSION POINT — adding new console signals.
+#
+# Each signal here represents "a shape every successful Kernos turn
+# should produce in stdout." When new architecture lands that has a
+# new console signal worth pinning, add a ConsoleAssertion below. Examples
+# of future architecture that would warrant a new entry:
+#
+#   - Subconscious layer ships → assert background-pondering log line
+#     fires when subconscious cycles run
+#   - New dispatcher seam (e.g., distinct workshop-tool dispatcher)
+#     ships → assert seam-specific TOOL_CALLED log line
+#   - Capability-readiness probe runs at boot → assert the probe log line
+#   - Multi-instance coordination ships → assert per-instance boot log
+#
+# Keep entries here scoped to "every turn should show this." Scenario-
+# specific console signals stay in the per-scenario `console_assertions`
+# tuple (see SCENARIO_1_HATCHING for examples).
 _BASELINE_CONSOLE_ASSERTIONS: tuple[ConsoleAssertion, ...] = (
     ConsoleAssertion(
         description="checklist-1: REPL boot succeeded (handler ready)",
@@ -891,6 +929,43 @@ _BASELINE_CONSOLE_ASSERTIONS: tuple[ConsoleAssertion, ...] = (
     ),
 )
 
+# ARCHITECTURAL EXTENSION POINT — adding new dump shape checks.
+#
+# Each entry pins "this substrate element reaches the model on every
+# turn." The split below mirrors how the substrate composes: zones
+# come from the assembly pipeline; tool surface comes from the
+# catalog-resolved tool list; identifiers come from the briefing.
+# When new substrate ships, route the new shape check to its category.
+#
+# Examples of future architecture that would warrant new entries:
+#
+#   Substrate zones (## SOMETHING headers in dump):
+#     - Subconscious layer ships → ## SUBCONSCIOUS or ## PONDERINGS zone
+#     - Cross-member shared spaces ship → ## SHARED CONTEXT zone
+#     - Per-member capability connections ship → ## MY CAPABILITIES
+#       zone visible to that member
+#     - System space tooling ships → ## SYSTEM SPACE zone for
+#       admin-mode turns
+#
+#   Tool surface (`"name": "..."` in tools array):
+#     - KERNEL-TOOL-REGISTRY-V1 lands → assert each ALWAYS_PINNED
+#       entry resolves through the registrar (right now only
+#       request_tool is asserted; widen here when registry refactor
+#       lands)
+#     - Workshop tools become first-class peers → assert at least
+#       one workshop tool registers and is reachable
+#     - Member-relational tools surface on thin path (currently in
+#       the asymmetric gap) → assert send_relational_message reaches
+#       the model
+#
+#   Briefing / identifier shape (preamble + cache_key fields):
+#     - When the dump format pins instance/member/space identifiers
+#       in a discoverable header → add identifier presence checks
+#     - Cache_key surfaces the thin-path indicator → add as
+#       path-specific check toggled by path_label
+#
+# Failure of any baseline item is structural-by-definition; the
+# diff-report classifier routes it to blocks-flip.
 _BASELINE_DUMP_ASSERTIONS: tuple[DumpAssertion, ...] = (
     DumpAssertion(
         description="checklist-5: ## RULES zone present (operating principles)",

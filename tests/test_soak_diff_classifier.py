@@ -6,6 +6,40 @@ mechanical surface the architect classifies divergences on. If the
 classifier itself silently misclassifies, the equivalence verdict
 loses meaning. These tests pin the classifier's bucket / severity /
 reason-code outputs against representative inputs.
+
+ARCHITECTURAL EXTENSION POINTS — adding new shape tests as
+architecture grows. The harness adds new shape checks in two
+places (per-turn baseline assertions and the diff classifier);
+this test file pins both. When new architecture lands, add a
+test here mirroring the shape check.
+
+  - New baseline console signal lands → add a test that asserts
+    the baseline regex matches expected stdout AND fails when
+    absent (mirror `test_normalize_log_for_prose_strips_logger_lines`
+    pattern: positive + negative cases).
+  - New baseline dump zone lands → add an extractor test
+    (`test_extract_dump_zones_*`) covering the new zone name
+    pattern, plus a structural assertion test that the new zone's
+    absence registers as `_REASON_ZONE_MISSING`.
+  - New dispatcher seam lands → add a tool-call test that captures
+    a TOOL_CALLED line with the new seam and verifies the
+    classifier's seam-specific rules (if any) fire correctly.
+  - New severity code or reason code lands → add a pin test that
+    asserts the constant exists with the expected string value
+    (rename detection — every reason code in the test imports
+    above pins the spelling).
+  - New zone-shape tolerance rule lands (e.g., MEMORY zone gets
+    its own LLM-variance tolerance) → add a tolerance test pair:
+    one inside-tolerance case → REVIEW; one outside-tolerance →
+    STRUCTURAL.
+  - New tool-surface contract (e.g., when KERNEL-TOOL-REGISTRY-V1
+    lands and asserts every ALWAYS_PINNED tool reaches the model)
+    → add baseline dump assertion tests for each newly-required
+    tool name in the surface.
+
+Pattern for every new shape test: build a representative pair of
+(legacy, thin) artifacts, run `_compare_scenario`, then assert
+the bucket + severity + reason code on the resulting Divergence.
 """
 
 from __future__ import annotations
