@@ -76,6 +76,17 @@ ChainCaller = Callable[
 ]
 
 
+# INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece C): tool dispatcher
+# protocol for the bounded tool-use loop. Returns the textual content
+# to be wrapped into a tool_result block. Errors propagate to the
+# loop's friendly-failure fallback (logged + reported as tool error
+# text rather than crashing the render).
+ToolDispatcher = Callable[
+    ...,  # tool_name, tool_input, tool_use_id, conversation_id (all kw)
+    Awaitable[str],
+]
+
+
 # ---------------------------------------------------------------------------
 # B1 / B2 safe render inputs — structural redaction
 # ---------------------------------------------------------------------------
@@ -167,36 +178,79 @@ class B1RenderInputs:
 # ---------------------------------------------------------------------------
 
 
+# INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece B): kind prompts
+# rewritten capability-first per saved feedback memory
+# `feedback_capability_first_posture`. Pre-spec these prompts contained
+# explicit "No tool calls." / "Do NOT execute the tool" / "Plain text."
+# directives that, combined with the surfaced_tools-empty bug, told the
+# model not to use tools even when they were in its tool definitions.
+# Per-prompt load-bearing check is documented inline.
+
 _SYSTEM_PROMPT_RESPOND_ONLY = """\
-You are Kernos's presence renderer. Generate a conversational reply that
-answers the user. Keep tone consistent with the briefing's directive.
-Brief and direct unless the directive asks for depth. Output the reply as
-plain text. No tool calls.
+You are Kernos's presence renderer. The decided action is a
+conversational reply. Answer the user directly; keep tone consistent
+with the briefing's directive. If a tool call would genuinely serve
+the user's request, call it — the kind classification didn't surface
+one because integration didn't see one as needed, but the model is
+the authority on what helps. Brief and direct unless the directive
+asks for depth.
 """
+# Load-bearing check (RESPOND_ONLY): pre-spec the prompt forbade tool
+# calls explicitly ("No tool calls."). That constraint was a legacy
+# render-only assumption — there is no architectural reason a
+# conversational reply cannot benefit from a quick tool consultation.
+# Constraint dropped; capability-first posture restored.
 
 _SYSTEM_PROMPT_DEFER = """\
 You are Kernos's presence renderer. The decided action is to defer.
 Acknowledge the user briefly, signal that this turn is being deferred,
-and indicate the follow-up shape from the briefing. Plain text response.
+and indicate the follow-up shape from the briefing. A tool call here
+is unusual but not forbidden if it materially helps explain the
+deferral.
 """
+# Load-bearing check (DEFER): pre-spec said "Plain text response."
+# Plain text is the typical output but not a hard constraint —
+# capability-first means the model decides whether a tool helps.
 
 _SYSTEM_PROMPT_CONSTRAINED_RESPONSE = """\
-You are Kernos's presence renderer. The decided action is constrained
+You are Kernos's presence renderer. The decided action is a constrained
 response: respond partially under the named constraint. Surface what
-can be said within the constraint; acknowledge what cannot. Plain text.
+can be said within the constraint; acknowledge what cannot. The
+constraint applies to scope, not to capability — use tools where they
+help fulfill the request within the named scope.
 """
+# Load-bearing check (CONSTRAINED_RESPONSE): pre-spec ended with
+# "Plain text." The scope constraint (respond partially under named
+# constraint) IS load-bearing — that's what the kind means. The
+# format constraint (plain text, no tools) was incidental and
+# anti-capability. Scope stays explicit; capability framing replaces
+# the plain-text-only directive.
 
 _SYSTEM_PROMPT_PIVOT = """\
-You are Kernos's presence renderer. The decided action is pivot:
-generate a different shape of response than the literal request asked
-for. Use the briefing's reason and suggested_shape. Plain text.
+You are Kernos's presence renderer. The decided action is to pivot:
+generate a different shape of response than the literal request
+asked for. Use the briefing's reason and suggested_shape. Tool calls
+are appropriate when the pivot benefits from real-world data.
 """
+# Load-bearing check (PIVOT): pre-spec said "Plain text." Pivot is
+# about response shape, not output format — capability-first allows
+# tool use when it serves the pivoted shape.
 
 _SYSTEM_PROMPT_PROPOSE_TOOL = """\
-You are Kernos's presence renderer. The decided action is propose_tool:
-render a proposal text awaiting user confirmation. Do NOT execute the
-tool — the proposal is the output. Plain text.
+You are Kernos's presence renderer. The decided action is propose_tool.
+If the proposed tool is read-only / non-destructive (effect "read"),
+call it directly — the user is best served by a real result rather
+than a confirmation prompt. Propose-then-confirm only when the effect
+is irreversible or affects others (writes, deletions, sends, payments,
+shared-state changes). When proposing, render the proposal as plain
+text awaiting confirmation.
 """
+# Load-bearing check (PROPOSE_TOOL): pre-spec said "Do NOT execute the
+# tool — the proposal is the output." That blanket rule was a real
+# anti-capability source: read-only tool calls have no consequence
+# requiring confirmation. Distinguish by effect: read = inline,
+# destructive = propose. Real safety constraint preserved (destructive
+# tools still propose-then-confirm).
 
 _SYSTEM_PROMPT_CLARIFICATION_FIRST_PASS = """\
 You are Kernos's presence renderer. Integration emitted a
@@ -222,9 +276,17 @@ excludes it.
 _SYSTEM_PROMPT_FULL_MACHINERY_TERMINAL = """\
 You are Kernos's presence renderer. A multi-step action has completed.
 Render the terminal user-facing response naturally given the briefing's
-directive and the action context. Plain text. Streaming permitted —
-the loop has terminated.
+directive and the action context. The full-machinery loop has
+terminated; a follow-up tool call here would be unusual but is
+permitted if it genuinely serves the wrap-up (e.g., a quick read to
+confirm the final state). Streaming permitted.
 """
+# Load-bearing check (FULL_MACHINERY_TERMINAL): pre-spec said "Plain
+# text. Streaming permitted — the loop has terminated." Terminal
+# framing is correct (the multi-step loop did finish). The plain-text
+# directive was implicit no-tools for legacy reasons. Capability-first:
+# the model can do a small follow-up read if it materially helps the
+# wrap-up. Streaming retained as architectural fact.
 
 
 def _system_prompt_for_kind(kind: ActionKind) -> str:
@@ -689,9 +751,25 @@ class PresenceRenderer:
         *,
         chain_caller: ChainCaller,
         max_tokens: int = DEFAULT_PRESENCE_MAX_TOKENS,
+        tool_dispatcher: "ToolDispatcher | None" = None,
+        max_tool_iterations: int = 5,
     ) -> None:
+        """
+        INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece C):
+        ``tool_dispatcher`` is the bounded tool-use-loop hook.
+        When None (default), ``_render`` calls ``chain_caller`` once
+        and extracts text — same behavior as pre-spec. When provided,
+        ``_render`` runs a bounded loop: tool_use blocks in the
+        response trigger dispatch, results append to messages,
+        chain_caller fires again. Loop terminates on text-only
+        response OR ``max_tool_iterations`` (whichever first).
+        Telemetry increments once per actual dispatch (per spec
+        acceptance criterion 6f).
+        """
         self._chain_caller = chain_caller
         self._max_tokens = max_tokens
+        self._tool_dispatcher = tool_dispatcher
+        self._max_tool_iterations = max_tool_iterations
 
     async def render(self, briefing: Briefing) -> PresenceRenderResult:
         """Kind-aware render. Branches structurally on decided_action.kind.
@@ -834,15 +912,109 @@ class PresenceRenderer:
         # chain_caller protocol compatible with stubs that don't accept
         # it. The production C7 thin path passes briefing.turn_id (the
         # upstream conversation_id), which is non-empty for real turns.
-        chain_kwargs = {}
+        chain_kwargs: dict[str, Any] = {}
         if conversation_id:
             chain_kwargs["conversation_id"] = conversation_id
-        response = await self._chain_caller(
-            system, messages, list(tools), self._max_tokens,
-            **chain_kwargs,
+
+        # INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece C): bounded
+        # tool-use loop. Pre-spec, this method called chain_caller
+        # once and extracted text; tool_use blocks in the response
+        # were silently dropped, breaking capability-first posture.
+        # Loop semantics:
+        #   - Each iteration: chain_caller produces a response.
+        #   - If response carries tool_use blocks AND a dispatcher
+        #     is wired, dispatch each, append assistant + tool_result
+        #     messages, loop.
+        #   - Terminate on text-only response OR max iterations.
+        #   - On max iterations, surface a friendly text rather than
+        #     silent drop (per spec acceptance criterion 6e).
+        # When no dispatcher is wired, the legacy single-call shape
+        # is preserved (loop body executes once, returns first text).
+        for _iteration in range(max(1, self._max_tool_iterations)):
+            response = await self._chain_caller(
+                system, messages, list(tools), self._max_tokens,
+                **chain_kwargs,
+            )
+            tool_use_blocks = [
+                b for b in getattr(response, "content", []) or []
+                if getattr(b, "type", None) == "tool_use"
+            ]
+            if not tool_use_blocks or self._tool_dispatcher is None:
+                text = _extract_text_from_response(response)
+                return PresenceRenderResult(text=text, streamed=False)
+
+            # Append the assistant turn (with the tool_use blocks) so
+            # the next chain call sees what was just decided. Use
+            # provider-API shape (role + content list of dicts).
+            assistant_blocks: list[dict] = []
+            for b in getattr(response, "content", []) or []:
+                btype = getattr(b, "type", None)
+                if btype == "text":
+                    assistant_blocks.append({
+                        "type": "text",
+                        "text": getattr(b, "text", "") or "",
+                    })
+                elif btype == "tool_use":
+                    assistant_blocks.append({
+                        "type": "tool_use",
+                        "id": getattr(b, "id", "") or "",
+                        "name": getattr(b, "name", "") or "",
+                        "input": getattr(b, "input", {}) or {},
+                    })
+            messages.append({"role": "assistant", "content": assistant_blocks})
+
+            # Dispatch each tool_use block, append tool_result blocks
+            # in a single user message (Anthropic-style multi-result
+            # turn). tool_use_id is preserved per dispatch so the
+            # provider can correlate (spec acceptance criterion 6b).
+            tool_result_blocks: list[dict] = []
+            for tu in tool_use_blocks:
+                tu_id = getattr(tu, "id", "") or ""
+                tu_name = getattr(tu, "name", "") or ""
+                tu_input = getattr(tu, "input", {}) or {}
+                try:
+                    result_content = await self._tool_dispatcher(
+                        tool_name=tu_name,
+                        tool_input=tu_input,
+                        tool_use_id=tu_id,
+                        conversation_id=conversation_id,
+                    )
+                except Exception as exc:
+                    # Friendly tool-failure result rather than tearing
+                    # down the loop — gives the model a chance to
+                    # recover or surface the error to the user.
+                    logger.warning(
+                        "PRESENCE_TOOL_DISPATCH_FAILED: tool=%s err=%s",
+                        tu_name, exc,
+                    )
+                    result_content = (
+                        f"[tool error] {tu_name} failed: {exc}. "
+                        f"You may try a different approach or report "
+                        f"the limitation to the user."
+                    )
+                tool_result_blocks.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu_id,
+                    "content": result_content if isinstance(result_content, str)
+                               else str(result_content),
+                })
+            messages.append({"role": "user", "content": tool_result_blocks})
+
+        # Max iterations reached without text-only termination.
+        # Friendly failure (spec acceptance criterion 6e).
+        logger.warning(
+            "PRESENCE_TOOL_LOOP_MAX_ITERATIONS: cap=%d — surfacing "
+            "iteration-cap message rather than silent drop",
+            self._max_tool_iterations,
         )
-        text = _extract_text_from_response(response)
-        return PresenceRenderResult(text=text, streamed=False)
+        return PresenceRenderResult(
+            text=(
+                "I worked through several tool calls but didn't reach a "
+                "final response within the iteration limit. Let me know "
+                "what to try next or which step to focus on."
+            ),
+            streamed=False,
+        )
 
 
 def _user_message_for_briefing(briefing: Briefing) -> str:
@@ -869,9 +1041,14 @@ def build_presence_renderer(
     *,
     chain_caller: ChainCaller,
     max_tokens: int = DEFAULT_PRESENCE_MAX_TOKENS,
+    tool_dispatcher: ToolDispatcher | None = None,
+    max_tool_iterations: int = 5,
 ) -> PresenceRenderer:
     return PresenceRenderer(
-        chain_caller=chain_caller, max_tokens=max_tokens
+        chain_caller=chain_caller,
+        max_tokens=max_tokens,
+        tool_dispatcher=tool_dispatcher,
+        max_tool_iterations=max_tool_iterations,
     )
 
 
@@ -881,5 +1058,6 @@ __all__ = [
     "ChainCaller",
     "DEFAULT_PRESENCE_MAX_TOKENS",
     "PresenceRenderer",
+    "ToolDispatcher",
     "build_presence_renderer",
 ]

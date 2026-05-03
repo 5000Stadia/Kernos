@@ -3263,6 +3263,36 @@ class ReasoningService:
         # Synthetic reasoning.request emitted ONCE at turn start.
         await delivery.emit_request_event()
 
+        # INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece A): build
+        # SurfacedTool tuple from cognitive_context.tool_surface so
+        # IntegrationInputs.surfaced_tools is populated. Without this,
+        # the integration LLM sees zero tools for the turn and defaults
+        # to render-only ActionKinds (RESPOND_ONLY / CONSTRAINED_RESPONSE
+        # / PROPOSE_TOOL) — agent cannot select tool execution even
+        # when the user explicitly asks. See
+        # specs/INTEGRATION-CAPABILITY-FIRST-V1.md §"Batch 1, piece A".
+        _cognitive_context = getattr(request, "cognitive_context", None)
+        _surfaced_tools: tuple = ()
+        if _cognitive_context is not None:
+            _tool_surface = getattr(_cognitive_context, "tool_surface", None)
+            if _tool_surface is not None:
+                try:
+                    from kernos.kernel.integration.surfaced_tools import (
+                        build_surfaced_tools,
+                    )
+                    _tool_dicts = _tool_surface.all_tools()
+                    _surfaced_tools = build_surfaced_tools(
+                        _tool_dicts,
+                        gate=self._get_gate(),
+                        active_space=None,
+                        rationale="cognitive_context.tool_surface",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "SURFACED_TOOLS_BUILD_FAILED: err=%s; "
+                        "integration will see empty surface (degraded)",
+                        exc,
+                    )
         inputs = TurnRunnerInputs.from_api_messages(
             instance_id=request.instance_id,
             member_id=request.member_id,
@@ -3273,11 +3303,12 @@ class ReasoningService:
             active_space_ids=(
                 (request.active_space_id,) if request.active_space_id else ()
             ),
+            surfaced_tools=_surfaced_tools,
             # COGNITIVE-CONTEXT-V1 C3a: thread the typed packet from
             # ReasoningRequest into TurnRunnerInputs so the runner
             # can pass it through to IntegrationInputs and onwards
             # to Briefing.cognitive_context for the renderer.
-            cognitive_context=getattr(request, "cognitive_context", None),
+            cognitive_context=_cognitive_context,
         )
         outcome = await turn_runner.run_turn(inputs)
         # When the response_delivery hook is wired correctly, the

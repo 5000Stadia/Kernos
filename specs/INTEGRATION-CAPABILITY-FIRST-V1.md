@@ -136,6 +136,51 @@ under the new prompt.
   - `TurnRunnerInputs.surfaced_tools` reaches
     `IntegrationInputs.surfaced_tools`
 
+### Batch 1 — Codex review fold (2026-05-03)
+
+End-of-batch Codex review verdict: PARTIAL → fixes folded; two
+architect-input items deferred for Batch 2 fold:
+
+**Folded into Batch 1:**
+- Action-dependent tools (`manage_covenants`, `manage_capabilities`,
+  `manage_channels`, `manage_members`, `manage_plan`,
+  `manage_workspace`, `respond_to_parcel`) classified `"unknown"`
+  at surfacing time rather than silently `"read"` — dispatch-time
+  enforcement (Batch 2) is the source of truth. Pin test added.
+- Capability-readiness contract test rewritten to use a real
+  cognitive-context tool surface and a real chain caller assertion
+  on the system prompt sent to the model — not gaming the loop.
+- Receipt-grade criterion (d) test reframed: pins MESSAGE-THREAD
+  parity with legacy (assistant→user/tool_result alternation).
+  Trace/audit/event parity is owned by the dispatcher layer, not
+  the renderer loop — Batch 2 wires the dispatcher with audit.
+
+**Architect-input items for Batch 2 fold:**
+
+1. **Dispatcher signature mismatch.** PresenceRenderer's loop expects
+   keyword-style `(tool_name, tool_input, tool_use_id, conversation_id)`;
+   server.py's `_integration_dispatcher` is positional
+   `(tool_id, args, inputs)`. Batch 2 wiring must define an adapter,
+   not a direct wire. Two callable shapes serve two distinct seams:
+   integration runner read-only dispatch vs presence renderer
+   observation-loop dispatch.
+
+2. **PROPOSE_TOOL effect data plumbing.** The Batch 1 prompt rewrite
+   asks the model to distinguish read vs destructive effects, but
+   `ProposeTool` briefing carries no `effect` field and the propose
+   user message includes only tool id and reason. Today the safety
+   property depends on model inference. Options for Batch 2 fold:
+   (a) thread effect through `ProposeTool` dataclass and the propose
+   user-message renderer; (b) make dispatch-time enforcement
+   block destructive calls regardless of inline-vs-propose decision;
+   (c) keep model inference and accept the residual. Architect call.
+
+3. **Dispatch-time enforcement using actual args.** Batch 2 must
+   enforce read-only at the dispatcher level using the actual call
+   arguments, not only `SurfacedTool.gate_classification` which is
+   set at surfacing time before args exist. This is the canonical
+   safety boundary for action-dependent tools.
+
 ### Batch 2 — D, with four live bindings (the design review edit 3)
 
 D = workshop binding, expanded scope per the design review. If any of the four
