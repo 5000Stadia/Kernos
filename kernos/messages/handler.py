@@ -4259,6 +4259,40 @@ class MessageHandler:
                             except Exception:
                                 pass
                             logger.info("Restart requested by member=%s", primary_ctx.member_id)
+                            # Re-read KERNOS_* env from .env before
+                            # execv so the restarted process picks up
+                            # any .env edits made since boot (e.g.,
+                            # toggling investigative flags). Mirrors
+                            # start.sh's _load_kernos_env. Without
+                            # this, /restart inherits the old env and
+                            # operators have to Ctrl+C + ./start.sh
+                            # instead — surprising, defeats the
+                            # "restart" mental model. Best-effort:
+                            # any failure to read .env is logged but
+                            # never blocks the restart.
+                            try:
+                                _env_path = Path.cwd() / ".env"
+                                if _env_path.exists():
+                                    _reloaded = 0
+                                    for _line in _env_path.read_text(encoding="utf-8").splitlines():
+                                        _line = _line.strip().rstrip("\r")
+                                        if not _line or _line.startswith("#") or "=" not in _line:
+                                            continue
+                                        _key, _, _val = _line.partition("=")
+                                        if not _key.startswith("KERNOS_"):
+                                            continue
+                                        _val = _val.strip().rstrip("\r")
+                                        if (_val.startswith('"') and _val.endswith('"')) or \
+                                           (_val.startswith("'") and _val.endswith("'")):
+                                            _val = _val[1:-1]
+                                        os.environ[_key] = _val
+                                        _reloaded += 1
+                                    logger.info(
+                                        "RESTART_ENV_RELOAD: %d KERNOS_* vars re-read from %s",
+                                        _reloaded, _env_path,
+                                    )
+                            except Exception:
+                                logger.exception("RESTART_ENV_RELOAD_FAILED")
                             os.execv(sys.executable, [sys.executable] + sys.argv)
                         else:
                             response = "Only the instance owner can restart."
