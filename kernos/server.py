@@ -21,7 +21,7 @@ from kernos.capability.registry import CapabilityRegistry, CapabilityStatus
 from kernos.kernel.event_types import EventType
 from kernos.kernel.events import JsonEventStream, emit_event
 from kernos.kernel.engine import TaskEngine
-from kernos.kernel.reasoning import ReasoningService
+from kernos.kernel.reasoning import ReasoningRequest, ReasoningService
 from kernos.kernel.state_json import JsonStateStore
 from kernos.persistence.json_file import JsonAuditStore, JsonConversationStore, JsonInstanceStore
 
@@ -624,7 +624,23 @@ async def on_ready():
             on_dispatch_complete=telemetry.add_tool_iteration,
         )
         per_turn_reasoner = DivergenceReasoner(chain_caller=wrapped_chain)
-        per_turn_presence = PresenceRenderer(chain_caller=wrapped_chain)
+        # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 1: bridge the
+        # renderer's keyword-style tool-dispatcher contract to the
+        # integration runner's positional (tool_id, args, inputs)
+        # contract via the adapter shim. Both seams stay intact —
+        # adapter translates without homogenizing. Late-binding
+        # closure means `_integration_dispatcher` resolves to the
+        # live LiveIntegrationDispatcher set up after handler is
+        # constructed.
+        from kernos.kernel.integration.live_wiring import (
+            build_renderer_to_integration_adapter,
+        )
+        per_turn_presence = PresenceRenderer(
+            chain_caller=wrapped_chain,
+            tool_dispatcher=build_renderer_to_integration_adapter(
+                integration_dispatcher=_integration_dispatcher,
+            ),
+        )
 
         per_turn_integration = IntegrationService(
             chain_caller=wrapped_chain,
@@ -664,6 +680,89 @@ async def on_ready():
     handler = MessageHandler(mcp_manager, conversations, tenants, audit, events, state, reasoning, registry, engine, secrets_dir=os.getenv("KERNOS_SECRETS_DIR", "./secrets"))
     handler._instance_db = instance_db  # Wire instance DB for member resolution
     handler.register_mcp_tools_in_catalog()
+
+    # ====================================================================
+    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 — live workshop binding
+    # ====================================================================
+    # The C5c-bringup cutover stubbed the workshop binding seams with
+    # _UnwiredDescriptorLookup / _UnwiredExecutor / empty
+    # _integration_dispatcher / empty StaticToolCatalog so the thin
+    # path could ship without full-machinery dispatch yet. Batch 2
+    # replaces those stubs with production-wired versions reading
+    # from the live tool catalog and routing through reasoning's
+    # execute_tool. Late-bind into the closure: the per-turn factory
+    # reads `shared_executor` etc. from the enclosing scope at call
+    # time, so rebinding here picks up correctly when turns fire.
+    #
+    # Per the design review's Fold 3 ("Gate at dispatch, hint at
+    # surfacing"): every live dispatch path classifies with the
+    # actual call arguments before executing — surfacing-time hints
+    # are not authoritative. See kernos/kernel/integration/live_wiring.py
+    # for the canonical implementations.
+    from kernos.kernel.integration.live_wiring import (
+        LiveDescriptorLookup,
+        LiveExecutor,
+        LiveIntegrationDispatcher,
+        LivePlannerCatalog,
+    )
+
+    def _live_request_factory(*args) -> Any:
+        """Build a minimal ReasoningRequest-shaped object for
+        execute_tool routing. Either receives ToolExecutionInputs
+        (executor path) or (tool_id, args, inputs) positional
+        (integration dispatcher path) — both supply the fields
+        execute_tool consults (instance_id, active_space_id,
+        member_id)."""
+        if len(args) == 1:
+            inputs = args[0]
+            return ReasoningRequest(
+                instance_id=getattr(inputs, "instance_id", "") or "",
+                conversation_id=getattr(inputs, "turn_id", "") or "",
+                system_prompt="",
+                messages=[],
+                tools=[],
+                model="",
+                trigger="thin-path-executor",
+                active_space_id=getattr(inputs, "space_id", "") or "",
+                member_id=getattr(inputs, "member_id", "") or "",
+            )
+        # Positional (tool_id, args, dispatch_inputs) signature: extract
+        # what we can from inputs (which carries integration's
+        # IntegrationInputs).
+        _, _, dispatch_inputs = args
+        return ReasoningRequest(
+            instance_id=getattr(dispatch_inputs, "instance_id", "") or "",
+            conversation_id=getattr(dispatch_inputs, "turn_id", "") or "",
+            system_prompt="",
+            messages=[],
+            tools=[],
+            model="",
+            trigger="thin-path-integration-dispatcher",
+            active_space_id=getattr(dispatch_inputs, "space_id", "") or "",
+            member_id=getattr(dispatch_inputs, "member_id", "") or "",
+        )
+
+    shared_descriptor_lookup = LiveDescriptorLookup(
+        tool_catalog=handler._tool_catalog,
+    )
+    shared_executor = LiveExecutor(
+        execute_tool=reasoning.execute_tool,
+        gate=reasoning._get_gate(),
+        request_factory=lambda inputs: _live_request_factory(inputs),
+    )
+    _integration_dispatcher = LiveIntegrationDispatcher(
+        execute_tool=reasoning.execute_tool,
+        gate=reasoning._get_gate(),
+        request_factory=lambda tid, args, inp: _live_request_factory(tid, args, inp),
+    )
+    planner_tool_catalog = LivePlannerCatalog(
+        tool_catalog=handler._tool_catalog,
+    )
+    logger.info(
+        "INTEGRATION_CAPABILITY_FIRST_V1_BATCH2: live workshop binding "
+        "wired (descriptor_lookup + executor + integration_dispatcher + "
+        "planner_catalog all live; gate-at-dispatch enforcement active)",
+    )
 
     logger.info("MessageHandler ready (data_dir=%s)", data_dir)
 

@@ -416,7 +416,18 @@ async def build_dev_handler(
             on_dispatch_complete=telemetry.add_tool_iteration,
         )
         reasoner = DivergenceReasoner(chain_caller=wrapped_chain)
-        presence = PresenceRenderer(chain_caller=wrapped_chain)
+        # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 1 — see server.py
+        # mirror. Same adapter shim wires the renderer's tool-use loop
+        # to the live integration dispatcher.
+        from kernos.kernel.integration.live_wiring import (
+            build_renderer_to_integration_adapter,
+        )
+        presence = PresenceRenderer(
+            chain_caller=wrapped_chain,
+            tool_dispatcher=build_renderer_to_integration_adapter(
+                integration_dispatcher=_integration_dispatcher,
+            ),
+        )
         integration = IntegrationService(
             chain_caller=wrapped_chain,
             read_only_dispatcher=_integration_dispatcher,
@@ -457,7 +468,58 @@ async def build_dev_handler(
     )
     handler._instance_db = instance_db
     handler.register_mcp_tools_in_catalog()
-    logger.info("repl: handler ready (instance_id=%s, data_dir=%s)", _instance_id, _data_dir)
+
+    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 — live workshop binding
+    # mirroring server.py. Late-bind into the per-turn factory's
+    # closure so dev-REPL turns dispatch through reasoning.execute_tool
+    # with the same gate-at-dispatch enforcement as production.
+    from kernos.kernel.integration.live_wiring import (
+        LiveDescriptorLookup,
+        LiveExecutor,
+        LiveIntegrationDispatcher,
+        LivePlannerCatalog,
+    )
+    from kernos.kernel.reasoning import ReasoningRequest as _ReasoningRequest
+
+    def _live_request_factory(*args) -> Any:
+        if len(args) == 1:
+            inputs = args[0]
+            return _ReasoningRequest(
+                instance_id=getattr(inputs, "instance_id", "") or "",
+                conversation_id=getattr(inputs, "turn_id", "") or "",
+                system_prompt="", messages=[], tools=[], model="",
+                trigger="repl-thin-path-executor",
+                active_space_id=getattr(inputs, "space_id", "") or "",
+                member_id=getattr(inputs, "member_id", "") or "",
+            )
+        _, _, dispatch_inputs = args
+        return _ReasoningRequest(
+            instance_id=getattr(dispatch_inputs, "instance_id", "") or "",
+            conversation_id=getattr(dispatch_inputs, "turn_id", "") or "",
+            system_prompt="", messages=[], tools=[], model="",
+            trigger="repl-thin-path-integration-dispatcher",
+            active_space_id=getattr(dispatch_inputs, "space_id", "") or "",
+            member_id=getattr(dispatch_inputs, "member_id", "") or "",
+        )
+
+    shared_descriptor_lookup = LiveDescriptorLookup(
+        tool_catalog=handler._tool_catalog,
+    )
+    shared_executor = LiveExecutor(
+        execute_tool=reasoning.execute_tool,
+        gate=reasoning._get_gate(),
+        request_factory=lambda inputs: _live_request_factory(inputs),
+    )
+    _integration_dispatcher = LiveIntegrationDispatcher(
+        execute_tool=reasoning.execute_tool,
+        gate=reasoning._get_gate(),
+        request_factory=lambda tid, args, inp: _live_request_factory(tid, args, inp),
+    )
+    planner_tool_catalog = LivePlannerCatalog(
+        tool_catalog=handler._tool_catalog,
+    )
+
+    logger.info("repl: handler ready (instance_id=%s, data_dir=%s); workshop binding live", _instance_id, _data_dir)
     return handler
 
 
