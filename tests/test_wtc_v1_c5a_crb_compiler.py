@@ -77,7 +77,7 @@ def test_rich_trigger_with_event_selector_override():
             {"op": "eq", "path": "event_type",
              "value": "email.message_observed"},
             {"op": "eq", "path": "payload.from_address",
-             "value": "kit@anthropic.com"},
+             "value": "owner@example.com"},
         ],
     }
     pred = compile_trigger_descriptor({

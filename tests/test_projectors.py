@@ -819,7 +819,7 @@ class TestSuspiciousCandidate:
 
     def test_identity_not_suspicious(self):
         assert not _is_suspicious_candidate({
-            "lifecycle_archetype": "identity", "content": "User's name is Kabe"
+            "lifecycle_archetype": "identity", "content": "User's name is Bob"
         })
 
     def test_structural_not_suspicious_without_markers(self):

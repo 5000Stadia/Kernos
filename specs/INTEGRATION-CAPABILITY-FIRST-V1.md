@@ -1,6 +1,10 @@
 # INTEGRATION-CAPABILITY-FIRST v1
 
-**Status:** Draft for founder + Kit approval before implementation.
+**Status:** APPROVED FOR CC HANDOFF — Kit verdict 2026-05-03 (REVISE
+NARROWLY → six edits folded → APPROVED). Architect primer carries
+"legacy is the oracle until equivalence is proven; then strike" as
+hard architectural principle.
+
 Resolves the C7-cutover gap surfaced 2026-05-02 during operator soak:
 the decoupled-cognition thin path is anti-capability today because it
 ships kind prompts that forbid tool calls (`RESPOND_ONLY` /
@@ -11,7 +15,8 @@ behind `_UnwiredDescriptorLookup` (parked CCV1 follow-up
 `INTEGRATION-WIRE-LIVE-WORKSHOP-BINDING`).
 
 This spec restores end-to-end tool execution on the C7 thin path and
-re-enables the C7 default flip.
+re-enables the C7 default flip — gated on demonstrated equivalence
+with the legacy path, not just green probes.
 
 ## Why
 
@@ -23,13 +28,12 @@ Today's diagnosis (commit `1133c19` reverts default to legacy):
 The agent is faithfully obeying its instructions — every kind-aware
 system prompt the C7 thin path emits literally tells the model "no
 tool calls" or "Do NOT execute the tool." Tools are in the body
-(verified via `KERNOS_CODEX_LAST_PAYLOAD` receipts, 50KB body, 19
-tools, `strict: None`, `cache_key` set) — the substrate fidelity is
-correct. But the system prompt then immediately tells the model not
-to use them.
+(verified via `KERNOS_CODEX_LAST_PAYLOAD` receipts) — substrate
+fidelity is correct. But the system prompt then immediately tells the
+model not to use them.
 
 This is structurally anti-capability. Per the architect's guidance
-(saved 2026-05-02 as feedback memory `feedback_capability_first_posture`):
+(saved 2026-05-02 as `feedback_capability_first_posture`):
 
 > Kernos should be impressively capable, not a stack of "don't"s.
 > The default posture across the substrate, integration phase, kind
@@ -37,170 +41,265 @@ This is structurally anti-capability. Per the architect's guidance
 > — even when there's a real limitation, lean toward "let me try" or
 > "let me build a solution," not "I can't."
 
-The current C7 thin path violates this guidance at every layer. This
-spec realigns it.
+The current C7 thin path violates this guidance at every layer.
 
-## Scope
+## Thin-path contract definition (Kit edit, codified as architectural fact)
 
-### Ships in v1
+The decoupled-cognition architecture defines two paths through the
+model-call seam:
 
-#### A. Thread `surfaced_tools` end-to-end (Codex pinpoint)
+- **Thin path** = conversational/render path + bounded read-only
+  observation loop.
+- **Full machinery** = write/destructive/multi-step envelope actions,
+  dispatched through `EXECUTE_TOOL` action kind via planning, gating,
+  and confirmation flow.
 
-* **`kernos/kernel/reasoning.py:3266`** — `_run_via_turn_runner_provider`
+This contract is codified in the architect primer. Future migrations
+inherit it.
+
+## Implementation strategy — three batches + decommission
+
+Kit's revision: ship as three batches with explicit gating criteria,
+plus a separate decommission commit. CC's original "B first, fast
+win" ordering is REVERSED because B-before-C is a structural risk:
+kind prompts encouraging tool use before the loop exists means the
+model can call tools and the answer vanishes silently.
+
+### Batch 1 — A + C + B together (C internally before B)
+
+#### A. Thread `surfaced_tools` end-to-end
+
+* `kernos/kernel/reasoning.py:3266` — `_run_via_turn_runner_provider`
   builds `TurnRunnerInputs.from_api_messages` without `surfaced_tools`.
   Populate from `request.cognitive_context.tool_surface.all_tools()`,
   mapped to `tuple[SurfacedTool, ...]` with `gate_classification`
   resolved from `kernos/capability/known.py`.
-* **`kernos/kernel/turn_runner.py:171, 295`** — verify
-  `TurnRunnerInputs.from_api_messages` accepts and forwards
-  `surfaced_tools` to `IntegrationInputs`. Default-empty stays the
-  fallback for callers that genuinely have no surface.
-* **Pin tests** at `tests/test_thin_path_surfaced_tools_plumbing.py`:
-  - reasoning builds `TurnRunnerInputs.surfaced_tools` from
-    `cognitive_context.tool_surface`
-  - each `SurfacedTool` has `gate_classification` non-empty
-  - `TurnRunnerInputs.surfaced_tools` reaches `IntegrationInputs.surfaced_tools`
+* `kernos/kernel/turn_runner.py:171, 295` — verify accepts and
+  forwards `surfaced_tools` to `IntegrationInputs`. Default-empty
+  stays the fallback for callers that genuinely have no surface.
 
-#### B. Capability-first kind prompts
-
-Per saved feedback memory: kind prompts should encourage tool use, not
-forbid it. Rewrite the four affected prompts at
-`kernos/kernel/enactment/presence_renderer.py:170-244`:
-
-* **`_SYSTEM_PROMPT_RESPOND_ONLY`** — drop "No tool calls." trailing
-  line. Default posture: respond conversationally; if a tool would
-  serve the user better, call it.
-* **`_SYSTEM_PROMPT_CONSTRAINED_RESPONSE`** — replace "Plain text."
-  with "Use tools where they help fulfill the request within the
-  constraint; constraint applies to scope, not to capability."
-* **`_SYSTEM_PROMPT_PROPOSE_TOOL`** — replace "Do NOT execute the
-  tool — the proposal is the output." with "If the tool is read-only
-  / non-destructive, call it directly. Propose first only when the
-  effect is irreversible or affects others."
-* **`_SYSTEM_PROMPT_PIVOT`** — verify pivot doesn't accidentally
-  forbid tool calls.
-
-Rationale per architect memory: constraints come from the user, not
-from the system inventing them. Read-only / observation tools have no
-ambiguity — agent should call them inline. Write/destructive tools
-are where proposal-then-confirm makes sense.
-
-* **Pin tests** at `tests/test_capability_first_kind_prompts.py`:
-  - no kind prompt contains the literal string "No tool calls"
-  - no kind prompt contains "Do NOT execute"
-  - kind prompts reference tool use as supportive of the action
-
-#### C. Add tool-use loop to thin-path `_render`
+#### C. Tool-use loop in thin-path render method (BEFORE B internally)
 
 `kernos/kernel/enactment/presence_renderer.py:_render` currently calls
 `chain_caller` once and extracts text. If the model returns a
 `tool_use` block, it's silently dropped. Add a bounded tool-use loop
-mirroring the legacy path's tool-use semantics (cap iterations, log
-every tool call, append tool_result blocks before next iteration).
+mirroring the legacy path's tool-use semantics. Lands BEFORE B
+internally so the loop exists when the kind prompts start encouraging
+tool use.
 
-* **Pin tests** at `tests/test_thin_path_tool_use_loop.py`:
-  - chain_caller returns tool_use → `_render` executes the tool and
-    appends `tool_result` before next chain call
-  - max iterations cap fires correctly with friendly error
-  - text-only response returns immediately without looping
+#### B. Capability-first kind prompts
 
-#### D. Wire workshop binding (parked CCV1 follow-up)
+Per `feedback_capability_first_posture`: kind prompts should encourage
+tool use, not forbid it. Rewrite the four affected prompts at
+`kernos/kernel/enactment/presence_renderer.py:170-244`:
 
-This is the original `INTEGRATION-WIRE-LIVE-WORKSHOP-BINDING`
-parked work. Replace `_UnwiredDescriptorLookup` and `_UnwiredExecutor`
-in `kernos/server.py:483-502` (and `kernos/repl.py` mirror) with
-production-wired versions:
+* `_SYSTEM_PROMPT_RESPOND_ONLY` — drop "No tool calls." trailing line.
+* `_SYSTEM_PROMPT_CONSTRAINED_RESPONSE` — replace "Plain text." with
+  "Use tools where they help fulfill the request within the
+  constraint; constraint applies to scope, not capability."
+* `_SYSTEM_PROMPT_PROPOSE_TOOL` — replace "Do NOT execute the tool"
+  with "If read-only / non-destructive, call inline. Propose only when
+  effect is irreversible or affects others."
+* `_SYSTEM_PROMPT_FULL_MACHINERY_TERMINAL` — verify it correctly
+  encourages tool use for execute-tool kind.
 
-* `descriptor_lookup` reads from the live tool catalog
-* `executor` dispatches through the existing kernel-tool dispatch
-  path used by the legacy handler
-* Audit + receipt parity with legacy path
+Per-prompt **load-bearing check** applies: name what each currently
+constrains, why, whether load-bearing, where the constraint moves
+under the new prompt.
 
-* **Pin tests** at `tests/test_thin_path_executor_wiring.py`:
-  - executor.execute on a kernel tool returns valid `ToolExecutionResult`
-  - descriptor_lookup returns valid descriptor for known tool ids
-  - tool execution receipts land in conversation log identical to legacy
+#### Batch 1 — required acceptance criteria (Kit edits 5 + 6)
 
-#### E. Verification — soak runbook re-run
+* **Receipt-grade tool-loop pin tests** at
+  `tests/test_thin_path_tool_use_loop.py`:
+  - (a) multiple `tool_use` blocks handled, OR explicit "first only"
+    policy pinned in the test
+  - (b) `tool_use_id` preserved through to corresponding `tool_result`
+  - (c) `conversation_id` forwarded every iteration
+  - (d) trace/audit/event parity with legacy path
+  - (e) max-iteration friendly failure (not silent drop)
+  - (f) telemetry increments once per actual dispatch, not per attempt
+* **Capability-readiness contract test** at
+  `tests/test_capability_readiness_contract.py` — semantic, not
+  string-ban: weather/calendar-style request + read tool surfaced ⇒
+  model invocation receives prompt that allows/encourages tool call,
+  not one that says "no tool available." Plain-text-no-tools default
+  behavior must affirmatively go away, not just lose its forbid-tools
+  string.
+* **Conservative classification fallback**: missing/unknown
+  classification defaults to propose/blocked, not silently read-safe.
+  Pin test enforces.
+* **Plumbing pin tests** at
+  `tests/test_thin_path_surfaced_tools_plumbing.py`:
+  - reasoning builds `TurnRunnerInputs.surfaced_tools` from
+    `cognitive_context.tool_surface`
+  - each `SurfacedTool` has `gate_classification` non-empty
+  - `TurnRunnerInputs.surfaced_tools` reaches
+    `IntegrationInputs.surfaced_tools`
 
-Re-run probes A–D + scenarios 1-4 from
-`data/diagnostics/live-tests/COGNITIVE-CONTEXT-V1-live-test.md`
-against the C7 thin path with all four pieces above landed. Pass
-criteria:
+### Batch 2 — D, with four live bindings (Kit edit 3)
 
-- Probe A: ✅ already passed (substrate)
-- Probe B: tool actually invoked + result reaches model + included
-  in response (not just "substrate PASS")
-- Probe C: live procedures probe executes
-- Probe D: ✅ already passed (compaction-carry)
-- Scenarios 1-4: behavioral equivalence with legacy path
+D = workshop binding, expanded scope per Kit. If any of the four
+stay fake, integration/planning stays partially blind even after
+executor wiring. Half-fix is worse than no-fix because tests look
+complete.
 
-#### F. C7 default flip
+1. **Descriptor lookup** — replace `_UnwiredDescriptorLookup` in
+   `kernos/server.py:483` (and `kernos/repl.py` mirror) with a
+   production version reading from the live tool catalog.
+2. **Executor** — replace `_UnwiredExecutor` in
+   `kernos/server.py:497` with kernel-tool dispatch through the
+   legacy handler's existing path.
+3. **Planner tool catalog** — currently `StaticToolCatalog()` is
+   empty at `kernos/server.py`. Wire to the live catalog so planning
+   can see real tools.
+4. **Integration read-only dispatcher** — currently
+   `_integration_dispatcher` returns `{}`. Wire to the live
+   read-only dispatch path.
 
-Once all probes/scenarios pass on the thin path, flip
-`KERNOS_USE_DECOUPLED_TURN_RUNNER` default back to `1` in `start.sh`.
-Legacy stays reachable via `=0` for the stabilization window. Strike
-commit (legacy removal) gates on the same criteria as the original
-C7 spec.
+Pin tests at `tests/test_thin_path_executor_wiring.py`:
+- executor.execute on a kernel tool returns valid `ToolExecutionResult`
+- descriptor_lookup returns valid descriptor for known tool ids
+- planner catalog reflects live registrations
+- integration dispatcher returns real read-only tool results
+- tool execution receipts land in conversation log identical to legacy
 
-### Defers
+### Batch 3 — equivalence soak + default flip (legacy retained behind flag)
 
-* **Stewardship-aware tool gating** — for now, all tools the legacy
-  path would surface are surfaced on the thin path. Per-relationship
-  / per-sensitivity gating is its own follow-up.
-* **Streaming tool calls** — tool execution stays non-streamed in v1;
-  streaming during multi-step tool loops lands later if soak proves
-  out non-streamed UX is acceptable.
+Re-run the operator soak runbook against the thin path with all four
+pieces from Batches 1+2 landed. Default flip is gated on
+**demonstrated equivalence with legacy**, not just green probes.
 
-## Architecture
+#### Equivalence soak — required before default flip
 
-The decoupled-cognition design always intended tool execution to live
-on the thin path — the parked `INTEGRATION-WIRE-LIVE-WORKSHOP-BINDING`
-follow-up acknowledged it. This spec lands that wiring plus the
-upstream `surfaced_tools` plumbing the integration LLM needs to even
-*classify* requests as tool-needing in the first place. The
-capability-first kind-prompt rewrite is independent but landed in the
-same spec because shipping any of A/C/D without B leaves the agent
-still telling the model "don't use tools."
+* **Same-input parity scenarios.** Run each operator soak scenario
+  through both paths (`KERNOS_USE_DECOUPLED_TURN_RUNNER=0` for legacy,
+  `=1` for thin) with identical inputs. Capture model invocation
+  receipts, user-facing response shape, tool calls executed, side
+  effects landed. Compare. Document any divergence as either:
+  (a) intentional improvement on thin path with rationale,
+  (b) intentional removal of legacy quirk with rationale, or
+  (c) regression that blocks the flip.
+* **Read-only tool capability.** Calendar lookup, memory recall, web
+  fetch, file read — each runs end-to-end on thin path with response
+  equivalent to legacy.
+* **Write/destructive tool capability.** Tool propose-then-execute on
+  thin path produces the same audit, gate, and confirmation behavior
+  as legacy.
+* **No-tool conversational turns.** Plain conversational turns
+  (greetings, simple Q&A) on thin path produce equivalent or better
+  response quality.
+* **Hatching turn.** Fresh-install hatching reaches the model with
+  bootstrap content (CCV1 invariant holds) and the agent uses tools
+  when appropriate (capability-first holds).
+* **Multi-member disclosure scenario.** Cross-member sensitivity
+  gates apply correctly on thin path.
+* **Covenant-conflict scenario.** User covenants honored on thin
+  path; gate behavior matches legacy.
 
-## Acceptance criteria
+Any regression at this stage routes back to Batches 1 or 2 for fix;
+default does not flip with known regressions.
 
-- [ ] All four code pieces (A, B, C, D) shipped with pin tests green
-- [ ] Full pytest suite passes (5,300+ tests)
-- [ ] Architectural-constraint check clean (handler/adapter isolation,
-      no stray `tenant_id`)
-- [ ] Soak runbook probes A-D pass on thin path with
-      `KERNOS_USE_DECOUPLED_TURN_RUNNER=1`
-- [ ] Soak scenarios 1-4 pass on thin path with behavioral equivalence
-      to legacy path
-- [ ] No "No tool calls" / "Do NOT execute" strings in any kind prompt
-- [ ] Legacy path still works (`KERNOS_USE_DECOUPLED_TURN_RUNNER=0`)
-- [ ] `_UnwiredDescriptorLookup` removed; descriptor lookup wired
+#### Default flip
 
-## Implementation order (for the executor)
+When equivalence soak is green, the default flip commit lands:
+`KERNOS_USE_DECOUPLED_TURN_RUNNER` becomes unset-defaults-to-1 (thin
+path is the default), legacy reachable only via explicit
+`KERNOS_USE_DECOUPLED_TURN_RUNNER=0`.
 
-1. **B first** (kind prompts, ~30 min) — single file, obvious win,
-   immediately matches architect's saved feedback. Even without A/C/D
-   landing, the change in tone is visible in the next operator soak.
-2. **A next** (surfaced_tools threading, ~1-2 hr) — Codex's pinpointed
-   plumbing. Unblocks integration LLM's ability to classify
-   correctly.
-3. **C** (tool-use loop, ~2-3 hr) — adds the loop semantics to thin
-   path's `_render`.
-4. **D** (workshop binding, ~3-5 hr) — replaces unwired stubs with
-   production wiring.
-5. **E** (re-run soak) — operator-driven, ~30 min.
-6. **F** (default flip) — single line change in `start.sh`, gates on E.
+**Legacy is NOT decommissioned at this point.** It stays reachable
+behind the flag for the stabilization window.
 
-Total CC scope: ~6-10 hours of focused work plus operator soak. This
-is multi-commit batch territory, fold-and-review per the existing
-`feedback_codex_implementation_review` memory.
+### Stabilization window
+
+After default flip, legacy retained as oracle for 2-4 weeks of real
+production use (founder-decided duration). Catches regressions that
+didn't surface in soak under realistic conversational load. During
+this window:
+
+- Any reported anomaly on thin path can be cross-checked against
+  legacy by setting `KERNOS_USE_DECOUPLED_TURN_RUNNER=0`.
+- Capability-readiness contract tests + receipt-grade tool-loop pin
+  tests + same-input parity assertions stay strict-passing on every
+  commit.
+- New thin-path-only features (if any ship during the window) are
+  explicitly named as thin-path-only; legacy not held to feature
+  parity going forward.
+
+### Batch 4 — Legacy decommission (separate commit)
+
+Legacy `assemble.py` path strike commit ships only when ALL the
+following hold:
+
+- [ ] Stabilization window passed (2-4 weeks of real production use)
+- [ ] No reported regressions on thin path that required falling back
+      to legacy via the flag
+- [ ] All contract tests, capability-readiness tests, tool-loop pins,
+      and same-input parity assertions continue to pass
+- [ ] Founder explicit signoff that the criteria are met
+- [ ] Per-section load-bearing check (CCV1 discipline) applied to
+      every legacy code section being removed: name what it currently
+      provides, where that function moved on thin path, contract test
+      that proves the move, why it's obsolete rather than merely
+      inconvenient
+
+Decommission is a follow-up commit, not part of Batch 3. Naming it
+explicitly so the work doesn't become "we'll get to it" — it's a
+tracked roadmap item with explicit criteria.
+
+## Why this matters
+
+The earlier framing ("default flip and we'll see") would have repeated
+the CCV1 mistake one architectural layer up: shipping a substrate
+transition without proving it satisfies the legacy contract, then
+discovering the gap in production. The capability-first migration
+touches the same model-call seam CCV1 just stabilized. Same
+discipline applies: prove equivalence, then flip; soak under real
+load, then strike.
+
+**Legacy is the oracle until equivalence is proven, then strike. Not
+before.**
+
+## Definition of done
+
+- [ ] Batch 1 ships: A + C + B with C-before-B internally; six
+      receipt-grade tool-loop tests green; capability-readiness
+      contract test green (semantic not string-ban); conservative
+      classification fallback pinned.
+- [ ] Batch 2 ships: all four D bindings live (descriptor lookup,
+      executor, planner catalog, integration dispatcher); none stay
+      as empty stubs.
+- [ ] Batch 3 ships: equivalence soak runbook green; default flip
+      lands; legacy retained behind flag.
+- [ ] Stabilization window passes (2-4 weeks).
+- [ ] Batch 4 ships: legacy strike with all five decommission
+      criteria green.
+- [ ] Thin-path contract codified in architect primer (complete
+      2026-05-03).
+- [ ] Capability-first posture codified as architectural principle
+      (complete 2026-05-03).
+
+Default remains legacy until Batch 3 ships equivalence-green.
+Operators are not blocked. The wire-shape work shipped 2026-05-02
+(commits `757ca64` through `e008156`) is correct and stays under
+both paths.
+
+## Architectural-constraint check (always enforced per CLAUDE.md)
+
+- Adapter/handler isolation maintained
+- `instance_id` keying preserved
+- Graceful errors on every new path
+- MCP-for-capabilities discipline preserved
+- Single source of truth for tool catalog (no shadow registry)
 
 ## Out of scope (explicit nos)
 
-* New ActionKind types beyond what already exists
+* New `ActionKind` types beyond what already exists
 * Substrate restructure (RULES / NOW / STATE / etc. zones unchanged)
 * Provider chain changes (current chain stays)
-* Wire-shape changes to the Codex provider (today's `strict: None` +
-  conversation_id work is correct and stays — this spec doesn't touch
-  it)
+* Wire-shape changes to the Codex provider (2026-05-02
+  `strict: None` + `conversation_id` work is correct and stays —
+  this spec doesn't touch it)
+* Stewardship-aware tool gating (per-relationship / per-sensitivity
+  gating) — its own follow-up
+* Streaming tool calls during multi-step loops — defers; v1 ships
+  non-streamed tool execution

@@ -126,9 +126,9 @@ async def test_email_source_payload_shape(event_stream_started):
     await src.emit_observed(
         message_id="msg_001",
         thread_id="thr_001",
-        from_address="kit@anthropic.com",
+        from_address="owner@example.com",
         from_name="Kit",
-        to_addresses=["kabe@kernos.dev"],
+        to_addresses=["bob@example.com"],
         cc_addresses=["copilot@kernos.dev"],
         subject="WTC v1 review",
         received_iso="2026-04-30T18:00:00+00:00",
@@ -149,9 +149,9 @@ async def test_email_source_payload_shape(event_stream_started):
     p = rows[0].payload
     assert p["message_id"] == "msg_001"
     assert p["thread_id"] == "thr_001"
-    assert p["from_address"] == "kit@anthropic.com"
+    assert p["from_address"] == "owner@example.com"
     assert p["from_name"] == "Kit"
-    assert p["to_addresses"] == ["kabe@kernos.dev"]
+    assert p["to_addresses"] == ["bob@example.com"]
     assert p["cc_addresses"] == ["copilot@kernos.dev"]
     assert p["subject"] == "WTC v1 review"
     assert p["received_iso"] == "2026-04-30T18:00:00+00:00"
@@ -203,7 +203,7 @@ async def test_email_predicate_fires_on_sender_match(
                     {"op": "eq", "path": "event_type",
                      "value": EVENT_TYPE_EMAIL_MESSAGE_OBSERVED},
                     {"op": "eq", "path": "payload.from_address",
-                     "value": "kit@anthropic.com"},
+                     "value": "owner@example.com"},
                 ],
             },
             temporal_relation=TemporalRelation(kind="on"),
@@ -216,7 +216,7 @@ async def test_email_predicate_fires_on_sender_match(
     # Match.
     await src.emit_observed(
         message_id="msg_a",
-        from_address="kit@anthropic.com",
+        from_address="owner@example.com",
         subject="hello",
     )
     # Non-match (different sender).

@@ -87,7 +87,7 @@ class EmailMessageSource:
 
     * ``{"op": "eq", "path": "event_type", "value": "email.message_observed"}``
       — fire on any observed email.
-    * ``{"op": "eq", "path": "payload.from_address", "value": "kit@anthropic.com"}``
+    * ``{"op": "eq", "path": "payload.from_address", "value": "owner@example.com"}``
       — fire only on emails from a specific sender.
     * ``{"op": "AND", "operands": [...]}`` — combine event_type with
       payload-shape clauses (see :mod:`kernos.kernel.workflows.predicates`

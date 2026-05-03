@@ -378,7 +378,7 @@ async def test_scheduler_source_extra_payload_passes_through(
     await sched.emit_tick(
         tick_timestamp_iso="2026-04-30T17:00:00+00:00",
         reason="manual",
-        extra={"operator": "kabe"},
+        extra={"operator": "bob"},
     )
     await event_stream.flush_now()
     rows = await event_stream.events_in_window(
@@ -387,7 +387,7 @@ async def test_scheduler_source_extra_payload_passes_through(
         datetime.now(timezone.utc) + timedelta(minutes=5),
         event_types=[EVENT_TYPE_SCHEDULER_TICK_DUE],
     )
-    assert rows[0].payload["operator"] == "kabe"
+    assert rows[0].payload["operator"] == "bob"
     await sched.stop()
 
 

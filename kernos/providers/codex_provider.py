@@ -41,7 +41,7 @@ class OpenAICodexProvider(Provider):
     has been stable in production for the same backend.
 
     If you find yourself wanting to "clean up" any of the fields below, run
-    ``scripts/codex_replay_mutations.py`` against a captured >40KB body
+    ``scripts/diagnostics/codex_replay_mutations.py`` against a captured >40KB body
     first — strip the field, see the failure rate change. The mutation
     matrix is the contract test for this transport.
 
@@ -126,7 +126,7 @@ class OpenAICodexProvider(Provider):
        ``KERNOS_CODEX_CAPTURE_DIR``, threshold via
        ``KERNOS_CODEX_CAPTURE_THRESHOLD_KB``).
     2. Trigger the failing turn.
-    3. Run ``python scripts/codex_replay_mutations.py <body.json>``. The
+    3. Run ``python scripts/diagnostics/codex_replay_mutations.py <body.json>``. The
        mutation matrix tries strip-field, value-swap, and shape mutations
        and reports which one flips success rate. That's your trigger.
 
@@ -242,7 +242,7 @@ class OpenAICodexProvider(Provider):
         ``strict: null`` on payloads with real (non-trivial) tool schemas:
         without the explicit null, calls reliably mid-stream-fail with
         ``server_error`` once payload crosses ~40KB. The mutation matrix at
-        ``scripts/codex_replay_mutations.py`` 2026-05-02 confirmed this is
+        ``scripts/diagnostics/codex_replay_mutations.py`` 2026-05-02 confirmed this is
         the trigger (0/3 fail rate flipped to 3/3 pass with this single
         change). OpenClaw's installed Codex transport uses the same
         explicit-null pattern (``convertResponsesTools(tools, {strict: null})``).
@@ -265,7 +265,7 @@ class OpenAICodexProvider(Provider):
                 # find yourself wanting to drop this line because "the key
                 # is set to null, that's the same as missing it" — it
                 # isn't, and the symptom is mid-stream server_error on
-                # payloads above ~40KB. Run scripts/codex_replay_mutations.py
+                # payloads above ~40KB. Run scripts/diagnostics/codex_replay_mutations.py
                 # to convince yourself before changing.
                 "strict": None,
             })
@@ -485,7 +485,7 @@ class OpenAICodexProvider(Provider):
         # See the OpenAICodexProvider class docstring "WIRE SHAPE INVARIANTS"
         # section for the full failure mode that maps to each field. Stripping
         # any of these reproduces a known production failure on the consumer
-        # backend. Run scripts/codex_replay_mutations.py before changing.
+        # backend. Run scripts/diagnostics/codex_replay_mutations.py before changing.
         # ====================================================================
         body: dict[str, Any] = {
             # Model id, e.g. "gpt-5.5". Determines reasoning capability path.
@@ -577,7 +577,7 @@ class OpenAICodexProvider(Provider):
         # payload exceeds threshold, dump the exact body to disk so the
         # tipping-point probe can replay it verbatim. Investigative-only;
         # off by default. Accumulates one file per call (timestamped),
-        # paired with scripts/codex_replay_mutations.py for A/B work.
+        # paired with scripts/diagnostics/codex_replay_mutations.py for A/B work.
         if (
             os.getenv("KERNOS_CODEX_CAPTURE_BODY", "0") == "1"
             and _payload_bytes >= int(os.getenv("KERNOS_CODEX_CAPTURE_THRESHOLD_KB", "40")) * 1024
@@ -614,7 +614,7 @@ class OpenAICodexProvider(Provider):
         #
         # Distinct from KERNOS_CODEX_CAPTURE_BODY: that one is threshold-
         # gated, accumulates timestamped files, and pairs with
-        # scripts/codex_replay_mutations.py for A/B work. This one
+        # scripts/diagnostics/codex_replay_mutations.py for A/B work. This one
         # replaces a single file and pairs with /dump for receipts.
         if os.getenv("KERNOS_CODEX_LAST_PAYLOAD", "0") == "1":
             _capture_all = os.getenv("KERNOS_CODEX_LAST_PAYLOAD_ALL", "0") == "1"

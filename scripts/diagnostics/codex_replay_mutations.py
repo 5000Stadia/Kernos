@@ -12,7 +12,7 @@ Usage:
     # body will be at /tmp/codex_bodies/body_<ts>_<size>KB.json
 
     # 2. replay
-    python scripts/codex_replay_mutations.py /tmp/codex_bodies/body_*.json
+    python scripts/diagnostics/codex_replay_mutations.py /tmp/codex_bodies/body_*.json
 """
 
 from __future__ import annotations

@@ -49,7 +49,7 @@ The agent needs to know who it's talking to every turn.
 
 ### 3. Per-Member Conversation Threads
 
-Conversation logs are currently keyed to (instance_id, space_id). Two members talking in the General space share one thread — which means Sarah sees Kabe's messages in her context window.
+Conversation logs are currently keyed to (instance_id, space_id). Two members talking in the General space share one thread — which means Sarah sees Bob's messages in her context window.
 
 Add member_id as a dimension to conversation storage. Each member gets their own conversation thread per space.
 
@@ -95,7 +95,7 @@ Each member has their own bootstrap lifecycle, tracked in their member profile.
 
 ### 8. Per-Member Spaces
 
-When a new member first messages Kernos, ensure they have a default General space. Each member's space hierarchy is independent — Sarah's domains are hers, Kabe's are his.
+When a new member first messages Kernos, ensure they have a default General space. Each member's space hierarchy is independent — Sarah's domains are hers, Bob's are his.
 
 The router should route within the current member's space hierarchy using the member_id from TurnContext.
 

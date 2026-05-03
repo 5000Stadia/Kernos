@@ -2,7 +2,7 @@
 
 Boot:
     cd /home/k/Kernos && source .venv/bin/activate
-    python scripts/codex_tipping_point.py
+    python scripts/diagnostics/codex_tipping_point.py
 
 What it does:
     Drives kernos.providers.codex_provider.OpenAICodexProvider directly
