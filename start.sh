@@ -141,8 +141,19 @@ source .venv/bin/activate
 # ProductionResponseDelivery + telemetry binding + synthetic
 # reasoning.* aggregation. Full-machinery dispatch is gated behind
 # _UnwiredDescriptorLookup until INTEGRATION-WIRE-LIVE-WORKSHOP-BINDING
-# threads request context. Unset this var to revert to legacy path.
-export KERNOS_USE_DECOUPLED_TURN_RUNNER=1
+# threads request context.
+#
+# Default flipped to 0 (legacy path) 2026-05-02 after live soak proved
+# the C7 thin path is anti-capability without WORKSHOP-BINDING:
+# IntegrationService picks render-only ActionKinds (RESPOND_ONLY,
+# CONSTRAINED_RESPONSE, PROPOSE_TOOL — all of which forbid tool calls
+# in their kind prompts) for tool-needing requests because
+# IntegrationInputs.surfaced_tools is empty on this path. Result:
+# agent says "no calendar tool available" while calendar tool IS in
+# the request body — agent is faithfully obeying its instructions.
+# Until the resolution spec lands, legacy path remains the operator
+# default. Override to 1 explicitly when soak-testing thin path.
+export KERNOS_USE_DECOUPLED_TURN_RUNNER=${KERNOS_USE_DECOUPLED_TURN_RUNNER:-0}
 
 # Start the bot
 echo "Starting Kernos..."
