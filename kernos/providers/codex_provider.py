@@ -598,25 +598,39 @@ class OpenAICodexProvider(Provider):
 
         # Last-payload hook: when KERNOS_CODEX_LAST_PAYLOAD=1, write the
         # EXACT body shipped to the model to a fixed "last payload" file
-        # that's replaced on every call. Pairs with /dump's LAST OUTGOING
-        # PAYLOAD section so the operator can see receipts for what the
-        # model literally received — settles "did tool X reach the model"
-        # questions definitively. Distinct from the capture hook above:
-        # this fires on EVERY call regardless of size, and it overwrites
-        # rather than accumulating. Default path lives next to /dump
-        # output so the artifacts cluster together.
+        # (replaced each call). Pairs with /dump's LAST OUTGOING PAYLOAD
+        # section to give operators receipts for what the model literally
+        # received — settles "did tool X reach the model" questions.
+        #
+        # Default filter: only capture MAIN reasoning calls (those that
+        # carry a conversation_id). Utility calls — fact harvest,
+        # MESSAGE_ANALYSIS classification, tool-surfacing decisions —
+        # fire AFTER the main call in a turn and would otherwise
+        # overwrite the receipt with something irrelevant (gpt-5.4-mini
+        # / no tools / no cache_key body). Filtering on conversation_id
+        # keeps the file aligned with the turn the operator cares about.
+        # Set KERNOS_CODEX_LAST_PAYLOAD_ALL=1 to capture every call
+        # regardless (useful when investigating utility-call shape).
+        #
+        # Distinct from KERNOS_CODEX_CAPTURE_BODY: that one is threshold-
+        # gated, accumulates timestamped files, and pairs with
+        # scripts/codex_replay_mutations.py for A/B work. This one
+        # replaces a single file and pairs with /dump for receipts.
         if os.getenv("KERNOS_CODEX_LAST_PAYLOAD", "0") == "1":
-            _data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
-            _last_path = os.getenv(
-                "KERNOS_CODEX_LAST_PAYLOAD_PATH",
-                os.path.join(_data_dir, "diagnostics", "codex_last_payload.json"),
-            )
-            try:
-                os.makedirs(os.path.dirname(_last_path), exist_ok=True)
-                with open(_last_path, "w") as _f:
-                    json.dump(body, _f, indent=2)
-            except Exception:
-                logger.exception("CODEX_LAST_PAYLOAD_WRITE_FAILED")
+            _capture_all = os.getenv("KERNOS_CODEX_LAST_PAYLOAD_ALL", "0") == "1"
+            _is_main_call = bool(conversation_id)
+            if _capture_all or _is_main_call:
+                _data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+                _last_path = os.getenv(
+                    "KERNOS_CODEX_LAST_PAYLOAD_PATH",
+                    os.path.join(_data_dir, "diagnostics", "codex_last_payload.json"),
+                )
+                try:
+                    os.makedirs(os.path.dirname(_last_path), exist_ok=True)
+                    with open(_last_path, "w") as _f:
+                        json.dump(body, _f, indent=2)
+                except Exception:
+                    logger.exception("CODEX_LAST_PAYLOAD_WRITE_FAILED")
 
         url = self._resolve_url()
         headers = self._headers(session_id=conversation_id)
