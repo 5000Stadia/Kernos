@@ -333,6 +333,43 @@ async def test_model_override_no_override_uses_primary_unchanged():
     assert len(entries[0].provider.calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_model_override_head_fails_fallback_uses_configured_subsequent():
+    """Override-head failure path: head model fails → fallback uses
+    subsequent entries with their *configured* models (not the override
+    model). Pin: head_was_overridden flag does not leak into entry i>0
+    model selection."""
+    haiku_failing = ChainEntry(
+        provider=_FakeProvider(name="anthropic", fail=True),
+        model="haiku",
+    )
+    sonnet_succeeding = ChainEntry(
+        provider=_FakeProvider(name="anthropic", fail=False),
+        model="sonnet",
+    )
+    chains = {
+        "primary": [sonnet_succeeding, haiku_failing],
+        "lightweight": [haiku_failing],
+    }
+    # Override pins haiku as head (which will fail). Resolver
+    # prepends haiku, so entries become [haiku, sonnet, haiku].
+    request = _FakeRequest(
+        model_override={
+            "chain_name": None,
+            "override_provider": "anthropic",
+            "override_model": "haiku",
+        },
+    )
+    caller = build_resilient_chain_caller(chains=chains, request=request)
+    resp = await caller(system="", messages=[], tools=[], max_tokens=100)
+    assert resp is not None
+    # Sonnet entry got called with its CONFIGURED model "sonnet" — not
+    # with the override model "haiku".
+    sonnet_call_models = [c["model"] for c in sonnet_succeeding.provider.calls]
+    assert "sonnet" in sonnet_call_models
+    assert "haiku" not in sonnet_call_models
+
+
 # ---------------------------------------------------------------------------
 # Wire-shape: conversation_id forwards to provider
 # ---------------------------------------------------------------------------
