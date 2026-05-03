@@ -175,8 +175,22 @@ async def bootstrap_instance(
     # Provider chains — real. Reads KERNOS_LLM_PROVIDER / KERNOS_LLM_FALLBACK from env.
     chains, _ = build_chains_from_env()
 
+    # REASONING-SERVICE-CONSTRUCTION-PARITY-V1: shared turn-runner-
+    # provider wiring. Eval scenarios go through the same cognition
+    # path as production — different door, same handler.
+    from kernos.kernel.turn_runner_provider import (
+        build_turn_runner_provider,
+        setup_default_thin_path_context,
+        wire_live_thin_path,
+    )
+
+    _thin_path_ctx = setup_default_thin_path_context(
+        chains=chains, state=state, events=events, audit=audit,
+    )
     reasoning = ReasoningService(
         events=events, mcp=mcp, audit=audit, chains=chains,
+        trace_sink=_thin_path_ctx.trace_sink,
+        turn_runner_provider=build_turn_runner_provider(_thin_path_ctx),
     )
     engine = TaskEngine(reasoning=reasoning, events=events)
 
@@ -186,6 +200,11 @@ async def bootstrap_instance(
         registry=registry, engine=engine, secrets_dir=str(secrets_dir),
     )
     handler._instance_db = instance_db  # same post-init pattern as server.py
+    wire_live_thin_path(
+        _thin_path_ctx,
+        reasoning=reasoning,
+        handler=handler,
+    )
 
     bi = BootstrappedInstance(
         data_dir=data_dir,

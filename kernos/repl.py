@@ -431,77 +431,27 @@ async def build_dev_handler(
         except Exception:
             pass
 
-    def _build_per_turn_runner(request, event_emitter):
-        telemetry = AggregatedTelemetry()
-        wrapped_chain = wrap_chain_caller_with_telemetry(
-            _shared_chain_caller, telemetry,
-        )
-        planner = Planner(chain_caller=wrapped_chain, tool_catalog=planner_tool_catalog)
-        dispatcher = StepDispatcher(
-            executor=shared_executor,
-            descriptor_lookup=shared_descriptor_lookup,
-            trace_sink=reasoning_trace_sink,
-            event_emitter=_dispatcher_event_emitter,
-            audit_emitter=_dispatcher_audit_emitter,
-            on_dispatch_complete=telemetry.add_tool_iteration,
-        )
-        reasoner = DivergenceReasoner(chain_caller=wrapped_chain)
-        # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 1 — see server.py
-        # mirror. Same adapter shim wires the renderer's tool-use loop
-        # to the live integration dispatcher. CC-scope follow-up:
-        # thread per-turn request identifiers through the
-        # inputs_factory so the dispatcher's request_factory builds
-        # ReasoningRequest with real ids.
-        import dataclasses as _dc
-        from kernos.kernel.integration.live_wiring import (
-            build_renderer_to_integration_adapter,
-        )
+    # REASONING-SERVICE-CONSTRUCTION-PARITY-V1: per-turn factory
+    # closure now built by the shared helper. See kernos/kernel/
+    # turn_runner_provider.py for the canonical contract; mirrors
+    # the construction shape in server.py exactly.
+    from kernos.kernel.turn_runner_provider import (
+        ThinPathContext,
+        build_turn_runner_provider,
+    )
 
-        @_dc.dataclass(frozen=True)
-        class _ReplRendererTurnInputs:
-            instance_id: str
-            member_id: str
-            space_id: str
-            turn_id: str
-
-        def _repl_renderer_inputs_factory(conversation_id: str) -> Any:
-            return _ReplRendererTurnInputs(
-                instance_id=getattr(request, "instance_id", "") or "",
-                member_id=getattr(request, "member_id", "") or "",
-                space_id=getattr(request, "active_space_id", "") or "",
-                turn_id=conversation_id or getattr(request, "conversation_id", "") or "",
-            )
-
-        presence = PresenceRenderer(
-            chain_caller=wrapped_chain,
-            tool_dispatcher=build_renderer_to_integration_adapter(
-                integration_dispatcher=_integration_dispatcher,
-                inputs_factory=_repl_renderer_inputs_factory,
-            ),
-        )
-        integration = IntegrationService(
-            chain_caller=wrapped_chain,
-            read_only_dispatcher=_integration_dispatcher,
-            audit_emitter=_integration_audit_emitter,
-        )
-        enactment = EnactmentService(
-            presence_renderer=presence,
-            planner=planner,
-            step_dispatcher=dispatcher,
-            divergence_reasoner=reasoner,
-        )
-        delivery = ProductionResponseDelivery(
-            request=request,
-            telemetry=telemetry,
-            event_emitter=event_emitter,
-        )
-        runner = TurnRunner(
-            cohort_runner=cohort_runner,
-            integration_service=integration,
-            enactment_service=enactment,
-            response_delivery=delivery,
-        )
-        return runner, delivery
+    _thin_path_ctx = ThinPathContext(
+        chain_caller=_shared_chain_caller,
+        cohort_runner=cohort_runner,
+        dispatcher_event_emitter=_dispatcher_event_emitter,
+        dispatcher_audit_emitter=_dispatcher_audit_emitter,
+        integration_audit_emitter=_integration_audit_emitter,
+        trace_sink=reasoning_trace_sink,
+        executor=shared_executor,
+        descriptor_lookup=shared_descriptor_lookup,
+        integration_dispatcher=_integration_dispatcher,
+        planner_tool_catalog=planner_tool_catalog,
+    )
 
     reasoning = ReasoningService(
         events=events,
@@ -509,7 +459,7 @@ async def build_dev_handler(
         audit=audit,
         chains=chains,
         trace_sink=reasoning_trace_sink,
-        turn_runner_provider=_build_per_turn_runner,
+        turn_runner_provider=build_turn_runner_provider(_thin_path_ctx),
     )
     engine = TaskEngine(reasoning=reasoning, events=events)
     handler = MessageHandler(
@@ -520,58 +470,14 @@ async def build_dev_handler(
     handler._instance_db = instance_db
     handler.register_mcp_tools_in_catalog()
 
-    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 — live workshop binding
-    # mirroring server.py. Late-bind into the per-turn factory's
-    # closure so dev-REPL turns dispatch through reasoning.execute_tool
-    # with the same gate-at-dispatch enforcement as production.
-    from kernos.kernel.integration.live_wiring import (
-        LiveDescriptorLookup,
-        LiveExecutor,
-        LiveIntegrationDispatcher,
-        LivePlannerCatalog,
-    )
-    from kernos.kernel.reasoning import ReasoningRequest as _ReasoningRequest
-
-    def _live_request_factory(*args) -> Any:
-        if len(args) == 1:
-            inputs = args[0]
-            return _ReasoningRequest(
-                instance_id=getattr(inputs, "instance_id", "") or "",
-                conversation_id=getattr(inputs, "turn_id", "") or "",
-                system_prompt="", messages=[], tools=[], model="",
-                trigger="repl-thin-path-executor",
-                active_space_id=getattr(inputs, "space_id", "") or "",
-                member_id=getattr(inputs, "member_id", "") or "",
-            )
-        _, _, dispatch_inputs = args
-        return _ReasoningRequest(
-            instance_id=getattr(dispatch_inputs, "instance_id", "") or "",
-            conversation_id=getattr(dispatch_inputs, "turn_id", "") or "",
-            system_prompt="", messages=[], tools=[], model="",
-            trigger="repl-thin-path-integration-dispatcher",
-            active_space_id=getattr(dispatch_inputs, "space_id", "") or "",
-            member_id=getattr(dispatch_inputs, "member_id", "") or "",
-        )
-
-    shared_descriptor_lookup = LiveDescriptorLookup(
-        tool_catalog=handler._tool_catalog,
-    )
-    shared_executor = LiveExecutor(
-        execute_tool=reasoning.execute_tool,
-        gate=reasoning._get_gate(),
-        request_factory=lambda inputs: _live_request_factory(inputs),
-    )
-    _integration_dispatcher = LiveIntegrationDispatcher(
-        execute_tool=reasoning.execute_tool,
-        gate=reasoning._get_gate(),
-        request_factory=lambda tid, args, inp: _live_request_factory(tid, args, inp),
-        # Fold 8 — emit tool.called/tool.result + audit on every dispatch
-        # for equivalence-soak parity with legacy.
-        event_emitter=_dispatcher_event_emitter,
-        audit_emitter=_dispatcher_audit_emitter,
-    )
-    planner_tool_catalog = LivePlannerCatalog(
-        tool_catalog=handler._tool_catalog,
+    # REASONING-SERVICE-CONSTRUCTION-PARITY-V1: shared live-wiring
+    # helper. Mirrors server.py exactly so REPL and Discord-server
+    # boots produce the same thin-path infrastructure.
+    from kernos.kernel.turn_runner_provider import wire_live_thin_path
+    wire_live_thin_path(
+        _thin_path_ctx,
+        reasoning=reasoning,
+        handler=handler,
     )
 
     logger.info("repl: handler ready (instance_id=%s, data_dir=%s); workshop binding live", _instance_id, _data_dir)

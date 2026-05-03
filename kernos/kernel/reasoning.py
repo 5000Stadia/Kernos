@@ -199,6 +199,40 @@ class ReasoningService:
     Emits reasoning.request, reasoning.response, tool.called, tool.result events.
     Logs tool calls and results to the audit store.
     Raises ReasoningError subtypes on provider failure — does NOT catch them.
+
+    CONSTRUCTION CONTRACT (REASONING-SERVICE-CONSTRUCTION-PARITY-V1,
+    2026-05-03): every entry point that constructs ReasoningService
+    MUST wire ``turn_runner_provider`` via the shared helper at
+    ``kernos.kernel.turn_runner_provider``:
+
+        from kernos.kernel.turn_runner_provider import (
+            build_turn_runner_provider,
+            setup_default_thin_path_context,
+            wire_live_thin_path,
+        )
+
+        ctx = setup_default_thin_path_context(...)
+        reasoning = ReasoningService(
+            ...,
+            turn_runner_provider=build_turn_runner_provider(ctx),
+        )
+        handler = MessageHandler(..., reasoning=reasoning, ...)
+        wire_live_thin_path(ctx, reasoning=reasoning, handler=handler)
+
+    Do NOT copy-paste the closure pattern from server.py / repl.py
+    into a new launcher. The shared helper is the canonical
+    construction surface; copy-paste IS the failure mode this
+    contract exists to prevent. Per Kit's framing 2026-05-03 this is
+    the fourth instance of "canonical source + derived consumers +
+    parity pins" in recent architecture work (after CCV1 field-
+    provenance, gate-at-dispatch, and KERNEL-TOOL-REGISTRY-V1).
+
+    The pin test at
+    ``tests/test_reasoning_service_construction_parity.py`` walks
+    every callsite that constructs ReasoningService and asserts
+    each either uses the shared helper or appears in a documented
+    exclusion list with rationale. Adding a new launcher without
+    the shared helper fails CI.
     """
 
     MAX_TOOL_ITERATIONS = 10

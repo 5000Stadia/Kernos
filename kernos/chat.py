@@ -121,19 +121,38 @@ async def build_handler():
             cap.status = CapabilityStatus.CONNECTED
             cap.tools = [t["name"] for t in tools]
 
-    provider_name = os.getenv("KERNOS_LLM_PROVIDER", "anthropic")
-    if provider_name == "openai-codex":
-        from kernos.kernel.credentials import resolve_openai_codex_credential
-        from kernos.kernel.reasoning import OpenAICodexProvider
-        provider = OpenAICodexProvider(credential=resolve_openai_codex_credential())
-    else:
-        provider = AnthropicProvider(api_key=resolve_anthropic_credential())
-    reasoning = ReasoningService(provider, events, mcp_manager, audit)
+    # REASONING-SERVICE-CONSTRUCTION-PARITY-V1: see app.py / server.py
+    # for full rationale. Same wiring pattern; chat.py inherits the
+    # default thin-path context.
+    from kernos.providers.chains import build_chains_from_env
+    from kernos.kernel.turn_runner_provider import (
+        build_turn_runner_provider,
+        setup_default_thin_path_context,
+        wire_live_thin_path,
+    )
+
+    chains, _primary_provider = build_chains_from_env()
+    _thin_path_ctx = setup_default_thin_path_context(
+        chains=chains, state=state, events=events, audit=audit,
+    )
+    reasoning = ReasoningService(
+        events=events,
+        mcp=mcp_manager,
+        audit=audit,
+        chains=chains,
+        trace_sink=_thin_path_ctx.trace_sink,
+        turn_runner_provider=build_turn_runner_provider(_thin_path_ctx),
+    )
     engine = TaskEngine(reasoning=reasoning, events=events)
     handler = MessageHandler(
         mcp_manager, conversations, tenants, audit, events, state,
         reasoning, registry, engine,
         secrets_dir=os.getenv("KERNOS_SECRETS_DIR", "./secrets"),
+    )
+    wire_live_thin_path(
+        _thin_path_ctx,
+        reasoning=reasoning,
+        handler=handler,
     )
 
     return handler, mcp_manager
