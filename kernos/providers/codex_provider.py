@@ -576,7 +576,8 @@ class OpenAICodexProvider(Provider):
         # Capture-on-large hook: when KERNOS_CODEX_CAPTURE_BODY=1 and
         # payload exceeds threshold, dump the exact body to disk so the
         # tipping-point probe can replay it verbatim. Investigative-only;
-        # off by default.
+        # off by default. Accumulates one file per call (timestamped),
+        # paired with scripts/codex_replay_mutations.py for A/B work.
         if (
             os.getenv("KERNOS_CODEX_CAPTURE_BODY", "0") == "1"
             and _payload_bytes >= int(os.getenv("KERNOS_CODEX_CAPTURE_THRESHOLD_KB", "40")) * 1024
@@ -594,6 +595,28 @@ class OpenAICodexProvider(Provider):
                 logger.info("CODEX_BODY_CAPTURED: path=%s", cap_path)
             except Exception:
                 logger.exception("CODEX_BODY_CAPTURE_FAILED")
+
+        # Last-payload hook: when KERNOS_CODEX_LAST_PAYLOAD=1, write the
+        # EXACT body shipped to the model to a fixed "last payload" file
+        # that's replaced on every call. Pairs with /dump's LAST OUTGOING
+        # PAYLOAD section so the operator can see receipts for what the
+        # model literally received — settles "did tool X reach the model"
+        # questions definitively. Distinct from the capture hook above:
+        # this fires on EVERY call regardless of size, and it overwrites
+        # rather than accumulating. Default path lives next to /dump
+        # output so the artifacts cluster together.
+        if os.getenv("KERNOS_CODEX_LAST_PAYLOAD", "0") == "1":
+            _data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+            _last_path = os.getenv(
+                "KERNOS_CODEX_LAST_PAYLOAD_PATH",
+                os.path.join(_data_dir, "diagnostics", "codex_last_payload.json"),
+            )
+            try:
+                os.makedirs(os.path.dirname(_last_path), exist_ok=True)
+                with open(_last_path, "w") as _f:
+                    json.dump(body, _f, indent=2)
+            except Exception:
+                logger.exception("CODEX_LAST_PAYLOAD_WRITE_FAILED")
 
         url = self._resolve_url()
         headers = self._headers(session_id=conversation_id)

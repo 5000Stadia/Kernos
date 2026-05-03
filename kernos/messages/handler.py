@@ -4750,6 +4750,34 @@ class MessageHandler:
             except Exception as exc:
                 f.write(f"(log ring buffer read failed: {exc})\n")
 
+            # ---- LAST OUTGOING PAYLOAD --------------------------------
+            # Receipts for what the LLM actually received on the most
+            # recent codex call. Requires KERNOS_CODEX_LAST_PAYLOAD=1
+            # env (off by default) — codex_provider writes the body to
+            # this file (replaced each call) when the env is set.
+            # Settles "did tool X reach the model in turn N" questions.
+            f.write("\n=== LAST OUTGOING PAYLOAD ===\n")
+            f.write("(exact JSON body shipped to the LLM on the most recent call — receipts)\n")
+            f.write("(enable via KERNOS_CODEX_LAST_PAYLOAD=1 in .env)\n\n")
+            try:
+                _data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+                _payload_path = os.getenv(
+                    "KERNOS_CODEX_LAST_PAYLOAD_PATH",
+                    os.path.join(_data_dir, "diagnostics", "codex_last_payload.json"),
+                )
+                if Path(_payload_path).exists():
+                    _payload_text = Path(_payload_path).read_text(encoding="utf-8")
+                    f.write(f"(source: {_payload_path}, "
+                            f"{len(_payload_text)} chars)\n\n")
+                    f.write(_payload_text)
+                    if not _payload_text.endswith("\n"):
+                        f.write("\n")
+                else:
+                    f.write(f"(no last-payload file at {_payload_path}; "
+                            f"set KERNOS_CODEX_LAST_PAYLOAD=1 to enable)\n")
+            except Exception as exc:
+                f.write(f"(last-payload read failed: {exc})\n")
+
             f.write("\n=== SUMMARY ===\n")
             _sys_chars = len(ctx.system_prompt)
             msg_chars = sum(len(str(m.get('content', ''))) for m in ctx.messages)
