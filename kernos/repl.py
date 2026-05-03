@@ -821,6 +821,10 @@ async def main() -> int:
         level=os.getenv("KERNOS_LOG_LEVEL", "WARNING"),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Mirror server.py: install ring buffer so /dump's RECENT LOG section
+    # works identically in dev REPL.
+    from kernos.kernel.log_buffer import install_log_ring_buffer
+    install_log_ring_buffer()
     instance_id = os.getenv("KERNOS_INSTANCE_ID", "repl:dev")
     explicit_sender = os.getenv("KERNOS_REPL_SENDER", "")
     handler = await build_dev_handler(

@@ -4669,7 +4669,23 @@ class MessageHandler:
         return None
 
     async def _handle_dump(self, ctx: TurnContext) -> str:
-        """Write the fully assembled context to a diagnostic file, skip reasoning."""
+        """Write the fully assembled context to a diagnostic file, skip reasoning.
+
+        Sections written (in order):
+          1. SYSTEM PROMPT — static + dynamic substrate sent to the model
+          2. MESSAGES — the input message list (raw, with role tags)
+          3. TOOLS — tool schemas the model sees
+          4. RECENT CONVERSATION — human-readable tail of the persisted
+             conv_logger output for this (instance, space, member). Lets
+             operators see the user-facing exchange without the noise of
+             [SYSTEM] markers / fallback annotations / role boundaries.
+          5. RECENT LOG — tail of the in-process log ring buffer. Console
+             evidence (CODEX_REQUEST tools=N, TOOL_SURFACING, retry
+             warnings) lands in the same artifact as the substrate so
+             "what tools did the bot actually surface in the failing
+             turn?" is answerable without grepping a terminal scrollback.
+          6. SUMMARY — token estimates + cached/fresh split.
+        """
         data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
         # Second-precision timestamp — duplicate deliveries overwrite the same file
         ts = utc_now()[:19].replace(":", "-")
@@ -4692,6 +4708,48 @@ class MessageHandler:
             f.write("\n=== TOOLS ===\n\n")
             for tool in ctx.tools:
                 f.write(f"{json.dumps(tool, indent=2)}\n\n")
+
+            # ---- RECENT CONVERSATION ----------------------------------
+            # Tail the persisted conversation log for this space/member.
+            # Best-effort: failures here never break the dump.
+            f.write("\n=== RECENT CONVERSATION ===\n")
+            f.write("(tail of conv_logger output for this space + member)\n\n")
+            try:
+                _log_text, _log_num = await self.conv_logger.read_current_log_text(
+                    ctx.instance_id, ctx.active_space_id, member_id=ctx.member_id,
+                )
+                # Last ~3000 chars typically covers ~5-8 conversational turns.
+                _tail_chars = int(os.getenv("KERNOS_DUMP_CONVERSATION_TAIL_CHARS", "3000"))
+                if len(_log_text) > _tail_chars:
+                    f.write(f"... ({len(_log_text) - _tail_chars} earlier chars elided)\n\n")
+                    _log_text = _log_text[-_tail_chars:]
+                f.write(_log_text)
+                if not _log_text.endswith("\n"):
+                    f.write("\n")
+            except FileNotFoundError:
+                f.write("(no conversation log found for this space/member yet)\n")
+            except Exception as exc:
+                f.write(f"(conversation log read failed: {exc})\n")
+
+            # ---- RECENT LOG -------------------------------------------
+            # In-process log ring buffer (kernel/log_buffer.py). Captures
+            # the same lines the operator sees on the bot's stdout.
+            f.write("\n=== RECENT LOG ===\n")
+            f.write("(tail of in-process log ring buffer — same lines that scroll past on stdout)\n\n")
+            try:
+                from kernos.kernel.log_buffer import get_recent_log_lines
+                _log_tail = int(os.getenv("KERNOS_DUMP_LOG_TAIL_LINES", "150"))
+                _lines = get_recent_log_lines(last_n=_log_tail)
+                if _lines:
+                    for line in _lines:
+                        f.write(line)
+                        f.write("\n")
+                else:
+                    f.write("(log ring buffer not installed; see "
+                            "kernos.kernel.log_buffer.install_log_ring_buffer)\n")
+            except Exception as exc:
+                f.write(f"(log ring buffer read failed: {exc})\n")
+
             f.write("\n=== SUMMARY ===\n")
             _sys_chars = len(ctx.system_prompt)
             msg_chars = sum(len(str(m.get('content', ''))) for m in ctx.messages)

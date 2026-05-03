@@ -80,6 +80,13 @@ for h in logging.root.handlers:
     if h is not _handler:
         logging.root.removeHandler(h)
 
+# Install in-memory ring buffer of recent log records so /dump can include
+# a RECENT LOG section. Lets operators see substrate AND runtime evidence
+# (CODEX_REQUEST tools=N, TOOL_SURFACING, etc.) in the same artifact.
+# See kernos/kernel/log_buffer.py for capacity + env override.
+from kernos.kernel.log_buffer import install_log_ring_buffer
+install_log_ring_buffer()
+
 logger = logging.getLogger(__name__)
 
 intents = discord.Intents.default()
