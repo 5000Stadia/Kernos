@@ -155,58 +155,94 @@ architect-input items deferred for Batch 2 fold:
   Trace/audit/event parity is owned by the dispatcher layer, not
   the renderer loop — Batch 2 wires the dispatcher with audit.
 
-**Architect-input items for Batch 2 fold:**
+**Architect verdict folded 2026-05-03 (all three resolved as Batch 2 folds):**
 
-1. **Dispatcher signature mismatch.** PresenceRenderer's loop expects
-   keyword-style `(tool_name, tool_input, tool_use_id, conversation_id)`;
-   server.py's `_integration_dispatcher` is positional
-   `(tool_id, args, inputs)`. Batch 2 wiring must define an adapter,
-   not a direct wire. Two callable shapes serve two distinct seams:
-   integration runner read-only dispatch vs presence renderer
-   observation-loop dispatch.
+The three architect-input items were resolved per the design review's
+verdict; all three fold into Batch 2 before commits lock.
 
-2. **PROPOSE_TOOL effect data plumbing.** The Batch 1 prompt rewrite
-   asks the model to distinguish read vs destructive effects, but
-   `ProposeTool` briefing carries no `effect` field and the propose
-   user message includes only tool id and reason. Today the safety
-   property depends on model inference. Options for Batch 2 fold:
-   (a) thread effect through `ProposeTool` dataclass and the propose
-   user-message renderer; (b) make dispatch-time enforcement
-   block destructive calls regardless of inline-vs-propose decision;
-   (c) keep model inference and accept the residual. Architect call.
-
-3. **Dispatch-time enforcement using actual args.** Batch 2 must
-   enforce read-only at the dispatcher level using the actual call
-   arguments, not only `SurfacedTool.gate_classification` which is
-   set at surfacing time before args exist. This is the canonical
-   safety boundary for action-dependent tools.
-
-### Batch 2 — D, with four live bindings (the design review edit 3)
+### Batch 2 — D, with four live bindings + three architect folds
 
 D = workshop binding, expanded scope per the design review. If any of the four
 stay fake, integration/planning stays partially blind even after
 executor wiring. Half-fix is worse than no-fix because tests look
 complete.
 
+#### Four live bindings (D)
+
 1. **Descriptor lookup** — replace `_UnwiredDescriptorLookup` in
-   `kernos/server.py:483` (and `kernos/repl.py` mirror) with a
-   production version reading from the live tool catalog.
-2. **Executor** — replace `_UnwiredExecutor` in
-   `kernos/server.py:497` with kernel-tool dispatch through the
-   legacy handler's existing path.
+   `kernos/server.py` (and `kernos/repl.py` mirror) with a production
+   version reading from the live tool catalog.
+2. **Executor** — replace `_UnwiredExecutor` with kernel-tool dispatch
+   through the legacy handler's existing path. Implements the
+   "Gate at dispatch" half of Fold 3.
 3. **Planner tool catalog** — currently `StaticToolCatalog()` is
-   empty at `kernos/server.py`. Wire to the live catalog so planning
-   can see real tools.
+   empty. Wire to the live catalog so planning can see real tools.
 4. **Integration read-only dispatcher** — currently
    `_integration_dispatcher` returns `{}`. Wire to the live
    read-only dispatch path.
 
-Pin tests at `tests/test_thin_path_executor_wiring.py`:
-- executor.execute on a kernel tool returns valid `ToolExecutionResult`
-- descriptor_lookup returns valid descriptor for known tool ids
+#### Architect folds (required before Batch 2 commit lock)
+
+**Fold 1 — Dispatcher signature: adapter shim, not refactor.**
+The integration runner's read-only dispatch path and the presence
+renderer's observation-loop dispatch path serve different
+architectural roles (integration LLM observing tool effects during
+briefing assembly vs. principal model executing tools mid-render).
+They are structurally not plug-compatible because the roles
+legitimately differ, not because the signatures accidentally
+diverged. Batch 2 lands an adapter shim that bridges the renderer
+signature into the integration dispatcher; both seams stay intact.
+**Adapter ships in the same commit as descriptor + executor wiring.**
+
+**Fold 2 — Propose-tool effect plumbing: defense in depth.**
+Both candidates land. (a) Add an `effect` field to the propose-tool
+dataclass and thread it through the propose user-message renderer
+so the model sees the classification it should respect. (b) Make
+Batch 2's dispatcher enforce read-only at dispatch time using actual
+call arguments — the integration LLM's inline-versus-propose
+decision is advisory; the kernel catches mistakes structurally.
+**Same architectural pattern as covenant determinism in CCV1**:
+substrate flows deterministically AND integration LLM may add
+framing on top. (a) lands in the propose-tool briefing extension
+commit; (b) lands in the dispatcher safety-contract commit
+(see Fold 3).
+
+**Fold 3 — Dispatch-time enforcement is the canonical safety boundary.**
+Confirmed as architectural fact, not a test-only assertion. Surfacing-
+time gate-classification is a *hint* that aids tool selection;
+dispatch-time gate-classification using actual call arguments is the
+*safety boundary*. The Batch 1 fix that defaulted action-dependent
+kernel tools to the unknown token at surfacing was correct: it
+deferred the binding decision to dispatch where the actual arguments
+are available. Batch 2's dispatcher implements this contract: every
+dispatch invokes the gate's classifier with actual call arguments
+before executing. **Codified in the architect primer as a hard
+principle: "Gate at dispatch, hint at surfacing."**
+
+#### Pin tests for Batch 2
+
+`tests/test_thin_path_executor_wiring.py`:
+- `executor.execute` on a kernel tool returns valid `ToolExecutionResult`
+- `descriptor_lookup` returns valid descriptor for known tool ids
 - planner catalog reflects live registrations
 - integration dispatcher returns real read-only tool results
 - tool execution receipts land in conversation log identical to legacy
+
+`tests/test_thin_path_dispatcher_adapter.py` (Fold 1):
+- adapter translates renderer kwargs → integration positional shape
+- adapter preserves tool_use_id, tool_name, conversation_id across boundary
+- adapter passes through dispatcher errors as friendly tool-error text
+
+`tests/test_propose_tool_effect_plumbing.py` (Fold 2a):
+- ProposeTool dataclass carries effect field
+- propose user-message renderer surfaces effect to model
+- effect missing/None → conservative defaults to soft_write (propose)
+
+`tests/test_dispatch_time_enforcement.py` (Fold 2b + 3):
+- dispatcher classifies with actual call arguments, not surfaced classification
+- read-classified tool with mutating action arguments → blocked at gate
+- gate-at-dispatch invariant: dispatcher consults the gate classifier
+  with actual args on every call, not surfacing-time hint
 
 ### Batch 3 — equivalence soak + default flip (legacy retained behind flag)
 
