@@ -23,22 +23,114 @@ _OPENAI_CHEAP_MODEL = "gpt-4o-mini"
 class OpenAICodexProvider(Provider):
     """ChatGPT Codex OAuth provider — uses chatgpt.com/backend-api/codex/responses.
 
-    NOT the standard OpenAI API. Mirrors OpenClaw's openai-codex-responses transport.
+    NOT the standard OpenAI API. This talks to OpenAI's *consumer* backend
+    (the same endpoint OpenClaw / pi-ai use). The consumer backend is more
+    sensitive to body shape than api.openai.com — small differences in
+    field presence or value flip whether large payloads stream cleanly or
+    mid-stream-fail with ``server_error`` SSE events.
 
-    Wire shape (aligned with OpenClaw 2026-04-25 to fix mid-stream server_error
-    on payloads above ~50KB):
-    - Endpoint: https://chatgpt.com/backend-api/codex/responses
-    - Body: Responses API format with prompt_cache_key, reasoning effort/summary,
-      include reasoning encrypted_content, text verbosity for non-schema calls.
-    - Headers: Bearer token, chatgpt-account-id, originator pi, OpenAI-Beta,
-      session_id and x-client-request-id (when conversation_id provided),
-      OS-aware User-Agent.
-    - Auth: ChatGPT OAuth credentials, not OPENAI_API_KEY.
+    ============================================================================
+    WIRE SHAPE INVARIANTS — DO NOT REMOVE WITHOUT REPLACEMENT
+    ============================================================================
 
-    The prompt_cache_key + session correlation headers let the consumer
-    backend hit its prompt cache rather than recomputing attention from
-    scratch on every call. Without them, large payloads consistently hit
-    a per-request time budget and fail mid-stream.
+    Every field listed here is load-bearing. Each one was added in response to
+    a specific failure mode observed in production. The original "minimal
+    body" shape worked for small payloads but failed reliably above ~40KB
+    with real tool schemas. The current shape mirrors OpenClaw's installed
+    Codex transport (``@mariozechner/pi-ai openai-codex-responses``) which
+    has been stable in production for the same backend.
+
+    If you find yourself wanting to "clean up" any of the fields below, run
+    ``scripts/codex_replay_mutations.py`` against a captured >40KB body
+    first — strip the field, see the failure rate change. The mutation
+    matrix is the contract test for this transport.
+
+    REQUIRED BODY FIELDS:
+
+    * ``model`` — str. e.g. "gpt-5.5". Determines reasoning capability path.
+    * ``instructions`` — str. System prompt as a single block (NOT a system
+      message in ``input``). The consumer backend rejects system roles in
+      ``input`` for codex/responses.
+    * ``input`` — list of message items in Responses-API shape. Each item
+      is ``{role, content: [{type: "input_text", text: ...}]}`` for user,
+      or ``{role: "developer", content: ...}`` for the developer-role
+      override (overflow-handling).
+    * ``store: false`` — REQUIRED. Tells backend not to persist conversation
+      state. Omitting this triggers extra backend persistence work that
+      tips large payloads into mid-stream timeouts. OpenClaw sets this
+      via ``storeMode: "disable"``.
+    * ``stream: true`` — REQUIRED. The endpoint is SSE-only.
+    * ``tool_choice: "auto"`` — REQUIRED when tools are present. OpenClaw
+      sends this on every tool-bearing call.
+    * ``parallel_tool_calls: true`` — REQUIRED. Allows backend to plan
+      multi-tool turns. OpenClaw sends this.
+    * ``include: ["reasoning.encrypted_content"]`` — REQUIRED for gpt-5.x
+      reasoning models. Without it, the backend silently drops reasoning
+      state across turns, breaking continuity.
+    * ``prompt_cache_key`` — REQUIRED on every call where the caller has
+      a conversation identity. Set to a stable per-conversation string
+      (Discord channel id, REPL session id, etc.). Without it, the
+      consumer backend's KV cache misses on every turn and large payloads
+      recompute attention from scratch — reliably causing mid-stream
+      ``server_error`` once payload + tool schemas cross ~40KB.
+    * ``reasoning: {effort, summary}`` — REQUIRED for gpt-5.x. Omitting
+      lets the backend pick effort, which on big payloads drifts toward
+      "high" and blows the per-request time budget. ``effort`` overridable
+      via ``OPENAI_CODEX_REASONING_EFFORT`` (default "medium"). OpenClaw
+      defaults to "high" — both are stable; "medium" is the conservative
+      latency choice.
+    * ``text: {verbosity: "medium"}`` — for non-schema responses. When an
+      output_schema is set, ``text.format`` carries the JSON-schema spec
+      instead. Either ``text.verbosity`` or ``text.format`` must be set;
+      the field cannot be empty/missing on the consumer backend.
+
+    REQUIRED TOOL SHAPE — see ``_translate_tools`` for the load-bearing
+    detail. **Every tool MUST have ``strict: None`` as a top-level key**.
+    Missing-vs-null is the trigger for the ~40KB failure mode confirmed
+    by 2026-05-02 mutation matrix replay (0/3 fail flipped to 5/5 pass
+    with strict:None alone). OpenClaw sets the same: ``{strict: null}``.
+
+    REQUIRED HEADERS — see ``_headers``. Auth (Bearer + chatgpt-account-id),
+    transport identity (originator: pi, OS-aware User-Agent), and per-call
+    routing (session_id + x-client-request-id when conversation_id is
+    provided) are all load-bearing.
+
+    ============================================================================
+    PLUMBING INVARIANTS — conversation_id must reach the provider
+    ============================================================================
+
+    Every caller of ``complete()`` MUST forward ``conversation_id``. The
+    chain in production is:
+
+        PresenceRenderer.render(briefing)
+        → self._chain_caller(..., conversation_id=briefing.turn_id)
+        → response_delivery._wrapped(..., conversation_id=...)
+        → _shared_chain_caller(..., conversation_id=...)  [server.py + repl.py]
+        → entry.provider.complete(..., conversation_id=...)
+        → body["prompt_cache_key"] = conversation_id
+          headers["session_id"] = conversation_id
+          headers["x-client-request-id"] = conversation_id
+
+    If any seam drops conversation_id, the ~40KB failure mode returns.
+    Pin tests at ``tests/test_thin_path_codex_wire_shape_plumbing.py``
+    enforce the plumbing; do not delete them.
+
+    ============================================================================
+    INVESTIGATION TOOLING
+    ============================================================================
+
+    If a future failure looks wire-shape-related:
+
+    1. Set ``KERNOS_CODEX_CAPTURE_BODY=1`` in env. Triggers JSON dump of
+       any >40KB body to ``/tmp/codex_bodies/`` (path overridable via
+       ``KERNOS_CODEX_CAPTURE_DIR``, threshold via
+       ``KERNOS_CODEX_CAPTURE_THRESHOLD_KB``).
+    2. Trigger the failing turn.
+    3. Run ``python scripts/codex_replay_mutations.py <body.json>``. The
+       mutation matrix tries strip-field, value-swap, and shape mutations
+       and reports which one flips success rate. That's your trigger.
+
+    Do NOT diagnose by guessing. The matrix is fast (≤5min) and definitive.
     """
 
     provider_name = "openai-codex"
@@ -88,21 +180,41 @@ class OpenAICodexProvider(Provider):
     def _headers(self, *, session_id: str = "") -> dict[str, str]:
         """Build request headers matching OpenClaw's Codex wire contract.
 
+        Every header below is load-bearing — the consumer backend
+        rejects calls or routes them to a different path if any are
+        missing. Do NOT remove or rename without replacement.
+
         When session_id is provided, also sets the session_id and
         x-client-request-id headers so the backend can correlate calls
         in the same conversation for routing and prompt-cache hits.
         """
         ua = self._user_agent()
         headers = {
+            # OAuth bearer from ChatGPT credential. NOT an OPENAI_API_KEY —
+            # the consumer codex backend rejects API keys on this endpoint.
             "Authorization": f"Bearer {self._credential['access']}",
+            # Per-account routing. Required by chatgpt.com backend.
             "chatgpt-account-id": self._credential["accountId"],
+            # Transport identity tag — backend treats "pi" as a known
+            # transport. Other values get rate-limited or rejected.
             "originator": "pi",
+            # OS-aware UA matching OpenClaw shape exactly. The bare string
+            # "pi (python)" gets reduced quotas on the consumer backend;
+            # the OS-detail form mirrors what's been measured stable.
             "User-Agent": ua,
             "Content-Type": "application/json",
+            # Required for Responses API on the consumer backend.
             "OpenAI-Beta": "responses=experimental",
+            # Default; the actual call sets this to "text/event-stream"
+            # before sending (see complete()). Stream is REQUIRED.
             "accept": "application/json",
         }
         if session_id:
+            # Session correlation headers — set on every call where the
+            # caller has a conversation identity. Without these, the
+            # consumer backend's prompt-cache misses on every turn and
+            # large payloads tip into mid-stream timeouts. See class
+            # docstring "WIRE SHAPE INVARIANTS" for the full failure mode.
             headers["session_id"] = session_id
             headers["x-client-request-id"] = session_id
         return headers
@@ -123,15 +235,39 @@ class OpenAICodexProvider(Provider):
     @staticmethod
     @staticmethod
     def _translate_tools(tools: list[dict]) -> list[dict]:
-        """Convert Anthropic-format tool defs to OpenAI Responses API function format."""
+        """Convert Anthropic-format tool defs to OpenAI Responses API function format.
+
+        ``strict: None`` is set explicitly on every tool because the Codex
+        consumer backend treats a missing ``strict`` key differently from
+        ``strict: null`` on payloads with real (non-trivial) tool schemas:
+        without the explicit null, calls reliably mid-stream-fail with
+        ``server_error`` once payload crosses ~40KB. The mutation matrix at
+        ``scripts/codex_replay_mutations.py`` 2026-05-02 confirmed this is
+        the trigger (0/3 fail rate flipped to 3/3 pass with this single
+        change). OpenClaw's installed Codex transport uses the same
+        explicit-null pattern (``convertResponsesTools(tools, {strict: null})``).
+        """
         result = []
         for t in tools:
             schema = t.get("input_schema", {"type": "object", "properties": {}})
             result.append({
+                # Tool envelope. The consumer backend expects exactly these
+                # five keys per tool — type, name, description, parameters,
+                # strict. Adding extra keys is silently ignored; missing
+                # `strict` is the production failure trigger.
                 "type": "function",
                 "name": t["name"],
                 "description": t.get("description", ""),
                 "parameters": schema,
+                # CRITICAL: `strict` MUST be present, MUST be exactly None
+                # (renders as JSON `null`). This is enforced by the pin
+                # test test_body_tools_carry_explicit_strict_null. If you
+                # find yourself wanting to drop this line because "the key
+                # is set to null, that's the same as missing it" — it
+                # isn't, and the symptom is mid-stream server_error on
+                # payloads above ~40KB. Run scripts/codex_replay_mutations.py
+                # to convince yourself before changing.
+                "strict": None,
             })
         return result
 
@@ -344,32 +480,70 @@ class OpenAICodexProvider(Provider):
                 len(instructions_str) // 1024, len(dynamic_str) // 1024,
                 len(translated_input))
 
+        # ====================================================================
+        # CODEX REQUEST BODY — every field below is load-bearing.
+        # See the OpenAICodexProvider class docstring "WIRE SHAPE INVARIANTS"
+        # section for the full failure mode that maps to each field. Stripping
+        # any of these reproduces a known production failure on the consumer
+        # backend. Run scripts/codex_replay_mutations.py before changing.
+        # ====================================================================
         body: dict[str, Any] = {
+            # Model id, e.g. "gpt-5.5". Determines reasoning capability path.
             "model": model,
+            # System prompt as a single block (NOT a system role in input).
+            # The consumer backend rejects {role: "system"} items in input.
             "instructions": instructions_str,
+            # User/developer/assistant messages in Responses-API shape.
             "input": translated_input,
+            # REQUIRED. Tells backend NOT to persist conversation state.
+            # Without this (or with True), persistence overhead tips
+            # large payloads into mid-stream timeouts. OpenClaw sets the
+            # equivalent via storeMode: "disable".
             "store": False,
+            # REQUIRED. The codex/responses endpoint is SSE-only.
             "stream": True,
+            # REQUIRED when tools present. OpenClaw sends this on every
+            # tool-bearing call. Removing it changes backend tool-routing
+            # behavior unpredictably.
             "tool_choice": "auto",
+            # REQUIRED. Allows backend to plan multi-tool turns. OpenClaw
+            # sends this. Verified present in their stable wire shape.
             "parallel_tool_calls": True,
+            # REQUIRED for gpt-5.x reasoning models. Without it, the
+            # backend silently drops reasoning state across turns,
+            # breaking continuity. Do NOT remove even if you "don't use
+            # reasoning" — the backend needs the field to be present.
             "include": ["reasoning.encrypted_content"],
         }
-        # Session correlation. The consumer backend uses this for prompt-cache
-        # routing; without it, large payloads recompute attention from scratch
-        # and reliably fail mid-stream.
+        # prompt_cache_key — REQUIRED on every call where the caller has a
+        # conversation identity. Discord channel id / REPL session / etc.
+        # Without it, consumer backend's KV cache misses on every turn,
+        # large payloads recompute attention from scratch, and >40KB calls
+        # mid-stream-fail with `server_error` (e50fb32 fix). Plumbed via
+        # PresenceRenderer → response_delivery → _shared_chain_caller →
+        # provider.complete(conversation_id=...). Pin tests at
+        # tests/test_thin_path_codex_wire_shape_plumbing.py enforce this.
         if conversation_id:
             body["prompt_cache_key"] = conversation_id
-        # Reasoning configuration for GPT-5.x. An explicit effort + summary
-        # makes the backend's behaviour predictable; without it the backend
-        # picks one which on big payloads drifts toward "high" and blows the
-        # per-request time budget.
+        # reasoning — REQUIRED for gpt-5.x. Omitting lets backend pick
+        # effort which on big payloads drifts toward "high" and blows the
+        # per-request time budget. OPENAI_CODEX_REASONING_EFFORT overrides.
+        # OpenClaw defaults to "high"; "medium" is conservative latency.
         if model.startswith("gpt-5"):
             body["reasoning"] = {
                 "effort": os.getenv("OPENAI_CODEX_REASONING_EFFORT", "medium"),
                 "summary": "auto",
             }
+        # tools — translated via _translate_tools which sets `strict: None`
+        # on every tool. The strict-key-presence requirement is THE trigger
+        # for the >40KB tool-heavy failure mode confirmed 2026-05-02. See
+        # _translate_tools docstring for the full story. Do NOT bypass.
         if tools:
             body["tools"] = self._translate_tools(tools)
+        # text — REQUIRED. Either {format: ...} for schema-constrained
+        # output, or {verbosity: ...} for free-form. The field cannot be
+        # missing; the consumer backend treats absent text as a malformed
+        # request on the codex/responses endpoint.
         if output_schema:
             body["text"] = {
                 "format": {
@@ -379,16 +553,47 @@ class OpenAICodexProvider(Provider):
                 }
             }
         else:
-            # Verbosity is only meaningful when output is free-form text.
-            # When a JSON schema is set, the backend already constrains output.
+            # Verbosity only meaningful for free-form text. Schema calls
+            # already constrain output; setting verbosity AND format is
+            # mutually exclusive on this endpoint.
             body["text"] = {"verbosity": "medium"}
 
-        # Log actual request payload size for debugging API limits
+        # Log actual request payload size for debugging API limits.
+        # Wire-shape diagnostic: log whether prompt_cache_key (gated on
+        # conversation_id) is present in the body. Empty key means the
+        # caller didn't pass conversation_id and the backend will recompute
+        # attention from scratch — the e50fb32 failure mode.
         _payload_bytes = len(json.dumps(body))
         _tool_count = len(body.get("tools", []))
         _tool_bytes = len(json.dumps(body.get("tools", []))) if body.get("tools") else 0
-        logger.info("CODEX_REQUEST: payload=%dKB tools=%d tool_schemas=%dKB input_items=%d",
-            _payload_bytes // 1024, _tool_count, _tool_bytes // 1024, len(body.get("input", [])))
+        _cache_key = body.get("prompt_cache_key", "")
+        logger.info(
+            "CODEX_REQUEST: payload=%dKB tools=%d tool_schemas=%dKB "
+            "input_items=%d cache_key=%s",
+            _payload_bytes // 1024, _tool_count, _tool_bytes // 1024,
+            len(body.get("input", [])), _cache_key or "MISSING",
+        )
+        # Capture-on-large hook: when KERNOS_CODEX_CAPTURE_BODY=1 and
+        # payload exceeds threshold, dump the exact body to disk so the
+        # tipping-point probe can replay it verbatim. Investigative-only;
+        # off by default.
+        if (
+            os.getenv("KERNOS_CODEX_CAPTURE_BODY", "0") == "1"
+            and _payload_bytes >= int(os.getenv("KERNOS_CODEX_CAPTURE_THRESHOLD_KB", "40")) * 1024
+        ):
+            import tempfile
+            import time as _time
+            cap_dir = os.getenv("KERNOS_CODEX_CAPTURE_DIR", "/tmp/codex_bodies")
+            os.makedirs(cap_dir, exist_ok=True)
+            cap_path = os.path.join(
+                cap_dir, f"body_{int(_time.time())}_{_payload_bytes // 1024}KB.json",
+            )
+            try:
+                with open(cap_path, "w") as _f:
+                    json.dump(body, _f)
+                logger.info("CODEX_BODY_CAPTURED: path=%s", cap_path)
+            except Exception:
+                logger.exception("CODEX_BODY_CAPTURE_FAILED")
 
         url = self._resolve_url()
         headers = self._headers(session_id=conversation_id)

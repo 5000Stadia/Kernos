@@ -95,7 +95,7 @@ def _build_server_style_wiring():
     audit: list[dict] = []
     trace_sink: list[dict] = []
 
-    async def shared_chain(system, messages, tools, max_tokens):
+    async def shared_chain(system, messages, tools, max_tokens, **_):
         return _resp_text("rendered")
 
     async def cohort_runner_run(ctx):

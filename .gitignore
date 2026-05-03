@@ -9,6 +9,9 @@ dist/
 build/
 credentials.json
 data/
+# Isolated data dirs from harnesses, dev clones, scratch runs. Never
+# committed. Examples: data-soak/ (kernos/soak.py), data-dev/, data-tmp/.
+data-*/
 # Archived data dirs from clean-slate wipes (operational artifacts —
 # preserved per-instance for recovery, never committed). Pattern matches
 # both within-tree archives and accidentally-misplaced ones.

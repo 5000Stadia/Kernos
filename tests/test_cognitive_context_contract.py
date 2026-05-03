@@ -261,7 +261,7 @@ def _build_decoupled_provider(mock_provider: AsyncMock):
     """
     catalog = StaticToolCatalog()
 
-    async def shared_chain(system, messages, tools, max_tokens):
+    async def shared_chain(system, messages, tools, max_tokens, **_):
         # Proxy to mock_provider.complete so call_args land on a single
         # capture seam shared with the legacy path. The contract tests
         # assert on whatever the renderer chose to send here.

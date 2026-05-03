@@ -81,12 +81,16 @@ def _resp(text: str) -> ProviderResponse:
 
 
 def _capture_chain(text: str = "rendered text", captured: dict | None = None):
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **kwargs):
         if captured is not None:
             captured["system"] = system
             captured["messages"] = messages
             captured["tools"] = tools
             captured["max_tokens"] = max_tokens
+            # Capture forward-compat kwargs (e.g. conversation_id added
+            # in CCV1-C7 wire-shape plumbing fix) so pin tests can
+            # assert on them.
+            captured["kwargs"] = kwargs
         return _resp(text)
 
     return chain
@@ -398,7 +402,7 @@ async def test_same_chain_caller_invoked_for_all_kinds():
     differentiation via prompt, not via chain selection."""
     invocations = []
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         invocations.append(system)
         return _resp("x")
 

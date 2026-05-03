@@ -317,7 +317,20 @@ async def build_dev_handler(
 
     primary_chain = chains.get("primary", [])
 
-    async def _shared_chain_caller(system, messages, tools, max_tokens):
+    async def _shared_chain_caller(
+        system, messages, tools, max_tokens, *, conversation_id="",
+    ):
+        # ============================================================
+        # WIRE-SHAPE PLUMBING SEAM — mirrors server.py's chain caller.
+        # ============================================================
+        # See server.py's _shared_chain_caller for the full contract.
+        # The dev REPL boot path MUST forward conversation_id identically
+        # to the production server, otherwise tests/test_repl_boot_smoke.py
+        # detects substrate divergence between dev REPL and production.
+        # Pin tests:
+        #   tests/test_thin_path_codex_wire_shape_plumbing.py
+        # See kernos/providers/codex_provider.py class docstring
+        # "WIRE SHAPE INVARIANTS" for the full Codex wire contract.
         if not primary_chain:
             raise RuntimeError(
                 "primary chain not configured — REPL needs at least one "
@@ -330,6 +343,7 @@ async def build_dev_handler(
             messages=messages,
             tools=tools,
             max_tokens=max_tokens,
+            conversation_id=conversation_id,
         )
 
     class _UnwiredDescriptorLookup:

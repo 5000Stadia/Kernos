@@ -110,7 +110,7 @@ def _make_chain(payloads_by_tool: dict[str, dict], captured: list | None = None)
     """Build a chain_caller stub that returns a tool_use block matching
     the requested tool. payloads_by_tool maps tool_name → payload."""
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         # Identify which tool the call is for via the tools list.
         tool_name = tools[0]["name"] if tools else ""
         if captured is not None:

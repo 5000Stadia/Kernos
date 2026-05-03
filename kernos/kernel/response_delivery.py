@@ -395,8 +395,29 @@ def wrap_chain_caller_with_telemetry(
     accumulates into the shared telemetry.
     """
 
-    async def _wrapped(system, messages, tools, max_tokens):
-        response = await chain_caller(system, messages, tools, max_tokens)
+    async def _wrapped(system, messages, tools, max_tokens, *, conversation_id=""):
+        # ============================================================
+        # WIRE-SHAPE PLUMBING SEAM — forward conversation_id through.
+        # ============================================================
+        # This wrapper sits BETWEEN PresenceRenderer and the shared chain
+        # caller — exactly where a future refactor might drop a kwarg
+        # "for cleanup." Don't. conversation_id reaches the Codex provider
+        # via this seam to populate prompt_cache_key + session correlation
+        # headers. See kernos/providers/codex_provider.py class docstring
+        # "WIRE SHAPE INVARIANTS" for the full contract and failure mode.
+        #
+        # Empty-conversation_id carve-out: only forward when non-empty so
+        # legacy/test chain_caller stubs that don't accept the kwarg
+        # still work. Pin tests at
+        # tests/test_thin_path_codex_wire_shape_plumbing.py enforce both
+        # the forward-when-set and omit-when-empty halves.
+        chain_kwargs = {}
+        if conversation_id:
+            chain_kwargs["conversation_id"] = conversation_id
+        response = await chain_caller(
+            system, messages, tools, max_tokens,
+            **chain_kwargs,
+        )
         # Best-effort token accumulation. Provider responses carry
         # token counts; cost is left to the wiring layer's
         # provider-specific cost calculator (out of scope for v1

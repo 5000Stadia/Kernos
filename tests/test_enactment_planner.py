@@ -123,7 +123,7 @@ def _capture_chain(payload: dict, captured: dict | None = None):
     the given payload. If `captured` is provided, records the call
     args for assertions."""
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         if captured is not None:
             captured["system"] = system
             captured["messages"] = messages
@@ -523,7 +523,7 @@ async def test_missing_finalize_block_raises_planner_error():
     """Model didn't call __finalize_plan__. The planner surfaces a
     clear error so EnactmentService routes through B1."""
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         return _resp(ContentBlock(type="text", text="here is my plan"))
 
     planner = Planner(

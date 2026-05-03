@@ -97,21 +97,21 @@ def _resp_tool_use(name: str, payload: dict) -> ProviderResponse:
 
 
 def _make_planner_chain(steps_payload: dict):
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         return _resp_tool_use(PLAN_FINALIZE_TOOL_NAME, steps_payload)
     return chain
 
 
 def _make_reasoner_chain(payloads: dict):
     """payloads maps tool_name → response payload."""
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         tool_name = tools[0]["name"] if tools else ""
         return _resp_tool_use(tool_name, payloads.get(tool_name, {}))
     return chain
 
 
 def _make_renderer_chain(text: str):
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         return _resp_text(text)
     return chain
 

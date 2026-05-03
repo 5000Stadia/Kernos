@@ -202,7 +202,7 @@ async def test_no_safety_failures_execute_tool_still_allowed():
 async def test_safety_degradation_guidance_appears_in_prompt():
     captured = {}
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         captured["body"] = messages[0]["content"]
         return _resp({
             "relevant_context": [],
@@ -240,7 +240,7 @@ async def test_safety_degradation_guidance_appears_in_prompt():
 async def test_safety_preamble_absent_when_no_failures():
     captured = {}
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         captured["body"] = messages[0]["content"]
         return _resp({
             "relevant_context": [],

@@ -499,6 +499,44 @@ class TestCodexWireShape:
         )
         assert captured["body"]["text"] == {"verbosity": "medium"}
 
+    async def test_body_tools_carry_explicit_strict_null(self, monkeypatch):
+        """Pin: every translated tool MUST include ``strict: None`` as a
+        top-level key. Live-replay 2026-05-02 confirmed that the Codex
+        consumer backend treats a missing ``strict`` key differently from
+        ``strict: null`` on payloads with real tool schemas: without the
+        explicit null, ~47KB calls reliably mid-stream-fail with
+        ``server_error`` (0/3 pass rate), with the null they pass (5/5).
+        OpenClaw's installed transport uses the same explicit-null pattern.
+        """
+        captured: dict = {}
+        provider = self._stub_provider(monkeypatch, captured)
+        tools = [
+            {"name": "tool_a", "description": "A",
+             "input_schema": {"type": "object", "properties": {}}},
+            {"name": "tool_b", "description": "B",
+             "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}}},
+        ]
+        await provider.complete(
+            model="gpt-5.5",
+            system="rules",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=tools,
+            max_tokens=1024,
+        )
+        sent_tools = captured["body"]["tools"]
+        for t in sent_tools:
+            assert "strict" in t, (
+                f"Every tool MUST have a 'strict' key (set to None). "
+                f"Missing on tool: {t.get('name')!r}. "
+                f"This is the wire-shape trigger for the Codex consumer "
+                f"backend's mid-stream server_error on >40KB payloads with "
+                f"real tool schemas. Live-replay 2026-05-02 pinned this."
+            )
+            assert t["strict"] is None, (
+                f"Tool {t.get('name')!r} has strict={t.get('strict')!r}; "
+                f"must be exactly None"
+            )
+
     async def test_body_uses_schema_format_when_output_schema_provided(self, monkeypatch):
         captured: dict = {}
         provider = self._stub_provider(monkeypatch, captured)

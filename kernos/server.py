@@ -458,7 +458,24 @@ async def on_ready():
     # wrapping happens in the provider closure below.
     primary_chain = chains.get("primary", [])
 
-    async def _shared_chain_caller(system, messages, tools, max_tokens):
+    async def _shared_chain_caller(
+        system, messages, tools, max_tokens, *, conversation_id="",
+    ):
+        # ============================================================
+        # WIRE-SHAPE PLUMBING SEAM — do NOT drop conversation_id.
+        # ============================================================
+        # conversation_id flows from briefing.turn_id → PresenceRenderer
+        # → response_delivery._wrapped → here → provider.complete. It
+        # populates the Codex provider's prompt_cache_key + session
+        # correlation headers. Without it, the consumer backend's KV
+        # cache misses on every turn and >40KB calls mid-stream-fail
+        # with server_error. Pin tests:
+        #   tests/test_thin_path_codex_wire_shape_plumbing.py
+        # See kernos/providers/codex_provider.py class docstring
+        # "WIRE SHAPE INVARIANTS" for the full contract.
+        # If you're refactoring this seam, the conversation_id kwarg
+        # MUST be accepted AND forwarded. Anthropic + Ollama providers
+        # accept and ignore it — passing it never breaks them.
         if not primary_chain:
             raise RuntimeError(
                 "primary chain not configured; new path requires a "
@@ -471,6 +488,7 @@ async def on_ready():
             messages=messages,
             tools=tools,
             max_tokens=max_tokens,
+            conversation_id=conversation_id,
         )
 
     # Architect-lean (a) loud-failure surface for v1: until the
@@ -1002,5 +1020,62 @@ if __name__ == "__main__":
 
     token = os.getenv("DISCORD_BOT_TOKEN")
     if not token:
-        raise RuntimeError("DISCORD_BOT_TOKEN not set in .env")
-    client.run(token)
+        print(
+            "\n" + "=" * 60 + "\n"
+            "DISCORD CONFIG ERROR: DISCORD_BOT_TOKEN is not set\n"
+            + "=" * 60 + "\n"
+            "Add your bot token to .env in this directory:\n"
+            "  DISCORD_BOT_TOKEN=<your_token_from_discord_dev_portal>\n\n"
+            "Get a token at https://discord.com/developers/applications\n"
+            "(create or open an application -> Bot -> Reset Token).\n",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    try:
+        client.run(token)
+    except discord.errors.PrivilegedIntentsRequired:
+        # Friendly remediation for the most common first-run misconfig:
+        # the application this token belongs to doesn't have MESSAGE
+        # CONTENT INTENT enabled in the Discord developer portal.
+        # Kernos requests it (server.py top: intents.message_content =
+        # True), so without the toggle Discord refuses the gateway
+        # connection entirely. Caught here so the operator sees the
+        # exact fix instead of a 30-line discord.py traceback.
+        print(
+            "\n" + "=" * 60 + "\n"
+            "DISCORD CONFIG ERROR: MESSAGE CONTENT INTENT is not enabled\n"
+            + "=" * 60 + "\n"
+            "Discord refused the bot connection because the application\n"
+            "this token belongs to does not have MESSAGE CONTENT INTENT\n"
+            "enabled. Kernos needs it to read message bodies.\n\n"
+            "Fix (one-time, ~30 seconds):\n"
+            "  1. https://discord.com/developers/applications\n"
+            "  2. Open the application this bot's token belongs to\n"
+            "  3. Bot tab (left sidebar)\n"
+            "  4. Scroll to 'Privileged Gateway Intents'\n"
+            "  5. Toggle ON: MESSAGE CONTENT INTENT\n"
+            "     (leave Server Members + Presence OFF — not needed)\n"
+            "  6. Click 'Save Changes' at the bottom of the page\n"
+            "  7. Re-run start.sh\n\n"
+            "If you already toggled it on: confirm Save Changes was\n"
+            "clicked, and that the token in .env belongs to the SAME\n"
+            "application you toggled (mismatched dev vs. prod tokens\n"
+            "are the most common cause of this surviving step 6).\n",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    except discord.errors.LoginFailure as exc:
+        # Bad token — also friendly-fail rather than dump a stack.
+        print(
+            "\n" + "=" * 60 + "\n"
+            "DISCORD CONFIG ERROR: bot token rejected\n"
+            + "=" * 60 + "\n"
+            "Discord rejected DISCORD_BOT_TOKEN. Common causes:\n"
+            "  - Token was reset in the Dev Portal -> copy the new one\n"
+            "    into .env (and update any other places it's stored)\n"
+            "  - Wrong token (mixed up dev vs. prod application)\n"
+            "  - Trailing whitespace or truncation when pasting\n\n"
+            f"Underlying error: {exc}\n",
+            file=sys.stderr,
+        )
+        sys.exit(2)

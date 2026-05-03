@@ -763,6 +763,7 @@ class PresenceRenderer:
                     tool_list = ()
         return await self._render(
             system, user_message, tools=tool_list,
+            conversation_id=briefing.turn_id,
         )
 
     async def render_b2(
@@ -774,7 +775,9 @@ class PresenceRenderer:
         that construction step."""
         system = _SYSTEM_PROMPT_CLARIFICATION_B2
         user_message = _user_message_b2(briefing, safe)
-        return await self._render(system, user_message)
+        return await self._render(
+            system, user_message, conversation_id=briefing.turn_id,
+        )
 
     async def render_b1(
         self, briefing: Briefing, safe: B1RenderInputs
@@ -783,7 +786,9 @@ class PresenceRenderer:
         as B2."""
         system = _SYSTEM_PROMPT_B1_TERMINATION
         user_message = _user_message_b1(briefing, safe)
-        return await self._render(system, user_message)
+        return await self._render(
+            system, user_message, conversation_id=briefing.turn_id,
+        )
 
     async def _render(
         self,
@@ -791,6 +796,7 @@ class PresenceRenderer:
         user_message: str,
         *,
         tools: list[dict] | tuple[dict, ...] = (),
+        conversation_id: str = "",
     ) -> PresenceRenderResult:
         """Internal helper: invoke the chain and extract text.
 
@@ -803,10 +809,37 @@ class PresenceRenderer:
         B1 / B2 paths that don't surface tools). Thin-path render()
         passes the tool surface from ``briefing.cognitive_context``;
         legacy / pre-C5 callers see empty tools, unchanged.
+
+        ``conversation_id`` is the briefing's turn_id (which IS the
+        upstream conversation_id from ReasoningRequest, renamed at
+        the TurnRunnerInputs boundary). The chain caller forwards
+        it to the underlying provider; for the Codex provider this
+        unlocks the wire-shape repair fields (prompt_cache_key +
+        session correlation headers) that fix recurrent mid-stream
+        ``server_error`` on payloads above ~50KB. See e50fb32 for
+        the original wire-shape fix that this thin-path plumbing
+        restores.
+
+        WIRE-SHAPE PLUMBING SEAM — do NOT drop conversation_id from
+        the chain_caller invocation below. It flows through
+        response_delivery._wrapped → _shared_chain_caller →
+        provider.complete to populate the Codex provider's
+        prompt_cache_key + session correlation headers. See
+        kernos/providers/codex_provider.py class docstring
+        "WIRE SHAPE INVARIANTS" for the full contract. Pin tests:
+        tests/test_thin_path_codex_wire_shape_plumbing.py.
         """
         messages: list[dict] = [{"role": "user", "content": user_message}]
+        # conversation_id is forwarded only when non-empty to keep the
+        # chain_caller protocol compatible with stubs that don't accept
+        # it. The production C7 thin path passes briefing.turn_id (the
+        # upstream conversation_id), which is non-empty for real turns.
+        chain_kwargs = {}
+        if conversation_id:
+            chain_kwargs["conversation_id"] = conversation_id
         response = await self._chain_caller(
-            system, messages, list(tools), self._max_tokens
+            system, messages, list(tools), self._max_tokens,
+            **chain_kwargs,
         )
         text = _extract_text_from_response(response)
         return PresenceRenderResult(text=text, streamed=False)

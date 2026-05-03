@@ -86,7 +86,7 @@ def _build_service(model_payload: dict) -> tuple[IntegrationService, list]:
     emission."""
     audit_sink: list[dict] = []
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         return _resp(_finalize_block(model_payload))
 
     async def dispatcher(tool_id, args, inputs):

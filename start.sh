@@ -32,6 +32,9 @@ _load_kernos_env() {
             KERNOS_*=*)
                 key="${line%%=*}"
                 val="${line#*=}"
+                # Strip CR (Windows line endings) and trailing whitespace.
+                val="${val%$'\r'}"
+                val="${val%"${val##*[![:space:]]}"}"
                 # Strip surrounding quotes (single or double) if present.
                 val="${val%\"}"; val="${val#\"}"
                 val="${val%\'}"; val="${val#\'}"
@@ -44,6 +47,36 @@ _load_kernos_env() {
     done < "$env_file"
 }
 _load_kernos_env
+
+# --- Graceful-crash handler ----------------------------------
+# When start.sh is launched by double-click, the terminal window
+# is owned by the script's shell. If python (or any earlier step)
+# exits with an error, the script returns and the window closes
+# instantly — the user never sees the traceback. This trap keeps
+# the window open on actual crashes so the error is readable.
+#
+# Skip-pause exit codes:
+#   0   — clean exit
+#   130 — SIGINT (Ctrl+C, user-initiated stop)
+#   143 — SIGTERM (kill signal, e.g. self-restart logic above)
+#
+# Set KERNOS_START_NO_PAUSE=1 to suppress the pause unconditionally
+# (e.g. when chaining start.sh from another script or systemd).
+_kernos_exit_handler() {
+    local rc=$?
+    if [ $rc -ne 0 ] && [ $rc -ne 130 ] && [ $rc -ne 143 ]; then
+        echo ""
+        echo "============================================================"
+        echo "Kernos exited with error code $rc"
+        echo "Scroll up in this window to see the traceback or error."
+        echo "============================================================"
+        if [ "${KERNOS_START_NO_PAUSE:-0}" != "1" ] && [ -t 0 ] && [ -t 1 ]; then
+            echo ""
+            read -r -p "Press Enter to close this window... " _
+        fi
+    fi
+}
+trap _kernos_exit_handler EXIT
 
 # Helper: emit space-separated PIDs of processes matching $1
 # whose /proc/PID/cwd resolves to SCRIPT_DIR.

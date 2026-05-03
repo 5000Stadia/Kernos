@@ -177,7 +177,7 @@ def _make_runner(
 async def test_runner_happy_path_single_iteration():
     captured = {}
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         captured["system"] = system
         captured["messages"] = messages
         captured["tools"] = tools
@@ -205,7 +205,7 @@ async def test_runner_happy_path_single_iteration():
 async def test_runner_prompt_carries_inputs():
     captured = {}
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         captured["system"] = system
         captured["messages"] = messages
         captured["tools"] = tools
@@ -238,7 +238,7 @@ async def test_runner_iterates_with_read_only_tool_call():
     call_count = {"n": 0}
     dispatch_calls = []
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         call_count["n"] += 1
         if call_count["n"] == 1:
             return _resp(
@@ -321,7 +321,7 @@ async def test_runner_rejects_non_read_tool_with_fail_soft():
 async def test_runner_filters_non_read_tools_from_model_surface():
     captured = {}
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_):
         captured["tools"] = tools
         return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
 

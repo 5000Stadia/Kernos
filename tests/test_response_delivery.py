@@ -431,7 +431,7 @@ async def test_response_delivery_does_not_drain_trace_sink():
 async def test_chain_caller_wrapper_accumulates_tokens_into_shared_telemetry():
     telemetry = AggregatedTelemetry()
 
-    async def fake_chain(system, messages, tools, max_tokens):
+    async def fake_chain(system, messages, tools, max_tokens, **_):
         return ProviderResponse(
             content=[ContentBlock(type="text", text="x")],
             stop_reason="end_turn",

@@ -241,7 +241,7 @@ def _build_production_equivalent_wiring(
     descriptors = descriptors or {}
     executor_results = executor_results or []
 
-    async def shared_chain(system, messages, tools, max_tokens):
+    async def shared_chain(system, messages, tools, max_tokens, **_):
         return _resp_text("rendered")
 
     class _RecordingExecutor:
