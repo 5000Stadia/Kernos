@@ -1090,10 +1090,17 @@ async def _run_scenario(
     # Force the cognition-path flag for dual-path mode. Without this
     # the child inherits whatever the operator set (or .env default),
     # which would silently undermine equivalence soak.
+    #
+    # path_label="default" runs the post-flip verification: leave the
+    # env var unset so the production default (thin path post-CCV1-C7-
+    # flip) decides. Strip any inherited value from .env so the test
+    # actually exercises "what happens when no override is set."
     if path_label == "legacy":
         env["KERNOS_USE_DECOUPLED_TURN_RUNNER"] = "0"
     elif path_label == "thin":
         env["KERNOS_USE_DECOUPLED_TURN_RUNNER"] = "1"
+    elif path_label == "default":
+        env.pop("KERNOS_USE_DECOUPLED_TURN_RUNNER", None)
 
     # Pre-launch setup files: harness writes producer-side
     # artifacts into the scenario's data dir before the launcher
@@ -1598,13 +1605,16 @@ def main() -> int:
         help="run only automated scenarios (skip operator-driven)",
     )
     parser.add_argument(
-        "--paths", choices=["legacy", "thin", "both"], default="thin",
+        "--paths", choices=["legacy", "thin", "both", "default"], default="thin",
         help=(
             "cognition path to exercise. 'legacy' = "
             "KERNOS_USE_DECOUPLED_TURN_RUNNER=0; 'thin' = =1; 'both' = "
             "run each automated scenario twice and emit a diff-report. "
-            "Default 'thin' matches single-path operator runs; use "
-            "'both' for Batch 3 equivalence soak."
+            "'default' = leave the env var unset and let the production "
+            "default decide (thin post-CCV1-C7-flip 2026-05-03); used "
+            "for post-flip default verification turns. Default 'thin' "
+            "matches single-path operator runs; use 'both' for Batch 3 "
+            "equivalence soak."
         ),
     )
     parser.add_argument(
