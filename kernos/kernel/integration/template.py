@@ -120,6 +120,26 @@ FINALIZE_TOOL_SCHEMA: dict = {
                     "arguments": {"type": "object"},
                     "narration_context": {"type": "string"},
                     "reason": {"type": "string"},
+                    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 7:
+                    # propose-tool effect classification. Pairs with
+                    # the ProposeTool dataclass effect field and the
+                    # propose user-message renderer's "## Tool effect
+                    # (deterministic substrate)" section. Recognized:
+                    # "read", "soft_write", "hard_write", "unknown".
+                    # When you choose propose_tool, populate effect
+                    # from the gate's tool-effects map for the
+                    # proposed tool. Empty/missing → renderer treats
+                    # as "unknown — propose conservatively".
+                    "effect": {
+                        "type": "string",
+                        "enum": [
+                            "",
+                            "read",
+                            "soft_write",
+                            "hard_write",
+                            "unknown",
+                        ],
+                    },
                     "constraint": {"type": "string"},
                     "satisfaction_partial": {"type": "string"},
                     "suggested_shape": {"type": "string"},
@@ -257,7 +277,13 @@ Call __finalize_briefing__ when you are ready to hand off. That ends the loop.
 
   - respond_only          — presence generates a conversational reply
   - execute_tool          — presence executes the named tool now
-  - propose_tool          — presence surfaces a confirmation to the user
+  - propose_tool          — presence surfaces a confirmation to the user.
+                            REQUIRED sibling: tool_id (the proposed tool's
+                            id) + effect (gate effect classification: one
+                            of "read", "soft_write", "hard_write",
+                            "unknown"). Effect helps presence decide
+                            whether to call the tool inline (read) or
+                            propose-then-confirm (soft_write / hard_write).
   - constrained_response  — presence partially satisfies under a named limit
   - pivot                 — presence generates a different shape than asked
   - defer                 — presence acknowledges and signals delay

@@ -591,6 +591,12 @@ class IntegrationRunner:
             integration_run_id=inputs.integration_run_id,
             action_envelope=envelope,
             cognitive_context=inputs.cognitive_context,
+            # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 6:
+            # turn-context identifiers thread through to step
+            # dispatcher's ToolExecutionInputs construction.
+            instance_id=inputs.instance_id,
+            member_id=inputs.member_id,
+            space_id=inputs.space_id,
         )
 
     def _check_redaction_invariant(
@@ -700,6 +706,10 @@ class IntegrationRunner:
                 turn_id=inputs.turn_id,
                 integration_run_id=inputs.integration_run_id,
                 cognitive_context=inputs.cognitive_context,
+                # Fold 6 — turn-context identifiers
+                instance_id=inputs.instance_id,
+                member_id=inputs.member_id,
+                space_id=inputs.space_id,
             )
             await self._emit_audit(
                 briefing, success=False, error=error or notes,
@@ -731,6 +741,10 @@ class IntegrationRunner:
             turn_id=briefing.turn_id,
             integration_run_id=briefing.integration_run_id,
             cognitive_context=inputs.cognitive_context,
+            # Fold 6 — turn-context identifiers
+            instance_id=inputs.instance_id,
+            member_id=inputs.member_id,
+            space_id=inputs.space_id,
         )
         await self._emit_audit(briefing, success=False, error=error or notes)
         return briefing

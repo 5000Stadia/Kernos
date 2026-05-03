@@ -418,14 +418,35 @@ async def build_dev_handler(
         reasoner = DivergenceReasoner(chain_caller=wrapped_chain)
         # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 1 — see server.py
         # mirror. Same adapter shim wires the renderer's tool-use loop
-        # to the live integration dispatcher.
+        # to the live integration dispatcher. CC-scope follow-up:
+        # thread per-turn request identifiers through the
+        # inputs_factory so the dispatcher's request_factory builds
+        # ReasoningRequest with real ids.
+        import dataclasses as _dc
         from kernos.kernel.integration.live_wiring import (
             build_renderer_to_integration_adapter,
         )
+
+        @_dc.dataclass(frozen=True)
+        class _ReplRendererTurnInputs:
+            instance_id: str
+            member_id: str
+            space_id: str
+            turn_id: str
+
+        def _repl_renderer_inputs_factory(conversation_id: str) -> Any:
+            return _ReplRendererTurnInputs(
+                instance_id=getattr(request, "instance_id", "") or "",
+                member_id=getattr(request, "member_id", "") or "",
+                space_id=getattr(request, "active_space_id", "") or "",
+                turn_id=conversation_id or getattr(request, "conversation_id", "") or "",
+            )
+
         presence = PresenceRenderer(
             chain_caller=wrapped_chain,
             tool_dispatcher=build_renderer_to_integration_adapter(
                 integration_dispatcher=_integration_dispatcher,
+                inputs_factory=_repl_renderer_inputs_factory,
             ),
         )
         integration = IntegrationService(
@@ -514,6 +535,10 @@ async def build_dev_handler(
         execute_tool=reasoning.execute_tool,
         gate=reasoning._get_gate(),
         request_factory=lambda tid, args, inp: _live_request_factory(tid, args, inp),
+        # Fold 8 — emit tool.called/tool.result + audit on every dispatch
+        # for equivalence-soak parity with legacy.
+        event_emitter=_dispatcher_event_emitter,
+        audit_emitter=_dispatcher_audit_emitter,
     )
     planner_tool_catalog = LivePlannerCatalog(
         tool_catalog=handler._tool_catalog,

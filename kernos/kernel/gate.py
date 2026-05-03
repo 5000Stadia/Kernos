@@ -101,10 +101,21 @@ class DispatchGate:
         _KERNEL_READS = {
             "remember", "remember_details", "list_files", "read_file",
             "dismiss_whisper", "read_source", "read_doc", "read_soul",
-            "manage_channels", "request_tool", "inspect_state",
+            "request_tool", "inspect_state",
             "list_parcels", "inspect_parcel",
             # CANVAS-V1
             "canvas_list", "page_read", "page_list", "page_search",
+            # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
+            # Batch 2 follow-up. It has action-dependent semantics
+            # (list=read, enable/disable=soft_write); the kernel-reads
+            # membership check fired before the action-dependent branch
+            # below, so enable/disable were silently classified as
+            # read at dispatch time. Per Fold 5 (architect verdict
+            # 2026-05-03): moved into the action-dependent branch
+            # below where the actual semantics live.
+            # NOTE: manage_schedule had a hardcoded "read" return at
+            # the per-tool branch below for the same reason; replaced
+            # with action-aware classification below.
         }
         _KERNEL_WRITES = {
             "write_file", "delete_file", "manage_covenants",
@@ -151,7 +162,15 @@ class DispatchGate:
             # whether it's a reactive user request or a proactive agent move.
             return "hard_write"
         if tool_name == "manage_schedule":
-            return "read"
+            # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 5: was
+            # hardcoded "read" pre-fold despite enum supporting
+            # create/update/pause/resume/remove which mutate trigger
+            # state. Now action-aware: list = read, anything else
+            # = soft_write (reversible — pause/resume/remove can
+            # be undone via list-then-create-or-resume; create can
+            # be remove'd; update produces a soft history).
+            action = (tool_input or {}).get("action", "list")
+            return "read" if action == "list" else "soft_write"
         if tool_name == "manage_workspace":
             action = (tool_input or {}).get("action", "list")
             return "read" if action == "list" else "soft_write"

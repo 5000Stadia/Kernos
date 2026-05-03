@@ -146,14 +146,32 @@ class TestManageScheduleTool:
         r = ReasoningService(MagicMock(), MagicMock(), MagicMock(), MagicMock())
         assert r._classify_tool_effect("manage_schedule", None, {"action": "list"}) == "read"
 
-    def test_gate_classification_all_read(self):
-        """All manage_schedule actions are read — gate fires at fire time, not management time."""
+    def test_gate_classification_action_dependent(self):
+        """INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 5 (the design
+        review verdict 2026-05-03): manage_schedule classification is
+        now action-dependent. Pre-fix the tool returned "read" for
+        every action with the rationale "gate fires at fire time, not
+        management time" — but management actions (create / update /
+        pause / resume / remove) DO mutate trigger state at the
+        scheduler. The dispatch-time gate enforcement codified by
+        Fold 3 ("gate at dispatch, hint at surfacing") requires the
+        classifier to reflect the actual effect of the call.
+
+        - list → read (no state change)
+        - create / update / pause / resume / remove → soft_write
+          (reversible — pause/resume/remove can be undone via
+          list-then-create-or-resume; create can be remove'd;
+          update produces a soft history)
+        """
         from kernos.kernel.reasoning import ReasoningService
         r = ReasoningService(MagicMock(), MagicMock(), MagicMock(), MagicMock())
-        for action in ["list", "create", "remove", "pause", "resume", "update"]:
+        assert r._classify_tool_effect(
+            "manage_schedule", None, {"action": "list"},
+        ) == "read"
+        for action in ["create", "remove", "pause", "resume", "update"]:
             assert r._classify_tool_effect(
-                "manage_schedule", None, {"action": action}
-            ) == "read", f"Expected read for action={action}"
+                "manage_schedule", None, {"action": action},
+            ) == "soft_write", f"Expected soft_write for action={action}"
 
 
 class TestManageScheduleHandler:

@@ -1358,6 +1358,18 @@ class Briefing:
     # backward compat with existing Briefing construction sites
     # (fail-soft path, tests, integration runner pre-C3a).
     cognitive_context: Any = None
+    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 6: turn-context
+    # identifiers carried on the briefing so step dispatcher's
+    # ToolExecutionInputs construction has real ids to populate
+    # (rather than getattr-with-empty-default which lost identifiers
+    # for full-machinery dispatch). The briefing is the canonical
+    # artifact crossing the model-call seam (CCV1 invariant);
+    # identifiers belong on it alongside the cognitive context.
+    # Defaults to empty string for backward compat with Briefing
+    # construction sites that don't yet thread the identifiers.
+    instance_id: str = ""
+    member_id: str = ""
+    space_id: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.relevant_context, tuple):

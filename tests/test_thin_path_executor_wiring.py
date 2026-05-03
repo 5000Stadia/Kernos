@@ -54,8 +54,9 @@ def _inputs(tool_id: str = "list-events", args: dict | None = None) -> ToolExecu
 
 
 def test_descriptor_lookup_returns_descriptor_for_known_tool():
-    """Pin: catalog hit returns a descriptor with tool_id +
-    description. Replaces _UnwiredDescriptorLookup which raised."""
+    """Pin: catalog hit returns a ToolDescriptor-compatible object
+    with ``name`` + ``description`` + ``operations`` + ``safety_for``
+    matching what the resolve_operation consumer expects."""
     catalog = MagicMock()
     catalog.get.return_value = MagicMock(
         description="Calendar list events",
@@ -64,9 +65,12 @@ def test_descriptor_lookup_returns_descriptor_for_known_tool():
     lookup = LiveDescriptorLookup(tool_catalog=catalog)
     desc = lookup.descriptor_for("list-events")
     assert desc is not None
-    assert desc.tool_id == "list-events"
+    assert desc.name == "list-events"
     assert desc.description == "Calendar list events"
-    assert desc.source == "mcp"
+    # Required interface for resolve_operation:
+    assert hasattr(desc, "operations")
+    assert hasattr(desc, "operation_resolver")
+    assert callable(desc.safety_for)
 
 
 def test_descriptor_lookup_returns_none_for_unknown_tool():
@@ -230,9 +234,9 @@ async def test_integration_dispatcher_positional_call_succeeds_for_classified_to
 
 @pytest.mark.asyncio
 async def test_integration_dispatcher_refuses_unknown_classification():
-    """Pin: unknown-classified tools rejected with error dict.
-    Mirrors LiveExecutor's gate enforcement (Fold 3 applies on both
-    consumer paths)."""
+    """Pin (Fold 4): unknown-classified tools rejected with error dict.
+    Strict read enforcement applies on the integration runner's
+    read-only seam: anything not classified as read refuses."""
     gate = MagicMock()
     gate.classify_tool_effect.return_value = "unknown"
     execute_tool = AsyncMock()
@@ -244,8 +248,114 @@ async def test_integration_dispatcher_refuses_unknown_classification():
     )
     result = await dispatcher("manage_members", {}, MagicMock())
     assert result.get("is_error") is True
-    assert "not classified" in result.get("error", "").lower()
+    # Fold 4 error text mentions classification on the read-only seam
+    assert "read-only" in result.get("error", "").lower() or "classif" in result.get("error", "").lower()
     execute_tool.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_integration_dispatcher_refuses_soft_write_classification():
+    """Pin (Fold 4 STRICT): soft_write classification refuses on
+    the read-only integration seam. Without this enforcement the
+    integration runner could execute mutating tools through what
+    is structurally meant to be a read-only seam."""
+    gate = MagicMock()
+    gate.classify_tool_effect.return_value = "soft_write"
+    execute_tool = AsyncMock()
+
+    dispatcher = LiveIntegrationDispatcher(
+        execute_tool=execute_tool,
+        gate=gate,
+        request_factory=lambda tid, args, inp: MagicMock(),
+    )
+    result = await dispatcher("create-event", {}, MagicMock())
+    assert result.get("is_error") is True
+    execute_tool.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_integration_dispatcher_refuses_hard_write_classification():
+    """Pin (Fold 4 STRICT): hard_write classification refuses too.
+    The contract name is read-only — write-classified tools route
+    through full-machinery EXECUTE_TOOL kind, not this seam."""
+    gate = MagicMock()
+    gate.classify_tool_effect.return_value = "hard_write"
+    execute_tool = AsyncMock()
+
+    dispatcher = LiveIntegrationDispatcher(
+        execute_tool=execute_tool,
+        gate=gate,
+        request_factory=lambda tid, args, inp: MagicMock(),
+    )
+    result = await dispatcher("delete-event", {"id": "x"}, MagicMock())
+    assert result.get("is_error") is True
+    execute_tool.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_integration_dispatcher_emits_tool_called_and_result_events():
+    """Pin (Fold 8): every dispatch emits tool.called before and
+    tool.result after. Audit/trace parity with legacy is required
+    for Batch 3 equivalence soak."""
+    events: list[dict] = []
+
+    async def event_emitter(payload):
+        events.append(payload)
+
+    audit_entries: list[dict] = []
+
+    async def audit_emitter(entry):
+        audit_entries.append(entry)
+
+    gate = MagicMock()
+    gate.classify_tool_effect.return_value = "read"
+    execute_tool = AsyncMock(return_value="ok")
+
+    dispatcher = LiveIntegrationDispatcher(
+        execute_tool=execute_tool,
+        gate=gate,
+        request_factory=lambda tid, args, inp: MagicMock(),
+        event_emitter=event_emitter,
+        audit_emitter=audit_emitter,
+    )
+    await dispatcher("list-events", {}, MagicMock())
+
+    types = [e.get("type") for e in events]
+    assert "tool.called" in types
+    assert "tool.result" in types
+    assert any(a.get("type") == "tool_call_succeeded" for a in audit_entries)
+
+
+@pytest.mark.asyncio
+async def test_integration_dispatcher_emits_failure_events_on_dispatch_error():
+    """Pin (Fold 8): dispatch failures emit tool.result with
+    is_error=True and a tool_call_failed audit entry."""
+    events: list[dict] = []
+    audits: list[dict] = []
+
+    async def event_emitter(p):
+        events.append(p)
+
+    async def audit_emitter(e):
+        audits.append(e)
+
+    gate = MagicMock()
+    gate.classify_tool_effect.return_value = "read"
+    execute_tool = AsyncMock(side_effect=RuntimeError("backend fail"))
+
+    dispatcher = LiveIntegrationDispatcher(
+        execute_tool=execute_tool,
+        gate=gate,
+        request_factory=lambda tid, args, inp: MagicMock(),
+        event_emitter=event_emitter,
+        audit_emitter=audit_emitter,
+    )
+    await dispatcher("list-events", {}, MagicMock())
+    assert any(e.get("type") == "tool.called" for e in events)
+    result_events = [e for e in events if e.get("type") == "tool.result"]
+    assert len(result_events) == 1
+    assert result_events[0].get("is_error") is True
+    assert any(a.get("type") == "tool_call_failed" for a in audits)
 
 
 # ---------------------------------------------------------------------------
@@ -342,21 +452,35 @@ def test_planner_catalog_lookup_returns_catalog_entry():
     assert planner_catalog.lookup("list-events") is not None
 
 
-def test_planner_catalog_list_tools_returns_all_registered():
-    """Pin: list_tools surfaces all live registrations to the
-    planner."""
+def test_planner_catalog_list_tools_for_planning_returns_all_registered():
+    """Pin: list_tools_for_planning() surfaces all live
+    registrations as ToolCatalogEntry shape (the planner protocol
+    method, NOT a generic list_tools accessor). Pre-fix the wrapper
+    only exposed lookup() and list_tools(); planner crashed with
+    AttributeError."""
+    from kernos.kernel.enactment.planner import ToolCatalogEntry
     catalog = MagicMock()
-    catalog.get_all.return_value = [
-        MagicMock(name="t1"), MagicMock(name="t2"), MagicMock(name="t3"),
-    ]
+    entry1 = MagicMock()
+    entry1.name = "list-events"
+    entry1.description = "List calendar events"
+    entry1.source = "mcp"
+    entry2 = MagicMock()
+    entry2.name = "remember"
+    entry2.description = "Remember a fact"
+    entry2.source = "kernel"
+    catalog.get_all.return_value = [entry1, entry2]
     planner_catalog = LivePlannerCatalog(tool_catalog=catalog)
-    tools = planner_catalog.list_tools()
-    assert len(tools) == 3
+    tools = planner_catalog.list_tools_for_planning()
+    assert len(tools) == 2
+    assert all(isinstance(t, ToolCatalogEntry) for t in tools)
+    by_id = {t.tool_id: t for t in tools}
+    assert by_id["list-events"].tool_class == "mcp"
+    assert by_id["remember"].tool_class == "kernel"
 
 
 def test_planner_catalog_handles_none_catalog_defensively():
-    """Pin: defensive — None catalog returns empty rather than
-    crashing planner construction."""
+    """Pin: defensive — None catalog returns empty for both
+    accessors rather than crashing planner construction."""
     pc = LivePlannerCatalog(tool_catalog=None)
     assert pc.lookup("anything") is None
-    assert pc.list_tools() == []
+    assert pc.list_tools_for_planning() == []

@@ -627,18 +627,38 @@ async def on_ready():
         # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 1: bridge the
         # renderer's keyword-style tool-dispatcher contract to the
         # integration runner's positional (tool_id, args, inputs)
-        # contract via the adapter shim. Both seams stay intact —
-        # adapter translates without homogenizing. Late-binding
-        # closure means `_integration_dispatcher` resolves to the
-        # live LiveIntegrationDispatcher set up after handler is
-        # constructed.
+        # contract via the adapter shim. Both seams stay intact.
+        # CC-scope follow-up to Batch 2 Codex review: thread the
+        # per-turn request's identifiers through the inputs_factory
+        # so the dispatcher's request_factory has real
+        # instance_id/member_id/space_id to populate downstream
+        # ReasoningRequest with. Pre-fix the adapter passed
+        # inputs=None and the request_factory built with empty
+        # identifiers everywhere on inline tool calls.
         from kernos.kernel.integration.live_wiring import (
             build_renderer_to_integration_adapter,
         )
+
+        @dataclasses.dataclass(frozen=True)
+        class _RendererTurnInputs:
+            instance_id: str
+            member_id: str
+            space_id: str
+            turn_id: str
+
+        def _renderer_inputs_factory(conversation_id: str) -> Any:
+            return _RendererTurnInputs(
+                instance_id=getattr(request, "instance_id", "") or "",
+                member_id=getattr(request, "member_id", "") or "",
+                space_id=getattr(request, "active_space_id", "") or "",
+                turn_id=conversation_id or getattr(request, "conversation_id", "") or "",
+            )
+
         per_turn_presence = PresenceRenderer(
             chain_caller=wrapped_chain,
             tool_dispatcher=build_renderer_to_integration_adapter(
                 integration_dispatcher=_integration_dispatcher,
+                inputs_factory=_renderer_inputs_factory,
             ),
         )
 
@@ -706,17 +726,34 @@ async def on_ready():
         LivePlannerCatalog,
     )
 
+    async def _resolve_user_timezone(instance_id: str, member_id: str) -> str:
+        """Best-effort: pull user_timezone from the soul/member profile
+        for manage_schedule-style tools that consult it. Empty string
+        on miss (legacy execute_tool also accepts that). CC-scope item
+        from Codex Batch 2 review."""
+        if not instance_id or not state:
+            return ""
+        try:
+            profile = await state.get_member_profile(instance_id, member_id) if member_id else None
+            if profile:
+                return getattr(profile, "timezone", "") or ""
+        except Exception:
+            pass
+        return ""
+
     def _live_request_factory(*args) -> Any:
         """Build a minimal ReasoningRequest-shaped object for
         execute_tool routing. Either receives ToolExecutionInputs
         (executor path) or (tool_id, args, inputs) positional
         (integration dispatcher path) — both supply the fields
         execute_tool consults (instance_id, active_space_id,
-        member_id)."""
+        member_id, user_timezone)."""
         if len(args) == 1:
             inputs = args[0]
+            instance_id = getattr(inputs, "instance_id", "") or ""
+            member_id = getattr(inputs, "member_id", "") or ""
             return ReasoningRequest(
-                instance_id=getattr(inputs, "instance_id", "") or "",
+                instance_id=instance_id,
                 conversation_id=getattr(inputs, "turn_id", "") or "",
                 system_prompt="",
                 messages=[],
@@ -724,14 +761,13 @@ async def on_ready():
                 model="",
                 trigger="thin-path-executor",
                 active_space_id=getattr(inputs, "space_id", "") or "",
-                member_id=getattr(inputs, "member_id", "") or "",
+                member_id=member_id,
             )
-        # Positional (tool_id, args, dispatch_inputs) signature: extract
-        # what we can from inputs (which carries integration's
-        # IntegrationInputs).
         _, _, dispatch_inputs = args
+        instance_id = getattr(dispatch_inputs, "instance_id", "") or ""
+        member_id = getattr(dispatch_inputs, "member_id", "") or ""
         return ReasoningRequest(
-            instance_id=getattr(dispatch_inputs, "instance_id", "") or "",
+            instance_id=instance_id,
             conversation_id=getattr(dispatch_inputs, "turn_id", "") or "",
             system_prompt="",
             messages=[],
@@ -739,7 +775,7 @@ async def on_ready():
             model="",
             trigger="thin-path-integration-dispatcher",
             active_space_id=getattr(dispatch_inputs, "space_id", "") or "",
-            member_id=getattr(dispatch_inputs, "member_id", "") or "",
+            member_id=member_id,
         )
 
     shared_descriptor_lookup = LiveDescriptorLookup(
@@ -754,6 +790,13 @@ async def on_ready():
         execute_tool=reasoning.execute_tool,
         gate=reasoning._get_gate(),
         request_factory=lambda tid, args, inp: _live_request_factory(tid, args, inp),
+        # Fold 8: emit tool.called/tool.result + audit on every dispatch
+        # so equivalence soak can compare audit/event trails between
+        # legacy and thin paths. Reuses the existing dispatcher emitters
+        # wired further up so events flow through the canonical
+        # EventStream + AuditStore.
+        event_emitter=_dispatcher_event_emitter,
+        audit_emitter=_dispatcher_audit_emitter,
     )
     planner_tool_catalog = LivePlannerCatalog(
         tool_catalog=handler._tool_catalog,
