@@ -342,21 +342,34 @@ before.**
 
 ## Definition of done
 
-- [ ] Batch 1 ships: A + C + B with C-before-B internally; six
+- [x] Batch 1 ships: A + C + B with C-before-B internally; six
       receipt-grade tool-loop tests green; capability-readiness
       contract test green (semantic not string-ban); conservative
-      classification fallback pinned.
-- [ ] Batch 2 ships: all four D bindings live (descriptor lookup,
+      classification fallback pinned. **Shipped at commit 239c007
+      on 2026-05-03; Codex review fold complete; three architect-
+      input items resolved as Batch 2 folds.**
+- [x] Batch 2 ships: all four D bindings live (descriptor lookup,
       executor, planner catalog, integration dispatcher); none stay
-      as empty stubs.
+      as empty stubs. Adapter shim for dispatcher signatures
+      (Fold 1). Propose-tool effect field + dispatch-time enforcement
+      (Folds 2 + 3). Folds 4-8 (architect verdict 2026-05-03)
+      folded: strict-read on integration dispatcher seam, classifier
+      bug fixes in gate.py, Briefing identifier extension, integration
+      prompt template effect field, audit/trace parity. **Shipped at
+      commits ac3ff12 + 484a852 + 92adb77 on 2026-05-03. Codex
+      end-of-batch re-review GREEN on all five verification checks.**
 - [ ] Batch 3 ships: equivalence soak runbook green; default flip
       lands; legacy retained behind flag.
 - [ ] Stabilization window passes (2-4 weeks).
 - [ ] Batch 4 ships: legacy strike with all five decommission
       criteria green.
-- [ ] Thin-path contract codified in design review primer (complete
+- [x] Thin-path contract codified in design review primer (complete
       2026-05-03).
-- [ ] Capability-first posture codified as architectural principle
+- [x] Capability-first posture codified as architectural principle
+      (complete 2026-05-03).
+- [x] Legacy-as-oracle-then-strike discipline codified
+      (complete 2026-05-03).
+- [x] Gate-at-dispatch-hint-at-surfacing codified
       (complete 2026-05-03).
 
 Default remains legacy until Batch 3 ships equivalence-green.
