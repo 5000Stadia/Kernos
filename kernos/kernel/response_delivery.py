@@ -20,14 +20,14 @@ turn (integration + planner + per-step divergence + presence).
 Aggregation is the single source of truth for legacy
 `reasoning.response`-shape consumers.
 
-NO-DOUBLE-COUNT INVARIANT (Kit edit, locked):
+NO-DOUBLE-COUNT INVARIANT (the design review edit, locked):
 
 Inner hook model calls do NOT emit `reasoning.*` events. Synthetic
 outer `reasoning.request` / `reasoning.response` events are emitted
 ONCE per turn at the TurnRunner boundary. Test pin verifies count
 of `reasoning.response` events per new-path turn equals exactly 1.
 
-DRAIN-ORDERING INVARIANT (Kit final-signoff, locked):
+DRAIN-ORDERING INVARIANT (the design review final-signoff, locked):
 
 `response_delivery` writes/bridges into the shared trace sink and
 MUST NOT drain or clear the trace store. The handler is the single
@@ -139,7 +139,7 @@ def enactment_outcome_to_reasoning_result(
 ) -> ReasoningResult:
     """Translate EnactmentOutcome into a ReasoningResult.
 
-    Per Kit edit: targets ONLY the actual shipped fields. No
+    Per the design review edit: targets ONLY the actual shipped fields. No
     `tool_calls`, `assistant_content`, `stop_reason`, `provider`, or
     `event_id` fields exist on ReasoningResult; richer detail flows
     through audit/trace.

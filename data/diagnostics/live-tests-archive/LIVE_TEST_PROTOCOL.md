@@ -3,7 +3,7 @@
 ## When to Run
 
 After every significant code change before pushing to production.
-Two tiers: automated (Claude Code runs) and manual (founder runs via Discord).
+Two tiers: automated (Claude Code runs) and manual (owner runs via Discord).
 
 ## Tier 1: Automated (run_live_smoke.py)
 
@@ -28,7 +28,7 @@ source .venv/bin/activate && python tests/live/run_live_smoke.py
 ## Tier 2: Manual (Discord — requires MCP + real tenant)
 
 Tests that require MCP connections (calendar, search) and the real
-tenant's data (knowledge entries, spaces, preferences). Founder runs
+tenant's data (knowledge entries, spaces, preferences). Owner runs
 these via Discord after /restart.
 
 ### Test 1: Tool Surfacing Across Spaces

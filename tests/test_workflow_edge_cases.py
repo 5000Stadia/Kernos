@@ -139,14 +139,14 @@ async def stack(tmp_path):
     trig = TriggerRegistry()
     await trig.start(str(tmp_path))
     # DAR C4: pre-register the agent_ids the edge-case scenarios
-    # use (Scenario 4 routes to "founder", Scenario 7 routes to
+    # use (Scenario 4 routes to "owner", Scenario 7 routes to
     # "spec-agent" + "code-agent", Scenario 9 routes to "x") so
     # registration-time validation succeeds. Tests still use the
     # legacy RouteToAgentAction(inbox=...) dispatch path.
     from kernos.kernel.agents.registry import AgentRecord, AgentRegistry
     agents = AgentRegistry()
     await agents.start(str(tmp_path))
-    for aid in ("founder", "spec-agent", "code-agent", "x"):
+    for aid in ("owner", "spec-agent", "code-agent", "x"):
         await agents._insert_record(AgentRecord(
             agent_id=aid, instance_id="inst_a",
             provider_key="legacy-noop",
@@ -218,7 +218,7 @@ def _basic_wf(workflow_id, action_sequence, *, trigger=None, gates=None,
         instance_id="inst_a",
         name=workflow_id,
         description="",
-        owner="founder",
+        owner="owner",
         version="1.0",
         bounds=Bounds(iteration_count=1, wall_time_seconds=30),
         verifier=Verifier(flavor="deterministic", check="ok"),
@@ -361,7 +361,7 @@ class TestScenario4GateHappy:
                 gate_ref="g1",
                 continuation_rules=ContinuationRules(on_failure="abort"),
                 parameters={
-                    "agent_id": "founder",
+                    "agent_id": "owner",
                     "payload": {
                         APPROVAL_REQUEST_KEY: {
                             "execution_id": "{workflow.execution_id}",
@@ -370,7 +370,7 @@ class TestScenario4GateHappy:
                             "pause_reason": "approve please",
                             "response_event_type": "user.approval",
                             "response_predicate": {
-                                "op": "actor_eq", "value": "founder",
+                                "op": "actor_eq", "value": "owner",
                             },
                         },
                     },
@@ -380,7 +380,7 @@ class TestScenario4GateHappy:
         ], gates=[ApprovalGate(
             gate_name="g1", pause_reason="approve please",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=5,
             bound_behavior_on_timeout="abort_workflow",
         )])
@@ -389,16 +389,16 @@ class TestScenario4GateHappy:
         await event_stream.flush_now()
         # Wait for inbox to receive the approval request.
         await _wait_for(
-            lambda: bool(stack["inbox"]._items.get(("inst_a", "founder"), [])),
+            lambda: bool(stack["inbox"]._items.get(("inst_a", "owner"), [])),
         )
-        items = stack["inbox"]._items[("inst_a", "founder")]
+        items = stack["inbox"]._items[("inst_a", "owner")]
         block = items[0].payload[APPROVAL_REQUEST_KEY]
         # Compose the approval response with the nonce echoed back.
         await event_stream.emit(
             "inst_a", "user.approval",
             {"execution_id": block["execution_id"],
              "gate_nonce": block["gate_nonce"]},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         ok = await _wait_for(
@@ -427,7 +427,7 @@ class TestScenario5bGateAutoProceed:
         ], gates=[ApprovalGate(
             gate_name="g1", pause_reason="confirm",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=1,
             bound_behavior_on_timeout="auto_proceed_with_default",
             default_value="ok",
@@ -469,7 +469,7 @@ class TestScenario5GateEscalate:
         ], gates=[ApprovalGate(
             gate_name="g1", pause_reason="confirm",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=1,
             bound_behavior_on_timeout="escalate_to_owner",
         )])
@@ -513,7 +513,7 @@ class TestScenario6BypassAttempt:
         ], gates=[ApprovalGate(
             gate_name="g1", pause_reason="confirm",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=10,
             bound_behavior_on_timeout="abort_workflow",
         )])
@@ -530,7 +530,7 @@ class TestScenario6BypassAttempt:
     async def test_missing_nonce_does_not_wake(self, stack):
         await self._setup_paused(stack, "ed-bypass-missing")
         await event_stream.emit(
-            "inst_a", "user.approval", {}, member_id="founder",
+            "inst_a", "user.approval", {}, member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.3)
@@ -542,7 +542,7 @@ class TestScenario6BypassAttempt:
             "inst_a", "user.approval",
             {"execution_id": gated.execution_id,
              "gate_nonce": "00000000-0000-0000-0000-deadbeefdead"},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.3)
@@ -554,7 +554,7 @@ class TestScenario6BypassAttempt:
             "inst_a", "user.approval",
             {"execution_id": "different-execution-id",
              "gate_nonce": gated.gate_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.3)
@@ -569,7 +569,7 @@ class TestScenario6BypassAttempt:
             "gate_nonce": gated.gate_nonce,
         }
         await event_stream.emit(
-            "inst_a", "user.approval", approval, member_id="founder",
+            "inst_a", "user.approval", approval, member_id="owner",
         )
         await event_stream.flush_now()
         ok = await _wait_for(
@@ -578,7 +578,7 @@ class TestScenario6BypassAttempt:
         assert ok
         # Replay identical approval. Should be a no-op.
         await event_stream.emit(
-            "inst_a", "user.approval", approval, member_id="founder",
+            "inst_a", "user.approval", approval, member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.2)

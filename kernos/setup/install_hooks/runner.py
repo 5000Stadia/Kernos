@@ -1,6 +1,6 @@
 """Install hook runner — shared between `kernos setup` and self_update.
 
-Per Section 7 of the INSTALL-FOR-STOCK-CONNECTORS spec (Kit edit #2):
+Per Section 7 of the INSTALL-FOR-STOCK-CONNECTORS spec (the design review edit #2):
 the hook runner is a SHARED module called from both
 `kernos setup` (fresh install) and `self_update.py` (updates).
 self_update only runs on updates; fresh-install bootstrapping
@@ -275,7 +275,7 @@ class HookStatusStore:
 
 
 class HookRegistry:
-    """Architect-controlled boot-time registration of hooks.
+    """Design Review-controlled boot-time registration of hooks.
 
     Per Section 7: registry rejects non-idempotent hooks, hooks
     declaring credential-key generation, and unresolvable

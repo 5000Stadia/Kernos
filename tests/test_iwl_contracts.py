@@ -1,6 +1,6 @@
 """Type-contract pins for IWL adapters (IWL C7).
 
-Per Kit BLIP v2 review: the dispatcher tests use mocked event_emitter
+Per the design review BLIP v2 review: the dispatcher tests use mocked event_emitter
 and audit_emitter interfaces — mocks accept any call signature and
 any enum-shaped argument. So the real `EventType.TOOL_RETURNED`
 (nonexistent) and the wrong audit.log signature pass through.

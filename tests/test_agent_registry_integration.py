@@ -253,7 +253,7 @@ class TestVerifierSnapshot:
         assert result.success
         # Forcibly mutate the registry row to point at config-B.
         # (No update_record API yet; do it via raw SQL to simulate
-        # the architectural concern Kit flagged.)
+        # the architectural concern the design review flagged.)
         await stack["agents"]._db.execute(
             "UPDATE agent_records SET provider_config_ref = ? "
             "WHERE instance_id = ? AND agent_id = ?",
@@ -503,7 +503,7 @@ class TestEndToEndApprovalFlow:
 
     async def test_gated_route_to_agent_via_registry(self, stack):
         await stack["agents"].register_agent(_agent_record(
-            agent_id="founder", provider_config_ref="founder-inbox",
+            agent_id="owner", provider_config_ref="owner-inbox",
         ))
         wf = _build_workflow(
             workflow_id="wf-gated-routed",
@@ -513,7 +513,7 @@ class TestEndToEndApprovalFlow:
                 pause_reason="approve",
                 approval_event_type="user.approval",
                 approval_event_predicate={
-                    "op": "actor_eq", "value": "founder",
+                    "op": "actor_eq", "value": "owner",
                 },
                 timeout_seconds=5,
                 bound_behavior_on_timeout="abort_workflow",
@@ -523,7 +523,7 @@ class TestEndToEndApprovalFlow:
                     action_type="route_to_agent",
                     gate_ref="g1",
                     parameters={
-                        "agent_id": "founder",
+                        "agent_id": "owner",
                         "payload": {
                             APPROVAL_REQUEST_KEY: {
                                 "execution_id": "{workflow.execution_id}",
@@ -532,7 +532,7 @@ class TestEndToEndApprovalFlow:
                                 "pause_reason": "approve",
                                 "response_event_type": "user.approval",
                                 "response_predicate": {
-                                    "op": "actor_eq", "value": "founder",
+                                    "op": "actor_eq", "value": "owner",
                                 },
                             },
                         },
@@ -549,18 +549,18 @@ class TestEndToEndApprovalFlow:
         await event_stream.flush_now()
         # Inbox receives the approval_request.
         await _wait_for(
-            lambda: bool(stack["inboxes"].get("founder-inbox")
-                         and stack["inboxes"]["founder-inbox"]._items.get(
-                             ("inst_a", "founder"), [])),
+            lambda: bool(stack["inboxes"].get("owner-inbox")
+                         and stack["inboxes"]["owner-inbox"]._items.get(
+                             ("inst_a", "owner"), [])),
         )
-        items = stack["inboxes"]["founder-inbox"]._items[("inst_a", "founder")]
+        items = stack["inboxes"]["owner-inbox"]._items[("inst_a", "owner")]
         block = items[0].payload[APPROVAL_REQUEST_KEY]
         # Echo the approval back.
         await event_stream.emit(
             "inst_a", "user.approval",
             {"execution_id": block["execution_id"],
              "gate_nonce": block["gate_nonce"]},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         ok = await _wait_for(
@@ -591,7 +591,7 @@ def _build_workflow(*, workflow_id="wf", instance_local=False,
         instance_id="inst_a",
         name=workflow_id,
         description="",
-        owner="founder",
+        owner="owner",
         version="1.0",
         bounds=Bounds(iteration_count=1, wall_time_seconds=30),
         verifier=Verifier(flavor="deterministic", check="ok"),

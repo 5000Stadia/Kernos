@@ -143,7 +143,7 @@ class TestStatusAgnosticLookup:
     """``get_by_id`` returns the record regardless of status. The
     caller (``RouteToAgentAction`` in C4) checks ``record.status``
     and raises typed errors for ``paused`` / ``retired``. This is
-    Kit's v1 → v2 lifecycle clarification."""
+    the design review's v1 → v2 lifecycle clarification."""
 
     async def test_get_by_id_returns_paused_record(self, registry):
         await registry._insert_record(_basic_record(status="paused"))

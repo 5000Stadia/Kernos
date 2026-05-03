@@ -1,8 +1,8 @@
 ## NOW
 
 **Status:** WORKFLOW-TRIGGERS-CONSOLIDATION-V1 mid-batch — substrate landed (C1–C6) plus STS atomic registration (C5b), heartbeat consolidation (C5c-1), Codex-fold cleanup, and manage_schedule translation prep (C5c-2-prep). Pre-WTC v1: EXTERNAL-AGENT-CONSULTATION v1, CLEANUP-BATCH-V1, AUTO-UPDATE-INFORMING-V1, CROSS_SPACE_REQUESTS_V1 all shipped. Multi-member V1 done; Drafter v2 + STS + CRB live.
-**Owner:** Founder
-**Action:** Architect call pending on C5c-2 + C7 staging — atomic strike vs. further sub-commits (NotifyUserAction wiring + CalendarSource lifecycle + Pattern 05 strike + AC13 grep-pin + AC14 full-repo green). Mid-batch Codex audit running on stale-elements / dead-scaffolding survey. Parked: REASONING-DISPATCH-EXTRACT (from CLEANUP-BATCH-V1 Pass 5), plan-step `target_space` follow-on (from CROSS_SPACE_REQUESTS_V1).
+**Owner:** Owner
+**Action:** Design Review call pending on C5c-2 + C7 staging — atomic strike vs. further sub-commits (NotifyUserAction wiring + CalendarSource lifecycle + Pattern 05 strike + AC13 grep-pin + AC14 full-repo green). Mid-batch Codex audit running on stale-elements / dead-scaffolding survey. Parked: REASONING-DISPATCH-EXTRACT (from CLEANUP-BATCH-V1 Pass 5), plan-step `target_space` follow-on (from CROSS_SPACE_REQUESTS_V1).
 **Tests:** 5181 passing. See Phase Summary table for per-batch counts.
 
 > **Rule:** This block is always the first thing in the file. Whoever completes a step updates it before handing off. Format is always: Status (what), Owner (who), Action (next thing to do).
@@ -13,7 +13,7 @@
 
 ## Active Spec
 
-None currently active. Next spec will be assigned by founder.
+None currently active. Next spec will be assigned by owner.
 
 ---
 
@@ -75,7 +75,7 @@ None currently active. Next spec will be assigned by founder.
 | AUB | AUTO-UPDATE-BEHAVIOR-V1 + AUTO-UPDATE-INFORMING-V1 — daily background pull at KERNOS_AUTO_UPDATE_TIME, structured substrate-event whisper carrying update data, default "tell me about updates" covenant, KERNOS_AUTO_UPDATE_VERBOSE master opt-out | 4975 | 2026-05-01 |
 | CSR | CROSS_SPACE_REQUESTS_V1 — bounded cross-space mutation primitive: request_space_action tool, 4 action-kind whitelist (write_knowledge, propose_covenant, create_plan_draft, create_workflow_draft), per-space lock with bounded timeout, target covenant evaluation, target re-entry awareness preamble, idempotency via request_id | 5011 | 2026-05-01 |
 | WTC-C1 | WTC v1 C1 — WLP fire_id idempotency substrate (partial unique index) + triggers/ module skeleton: predicate model, FireOutbox CAS state machine, errors, runtime shell | n/a | 2026-05-01 |
-| WTC-C2 | WTC v1 C2 — predicate evaluator + four temporal relations (every/on/before/after) + runtime cron walk + recovery sweep with WLP fire_id reconciliation closing the Kit must-fix seam | n/a | 2026-05-01 |
+| WTC-C2 | WTC v1 C2 — predicate evaluator + four temporal relations (every/on/before/after) + runtime cron walk + recovery sweep with WLP fire_id reconciliation closing the the design review must-fix seam | n/a | 2026-05-01 |
 | WTC-C3 | WTC v1 C3 — first-class event sources: EventSource protocol, InternalEventAdapter (post-flush hook → runtime.on_event_observed), CalendarSource + SchedulerHeartbeatSource emit-only stubs | n/a | 2026-05-01 |
 | WTC-C4 | WTC v1 C4 — external source contracts: email.message_observed + notion.page_observed payload shape stubs (no polling); predicate language verified against the shapes | n/a | 2026-05-01 |
 | WTC-C5a | WTC v1 C5a — CRB Compiler descriptor.triggers → TriggerPredicate translation adapter (deterministic trigger_id derivation, backward-compatible with minimal {"event_type": X}) | n/a | 2026-05-01 |
@@ -90,7 +90,7 @@ None currently active. Next spec will be assigned by founder.
 ## Where Things Live
 
 - **Full roadmap + priority stack:** Notion (Kernos Roadmap — Canonical)
-- **Kit reviews + design documents:** Notion (Kit Reviews)
+- **the design review reviews + design documents:** Notion (the design review Reviews)
 - **As-built architecture:** `docs/TECHNICAL-ARCHITECTURE.md`
 - **Kernel design:** `docs/reference/kernel-architecture-outline.md`
 - **Completed specs:** `specs/completed/`

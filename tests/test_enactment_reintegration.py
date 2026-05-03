@@ -1,6 +1,6 @@
 """Tests for ReintegrationContext + PlanRef + ExecutionTrace (PDI C6).
 
-Per architect's C6 guidance: caps enforced at construction, not
+Per design review's C6 guidance: caps enforced at construction, not
 aspirational. truncated flag set when ANY field exceeds its cap.
 """
 
@@ -25,7 +25,7 @@ from kernos.kernel.enactment.reintegration import (
 
 
 def test_caps_match_spec_locked_values():
-    """Architect-locked caps. Changes here are coordinated migrations,
+    """Design Review-locked caps. Changes here are coordinated migrations,
     not silent tweaks."""
     assert TOOL_OUTCOMES_SUMMARY_CAP == 1000
     assert DISCOVERED_INFORMATION_CAP == 500

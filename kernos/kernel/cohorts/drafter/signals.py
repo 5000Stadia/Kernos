@@ -180,7 +180,7 @@ def build_multi_intent_payload(
     v1.2 payload missing ``candidate_id``, breaking CRB's
     disambiguation user-choice mapping.
 
-    Pin (Kit pin v1->v2 cleanup): :class:`CandidateIntent` is the
+    Pin (the design review pin v1->v2 cleanup): :class:`CandidateIntent` is the
     single source of truth for the candidate shape. The payload
     references the type directly to avoid divergence.
     """

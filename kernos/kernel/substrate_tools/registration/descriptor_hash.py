@@ -16,7 +16,7 @@ Included fields (NOT excluded):
   sees and approves
 * ``trigger``, ``predicate``, ``verifier``, ``bounds``, all
   ``action_sequence`` entries — executable shape
-* ``prev_version_id`` — Kit edit (v1→v2). For modifications, this
+* ``prev_version_id`` — the design review edit (v1→v2). For modifications, this
   field is set by the Compiler at proposal time and represents user
   intent ("modify THIS specific routine"). Including it in the hash
   means swapping it after approval invalidates the approval.
@@ -58,7 +58,7 @@ DESCRIPTOR_VOLATILE_FIELDS: frozenset[str] = frozenset({
 })
 """Fields excluded from the canonical descriptor hash.
 
-NOTE (Kit edit, v1 → v2): ``prev_version_id`` is intentionally NOT in
+NOTE (the design review edit, v1 → v2): ``prev_version_id`` is intentionally NOT in
 this list. For modifications, ``prev_version_id`` represents user
 intent ("modify THIS specific routine") and must change the hash so a
 swap attack invalidates the approval."""

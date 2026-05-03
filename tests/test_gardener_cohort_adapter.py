@@ -336,7 +336,7 @@ async def test_scenario_10_no_model_call_during_run():
 
 
 # ---------------------------------------------------------------------------
-# 11. Cohort output is CohortOutput, not dict (Kit edit #2)
+# 11. Cohort output is CohortOutput, not dict (the design review edit #2)
 # ---------------------------------------------------------------------------
 
 

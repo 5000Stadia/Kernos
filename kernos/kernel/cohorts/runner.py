@@ -3,7 +3,7 @@
 Per the COHORT-FAN-OUT-RUNNER spec:
 
 - Section 4 (fan-out execution model) — `asyncio.wait` with explicit
-  task bookkeeping per Kit edit #3 (NOT `asyncio.gather`); per-cohort
+  task bookkeeping per the design review edit #3 (NOT `asyncio.gather`); per-cohort
   timeout via `asyncio.wait_for`; global wall-clock budget caps the
   whole run; pending cohorts past the cap are cancelled.
 
@@ -72,7 +72,7 @@ class CohortFanOutConfig:
     """Tunables for the fan-out runner.
 
     `global_timeout_seconds` caps the entire wall-clock duration of
-    the fan-out (Kit edit #6). When the cap is hit, any cohorts
+    the fan-out (the design review edit #6). When the cap is hit, any cohorts
     still pending get cancelled and produce synthetic
     `Outcome.TIMEOUT_GLOBAL` outputs.
 
@@ -170,7 +170,7 @@ class CohortFanOutRunner:
             tasks[task] = desc
 
         # Global wall-clock cap. asyncio.wait with explicit
-        # bookkeeping (Kit edit #3) — not asyncio.gather. wait gives
+        # bookkeeping (the design review edit #3) — not asyncio.gather. wait gives
         # us partial completion + ordered reconstruction.
         global_timeout = self._config.global_timeout_seconds
         done, pending = await asyncio.wait(

@@ -20,7 +20,7 @@ Architectural pins (carried from PDI):
     the Plan.
   - Locked 7-signal vocabulary: planner's prompt names exactly the
     seven SignalKinds from PDI C5; anything outside falls to prose.
-  - Same-model default in v1 (Kit edit, locked): the planner's
+  - Same-model default in v1 (the design review edit, locked): the planner's
     chain_caller is the same callable integration uses by default.
     Per-hook differentiation deferred until soak telemetry justifies.
 
@@ -442,7 +442,7 @@ def _filter_catalog_to_envelope(
     """Filter the tool catalog to entries whose operation_name is in
     envelope.allowed_operations.
 
-    Per Kit edit + spec acceptance criterion #3: the access path is
+    Per the design review edit + spec acceptance criterion #3: the access path is
     inputs.briefing.action_envelope.allowed_operations.
 
     When allowed_operations is empty, the envelope is treated as

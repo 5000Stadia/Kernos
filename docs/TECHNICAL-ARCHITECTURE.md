@@ -464,7 +464,7 @@ workflow_id: morning-briefing
 instance_id: inst_a
 name: Morning briefing
 version: "1.0"
-owner: founder
+owner: owner
 bounds:
   iteration_count: 1
   wall_time_seconds: 30

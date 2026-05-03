@@ -11,7 +11,7 @@ checks:
      value side per AC #9).
 
 Pattern lists below are the **canonical chosen list** for v1
-(Kit edit v1 → v2 — illustrative-not-exhaustive). The spec
+(the design review edit v1 → v2 — illustrative-not-exhaustive). The spec
 declared the lists as elegance-latitude starting points; we
 document the canonical set here. New patterns can be added
 through normal code review without amending the spec.

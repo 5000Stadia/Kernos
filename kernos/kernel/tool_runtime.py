@@ -1,6 +1,6 @@
 """Tool runtime context — invocation-scoped, never registration-scoped.
 
-Per Section 7 of the Kit-revised spec: when a tool is invoked, it
+Per Section 7 of the the design review-revised spec: when a tool is invoked, it
 receives a runtime context derived from the invoking member's
 identity. Tools cannot pin to registration-time identity. The context
 exposes:

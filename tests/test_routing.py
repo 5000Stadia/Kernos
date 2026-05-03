@@ -601,7 +601,7 @@ class TestSystemPromptPosture:
     """Posture injected for non-daily space."""
 
     def _make_soul(self) -> Soul:
-        return Soul(instance_id="t_prompt", user_name="Kit")
+        return Soul(instance_id="t_prompt", user_name="the design review")
 
     def _make_message(self):
         return NormalizedMessage(
@@ -665,7 +665,7 @@ class TestSystemPromptNoPostureDaily:
         from kernos.messages.handler import _build_system_prompt
         from kernos.kernel.template import PRIMARY_TEMPLATE
 
-        soul = Soul(instance_id="t2", user_name="Kit")
+        soul = Soul(instance_id="t2", user_name="the design review")
         msg = NormalizedMessage(
             content="hello", sender="u", sender_auth_level=AuthLevel.owner_verified,
             platform="discord", platform_capabilities=["text"],
@@ -687,7 +687,7 @@ class TestSystemPromptCrossDomainPrefix:
         from kernos.messages.handler import _build_system_prompt
         from kernos.kernel.template import PRIMARY_TEMPLATE
 
-        soul = Soul(instance_id="t3", user_name="Kit")
+        soul = Soul(instance_id="t3", user_name="the design review")
         msg = NormalizedMessage(
             content="hello", sender="u", sender_auth_level=AuthLevel.owner_verified,
             platform="discord", platform_capabilities=["text"],
@@ -709,7 +709,7 @@ class TestSystemPromptCrossDomainPrefix:
         from kernos.messages.handler import _build_system_prompt
         from kernos.kernel.template import PRIMARY_TEMPLATE
 
-        soul = Soul(instance_id="t4", user_name="Kit")
+        soul = Soul(instance_id="t4", user_name="the design review")
         msg = NormalizedMessage(
             content="hello", sender="u", sender_auth_level=AuthLevel.owner_verified,
             platform="discord", platform_capabilities=["text"],

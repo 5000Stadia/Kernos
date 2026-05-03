@@ -1,6 +1,6 @@
 """Deterministic sanitizer for synthetic CohortOutput error_summary.
 
-Per the COHORT-FAN-OUT-RUNNER spec, Section 5b (Kit edit #7):
+Per the COHORT-FAN-OUT-RUNNER spec, Section 5b (the design review edit #7):
 
   - Truncate to a configurable cap (default 500 chars)
   - Strip token-like patterns (long alphanumeric, sk-*, xoxb-*, JWT,

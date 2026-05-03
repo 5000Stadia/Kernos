@@ -61,7 +61,7 @@ def test_channel_alternatives_for_returns_sorted_list():
 def test_cookie_upload_not_in_auth_type_enum():
     """cookie_upload is reserved for BROWSER-COOKIE-IMPORT; declaring it
     here without an implementation is the registration footgun the
-    Kit-revised spec deliberately removed."""
+    the design review-revised spec deliberately removed."""
     assert "cookie_upload" not in [a.value for a in AuthType]
 
 

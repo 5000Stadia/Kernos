@@ -6,7 +6,7 @@ WDP C1: schema + ``WorkflowDraft`` dataclass + ``create_draft`` +
 envelope validation + concurrency. C3 adds ``list_drafts`` +
 ``cleanup_abandoned_older_than`` + the live sweep.
 
-**Future-composition requirement** (architect-stated invariant
+**Future-composition requirement** (design review-stated invariant
 for downstream specs): WorkflowDraft persistence must remain
 substrate-neutral while carrying enough lightweight context for
 future surfaces to attach intelligently. Drafts MUST NOT depend
@@ -139,7 +139,7 @@ class WorkflowDraft:
     """In-memory representation of a row in ``workflow_drafts``.
 
     ``aliases`` and ``partial_spec_json`` are NEVER None — schema
-    NOT NULL with safe defaults (Kit edit, v1 → v2). The Python
+    NOT NULL with safe defaults (the design review edit, v1 → v2). The Python
     class enforces the same: empty list / empty dict, never None.
     """
 

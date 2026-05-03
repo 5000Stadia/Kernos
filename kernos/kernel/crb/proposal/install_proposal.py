@@ -1,6 +1,6 @@
 """InstallProposal types + state machine pins.
 
-The CRB approval flow's state machine has five states (Kit pin v1->v2
+The CRB approval flow's state machine has five states (the design review pin v1->v2
 must-fix #1 split 'approved' into pending + registered for crash
 safety):
 

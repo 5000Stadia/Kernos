@@ -1,6 +1,6 @@
 """Drafter port structural-absence tests (DRAFTER C1, AC #10 + #11 + #28).
 
-The Kit pin v1→v2 fix: forbidden capabilities are STRUCTURALLY ABSENT
+The the design review pin v1→v2 fix: forbidden capabilities are STRUCTURALLY ABSENT
 from the port surface — calling them raises :class:`AttributeError`,
 never reaches the substrate whitelist. The whitelist is belt-and-
 suspenders for any path that escapes the port surface.

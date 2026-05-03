@@ -6,7 +6,7 @@
 
 Canvas v1 gave members a shared-state primitive: scoped directories of markdown pages with YAML frontmatter, routes, state transitions, section markers. All the machinery works. But it doesn't keep itself well-shaped.
 
-Members don't want to architect upfront. Asked *"which of these eighteen patterns is your work?"* — most people want to do the work, not the meta-work. Asked *"how should we reorganize this page that's become 10,000 lines?"* — they usually haven't thought about it and don't want to.
+Members don't want to design review upfront. Asked *"which of these eighteen patterns is your work?"* — most people want to do the work, not the meta-work. Asked *"how should we reorganize this page that's become 10,000 lines?"* — they usually haven't thought about it and don't want to.
 
 The gap is judgment: *what shape should this canvas have, given what the member is doing with it?* Canvas v1 leaves that to the member. The Gardener closes the gap.
 
@@ -28,7 +28,7 @@ Three disciplines *compose* with the invariant; they don't replace it. Removing 
 - **24-hour coalescing** — high-confidence proposals for a canvas coalesce into at most one surface per window, so proposal density stays sparse regardless of dispatch frequency
 - **High-confidence-only surfacing** — low and medium confidence matches log for pattern-tuning audit but don't wake members
 
-**Why this matters.** Gardener work scales with canvas count × event frequency × declared-heuristic count. Pattern migrations will increase declared heuristics; preference capture (deferred Pillar 5) will add new judgment surfaces; future pattern-library expansion will bring more canvases into the dispatch set. The async invariant is what lets that scaling stay invisible to per-turn latency. Any proposal to introduce a blocking Gardener call in the primary-agent path is a Charter-adjacent change and requires architect-level review — it's not just adding a feature, it's altering a load-bearing property of the agent experience.
+**Why this matters.** Gardener work scales with canvas count × event frequency × declared-heuristic count. Pattern migrations will increase declared heuristics; preference capture (deferred Pillar 5) will add new judgment surfaces; future pattern-library expansion will bring more canvases into the dispatch set. The async invariant is what lets that scaling stay invisible to per-turn latency. Any proposal to introduce a blocking Gardener call in the primary-agent path is a Charter-adjacent change and requires design review-level review — it's not just adding a feature, it's altering a load-bearing property of the agent experience.
 
 ## Bounded judgment
 
@@ -71,7 +71,7 @@ Fires on canvas page events (`canvas.page.created`, `canvas.page.changed`, `canv
 
 The merge and index-promotion heuristics require a cross-page index that doesn't yet exist; they ship in a follow-on batch.
 
-**Pattern-specific heuristics** compose with the cross-pattern set. Per the Kit design-review round, v1 ships cross-pattern heuristics only; pattern-specific heuristics come next batch. A pattern declares heuristics like *software development*'s "spec count exceeds 12 without subdivision" or *long-form campaign*'s "NPC mentioned in 3+ sessions promote to page" — and the Gardener runs the applicable ones on matching events when they land.
+**Pattern-specific heuristics** compose with the cross-pattern set. Per the the design review design-review round, v1 ships cross-pattern heuristics only; pattern-specific heuristics come next batch. A pattern declares heuristics like *software development*'s "spec count exceeds 12 without subdivision" or *long-form campaign*'s "NPC mentioned in 3+ sessions promote to page" — and the Gardener runs the applicable ones on matching events when they land.
 
 ### 3. Section management
 

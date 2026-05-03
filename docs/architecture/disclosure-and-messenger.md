@@ -6,7 +6,7 @@
 
 A personal agent that serves more than one person has a problem most agent frameworks don't acknowledge. The obvious failure mode is easy: don't let member A read member B's private data. Every serious system has some form of access control for this.
 
-The interesting failure mode is the one access control cannot fix: **member A is allowed to see something about member B, but telling member A right now would damage member B.** Your spouse *can* see your calendar — you share one — but you haven't told them yet about the therapy appointment you booked for Thursday. Or: your co-founder *can* query the shared project tracker — you built it together — but they haven't seen yet that you've flagged your strongest engineer as a flight risk. The permission matrix says "allow." The relationship, or the moment, says "not yet."
+The interesting failure mode is the one access control cannot fix: **member A is allowed to see something about member B, but telling member A right now would damage member B.** Your spouse *can* see your calendar — you share one — but you haven't told them yet about the therapy appointment you booked for Thursday. Or: your co-owner *can* query the shared project tracker — you built it together — but they haven't seen yet that you've flagged your strongest engineer as a flight risk. The permission matrix says "allow." The relationship, or the moment, says "not yet."
 
 A single-user chatbot never hits this. A multi-user system with strict isolation never hits this. A multi-member system with realistic relationship graphs — whether the members are family or colleagues — hits this every day.
 

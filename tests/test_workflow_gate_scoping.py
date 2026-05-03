@@ -84,7 +84,7 @@ def _gate(name, *, behavior="abort_workflow", default_value=None,
         pause_reason="confirm",
         approval_event_type="user.approval",
         approval_event_predicate=predicate or {
-            "op": "actor_eq", "value": "founder",
+            "op": "actor_eq", "value": "owner",
         },
         timeout_seconds=2,
         bound_behavior_on_timeout=behavior,
@@ -99,7 +99,7 @@ def _make_workflow(*, workflow_id="wf-gs", instance_id="inst_a",
         instance_id=instance_id,
         name="gs-test",
         description="",
-        owner="founder",
+        owner="owner",
         version="1.0",
         bounds=Bounds(iteration_count=1, wall_time_seconds=30),
         verifier=Verifier(flavor="deterministic", check="ok"),
@@ -123,14 +123,14 @@ async def stack(tmp_path):
     # DAR C4: legacy RouteToAgentAction(inbox=...) test uses the
     # legacy dispatch path, but registration-time agent_id validation
     # still requires the registry to be wired with the referenced
-    # agent_ids. Pre-register "founder" (the only agent the gate
+    # agent_ids. Pre-register "owner" (the only agent the gate
     # tests route to) so registrations succeed without churning the
     # shipped test logic.
     from kernos.kernel.agents.registry import AgentRecord, AgentRegistry
     agents = AgentRegistry()
     await agents.start(str(tmp_path))
     await agents._insert_record(AgentRecord(
-        agent_id="founder", instance_id="inst_a",
+        agent_id="owner", instance_id="inst_a",
         provider_key="legacy-noop",
     ))
     wfr = WorkflowRegistry()
@@ -255,7 +255,7 @@ class TestNonceAvailabilityDuringAction:
                 _make_action(
                     "route_to_agent",
                     gate_ref="g1",
-                    agent_id="founder",
+                    agent_id="owner",
                     payload={
                         "approval_request": {
                             "execution_id": "{workflow.execution_id}",
@@ -264,7 +264,7 @@ class TestNonceAvailabilityDuringAction:
                             "pause_reason": "confirm",
                             "response_event_type": "user.approval",
                             "response_predicate": {
-                                "op": "actor_eq", "value": "founder",
+                                "op": "actor_eq", "value": "owner",
                             },
                         },
                     },
@@ -278,10 +278,10 @@ class TestNonceAvailabilityDuringAction:
         # Wait until inbox has the approval_request payload posted.
         await _wait_for(
             lambda: stack["inbox"]._items.get(
-                ("inst_a", "founder"), [],
+                ("inst_a", "owner"), [],
             ),
         )
-        items = stack["inbox"]._items[("inst_a", "founder")]
+        items = stack["inbox"]._items[("inst_a", "owner")]
         block = items[0].payload["approval_request"]
         # The nonce in the action's payload matches what the engine
         # persists on the paused execution row.
@@ -465,10 +465,10 @@ class TestMatchLogic:
         """Approval event matching descriptor predicate but missing
         gate_nonce → execution stays paused (AC #9)."""
         gated = await self._pause_workflow(stack)
-        # Emit approval matching descriptor predicate (actor_eq founder)
+        # Emit approval matching descriptor predicate (actor_eq owner)
         # but NO nonce / execution_id in the payload.
         await event_stream.emit(
-            "inst_a", "user.approval", {}, member_id="founder",
+            "inst_a", "user.approval", {}, member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.2)
@@ -485,7 +485,7 @@ class TestMatchLogic:
         (AC #10)."""
         gated = await self._pause_workflow(stack)
         # Carry the right nonce + execution_id but emit from wrong
-        # actor (predicate is actor_eq founder).
+        # actor (predicate is actor_eq owner).
         await event_stream.emit(
             "inst_a", "user.approval",
             {"execution_id": gated.execution_id,
@@ -504,7 +504,7 @@ class TestMatchLogic:
             "inst_a", "user.approval",
             {"execution_id": gated.execution_id,
              "gate_nonce": gated.gate_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         ok = await _wait_for(
@@ -520,7 +520,7 @@ class TestMatchLogic:
             "inst_a", "user.approval",
             {"execution_id": "different-execution",
              "gate_nonce": gated.gate_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.2)
@@ -559,7 +559,7 @@ class TestStaleNonceRejection:
             "gate_nonce": gated.gate_nonce,
         }
         await event_stream.emit(
-            "inst_a", "user.approval", approval, member_id="founder",
+            "inst_a", "user.approval", approval, member_id="owner",
         )
         await event_stream.flush_now()
         await _wait_for(
@@ -569,7 +569,7 @@ class TestStaleNonceRejection:
         # Should be a no-op — nonce is cleared from execution row,
         # match logic finds no waiter expecting that nonce.
         await event_stream.emit(
-            "inst_a", "user.approval", approval, member_id="founder",
+            "inst_a", "user.approval", approval, member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.2)
@@ -606,7 +606,7 @@ class TestCrossExecutionIsolation:
             "inst_a", "user.approval",
             {"execution_id": gated_a.execution_id,
              "gate_nonce": forged_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         await asyncio.sleep(0.2)
@@ -617,7 +617,7 @@ class TestCrossExecutionIsolation:
             "inst_a", "user.approval",
             {"execution_id": gated_a.execution_id,
              "gate_nonce": gated_a.gate_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         ok = await _wait_for(

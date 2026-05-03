@@ -1,7 +1,7 @@
 # INTEGRATION-CAPABILITY-FIRST v1
 
-**Status:** APPROVED FOR CC HANDOFF — Kit verdict 2026-05-03 (REVISE
-NARROWLY → six edits folded → APPROVED). Architect primer carries
+**Status:** APPROVED FOR CC HANDOFF — the design review verdict 2026-05-03 (REVISE
+NARROWLY → six edits folded → APPROVED). Design Review primer carries
 "legacy is the oracle until equivalence is proven; then strike" as
 hard architectural principle.
 
@@ -32,7 +32,7 @@ tool calls" or "Do NOT execute the tool." Tools are in the body
 fidelity is correct. But the system prompt then immediately tells the
 model not to use them.
 
-This is structurally anti-capability. Per the architect's guidance
+This is structurally anti-capability. Per the design review's guidance
 (saved 2026-05-02 as `feedback_capability_first_posture`):
 
 > Kernos should be impressively capable, not a stack of "don't"s.
@@ -43,7 +43,7 @@ This is structurally anti-capability. Per the architect's guidance
 
 The current C7 thin path violates this guidance at every layer.
 
-## Thin-path contract definition (Kit edit, codified as architectural fact)
+## Thin-path contract definition (the design review edit, codified as architectural fact)
 
 The decoupled-cognition architecture defines two paths through the
 model-call seam:
@@ -54,12 +54,12 @@ model-call seam:
   dispatched through `EXECUTE_TOOL` action kind via planning, gating,
   and confirmation flow.
 
-This contract is codified in the architect primer. Future migrations
+This contract is codified in the design review primer. Future migrations
 inherit it.
 
 ## Implementation strategy — three batches + decommission
 
-Kit's revision: ship as three batches with explicit gating criteria,
+the design review's revision: ship as three batches with explicit gating criteria,
 plus a separate decommission commit. CC's original "B first, fast
 win" ordering is REVERSED because B-before-C is a structural risk:
 kind prompts encouraging tool use before the loop exists means the
@@ -107,7 +107,7 @@ Per-prompt **load-bearing check** applies: name what each currently
 constrains, why, whether load-bearing, where the constraint moves
 under the new prompt.
 
-#### Batch 1 — required acceptance criteria (Kit edits 5 + 6)
+#### Batch 1 — required acceptance criteria (the design review edits 5 + 6)
 
 * **Receipt-grade tool-loop pin tests** at
   `tests/test_thin_path_tool_use_loop.py`:
@@ -136,9 +136,9 @@ under the new prompt.
   - `TurnRunnerInputs.surfaced_tools` reaches
     `IntegrationInputs.surfaced_tools`
 
-### Batch 2 — D, with four live bindings (Kit edit 3)
+### Batch 2 — D, with four live bindings (the design review edit 3)
 
-D = workshop binding, expanded scope per Kit. If any of the four
+D = workshop binding, expanded scope per the design review. If any of the four
 stay fake, integration/planning stays partially blind even after
 executor wiring. Half-fix is worse than no-fix because tests look
 complete.
@@ -212,7 +212,7 @@ behind the flag for the stabilization window.
 ### Stabilization window
 
 After default flip, legacy retained as oracle for 2-4 weeks of real
-production use (founder-decided duration). Catches regressions that
+production use (owner-decided duration). Catches regressions that
 didn't surface in soak under realistic conversational load. During
 this window:
 
@@ -235,7 +235,7 @@ following hold:
       to legacy via the flag
 - [ ] All contract tests, capability-readiness tests, tool-loop pins,
       and same-input parity assertions continue to pass
-- [ ] Founder explicit signoff that the criteria are met
+- [ ] Owner explicit signoff that the criteria are met
 - [ ] Per-section load-bearing check (CCV1 discipline) applied to
       every legacy code section being removed: name what it currently
       provides, where that function moved on thin path, contract test
@@ -273,7 +273,7 @@ before.**
 - [ ] Stabilization window passes (2-4 weeks).
 - [ ] Batch 4 ships: legacy strike with all five decommission
       criteria green.
-- [ ] Thin-path contract codified in architect primer (complete
+- [ ] Thin-path contract codified in design review primer (complete
       2026-05-03).
 - [ ] Capability-first posture codified as architectural principle
       (complete 2026-05-03).

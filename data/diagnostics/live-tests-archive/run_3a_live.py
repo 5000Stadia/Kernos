@@ -196,14 +196,14 @@ async def main():
     t0 = time.monotonic()
     response4 = await handler.process(make_msg(
         "Update the campaign notes — add that in the last session Pip discovered "
-        "The Architect's true identity and escaped through the sewer tunnels."
+        "The Design Review's true identity and escaped through the sewer tunnels."
     ))
     elapsed = time.monotonic() - t0
     print(f"  Response ({elapsed:.1f}s): {response4[:400]}")
 
     # Check for "Updated" confirmation in response
     file_updated = any(
-        kw in response4.lower() for kw in ["updated", "update", "saved", "added", "architect", "sewer"]
+        kw in response4.lower() for kw in ["updated", "update", "saved", "added", "design review", "sewer"]
     )
     log_result(
         "4", "write_file overwrite — update campaign notes",

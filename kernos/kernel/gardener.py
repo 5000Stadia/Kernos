@@ -167,7 +167,7 @@ class ProposalCoalescer:
     ) -> tuple["PendingProposal", ...]:
         """Non-mutating read of currently-buffered proposals.
 
-        Per COHORT-ADAPT-GARDENER spec Section 7 + Kit edit #4:
+        Per COHORT-ADAPT-GARDENER spec Section 7 + the design review edit #4:
         the cohort needs a stable read surface that does NOT drain
         or otherwise touch coalescer state. The returned tuple is
         a copy of the buffered list at call time; callers can
@@ -190,7 +190,7 @@ class EvolutionRecord:
     snapshot surface reads the most-recent N records to populate
     its ``recent_evolution`` field.
 
-    Per Kit's edit #4: this is a small ledger living inside
+    Per the design review's edit #4: this is a small ledger living inside
     GardenerService — not a replacement for the existing event
     stream. Consultations still emit canvas/gardener events
     through the existing ``_event_emit`` callback; this ledger is
@@ -697,7 +697,7 @@ class GardenerService:
     ) -> GardenerSnapshot:
         """Non-mutating read of gardener's current state for a canvas.
 
-        Per COHORT-ADAPT-GARDENER spec Section 7 + Kit edit #4.
+        Per COHORT-ADAPT-GARDENER spec Section 7 + the design review edit #4.
         Returns a frozen ``GardenerSnapshot``. Guarantees:
 
           - No LLM invocation. The method is a pure state read.

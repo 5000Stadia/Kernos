@@ -6,7 +6,7 @@ preserved; the new fields are additive so existing tools continue
 parsing without churn. Existing tools migrate to explicit
 gate_classification: read in C6.
 
-New fields per the Kit-revised spec:
+New fields per the the design review-revised spec:
 
 - service_id: optional. Links the tool to a registered service so the
   runtime-context credential accessor knows which service's token to
@@ -21,7 +21,7 @@ New fields per the Kit-revised spec:
   routing token. Values: read, soft_write, hard_write, delete.
   Used when the tool dispatches a single kind of work.
 
-- operations: per-operation classification (Kit edit 1). When a tool
+- operations: per-operation classification (the design review edit 1). When a tool
   exposes multiple operations with different gate semantics (e.g.,
   read_pages is read; write_pages is hard_write), each operation is
   classified independently. Per-operation overrides the tool-level
@@ -36,7 +36,7 @@ New fields per the Kit-revised spec:
   credential presence for those.
 
 - aggregation: per_member (default) or cross_member. The cross_member
-  value is reserved-but-rejected at registration in v1 per Kit's
+  value is reserved-but-rejected at registration in v1 per the design review's
   call. Declaring it produces a clear error pointing at the v2
   follow-on. The reserved enum value lives here so the validation
   surface is in place when the follow-on lands.
@@ -44,7 +44,7 @@ New fields per the Kit-revised spec:
 Default for missing classification:
 - A tool with no gate_classification and no per-operation overrides
   defaults to soft_write at the tool level. This is the fail-closed
-  default per architect's revision 1; previously this was read.
+  default per design review's revision 1; previously this was read.
 - A tool that *only* has per-operation overrides without a tool-level
   classification picks each operation's classification independently;
   unclassified operations under such a tool default to soft_write.
@@ -69,9 +69,9 @@ logger = logging.getLogger(__name__)
 class GateClassification(str, Enum):
     """Routing tokens recognised by the dispatch gate.
 
-    Per Kit's response on question 1: read / soft_write / hard_write /
+    Per the design review's response on question 1: read / soft_write / hard_write /
     delete are the v1 categories. A separate destructive_irreversible
-    category was considered and not added in v1 — Kit's view was that
+    category was considered and not added in v1 — the design review's view was that
     delete plus runtime confirmation suffices for the v1 surface.
 
     EXTERNAL-AGENT-CONSULTATION v1 (additive, AC5 + Codex spec-review
@@ -96,7 +96,7 @@ class Aggregation(str, Enum):
     """Whether a tool reads data across members.
 
     per_member (default) is the AppData-style isolation. cross_member
-    is reserved for v2 per Kit's call — registration with this value
+    is reserved for v2 per the design review's call — registration with this value
     produces a clear error pointing at the future spec rather than
     silently accepting it or feature-flagging it.
     """
@@ -161,7 +161,7 @@ SAFETY_FOR_GATE: dict[GateClassification, OperationSafety] = {
 
 
 # Default tool-level classification when nothing is declared.
-# Per architect's revision 1: missing classification fails closed,
+# Per design review's revision 1: missing classification fails closed,
 # not open. soft_write is the fail-closed shape.
 DEFAULT_GATE_CLASSIFICATION = GateClassification.SOFT_WRITE
 
@@ -176,7 +176,7 @@ _OPERATION_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 @dataclass(frozen=True)
 class OperationClassification:
-    """Per-operation gate classification (Kit edit 1, extended in PDI).
+    """Per-operation gate classification (the design review edit 1, extended in PDI).
 
     A tool that exposes multiple operations classifies each
     independently. read_pages is read; write_pages is hard_write;
@@ -269,7 +269,7 @@ class ToolDescriptor:
     def classification_for(self, operation: str | None) -> GateClassification:
         """Return the gate classification that applies to the named operation.
 
-        Resolution order, per Kit edit 1:
+        Resolution order, per the design review edit 1:
           1. Per-operation classification (if the tool declared one for
              this operation).
           2. Tool-level gate_classification (shorthand).
@@ -343,7 +343,7 @@ class ToolDescriptorError(ValueError):
 class CrossMemberAggregationReservedError(ToolDescriptorError):
     """Raised when a descriptor declares aggregation: cross_member.
 
-    Per Kit's call: cross_member aggregation is a v2 surface. The
+    Per the design review's call: cross_member aggregation is a v2 surface. The
     enum value is reserved here so the validation footprint exists
     when the follow-on spec lands; using it in v1 fails with a clear
     pointer to the future spec rather than silent acceptance or a

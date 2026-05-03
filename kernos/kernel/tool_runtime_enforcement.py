@@ -1,4 +1,4 @@
-"""Runtime enforcement for workshop tool invocations (Kit edit 2).
+"""Runtime enforcement for workshop tool invocations (the design review edit 2).
 
 Layered on top of the registration-time authoring-pattern validator
 (C3). The four checks defined here run at invocation time, before
@@ -29,7 +29,7 @@ the tool's implementation receives control:
    feasible" per the spec language. Force-registered tools are
    subject to the same enforcement as ordinary tools — force
    bypasses authoring-pattern validation only, never runtime
-   isolation (Kit edit 5).
+   isolation (the design review edit 5).
 
 All checks raise `RuntimeEnforcementError` (or a subclass) on
 failure. The dispatcher catches and renders a clean error to the
@@ -423,7 +423,7 @@ def enforce_invocation(inputs: EnforcementInputs) -> None:
 
     This is the entry point the dispatcher calls before handing
     control to the tool's implementation. Force-registered tools go
-    through this same path — Kit edit 5: force bypasses authoring-
+    through this same path — the design review edit 5: force bypasses authoring-
     pattern validation only, not runtime isolation.
     """
     check_hash_unchanged(

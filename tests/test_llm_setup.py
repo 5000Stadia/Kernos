@@ -4,7 +4,7 @@ Covers:
   * Storage-backend abstraction — single-key write/read/remove + has_secret.
   * Storage-backend switching — the four switch paths (keychain ↔ hardened,
     hardened ↔ plaintext, plaintext ↔ keychain) with cleanup-after-verify
-    ordering per Kit's implementation hazard.
+    ordering per the design review's implementation hazard.
   * Provider registry — seven entries, all fields populated.
   * Benchmark snapshot reader — setup-time-only surface, returns dict.
   * Chain config IO — add / remove / set-model in place.
@@ -214,7 +214,7 @@ class TestPlaintextBackend:
 
 
 # ---------------------------------------------------------------------------
-# Storage backend — switch cleanup (Kit's implementation hazard)
+# Storage backend — switch cleanup (the design review's implementation hazard)
 #
 # Four switch paths, each asserting: (a) secrets land on target, (b) the old
 # backend no longer holds them, (c) on abort, the old backend is untouched.
@@ -229,7 +229,7 @@ def _make_file_backend(kind: str, tmp_path: Path):
 
 
 class TestStorageBackendSwitch:
-    """Kit's hazard: backend switching must be a cleanup operation.
+    """the design review's hazard: backend switching must be a cleanup operation.
 
     Each switch path is tested in isolation. Keychain is mocked so the tests
     run on any host (CI, laptops without Secret Service, etc.).

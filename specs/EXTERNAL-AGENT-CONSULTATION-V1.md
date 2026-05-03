@@ -1,6 +1,6 @@
 # EXTERNAL-AGENT-CONSULTATION v1
 
-**Status:** Draft for founder approval before implementation. Codex
+**Status:** Draft for owner approval before implementation. Codex
 deliberated D1–D7 architectural decisions during drafting (3 AGREE,
 3 REVISE, 1 NEW reentrancy-policy seam). All folded.
 
@@ -24,7 +24,7 @@ Builders exist as an env-var-gated single-backend choice for
    behind one env var nobody flips.
 4. Gemini is missing entirely.
 
-Founder direction (2026-04-30): "build it into Kernos" — this is a
+Owner direction (2026-04-30): "build it into Kernos" — this is a
 first-class capability, not a lab tool. The spec generalizes the
 shipped builder pattern into a single external-agent primitive
 covering both task-execution (existing builders role) and
@@ -611,7 +611,7 @@ Codex review confer:
 
 ## Kick-back triggers
 
-Implementer escalates to architect when:
+Implementer escalates to design review when:
 
 1. **Claude Code's `--session-id` doesn't behave as expected.** v1
    assumes `claude --print --session-id <uuid>` resumes prior
@@ -631,7 +631,7 @@ Implementer escalates to architect when:
    of the prompt on each call. Surface before C2 if so.
 4. **Reentrancy guard breaks an existing flow.** If a shipped
    pipeline (e.g., compaction) actually NEEDS to consult — surface
-   for architect call on whether to allowlist that path.
+   for design review call on whether to allowlist that path.
 5. **Schema migration on `code_exec`'s service binding can't
    accept new authority cleanly.** Surface before C4.
 6. **Aider's existing implementation can't be moved without
@@ -697,7 +697,7 @@ When-to-use rubric (drafted; refined during C6):
 
 ## References
 
-* Framing context: founder direction 2026-04-30 ("build it into
+* Framing context: owner direction 2026-04-30 ("build it into
   Kernos"; harness pattern; CC + Codex + Gemini + Aider; matches
   the consultation-out direction discussed in this conversation).
 * Substrate composed against:
@@ -712,7 +712,7 @@ When-to-use rubric (drafted; refined during C6):
   * `kernos/kernel/template.py` (extended for agent
     operating-principles awareness in C6)
 * Shipped specs: `MODEL-AND-STATUS-V1.md`,
-  `WORKFLOW-TRIGGERS-CONSOLIDATION-V1.md` (in flight at Kit's
+  `WORKFLOW-TRIGGERS-CONSOLIDATION-V1.md` (in flight at the design review's
   inbox).
 
 ## Codex deliberation outcomes (D1–D7)

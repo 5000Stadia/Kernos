@@ -179,7 +179,7 @@ async def test_service_clarification_with_omitted_partial_state_is_first_pass():
 
 @pytest.mark.asyncio
 async def test_service_attaches_action_envelope_to_execute_tool_briefing():
-    """Per Kit edit: action-shape decided_actions carry an explicit
+    """Per the design review edit: action-shape decided_actions carry an explicit
     ActionEnvelope. The integration runner constructs the briefing
     from model output that includes the envelope; the service
     surfaces it untouched."""

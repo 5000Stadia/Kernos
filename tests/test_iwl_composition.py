@@ -1,6 +1,6 @@
 """Composition-level pins for IWL production wiring (IWL C6).
 
-Per Kit BLIP review: the per-component invariants are pinned but
+Per the design review BLIP review: the per-component invariants are pinned but
 the composition step that hooks them into server.py's production
 wiring per turn was previously stubbed. This test surface verifies
 the composition is correct so a future regression where someone
@@ -292,12 +292,12 @@ async def test_each_call_to_provider_constructs_fresh_telemetry_and_delivery():
 
 
 # ---------------------------------------------------------------------------
-# Architect-lean (a) — _UnwiredDescriptorLookup raises loudly
+# Design Review-lean (a) — _UnwiredDescriptorLookup raises loudly
 # ---------------------------------------------------------------------------
 
 
 def test_server_unwired_descriptor_lookup_raises_loudly_not_returns_none():
-    """Architect-lean (a): the v1 descriptor lookup placeholder raises
+    """Design Review-lean (a): the v1 descriptor lookup placeholder raises
     NotImplementedError when consulted so soak operators see the
     deferred binding clearly. Returning None would produce a graceful
     'tool-not-registered' response indistinguishable from a
@@ -330,7 +330,7 @@ def test_server_unwired_descriptor_lookup_raises_loudly_not_returns_none():
     # And NOT silently return None.
     assert "return None" not in block, (
         "_UnwiredDescriptorLookup must not return None silently — "
-        "architect-lean (a)"
+        "design review-lean (a)"
     )
 
 

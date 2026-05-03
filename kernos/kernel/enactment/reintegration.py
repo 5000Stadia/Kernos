@@ -1,6 +1,6 @@
 """ReintegrationContext — capped payload for next-turn integration (PDI C6).
 
-Per Kit edit on PDI: the reintegration payload is hard-capped at
+Per the design review edit on PDI: the reintegration payload is hard-capped at
 construction, not aspirational. Long action failures otherwise become
 prompt bloat at the moment the system is already degraded — exactly
 the canonical case where bounded context matters most.

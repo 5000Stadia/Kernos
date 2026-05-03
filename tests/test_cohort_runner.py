@@ -1,8 +1,8 @@
 """Tests for the cohort fan-out runner.
 
 Covers Sections 4, 5, 5a, 7, 10 of the COHORT-FAN-OUT-RUNNER spec
-plus Kit edits #3 (asyncio.wait), #6 (global wall-clock cap), and
-the synthetic-output shape from Kit edit #4.
+plus the design review edits #3 (asyncio.wait), #6 (global wall-clock cap), and
+the synthetic-output shape from the design review edit #4.
 
 Live-test scenarios 1-16 from the spec are exercised here. Scenarios
 17-18 (integration with V1 IntegrationRunner) live in

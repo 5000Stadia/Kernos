@@ -276,7 +276,7 @@ async def test_scenario_5_entity_with_knowledge_count():
 
 
 # ---------------------------------------------------------------------------
-# 6. No archive in cohort path (Kit edit #2)
+# 6. No archive in cohort path (the design review edit #2)
 # ---------------------------------------------------------------------------
 
 
@@ -330,7 +330,7 @@ async def test_scenario_7_disclosure_gate_filters_semantic_knowledge():
 
 
 # ---------------------------------------------------------------------------
-# 8. Disclosure gate — entity-linked knowledge (Kit edit #4)
+# 8. Disclosure gate — entity-linked knowledge (the design review edit #4)
 # ---------------------------------------------------------------------------
 
 
@@ -394,7 +394,7 @@ async def test_scenario_9_entity_filtered_when_all_linked_knowledge_gated():
     run = make_memory_cohort_run(svc, instance_db=instance_db)
     out = await run(_ctx(user_message="alice"))
     if out.output["entities"]:
-        # Per Kit edit #4 the entity may surface but its knowledge_count
+        # Per the design review edit #4 the entity may surface but its knowledge_count
         # reflects only visible entries (zero in this case).
         assert out.output["entities"][0]["knowledge_count"] == 0
 
@@ -491,7 +491,7 @@ async def test_scenario_12_embedding_failure_graceful_empty():
 
 @pytest.mark.asyncio
 async def test_scenario_13_unexpected_error_propagates_to_runner():
-    """Per Kit edit #6: only embedding/vector failure swallows.
+    """Per the design review edit #6: only embedding/vector failure swallows.
     Other unexpected bugs propagate so the runner registers
     outcome=error rather than silently swallowing as graceful empty."""
     svc = _retrieval_service(knowledge_query_raises=True)
@@ -746,7 +746,7 @@ async def test_scenario_20_search_and_search_structured_consistent():
 
 
 # ---------------------------------------------------------------------------
-# 21. Archive disclosure gating in remember path (Kit's correction)
+# 21. Archive disclosure gating in remember path (the design review's correction)
 # ---------------------------------------------------------------------------
 
 

@@ -11,7 +11,7 @@ nothing in the existing reasoning loop or message handler invokes
 it yet. INTEGRATION-WIRE-LIVE later in the arc wires fan-out →
 integration → presence into the production turn pipeline.
 
-Failure isolation guarantee (narrowed per Kit edit #1):
+Failure isolation guarantee (narrowed per the design review edit #1):
 async-task-per-cohort isolates yielding coroutines from each
 other. The runner does NOT isolate against synchronous infinite
 loops, CPU-bound work without await yield points, blocking I/O

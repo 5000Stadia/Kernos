@@ -7,7 +7,7 @@ assembly → integration → presence pipeline with deterministic fields,
 preserving the legacy seven-block grammar while leaving the decoupled
 architecture's freedom on *who* computes/mediates context intact.
 
-The load-bearing invariant (Kit, 2026-05-01):
+The load-bearing invariant (the design review, 2026-05-01):
 
     Decoupling may change *who* computes/mediates context, but it
     may not silently change *what* cognitive substrate reaches the

@@ -64,7 +64,7 @@ class ApprovalInstanceMismatch(SubstrateToolsError):
 
 class ApprovalModificationTargetMismatch(SubstrateToolsError):
     """Raised when a modification approval's ``prev_workflow_id`` does
-    not match the descriptor's ``prev_version_id`` (Kit edit v1→v2).
+    not match the descriptor's ``prev_version_id`` (the design review edit v1→v2).
 
     This closes the failure mode where the same modification descriptor
     body could be approved against routine A and applied to routine B
@@ -82,7 +82,7 @@ class ApprovalDescriptorMismatch(SubstrateToolsError):
     descriptor mutation between proposal and registration AND any caller
     bug feeding a different descriptor than was approved.
 
-    Now that ``prev_version_id`` is in the hash (Kit edit v1→v2), this
+    Now that ``prev_version_id`` is in the hash (the design review edit v1→v2), this
     also catches modification-target swap attempts as a belt-and-
     suspenders backstop to
     :class:`ApprovalModificationTargetMismatch`."""

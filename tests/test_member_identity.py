@@ -35,14 +35,14 @@ async def idb(tmp_path):
 
 class TestInstanceDB:
     async def test_ensure_owner(self, idb):
-        await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         members = await idb.list_members()
         assert len(members) == 1
         assert members[0]["role"] == "owner"
-        assert members[0]["display_name"] == "Kit"
+        assert members[0]["display_name"] == "the design review"
 
     async def test_get_member_by_channel(self, idb):
-        stable_id = await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        stable_id = await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         member = await idb.get_member_by_channel("discord", "12345")
         assert member is not None
         assert member["member_id"] == stable_id
@@ -69,7 +69,7 @@ class TestInviteCodes:
         assert "Telegram" in result["instructions"] or "telegram" in result["instructions"].lower()
 
     async def test_claim_new_user(self, idb):
-        await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         result = await idb.create_invite_code("owner1", platform="sms", display_name="Sarah")
         code = result["code"]
 
@@ -84,7 +84,7 @@ class TestInviteCodes:
         assert member is not None
 
     async def test_claim_channel_add(self, idb):
-        stable_id = await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        stable_id = await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         r = await idb.create_invite_code(stable_id, platform="sms", for_member=stable_id)
         code = r["code"]
 
@@ -104,7 +104,7 @@ class TestInviteCodes:
 
     async def test_platform_enforcement(self, idb):
         """Code for discord rejected on sms."""
-        await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         r = await idb.create_invite_code("owner1", platform="discord", display_name="Sarah")
         code = r["code"]
         # Try to claim on wrong platform
@@ -114,7 +114,7 @@ class TestInviteCodes:
         assert "discord" in result["static_response"].lower()
 
     async def test_code_used_once(self, idb):
-        await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         r = await idb.create_invite_code("owner1", platform="sms", display_name="Sarah")
         code = r["code"]
 
@@ -127,7 +127,7 @@ class TestInviteCodes:
         assert result2 is None
 
     async def test_deactivate_member(self, idb):
-        await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         r = await idb.create_invite_code("owner1", platform="sms", display_name="Bob")
         await idb.claim_invite_code(r["code"], "sms", "+15553333333")
 
@@ -144,7 +144,7 @@ class TestInviteCodes:
         assert len(active) == 1
 
     async def test_list_members_shows_channels(self, idb):
-        await idb.ensure_owner("owner1", "Kit", "inst1", "discord", "12345")
+        await idb.ensure_owner("owner1", "the design review", "inst1", "discord", "12345")
         members = await idb.list_members()
         assert len(members[0]["channels"]) == 1
         assert members[0]["channels"][0]["platform"] == "discord"

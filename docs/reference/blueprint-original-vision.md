@@ -11,7 +11,7 @@ This document captures the original vision. For current architecture see
 > 
 > **What this document is:** The single source of truth for this project. Bring this file to every Claude session and every Claude Code session. It contains the full vision, architectural decisions, implementation plan, and current status. Update the STATUS sections as work is completed.
 > 
-> **Project origin:** Conversation on February 26, 2026, between the founder and Claude, deriving agentic OS principles from first principles of traditional operating systems.
+> **Project origin:** Conversation on February 26, 2026, between the owner and Claude, deriving agentic OS principles from first principles of traditional operating systems.
 
 -----
 
@@ -88,7 +88,7 @@ The bidirectional rules governing how humans express intent and how the system p
 
 The KERNOS kernel architecture was derived from first-principles analysis of what traditional operating system concepts (process scheduling, memory management, resource abstraction, access control) look like when applied to LLM-based agents serving non-technical users.
 
-- **Origin:** A February 26, 2026 conversation between the founder and Claude, deriving agentic OS pillars from traditional OS theory. Refined through architectural brainstorming and a structured interview with OSBuilder (OpenClaw's primary agent), whose real-world experience running a production agent system validated key design decisions and revealed critical failure modes.
+- **Origin:** A February 26, 2026 conversation between the owner and Claude, deriving agentic OS pillars from traditional OS theory. Refined through architectural brainstorming and a structured interview with OSBuilder (OpenClaw's primary agent), whose real-world experience running a production agent system validated key design decisions and revealed critical failure modes.
 - **Architecture:** Five primitives (Event Stream, State Store, Capability Graph, Reasoning Service, Task Engine) composing into three operational modes (reactive, proactive, generative). See `docs/reference/kernel-architecture-outline.md` for the full design.
 - **Core inversion:** "The agent thinks, the kernel remembers." Unlike existing systems where agents manage their own memory, tool discovery, and safety enforcement, KERNOS separates reasoning (agent) from infrastructure (kernel). The agent receives pre-assembled context, reasons about the current moment, and returns a response. Everything else is kernel responsibility.
 - **Language:** Python for faster iteration in the kernel. No external kernel codebase is forked or integrated — the kernel is KERNOS-native.
@@ -658,14 +658,14 @@ This applies at every layer of KERNOS:
 
 ### How We Work Together
 
-**Your Role (Founder):**
+**Your Role (Owner):**
 
 - Directional vision and corrective steering
 - Approving or rejecting deliverables
 - Testing from a user perspective
 - Flagging when something feels wrong even if you can’t articulate why
 
-**Claude’s Role (Architect/Planner):**
+**Claude’s Role (Design Review/Planner):**
 
 - Breaking deliverables into Claude Code-executable tasks
 - Writing detailed implementation specs for each task
@@ -751,7 +751,7 @@ The KERNOS kernel is built from first principles, not forked from any existing p
 |AIOS codebase too academic/messy to fork cleanly  |HIGH                 |HIGH  |Read before forking (1A.1). If fork is unworkable, use AIOS as reference architecture and rebuild core modules from scratch using its design. Plan for this as the likely path.|
 |MemOS integration harder than expected            |MEDIUM               |MEDIUM|Mem0 is the fallback — simpler, more production-proven, less ambitious but functional.                                                                                         |
 |LLM API costs during development                  |MEDIUM               |MEDIUM|Use local models (Ollama) for development. Cloud APIs for testing only.                                                                                                        |
-|Single developer bottleneck                       |HIGH                 |HIGH  |Claude Code handles implementation. Founder focuses only on steering. Don’t try to understand every line of code.                                                              |
+|Single developer bottleneck                       |HIGH                 |HIGH  |Claude Code handles implementation. Owner focuses only on steering. Don’t try to understand every line of code.                                                              |
 |Trust problem unsolved (another OpenClaw incident)|LOW (with our design)|FATAL |Conservative-by-default principle. Graduated autonomy. Non-destructive deletion. Never ship without the trust dashboard.                                                       |
 
 -----

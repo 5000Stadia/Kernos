@@ -115,7 +115,7 @@ class DrafterCohort:
     workflow drafts via WDP; validates via STS dry-run; signals principal
     when committable.
 
-    Constructor takes restricted *ports* (Kit pin v1→v2), NOT raw
+    Constructor takes restricted *ports* (the design review pin v1→v2), NOT raw
     ``DraftRegistry`` / ``SubstrateTools`` / ``EventEmitter`` objects.
     Forbidden capabilities (``mark_committed``, full ``register_workflow``,
     raw ``emit``) are STRUCTURALLY ABSENT from the port surface — the

@@ -17,7 +17,7 @@ consistently better.
 For canonical loop semantics — three-question check, five-tier
 response hierarchy, the step-as-hypothesis frame — refer to the
 ENACTMENT-LOOP-SEMANTICS deep-work artifact (settled
-2026-04-26 with input from Founder, Kit, CC). The artifact is the
+2026-04-26 with input from Owner, the design review, CC). The artifact is the
 source of truth for any architectural question this document does
 not explicitly cover.
 
@@ -41,7 +41,7 @@ are injected as Protocols (`IntegrationServiceLike`,
 `EnactmentServiceLike`) so the skeleton can land before the concrete
 services do and tests can use stubs.
 
-**Load-bearing seam (Kit edit, acceptance criterion #7):**
+**Load-bearing seam (the design review edit, acceptance criterion #7):**
 `required_safety_cohort_failures` flows from `CohortFanOutResult` to
 `IntegrationInputs` at the TurnRunner → IntegrationService boundary.
 The plumbing uses `build_integration_inputs_from_fan_out` (added in
@@ -78,7 +78,7 @@ Branch decision at entry, by `briefing.decided_action.kind`:
 
 - **Render-only kinds → thin path:** `respond_only`, `defer`,
   `constrained_response`, `pivot`, `clarification_needed`,
-  `propose_tool` (Kit edit — propose_tool is render-only because
+  `propose_tool` (the design review edit — propose_tool is render-only because
   the actual dispatch lives on the next turn after user confirms).
 - **Dispatch kind → full machinery:** `execute_tool` only.
 
@@ -134,7 +134,7 @@ dependency is structurally absent.
 
 ## Explicit ActionEnvelope contract
 
-Per Kit edit on PDI: `ActionEnvelope` is structural, not prose-derived.
+Per the design review edit on PDI: `ActionEnvelope` is structural, not prose-derived.
 A `Briefing` whose `decided_action.kind` is `execute_tool` MUST carry
 an `action_envelope` field; non-action kinds MUST omit it. The
 `Briefing` dataclass enforces both rules at construction.
@@ -154,7 +154,7 @@ ActionEnvelope:
 Validation runs at every plan-changing tier:
 
 - Initial plan creation
-- Tier-2 modify (Kit edit — `same intent` is model assertion, not
+- Tier-2 modify (the design review edit — `same intent` is model assertion, not
   runtime guarantee)
 - Tier-3 pivot
 - Tier-4 reassemble (new plan path)
@@ -285,7 +285,7 @@ INTEGRATION-WIRE-LIVE rather than producing a half-formed turn.
 
 ## Equivalence testing
 
-Per Kit edit, equivalence is asserted along five dimensions:
+Per the design review edit, equivalence is asserted along five dimensions:
 
 1. **User-facing outcome** — functional equivalence; precise wording
    may differ (model variance is acceptable).

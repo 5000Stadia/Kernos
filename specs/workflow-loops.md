@@ -4,7 +4,7 @@
 
 ## The problem
 
-Kernos's reactive turn loop handles the case where the user asks and the agent answers. But many useful patterns aren't reactive. *"When CC posts a batch report, append a synopsis to the architect's ledger and notify me."* *"Every morning at 8am, summarize overnight events and deliver a briefing."* *"When an email matching this pattern arrives, classify it and route the urgent ones for response."* *"Coordinate spec drafting through implementation across multiple agents with founder approval at the design and push gates."*
+Kernos's reactive turn loop handles the case where the user asks and the agent answers. But many useful patterns aren't reactive. *"When CC posts a batch report, append a synopsis to the design review's ledger and notify me."* *"Every morning at 8am, summarize overnight events and deliver a briefing."* *"When an email matching this pattern arrives, classify it and route the urgent ones for response."* *"Coordinate spec drafting through implementation across multiple agents with owner approval at the design and push gates."*
 
 These all share a shape — an event triggers a sequence, the sequence runs verifiable steps, some steps need human approval, the whole thing produces an auditable trail — but inventing each one as a one-off pipeline produces N pieces of bespoke coordination logic. The workflow-loop primitive is the substrate every such pattern composes against.
 
@@ -94,7 +94,7 @@ A minimal `.workflow.yaml` looks like this:
 workflow_id: cc-batch-arrival-notice
 instance_id: "{installer.instance_id}"   # filled in at registration time
 name: CC batch report arrival notice
-owner: founder
+owner: owner
 version: 1.0
 trigger:
   event_type: external.webhook
@@ -242,7 +242,7 @@ Every workflow has an append-only markdown ledger at `data/{instance_id}/workflo
 
 Each entry is a brief synopsis (1-3 sentences) with structured fields: timestamp, execution_id, step_index, agent_or_action, synopsis, result_summary, kickback (if any), references to artifacts produced this step. No big code blocks. Append-only — entries supersede via new entries, never overwrite.
 
-The ledger is the human-readable observability surface. A founder watching a workflow run reads the ledger at a glance and sees the trail: what fired, when, what each step produced, what's still in flight, what was kicked back. Any agent reviewing along the way reads the same ledger.
+The ledger is the human-readable observability surface. A owner watching a workflow run reads the ledger at a glance and sees the trail: what fired, when, what each step produced, what's still in flight, what was kicked back. Any agent reviewing along the way reads the same ledger.
 
 ## Composition with covenant + cohorts + integration
 

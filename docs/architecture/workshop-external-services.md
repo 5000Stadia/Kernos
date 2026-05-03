@@ -106,7 +106,7 @@ Extension fields (optional; existing tools parse without modification):
 - `domain_hints` — optional list of strings for relevance-based surfacing (consumed by the future `TOOL-SURFACING-RELEVANCE` spec; service-bound tools surface based on credential presence and don't need hints).
 - `aggregation` — `per_member` (default) or `cross_member`. The `cross_member` value is reserved-but-rejected in v1 with a clear error pointing at the `WORKSHOP-CROSS-MEMBER-AGGREGATION` follow-on.
 
-### Per-operation classification (Kit edit 1)
+### Per-operation classification (the design review edit 1)
 
 A tool that exposes multiple operations classifies each independently:
 
@@ -117,7 +117,7 @@ delete_pages → delete       (maps to hard_write in v1; runtime
                              confirmation is the safety net)
 ```
 
-Operations not classified per-op fall back to the tool-level shorthand. Tools with neither fall back to the **fail-closed default of `soft_write`** (architect revision 1: missing classification fails closed, not open). Workshop tools that genuinely only read declare it explicitly via the `gate_classification` shorthand.
+Operations not classified per-op fall back to the tool-level shorthand. Tools with neither fall back to the **fail-closed default of `soft_write`** (design review revision 1: missing classification fails closed, not open). Workshop tools that genuinely only read declare it explicitly via the `gate_classification` shorthand.
 
 ## Authoring-pattern validation (registration time)
 
@@ -131,7 +131,7 @@ Operations not classified per-op fall back to the tool-level shorthand. Tools wi
 
 Findings render with the AppData analogy concretely: *"this is the equivalent of an app writing to System32 instead of AppData."* The author either fixes the tool to use the runtime-context accessors or registers with `force=True`.
 
-### Force-register (Kit edit 5)
+### Force-register (the design review edit 5)
 
 Force-registered tools surface only to the author and bypass authoring-pattern validation. Force does **not** bypass member isolation — runtime enforcement (the four invocation-time checks) still applies. Force is for the legitimate edge cases (a tool deliberately reading from a fixed shared file the operator manages) without leaking unsafe authoring patterns to the wider member surface.
 
@@ -148,7 +148,7 @@ When a tool is invoked, it receives a `ToolRuntimeContext` derived from the invo
 
 Tools cannot pin to registration-time identity. The authoring-pattern validator catches the obvious bypass attempts at registration; runtime enforcement is the backstop.
 
-## Runtime enforcement (Kit edit 2)
+## Runtime enforcement (the design review edit 2)
 
 Four checks at every invocation, before the tool's implementation receives control. First failure raises a specific subclass of `RuntimeEnforcementError`; later checks are not run.
 
@@ -157,7 +157,7 @@ Four checks at every invocation, before the tool's implementation receives contr
 3. **Credential scope re-check.** Service-bound tools must have a non-expired credential for the invoking member. Failure → `CredentialUnavailableError`. Surfaces "credential missing or expired" cleanly before the tool's HTTP call has a chance to fail later.
 4. **Data-dir sandbox.** `check_sandbox_path(target, context)` verifies a path resolves under `context.data_dir` (symlinks are resolved before comparison). Used by the dispatcher for user-supplied path inputs and by post-invocation review for paths the tool returns. Best-effort in-process check; full subprocess-level isolation is a future spec.
 
-Force-registered tools go through the same path. Per Kit edit 5: force bypasses authoring-pattern validation only, never runtime isolation.
+Force-registered tools go through the same path. Per the design review edit 5: force bypasses authoring-pattern validation only, never runtime isolation.
 
 ## Audit-log integration
 

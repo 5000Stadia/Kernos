@@ -802,7 +802,7 @@ async def test_hatching_prompt_present_during_hatching(
 
 # ---------------------------------------------------------------------------
 # Test 4 — covenants reach the model deterministically (not LLM-synthesized)
-# Source: Hunt-list row 4 + Kit covenant verdict. Green at: C3a.
+# Source: Hunt-list row 4 + the design review covenant verdict. Green at: C3a.
 # ---------------------------------------------------------------------------
 
 
@@ -899,7 +899,7 @@ async def test_memory_zone_reaches_model(decoupled, monkeypatch):
 # Test 6 — awareness whispers reach model (gardener decoupled-only enrich.)
 # Source: Hunt-list row 6 + gardener_cohort never registered. Green at: C4.
 #
-# Per Kit's clarification: "awareness whispers as legacy oracle parity;
+# Per the design review's clarification: "awareness whispers as legacy oracle parity;
 # gardener observations as decoupled-only enrichment, not legacy-oracle
 # equivalence assertion." This test pins awareness whispers reaching
 # the model on both paths.

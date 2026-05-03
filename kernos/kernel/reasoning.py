@@ -643,7 +643,7 @@ class ReasoningService:
     def drain_tool_trace(self) -> list[dict]:
         """Return and clear the accumulated tool call trace for the current turn.
 
-        IWL drain-ordering invariant (Kit final-signoff note): the
+        IWL drain-ordering invariant (the design review final-signoff note): the
         handler is the single owner of this drain. response_delivery /
         StepDispatcher append into the trace store but never call
         this method. After `reason()` returns, the handler calls
@@ -2680,7 +2680,7 @@ class ReasoningService:
 
         # Low/medium confidence or unwired effect kinds silently no-op —
         # member never sees a confirmation for a preference that won't do
-        # anything (Kit revision #2).
+        # anything (the design review revision #2).
         if not result.should_surface:
             return _json.dumps({
                 "ok": True,

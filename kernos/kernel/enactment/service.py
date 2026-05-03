@@ -5,7 +5,7 @@ Consumes a Briefing and routes structurally:
   - decided_action.kind == execute_tool → full machinery (C5-C6)
   - everything else → thin path (render-only)
 
-Render-only kinds (per Kit edit, propose_tool joins the conversational
+Render-only kinds (per the design review edit, propose_tool joins the conversational
 set because the dispatch happens on the next turn after user confirms,
 not in this turn):
 
@@ -105,7 +105,7 @@ class ReassemblyBudget:
     """Tier-4 budget tracked at envelope-conceptual / per-turn-implementation
     level.
 
-    Per architect's C6 guidance: under the current one-action-per-turn
+    Per design review's C6 guidance: under the current one-action-per-turn
     invariant, per-envelope and per-turn are equivalent. The budget
     structure maps to envelope; the per-turn cap is a safety net that
     becomes load-bearing if the one-action-per-turn invariant ever
@@ -143,7 +143,7 @@ class TerminationSubtype(str, Enum):
     a tweak. The audit consumer (operator dashboards, friction
     observer) keys on these.
 
-    Per Kit re-review on PDI: success_thin_path and
+    Per the design review re-review on PDI: success_thin_path and
     success_full_machinery are kept distinct so audit filtering can
     distinguish where each completion came from. C5/C6 emitted the
     full-machinery happy path as success_thin_path; C8 corrects.
@@ -156,7 +156,7 @@ class TerminationSubtype(str, Enum):
     B2_USER_DISAMBIGUATION_NEEDED = "b2_user_disambiguation_needed"
 
 
-# Kinds that take the thin path (Kit edit — propose_tool included).
+# Kinds that take the thin path (the design review edit — propose_tool included).
 _THIN_PATH_KINDS: frozenset[ActionKind] = frozenset({
     ActionKind.RESPOND_ONLY,
     ActionKind.DEFER,
@@ -166,9 +166,9 @@ _THIN_PATH_KINDS: frozenset[ActionKind] = frozenset({
     ActionKind.PROPOSE_TOOL,
 })
 
-# Kinds that take full machinery. Per spec post-Kit-edit: only
+# Kinds that take full machinery. Per spec post-the design review-edit: only
 # execute_tool. propose_tool was historically considered for full
-# machinery and Kit moved it to render-only because its actual
+# machinery and the design review moved it to render-only because its actual
 # dispatch happens on the *next* turn after the user confirms.
 _FULL_MACHINERY_KINDS: frozenset[ActionKind] = frozenset({
     ActionKind.EXECUTE_TOOL,
@@ -537,7 +537,7 @@ class EnactmentService:
         """Branch on decided_action.kind and route to the right path.
 
         Branch decision is structural. Full machinery is reserved for
-        execute_tool only (Kit edit). Everything else takes the thin
+        execute_tool only (the design review edit). Everything else takes the thin
         path. An unrecognised kind is a contract bug — surfaced via
         ValueError so the wiring layer can catch it cleanly.
         """
@@ -709,7 +709,7 @@ class EnactmentService:
         # All steps completed cleanly. Terminal render via presence
         # renderer (the ONLY post-loop streaming point).
         #
-        # Audit subtype is SUCCESS_FULL_MACHINERY (Kit re-review: keep
+        # Audit subtype is SUCCESS_FULL_MACHINERY (the design review re-review: keep
         # full-machinery completions distinct from thin-path
         # completions for diagnostic clarity in audit-trail filters).
         result = await self._presence.render(briefing)
@@ -833,7 +833,7 @@ class EnactmentService:
                         briefing=briefing,
                     )
                 )
-                # Envelope validation BEFORE dispatch (Kit edit).
+                # Envelope validation BEFORE dispatch (the design review edit).
                 step_validation = validate_step_against_envelope(
                     modified, envelope
                 )
@@ -1124,7 +1124,7 @@ class EnactmentService:
     ) -> EnactmentOutcome:
         """B2 surface: user disambiguation needed.
 
-        Per Kit edit (load-bearing): NO same-turn integration re-entry.
+        Per the design review edit (load-bearing): NO same-turn integration re-entry.
         Enactment constructs the ClarificationNeeded variant directly
         via the divergence_reasoner.formulate_clarification hook. The
         thin path renders the question. Reintegration payload is

@@ -164,7 +164,7 @@ class AwarenessEvaluator:
     async def start(self, instance_id: str) -> None:
         """Start the periodic evaluator for an instance."""
         # WTC v1 C5c: run the unified runtime's recovery sweep once
-        # before the heartbeat loop begins. Closes the Kit must-fix
+        # before the heartbeat loop begins. Closes the the design review must-fix
         # seam (AC6 scenarios) — pending outbox rows past their
         # claim lease are reconciled or reclaimed before any new
         # fires are evaluated.

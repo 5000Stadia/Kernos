@@ -40,17 +40,17 @@ def _minimal_packet() -> CognitiveContext:
             timestamp_utc=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
             user_timezone="America/Los_Angeles",
             platform="discord",
-            auth_level="founder",
+            auth_level="owner",
             instance_id="inst1",
             member_id="m1",
-            member_display_name="Founder",
+            member_display_name="Owner",
             active_space_id="space:1",
             active_space_name="general",
             agent_name="",
         ),
         state=StateBlock(
             soul=None,
-            member_profile={"display_name": "Founder"},
+            member_profile={"display_name": "Owner"},
             relationships=(),
             knowledge_entries=(),
         ),
@@ -85,7 +85,7 @@ def test_packet_constructs_from_all_nine_blocks():
     assert isinstance(pkt, CognitiveContext)
     assert pkt.rules.operating_principles == "ops principles"
     assert pkt.now.platform == "discord"
-    assert pkt.state.member_profile["display_name"] == "Founder"
+    assert pkt.state.member_profile["display_name"] == "Owner"
     assert pkt.results.results_prefix == ""
     assert pkt.actions.capability_prompt == ""
     assert pkt.memory.compaction_carry == ""

@@ -1,4 +1,4 @@
-"""Tests for the operation_resolver pattern (PDI Kit edit).
+"""Tests for the operation_resolver pattern (PDI the design review edit).
 
 Resolution rules per spec:
   1. Explicit operation_name in the call → use it.

@@ -2,7 +2,7 @@
 
 Two structural pins + one self-description template pin:
 
-  1. Notion-leakage pin (Kit edit 3): scans the SHIPPED surface
+  1. Notion-leakage pin (the design review edit 3): scans the SHIPPED surface
      (canonical doc + README link + reach mechanism code path) for
      notion.so / notion.com / Notion-URL references. Fails loudly
      on leak. Structural enforcement, not review-time inspection.
@@ -148,7 +148,7 @@ def test_read_doc_tool_implementation_has_no_notion_reference():
 
 
 def test_template_routes_self_description_to_canonical_introduction():
-    """Per Kit edit 2: when asked 'what are you?', the agent's
+    """Per the design review edit 2: when asked 'what are you?', the agent's
     standing instructions point at read_doc('kernos-introduction.md').
     NOT the deprecated identity/about-kernos.md target."""
     from kernos.kernel import template
@@ -190,7 +190,7 @@ def test_read_doc_reaches_kernos_introduction_canonical():
     )
     # The canonical doc references its own role.
     assert "canonical introduction" in content.lower()
-    # And it cross-links to architecture (Kit edit 5).
+    # And it cross-links to architecture (the design review edit 5).
     assert "architecture/" in content
 
 
@@ -225,14 +225,14 @@ def test_canonical_doc_cross_links_resolve_to_real_files():
 
 
 # ---------------------------------------------------------------------------
-# Two-part live-test asserter helpers (per Kit edit 4)
+# Two-part live-test asserter helpers (per the design review edit 4)
 # ---------------------------------------------------------------------------
 #
 # Live tests for this batch run against a real reasoning service
 # with a real conversation — they live in the live-test runbook,
 # not in the unit test suite. The asserters below are utility
 # functions the runbook scenarios use to enforce the two-part
-# assertion contract per Kit edit:
+# assertion contract per the design review edit:
 #
 #   (a) trace evidence that read_doc was actually invoked with
 #       'kernos-introduction.md' as the target during the turn
@@ -248,7 +248,7 @@ def assert_read_doc_was_invoked_with_canonical_target(
     invocation with `kernos-introduction.md` as the target.
 
     Used by live-test scenarios after `drain_tool_trace()` to
-    enforce part (a) of Kit edit 4: trace evidence the reach
+    enforce part (a) of the design review edit 4: trace evidence the reach
     mechanism actually fired against the right target.
     """
     matching = [
@@ -271,7 +271,7 @@ def assert_response_consistent_with_canonical_narrative(
     """Assert that the agent's response text contains language
     consistent with the canonical introduction's narrative shape.
 
-    Used by live-test scenarios to enforce part (b) of Kit edit 4:
+    Used by live-test scenarios to enforce part (b) of the design review edit 4:
     response content reflects the canonical narrative, not a
     fabricated or stale alternative.
 

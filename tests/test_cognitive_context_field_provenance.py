@@ -202,7 +202,7 @@ def test_every_function_provenance_resolves_to_callable():
 
 def test_deferred_provenance_documented_with_phase_note():
     """Deferred fields must declare deferred_until and reference the
-    phase in their notes. Three-state classification per Kit's tweak."""
+    phase in their notes. Three-state classification per the design review's tweak."""
     for path, prov in FIELD_PROVENANCE.items():
         if prov.wiring_state != "deferred":
             continue
@@ -218,7 +218,7 @@ def test_deferred_provenance_documented_with_phase_note():
 
 
 # ---------------------------------------------------------------------------
-# Field-availability classification (Kit-required three-state pin)
+# Field-availability classification (the design review-required three-state pin)
 # ---------------------------------------------------------------------------
 
 
@@ -241,7 +241,7 @@ def test_no_unwired_expected_entries_at_C1():
     for future entries added without deliberate classification; the
     test catches that drift.
 
-    Kit's tweak: by end of C5, this same assertion holds, AND no
+    the design review's tweak: by end of C5, this same assertion holds, AND no
     deferred entries remain (only intentional deferrals with named
     target phase + reason if any). This test today pins the C1
     half of the contract."""
@@ -261,7 +261,7 @@ def test_deferred_until_phases_match_wiring_ladder():
 
     After C5 (commit graduating tool_surface.always_pinned and
     tool_surface.active_zone), all 23 packet fields are wired. Per
-    Kit's tweak, by end of C5 no deferred entries remain — only
+    the design review's tweak, by end of C5 no deferred entries remain — only
     intentional ones with explicit target-phase + reason. This pin
     enforces the ladder's terminal state for the CCV1 spec arc.
 
@@ -345,7 +345,7 @@ def test_C5_wired_entries_match_expected_set():
 
 
 def test_FieldProvenance_validator_rejects_deferred_without_until():
-    """Constructor validation pin — Kit's tweak requires explicit
+    """Constructor validation pin — the design review's tweak requires explicit
     deferred_until on every deferred entry."""
     with pytest.raises(ValueError, match="deferred_until"):
         FieldProvenance(
@@ -417,7 +417,7 @@ async def test_populate_hatching_prompt_inherit_when_agent_named():
     ctx = PopulationContext(
         member_profile={
             "bootstrap_graduated": False, "agent_name": "Avi",
-            "display_name": "Founder",
+            "display_name": "Owner",
         },
     )
     out = await populate_field("rules.hatching_prompt", ctx)

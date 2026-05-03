@@ -30,7 +30,7 @@ to TurnRunner.run_turn() only when the flag is set AND a TurnRunner
 instance has been wired. With the flag off, the existing reasoning
 loop runs unchanged.
 
-Acceptance criterion 7 (Kit edit) — load-bearing seam:
+Acceptance criterion 7 (the design review edit) — load-bearing seam:
 required_safety_cohort_failures must flow TurnRunner →
 IntegrationService at the boundary, not just be representable on the
 runner. The TurnRunner uses build_integration_inputs_from_fan_out so
@@ -282,7 +282,7 @@ class TurnRunner:
         """Build IntegrationInputs (threading required_safety_cohort_failures
         per acceptance criterion 7) and hand them to IntegrationService.
 
-        This is the load-bearing seam Kit's edit asserts: the safety
+        This is the load-bearing seam the design review's edit asserts: the safety
         metadata MUST cross the boundary, not just be representable.
         We use build_integration_inputs_from_fan_out to keep the
         plumbing consistent with all other wiring sites.

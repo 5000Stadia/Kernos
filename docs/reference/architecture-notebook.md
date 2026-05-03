@@ -1,12 +1,12 @@
 ## ⚠️ HISTORICAL — Last updated 2026-03-06
 
-New design rationale is captured in the Notion workspace (Kit Reviews,
-Session Notes). Kit's spawning decision model (Section 12) remains valid
+New design rationale is captured in the Notion workspace (the design review Reviews,
+Session Notes). the design review's spawning decision model (Section 12) remains valid
 for Phase 3 reference.
 
 # KERNOS Architecture Notebook
 
-> **What this is:** A curated capture of architectural thinking, design rationale, and deferred decisions from brainstorming sessions across Phase 1A and 1B development. This is NOT a spec and NOT a decision log. It lives in the repo and in the Claude Project files so the architect always has this context when working on future phases.
+> **What this is:** A curated capture of architectural thinking, design rationale, and deferred decisions from brainstorming sessions across Phase 1A and 1B development. This is NOT a spec and NOT a decision log. It lives in the repo and in the Claude Project files so the design review always has this context when working on future phases.
 >
 > **Why it exists:** Rich architectural discussions produced insights that are too speculative for the Blueprint, too early for specs, and would clutter DECISIONS.md — but they'll be exactly what's needed when speccing later phases. Without this document, that knowledge lives only in human memory, the assistant's memory system (which has recency bias), and scattered transcripts that are hard to search.
 >
@@ -28,7 +28,7 @@ for Phase 3 reference.
 8. [Phase 3-4: Agent Lifecycle](#8-phase-3-4-agent-lifecycle) — seed/hatch/refine/evaluate, soul vs. contract, prompt evolution
 9. [Real Scenarios That Shaped Design](#9-real-scenarios-that-shaped-design) — the plumber, the stained glass artist, the TTRPG project
 10. [Lessons from OSBuilder (OpenClaw)](#10-lessons-from-osbuilder-openclaw) — practical insights from a live agentic system
-11. [Phase 2 Preparation — Research Leads](#11-phase-2-preparation--research-leads) — Kit's research threads for memory architecture and behavioral contracts
+11. [Phase 2 Preparation — Research Leads](#11-phase-2-preparation--research-leads) — the design review's research threads for memory architecture and behavioral contracts
 12. [Open Questions — No Answer Yet](#12-open-questions--no-answer-yet)
 
 ---
@@ -61,11 +61,11 @@ KERNOS inverts this. The agent receives pre-assembled context, reasons about the
 
 ### The Kernel as Emergent Infrastructure
 
-**Origin:** Founder's framing during the "what even IS the kernel" brainstorm.
+**Origin:** Owner's framing during the "what even IS the kernel" brainstorm.
 
 **The insight:** The kernel isn't a thing you build and then put agents on top of. The kernel IS the orchestration that makes disconnected capabilities feel like unified awareness. Traditional OS kernels mediate between programs and hardware. The KERNOS kernel mediates between data sources, capabilities, and user intent.
 
-**The founder's GPS example that crystallized this:** GPS tracking shows the user is 40 minutes away. Calendar shows an appointment in 20 minutes. Messaging capability can call someone. No single agent is smart enough to produce "you're going to be late — should I call them?" That behavior emerges from the kernel connecting data streams, synthesizing them into a situation, evaluating against the behavioral contract, and routing action through the right channel.
+**The owner's GPS example that crystallized this:** GPS tracking shows the user is 40 minutes away. Calendar shows an appointment in 20 minutes. Messaging capability can call someone. No single agent is smart enough to produce "you're going to be late — should I call them?" That behavior emerges from the kernel connecting data streams, synthesizing them into a situation, evaluating against the behavioral contract, and routing action through the right channel.
 
 **What this means architecturally:** The kernel's primary job is maintaining a *world model* — not just "what tools are connected" but "what is the state of this person's day, commitments, relationships, and patterns — and what in that picture requires attention right now?"
 
@@ -119,7 +119,7 @@ AIOS has the right conceptual model (LLMs as cores, system call interface, modul
 
 ### The Elegance Principle
 
-**Origin:** Founder's request at the start of the 1B outline session: "Consider the angles that produce core elegance to build from."
+**Origin:** Owner's request at the start of the 1B outline session: "Consider the angles that produce core elegance to build from."
 
 **What it means:** Every layer of complexity must justify itself with value the user would miss if it weren't there. If you can remove a feature and the system still feels good, the feature wasn't worth building. This became the filter for every decision in the Kernel Architecture Outline.
 
@@ -131,7 +131,7 @@ AIOS has the right conceptual model (LLMs as cores, system call interface, modul
 
 ### The Memory Cohort Agent
 
-**Origin:** Founder's idea during 1A.4 persistence brainstorm, after discussing OSBuilder's pain with agents managing their own memory.
+**Origin:** Owner's idea during 1A.4 persistence brainstorm, after discussing OSBuilder's pain with agents managing their own memory.
 
 **The core concept:** Separate *focused attention* (the conversational agent that talks to the user) from *peripheral awareness* (the process that monitors, connects, retrieves, and surfaces relevant context). These are genuinely different cognitive functions that degrade when forced to compete in the same LLM call.
 
@@ -149,13 +149,13 @@ AIOS has the right conceptual model (LLMs as cores, system call interface, modul
 
 ### Inline Context Annotation
 
-**Origin:** Founder's idea, directly building on the memory cohort concept. One of the most elegant innovations from our sessions.
+**Origin:** Owner's idea, directly building on the memory cohort concept. One of the most elegant innovations from our sessions.
 
 **The standard approach (what everyone does):** Stuff context into the system prompt or prepend a big "here's what you should know" block. The agent then has to connect that context to the specific parts of the message where it's relevant. More injected context = more attention work for the agent.
 
 **The inline annotation approach:** The memory cohort places relevant context exactly where it's relevant, interleaved with the user's actual words. The relevance mapping is done at injection time, not at reasoning time.
 
-**The founder's example:**
+**The owner's example:**
 
 > "Tom was telling me there's a knitting social event **[User is an experienced knitter and has a side business selling work at local craft fairs.]** and I'm leaving soon to check it out! **[Alert: user has appointment with Dr. Smith at 3:30pm, 40 minutes from now.]** It should be fun!"
 
@@ -187,7 +187,7 @@ AIOS has the right conceptual model (LLMs as cores, system call interface, modul
 
 ### The Proactive Problem
 
-**Origin:** Founder's observation: "I know right now if I hook an agent up to my email I have to ask it to check. It doesn't just tell me when that critical email came in, and of course ignore the spam."
+**Origin:** Owner's observation: "I know right now if I hook an agent up to my email I have to ask it to check. It doesn't just tell me when that critical email came in, and of course ignore the spam."
 
 **Why it's hard (OSBuilder confirmed):** Triggering is easy. Judgment is hard. Every proactive notification is an interruption with a trust cost. The technical challenge isn't polling vs. webhooks — it's the triage layer that decides "is this worth bothering the user about?"
 
@@ -243,7 +243,7 @@ Routing is content-based, using keywords and State Store lookup — not an LLM c
 
 The user saying "let me switch over to that" is just human conversational signaling. The kernel routes on content, not commands. The user never manages contexts.
 
-### The Founder's Key Principle
+### The Owner's Key Principle
 
 **"The handoff note is not only cheap. It's actually free."** We need to find every opportunity where algorithmic solutions replace LLM calls. Immediately upon the handoff being identified, we know the agent that was being communicated with, and that is injected. No LLM call needed.
 
@@ -311,7 +311,7 @@ Every user approval, rejection, or correction is a signal that refines the contr
 
 ### Bootstrap Consolidation Pattern
 
-**Source:** Founder feedback on bootstrap fadeout design.
+**Source:** Owner feedback on bootstrap fadeout design.
 
 The bootstrap prompt should not disappear on a hard message count. The right trigger is **soul maturity** — when the soul has accumulated enough substance to carry the relationship without training wheels.
 
@@ -328,7 +328,7 @@ This is analogous to a junior employee who's been following the onboarding manua
 
 ### The Inverted Zapier
 
-**Origin:** Founder's comparison during kernel brainstorm.
+**Origin:** Owner's comparison during kernel brainstorm.
 
 **The insight:** Zapier makes you build the connections. You define triggers, conditions, actions. You're the programmer of your own automations. KERNOS discovers connections by understanding your life. You never said "monitor my GPS against my calendar." The system inferred the connection because it has access to both data streams and understands what "running late" means.
 
@@ -352,7 +352,7 @@ The capability graph needs to understand prerequisites, not just availability. O
 
 ### The Design Space
 
-**Origin:** Founder's observation during 1B brainstorm: "There's reasons we may want LLM 1 to handle one thing and LLM 2 to handle another."
+**Origin:** Owner's observation during 1B brainstorm: "There's reasons we may want LLM 1 to handle one thing and LLM 2 to handle another."
 
 **The routing logic:**
 - Creative writing → route to most capable model (Opus-class)
@@ -417,7 +417,7 @@ A plumber texts the KERNOS number: "Can you schedule customers for me?" The syst
 
 **Key architectural implication:** The plumber's *customers* text the same system. This means the agent handles external contacts who are NOT the owner. The routing is solved by the channel itself — the customer texts the plumber's number, so they're already talking to the plumber's agent. No central brain, no "which John?" problem.
 
-**The founder's scaling insight:** 10,000 users sharing infrastructure, not sharing an agent. "10,000 separate agents, shared infrastructure." Every agent instance is someone's agent. The customer never needs to specify which John because they're already talking to John's agent.
+**The owner's scaling insight:** 10,000 users sharing infrastructure, not sharing an agent. "10,000 separate agents, shared infrastructure." Every agent instance is someone's agent. The customer never needs to specify which John because they're already talking to John's agent.
 
 ### The Stained Glass Website
 
@@ -508,11 +508,11 @@ Every one of these pain points influenced our architecture: kernel-managed persi
 
 ## 11. PHASE 2 PREPARATION — RESEARCH LEADS
 
-Research threads identified by Kit (OSBuilder/OpenClaw) during SPEC-1B7 review. These are pre-reads before writing Phase 2 specs — not implementation tasks, but architectural homework.
+Research threads identified by the design review (OSBuilder/OpenClaw) during SPEC-1B7 review. These are pre-reads before writing Phase 2 specs — not implementation tasks, but architectural homework.
 
 ### Structured Outputs for LLM Extraction Calls
 
-**Source:** Kit's review of SPEC-1B7.
+**Source:** the design review's review of SPEC-1B7.
 
 The Tier 2 extraction prompt says "Return JSON only" and includes a parsing step that handles markdown code fences when the model wraps output anyway. This is a known fragility. Both Anthropic and OpenAI now support native structured output — pass a JSON schema and the API guarantees schema-compliant output.
 
@@ -524,7 +524,7 @@ The Python `instructor` library wraps both providers and lets you define extract
 
 ### Entity Resolution Before the Knowledge Graph Gets Deep
 
-**Source:** Kit's review of SPEC-1B7.
+**Source:** the design review's review of SPEC-1B7.
 
 The 1B.7 spec writes KnowledgeEntry records for entities as they're mentioned. "Mrs. Henderson (person, client)" today, "Henderson" next week, "my client Linda Henderson" next month. The system has no way to know these are the same entity. By month three of a real user's data, the State Store has multiple entries for the same person with slight variation in how they were mentioned.
 
@@ -536,7 +536,7 @@ The 1B.7 spec writes KnowledgeEntry records for entities as they're mentioned. "
 
 ### Temporal Knowledge Graphs for Fact TTL
 
-**Source:** Kit's review of SPEC-1B7.
+**Source:** the design review's review of SPEC-1B7.
 
 The `durability` field added in 1B.7 is correct but coarse: "permanent", "session", "expires_at:\<ISO\>". The research community has a more sophisticated model: every fact has a validity interval [t_start, t_end] and a confidence decay function. "John works at Portland Plumbing Co." starts at full confidence and decays over months without reinforcement. If never mentioned again, the system should eventually treat it as possibly stale, not permanently authoritative.
 
@@ -548,7 +548,7 @@ The `durability` field added in 1B.7 is correct but coarse: "permanent", "sessio
 
 ### Eclipse LMOS Behavioral Contract Format
 
-**Source:** Kit's review of SPEC-1B7.
+**Source:** the design review's review of SPEC-1B7.
 
 The Blueprint references OpenFang for behavioral contract design (now reframed as "conceptual lessons absorbed"). There's a more recent and production-tested implementation: Eclipse LMOS, running at Deutsche Telekom at scale. Their contract format has been stress-tested against real enterprise edge cases — specifically:
 
@@ -562,7 +562,7 @@ The Blueprint references OpenFang for behavioral contract design (now reframed a
 
 ### The Build vs. Borrow Split
 
-**Source:** Kit's closing observation on the SPEC-1B7 review.
+**Source:** the design review's closing observation on the SPEC-1B7 review.
 
 The architectural inversion — kernel owns memory, agent just reasons — is genuinely novel in how KERNOS applies it. Most systems that claim this either break it immediately (agents that cache their own context) or don't actually implement the kernel side. That's worth owning and building custom.
 

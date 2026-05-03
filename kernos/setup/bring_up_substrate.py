@@ -1,6 +1,6 @@
 """Production bring-up of the WLP / runtime / STS substrate.
 
-WTC v1 C5c-bringup (Codex-audit fold, architect-confirmed scope).
+WTC v1 C5c-bringup (Codex-audit fold, design review-confirmed scope).
 
 Prior to this module: the WLP / CRB / STS / TriggerEvaluationRuntime
 substrate was shipped substrate that **was never instantiated in
@@ -25,7 +25,7 @@ returned :class:`Substrate` bundle is wired back into the handler so
 ``AwarenessEvaluator`` can pick up ``runtime`` for the unified
 heartbeat (Phase 2b shipped in C5c-1 but dormant until now).
 
-Per the architect direction:
+Per the design review direction:
 
 * All 7 Action verbs MUST be registered. Where the handler-supplied
   callable is obvious (notify_user → send_outbound, etc.), the

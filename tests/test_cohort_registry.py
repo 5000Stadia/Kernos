@@ -3,8 +3,8 @@
 Covers Section 1, 2, 3 of the COHORT-FAN-OUT-RUNNER spec:
 - CohortDescriptor / CohortContext / ContextSpaceRef / Turn validation
 - Registry register / has / get / list_cohorts
-- Sync-callable rejection (Kit edit #1, scenario 3)
-- ExecutionMode validation (Kit edit #2: only ASYNC accepted; THREAD
+- Sync-callable rejection (the design review edit #1, scenario 3)
+- ExecutionMode validation (the design review edit #2: only ASYNC accepted; THREAD
   reserved with clear error)
 - Duplicate-id rejection
 - cohort_id snake_case validation
@@ -219,7 +219,7 @@ def test_registry_get_unknown_raises():
 
 
 # ---------------------------------------------------------------------------
-# Registry — Kit edit #1: sync rejection
+# Registry — the design review edit #1: sync rejection
 # ---------------------------------------------------------------------------
 
 
@@ -257,7 +257,7 @@ def test_registry_rejects_non_callable():
 
 
 # ---------------------------------------------------------------------------
-# Registry — Kit edit #2: ExecutionMode validation
+# Registry — the design review edit #2: ExecutionMode validation
 # ---------------------------------------------------------------------------
 
 

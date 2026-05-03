@@ -1,4 +1,4 @@
-"""WTC v1 C1 — WLP fire_id idempotency (Kit must-fix).
+"""WTC v1 C1 — WLP fire_id idempotency (the design review must-fix).
 
 Pins the public ``ExecutionEngine.execute_workflow(fire_id, ...)``
 and ``find_execution_by_fire_id`` surface that closes the crash
@@ -106,7 +106,7 @@ class TestExecuteWorkflowIdempotency:
         )
         assert first == second, (
             "duplicate fire_id must return the original execution_id; "
-            "Kit must-fix invariant"
+            "the design review must-fix invariant"
         )
 
     async def test_duplicate_fire_id_does_not_create_second_row(self, engine):
@@ -169,7 +169,7 @@ class TestFindExecutionByFireId:
 
     async def test_empty_fire_id_returns_none(self, engine):
         # Defensive: legacy in-process executions have empty fire_id;
-        # querying for "" must not match them. Kit must-fix invariant.
+        # querying for "" must not match them. the design review must-fix invariant.
         result = await engine.find_execution_by_fire_id("")
         assert result is None
 
@@ -180,7 +180,7 @@ class TestFindExecutionByFireId:
 
 
 class TestCrashRecoverySeamClosure:
-    """The Kit must-fix scenario: trigger-runtime calls
+    """The the design review must-fix scenario: trigger-runtime calls
     execute_workflow(fire_id), WLP creates the row + returns,
     runtime crashes before persisting workflow_execution_id.
     Recovery sweep queries by fire_id and gets the existing
@@ -226,7 +226,7 @@ class TestCrashRecoverySeamClosure:
             row = await cur.fetchone()
         assert row[0] == 1, (
             "must produce exactly one workflow execution per "
-            "Kit must-fix AC6 scenario #2"
+            "the design review must-fix AC6 scenario #2"
         )
 
 

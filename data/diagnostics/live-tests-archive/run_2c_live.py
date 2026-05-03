@@ -219,7 +219,7 @@ async def main():
         "Beyond the trap, we find the Ashen Veil's underground laboratory. What do we see?",
         "Pip recognizes the alchemical equipment. This must be where they're making the poison. He takes samples.",
         "We need to find evidence that links Captain Thorne to this operation. Pip searches the lab records.",
-        "Pip finds a ledger with payments from Thorne to someone called 'The Architect'. Who is that?",
+        "Pip finds a ledger with payments from Thorne to someone called 'The Design Review'. Who is that?",
     ]
 
     for i, msg in enumerate(phase2_messages, 1):

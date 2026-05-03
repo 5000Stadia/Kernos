@@ -100,7 +100,7 @@ class TestSendRelationalMessageExclusion:
 
     @pytest.mark.asyncio
     async def test_exclusion_covers_all_intents_uniformly(self):
-        """Kit v4 note: exclusion at the tool-call-name abstraction covers
+        """the design review v4 note: exclusion at the tool-call-name abstraction covers
         all three intents, not by intent and not by broader category. This
         guards against a future refactor that tries to exclude by intent
         (which would drift if a new intent is added)."""
@@ -183,7 +183,7 @@ class TestNonRMSensitiveActionsStillGate:
     @pytest.mark.asyncio
     async def test_exclusion_is_by_tool_name_not_capability(self):
         """A hypothetical 'messaging' capability tool that ISN'T
-        send_relational_message does NOT inherit the exclusion. The Kit
+        send_relational_message does NOT inherit the exclusion. The the design review
         note was explicit: exclude by tool-call name, not by capability or
         intent or broader category."""
         gate = _make_gate()

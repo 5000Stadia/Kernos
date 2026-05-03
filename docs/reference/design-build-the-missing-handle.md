@@ -2,7 +2,7 @@
 
 **Status:** Design principle. Frames when and how Kernos should build small reusable utilities.
 **Date:** 2026-04-02
-**Source:** Founder spec — operational self-maintenance principle.
+**Source:** Owner spec — operational self-maintenance principle.
 
 ---
 

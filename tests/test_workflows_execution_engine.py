@@ -67,7 +67,7 @@ def _make_workflow(**overrides) -> Workflow:
         instance_id="inst_a",
         name="engine test",
         description="",
-        owner="founder",
+        owner="owner",
         version="1.0",
         bounds=Bounds(iteration_count=1, wall_time_seconds=30),
         verifier=Verifier(flavor="deterministic", check="ok"),
@@ -213,7 +213,7 @@ class TestApprovalGates:
             gate_name="g1",
             pause_reason="approve please",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=1,
             bound_behavior_on_timeout=gate_behavior,
             default_value=default_value,
@@ -250,7 +250,7 @@ class TestApprovalGates:
             "inst_a", "user.approval",
             {"execution_id": gated.execution_id,
              "gate_nonce": gated.gate_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         await _wait_for(

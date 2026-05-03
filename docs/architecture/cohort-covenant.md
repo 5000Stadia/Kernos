@@ -49,7 +49,7 @@ rule descriptions during reasoning and encodes their effect into
 `presence_directive` as behavioral instruction; presence never
 sees the rule text directly.
 
-Per Kit edit #4, **directives must not quote `rule.topic`,
+Per the design review edit #4, **directives must not quote `rule.topic`,
 `rule.target`, or `rule.description`** even though those are
 inside the redaction boundary. Wrong: `"do not reference
 therapy"` (leaks the topic). Right: `"decline this cross-member
@@ -77,7 +77,7 @@ load-bearing.
 
 ### Safety-degraded fail-soft
 
-Per Kit's load-bearing input: **safety-degraded fail-soft must
+Per the design review's load-bearing input: **safety-degraded fail-soft must
 never be respond_only.** When `required_safety_cohort_failures`
 is non-empty AND fail-soft engages for any reason (model produced
 no tool_use, iteration budget exhausted, redaction violation,
@@ -137,7 +137,7 @@ ScopeInfo {
 
 ### Description hard cap (2000 chars)
 
-Pathological-rule defense (Kit edit #5). "Typically short" is not
+Pathological-rule defense (the design review edit #5). "Typically short" is not
 a safety property. Truncated descriptions get
 `description_truncated: True`; integration sees enough to reason
 about constraint type even if specific phrasing is clipped.
@@ -146,7 +146,7 @@ prompt-injection surface.
 
 ### Rule count cap (50) with safety-priority order
 
-Per Kit edit #6. Recency-only truncation could surface 50
+Per the design review edit #6. Recency-only truncation could surface 50
 preferences while silently dropping a `must_not + block` safety
 rule — defeating the cohort's purpose. The priority order makes
 the truncation safety-preserving by construction:
@@ -166,7 +166,7 @@ attention if budget capacity becomes a real concern.
 
 ## Member filtering — Python-side, not SQL
 
-Per Kit edit #7. `StateStore.query_covenant_rules` abstract
+Per the design review edit #7. `StateStore.query_covenant_rules` abstract
 signature does NOT take `member_id` (the sqlite implementation
 has it as an extra parameter; the JSON store does not). Pushing
 the filter into the SQL layer would couple to a specific store
@@ -183,7 +183,7 @@ Implementation-portable across stores. Tests verify
 
 ## Audit log redaction
 
-Per Kit edit #8: audit entries do NOT contain `description`,
+Per the design review edit #8: audit entries do NOT contain `description`,
 `topic`, OR `target` strings. The audit category
 `cohort.fan_out` already redacts cohort output payloads to
 references-only; the covenant cohort's contribution to that

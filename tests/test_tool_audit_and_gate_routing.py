@@ -249,7 +249,7 @@ def test_gate_effect_for_descriptor_honours_per_op():
         ],
     )
     assert gate_effect_for(desc, "read_pages") == "read"
-    # Per Kit: delete maps to hard_write in v1.
+    # Per the design review: delete maps to hard_write in v1.
     assert gate_effect_for(desc, "delete_pages") == "hard_write"
     # An operation not in the per-op list and outside authority falls
     # back to the tool-level shorthand.
@@ -262,7 +262,7 @@ def test_gate_effect_for_unclassified_is_fail_closed():
 
 
 def test_gate_effect_delete_maps_to_hard_write_v1():
-    """Kit's response to question 1: no destructive_irreversible in v1;
+    """the design review's response to question 1: no destructive_irreversible in v1;
     delete maps to hard_write so the gate fires confirmation."""
     desc = _descriptor(gate_classification="delete")
     assert gate_effect_for(desc) == "hard_write"

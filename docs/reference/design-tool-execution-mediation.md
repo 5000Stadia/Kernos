@@ -2,7 +2,7 @@
 
 **Status:** Design vision. Frames the V1 spec and future direction.
 **Date:** 2026-03-31
-**Source:** Founder + Kit conversation on tool result handling.
+**Source:** Owner + the design review conversation on tool result handling.
 
 ---
 
@@ -181,7 +181,7 @@ layers that make the mediation truly intelligent.
 
 ## The term: "cohort agent" vs alternatives
 
-The founder is looking for a term for this out-of-context
+The owner is looking for a term for this out-of-context
 filtering/mediation layer. Options:
 
 | Term | Connotation |
@@ -191,10 +191,10 @@ filtering/mediation layer. Options:
 | **Operative** | Implies task-aware packaging |
 | **Steward** | Implies careful management of what enters context |
 | **Valet** | Implies preparing the right things for the principal |
-| **Preprocessing layer** | Technical, Kit's earlier term |
+| **Preprocessing layer** | Technical, the design review's earlier term |
 
-Kit used "preprocessing capability layer" in the earlier Internal
-Capability Grammar design. The founder's "cohort agent" adds the
+the design review used "preprocessing capability layer" in the earlier Internal
+Capability Grammar design. The owner's "cohort agent" adds the
 nuance that this layer may itself need lightweight reasoning, not
 just structural processing.
 
@@ -237,7 +237,7 @@ route tool results appropriately for the current task.**
 
 ### Stage 5: Unified mediation layer (Phase 8-10)
 - Same layer handles tool surfacing AND result mediation
-- Preprocessing capability layer from Kit's grammar design
+- Preprocessing capability layer from the design review's grammar design
 - Full surgeon's assistant model
 
 ---
@@ -258,7 +258,7 @@ layer. Tool results are still raw injection.
 
 ---
 
-## The principle (from the founder + Kit)
+## The principle (from the owner + the design review)
 
 > A tool result should be inline when it is primarily consumed
 > in the moment. A tool result should become an artifact when it

@@ -1,4 +1,4 @@
-"""Restricted port facades for Drafter (Kit pin v1→v2: capability wrappers).
+"""Restricted port facades for Drafter (the design review pin v1→v2: capability wrappers).
 
 Drafter's ``__init__`` receives ports, NOT raw dependencies. Forbidden
 capabilities are STRUCTURALLY ABSENT from the port surface — calling

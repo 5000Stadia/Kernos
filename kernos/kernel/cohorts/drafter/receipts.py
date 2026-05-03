@@ -13,7 +13,7 @@ Four receipt types:
 * ``drafter.receipt.dry_run_completed`` — Drafter emits after STS
   ``register_workflow(dry_run=True)`` returns.
 
-Receipt timeout pin (DRAFTER spec, Kit pin v1→v2): default 60s at
+Receipt timeout pin (DRAFTER spec, the design review pin v1→v2): default 60s at
 substrate-delivery level — the principal cohort acks when it ingests
 into its queue, NOT when it speaks to the user. Threshold configurable
 per-instance via :class:`ReceiptTimeoutConfig`. When principal is in a
@@ -54,7 +54,7 @@ change; tests assert this exact set."""
 
 
 # ---------------------------------------------------------------------------
-# Receipt timeout configuration (Kit pin v1→v2)
+# Receipt timeout configuration (the design review pin v1→v2)
 # ---------------------------------------------------------------------------
 
 

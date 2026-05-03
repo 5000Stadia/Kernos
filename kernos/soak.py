@@ -412,7 +412,7 @@ PROBE_D_COMPACTION = Scenario(
     description=(
         "Compaction-carry probe — converse until KERNOS_COMPACTION_THRESHOLD=500 "
         "is crossed; verify ## MEMORY zone populates from real "
-        "compaction carry (Kit's explicitly-named fourth probe)"
+        "compaction carry (the design review's explicitly-named fourth probe)"
     ),
     launcher="cli.sh",
     automated=True,

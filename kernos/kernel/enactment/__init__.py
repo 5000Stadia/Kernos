@@ -7,7 +7,7 @@ two structurally distinct paths:
   - **Thin path (render-only)** — for conversational and proposal
     decided_actions. The model renders the user-facing response
     directly from the briefing. NO tool dispatch on this path; any
-    real tool execution belongs to full machinery. (Kit edit.)
+    real tool execution belongs to full machinery. (the design review edit.)
 
   - **Full machinery** — for execute_tool only. Plan creation +
     three-question check + five-tier response hierarchy + envelope

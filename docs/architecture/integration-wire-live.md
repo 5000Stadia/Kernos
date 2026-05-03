@@ -37,7 +37,7 @@ invariants relax.
 
 Conforms to `PlannerLike.create_plan(PlanCreationInputs) ->
 PlanCreationResult`. Tool catalog filtered to
-`inputs.briefing.action_envelope.allowed_operations` (Kit-corrected
+`inputs.briefing.action_envelope.allowed_operations` (the design review-corrected
 access path). Defense-in-depth filters layered on top:
 `allowed_tool_classes`, `forbidden_moves`.
 
@@ -89,7 +89,7 @@ Conforms to `DivergenceReasonerLike` four-method surface:
 - `emit_pivot_step(inputs) -> Step`
 - `formulate_clarification(inputs) -> ClarificationFormulationResult`
 
-Per Kit edit: deterministic-vs-prose split lives INSIDE
+Per the design review edit: deterministic-vs-prose split lives INSIDE
 `judge_divergence`. When structured signals all passed AND dispatch
 completed, the method short-circuits without invoking the model.
 Otherwise the prose path fires with explicit divergence framing.
@@ -109,7 +109,7 @@ loudly so the model can be tuned.
 ### PresenceRenderer (`kernos/kernel/enactment/presence_renderer.py`)
 
 Conforms to `PresenceRendererLike.render(briefing) ->
-PresenceRenderResult`. Awaited, NOT AsyncIterator (Kit edit).
+PresenceRenderResult`. Awaited, NOT AsyncIterator (the design review edit).
 
 Single renderer with kind-aware prompting. Branches structurally on
 `briefing.decided_action.kind` to pick the system prompt:
@@ -120,7 +120,7 @@ Single renderer with kind-aware prompting. Branches structurally on
 - clarification_needed first-pass
 - execute_tool (full machinery terminal)
 
-**B1 / B2 structural safety (Kit edit, load-bearing):**
+**B1 / B2 structural safety (the design review edit, load-bearing):**
 
 Dedicated frozen dataclasses `B1RenderInputs` and `B2RenderInputs`
 structurally exclude `discovered_information`. The renderer's
@@ -171,7 +171,7 @@ StepDispatcher invocation.
 
 ## Audit emission compatibility
 
-**No-double-count invariant (Kit edit, locked):** inner hook model
+**No-double-count invariant (the design review edit, locked):** inner hook model
 calls do NOT emit `reasoning.*` events. Synthetic outer
 `reasoning.request` / `reasoning.response` events emitted ONCE per
 turn at the TurnRunner boundary by `ProductionResponseDelivery`.
@@ -191,7 +191,7 @@ synthetic outer event matches legacy shape.
 
 ## `reasoning.py` minimal additive change
 
-Per Kit edit (locked): `reasoning.py` is MINIMALLY EXTENDED, not
+Per the design review edit (locked): `reasoning.py` is MINIMALLY EXTENDED, not
 unchanged. The constructor accepts an optional `trace_sink: list[dict]`
 parameter. When provided, the underlying `_turn_tool_trace` list IS
 that injected list — shared with the new path's StepDispatcher. The
@@ -206,7 +206,7 @@ returns entries from whichever path produced them.
 
 ## `server.py` production wiring
 
-**Per-turn binding (IWL C6, Kit-mandated):** the production wiring
+**Per-turn binding (IWL C6, the design review-mandated):** the production wiring
 constructs a `turn_runner_provider` closure passed to
 `ReasoningService(turn_runner_provider=...)`. The provider is
 invoked PER TURN by `ReasoningService._run_via_turn_runner_provider`
@@ -244,7 +244,7 @@ Construction order at startup:
 5. Shared `_shared_chain_caller` against the primary chain.
 6. Shared `_UnwiredDescriptorLookup` placeholder (raises
    NotImplementedError loudly when full-machinery turns hit it
-   — architect-lean (a)).
+   — design review-lean (a)).
 7. Shared `_UnwiredExecutor` placeholder.
 8. `_dispatcher_event_emitter` and `_dispatcher_audit_emitter`
    bridges into the existing event stream / audit store.
@@ -314,7 +314,7 @@ measurement on representative scenarios.
 - DivergenceJudgment / ClarificationFormulationResult have no
   `streamed` field (streaming-disabled-by-construction).
 
-**Composition pins (IWL C6, Kit-mandated):**
+**Composition pins (IWL C6, the design review-mandated):**
 
 - The production turn_runner_provider's TurnRunner.response_delivery
   IS an instance of `ProductionResponseDelivery` (not a stub or
@@ -329,7 +329,7 @@ measurement on representative scenarios.
   `audit_emitter` references AND non-None `on_dispatch_complete`
   callback (for tool_iterations counting).
 - `_UnwiredDescriptorLookup.descriptor_for` raises
-  NotImplementedError (architect-lean (a)). Source-inspection pin
+  NotImplementedError (design review-lean (a)). Source-inspection pin
   verifies the method body contains `raise NotImplementedError` and
   does NOT contain `return None`.
 - End-to-end: `ReasoningService.reason()` with the feature flag
@@ -367,7 +367,7 @@ tests/test_iwl_integration.py               (end-to-end smoke)
    event/audit records (the `instance_id` propagation noted below)
    AND wires the workshop dispatch primitive into `ToolExecutor`.
    Required before broad soak that exercises full-machinery turns.
-3. **Broad soak validation:** founder flips the flag for an
+3. **Broad soak validation:** owner flips the flag for an
    instance; new path runs on real turns including full-machinery
    dispatches. Friction observer accumulates tickets; equivalence
    telemetry observed via the synthetic `reasoning.response`
@@ -376,7 +376,7 @@ tests/test_iwl_integration.py               (end-to-end smoke)
    deprecates legacy reasoning loop after benchmarked clearly and
    consistently better with no remaining tuning needs.
 
-## Push-approval constraint (architect, IWL v3 review)
+## Push-approval constraint (design review, IWL v3 review)
 
 IWL is approved for push and thin-path soak. Broad soak (full-
 machinery turns) is gated on the workshop-binding follow-up.

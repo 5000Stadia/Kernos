@@ -62,7 +62,7 @@ consultations.
 
 ## Active-canvas resolution
 
-Per Kit edit #5, the rule is explicit and conservative:
+Per the design review edit #5, the rule is explicit and conservative:
 
 > Exactly one canvas space in `ctx.active_spaces` → use it.
 > Zero or multiple → `has_active_canvas: False`.
@@ -116,7 +116,7 @@ EvolutionSummary {
 
 ## Visibility model
 
-Per Kit edit #3: `CohortOutput.visibility` is **whole-output**
+Per the design review edit #3: `CohortOutput.visibility` is **whole-output**
 in V1. Gardener filters restricted items at source — restricted
 proposals/evolution records are absent from the payload entirely
 (not marked, not redacted, just not present). The output stays

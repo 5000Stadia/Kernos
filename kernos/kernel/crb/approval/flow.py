@@ -1,7 +1,7 @@
 """CRBApprovalFlow state machine (CRB C4).
 
 Owns ``handle_response`` (with crash-safe approval-to-registration
-handoff per Kit pin v1->v2 must-fix #1), branches event emission by
+handoff per the design review pin v1->v2 must-fix #1), branches event emission by
 proposal type (must-fix #2: modifications emit
 ``routine.modification.approved``, not the generic event),
 ``handle_explicit_modification_request`` fallback when Drafter misses
@@ -232,7 +232,7 @@ class CRBApprovalFlow:
                     new_proposal_id=None,
                 )
 
-            # Crash-safe handoff (Kit pin v1->v2 must-fix #1, hardened
+            # Crash-safe handoff (the design review pin v1->v2 must-fix #1, hardened
             # by Codex final review REAL #1 + #4):
             #
             # Step 1: CLAIM via state transition BEFORE the approval
@@ -264,7 +264,7 @@ class CRBApprovalFlow:
                 return await self._outcome_for_concurrent_state(latest)
 
             # Step 2: we won the claim — emit the appropriate approval
-            # event. Modification branch per Kit pin v1->v2 must-fix #2.
+            # event. Modification branch per the design review pin v1->v2 must-fix #2.
             if proposal.prev_workflow_id:
                 approval_event_id = await self._event_emitter.emit_routine_modification_approved(
                     correlation_id=proposal.correlation_id,
@@ -414,7 +414,7 @@ class CRBApprovalFlow:
             [str, str], "Awaitable[list[Workflow]]"  # type: ignore[name-defined]
         ] | None = None,
     ) -> ExplicitModificationOutcome:
-        """Fallback when Drafter misses a modification intent (Kit pin
+        """Fallback when Drafter misses a modification intent (the design review pin
         C4). Resolves ``target_workflow_id`` via the supplied lookup;
         on a single match, emits ``crb.feedback.modify_request`` to
         drive the Drafter shaping path. On ambiguity, returns an
@@ -494,7 +494,7 @@ class CRBApprovalFlow:
           principal via Drafter port; CRB just reports the decision).
         * permission=False -> ephemeral; NO WDP row.
 
-        Codex / Kit pin: Drafter v2 AC #12 invariant preserved across
+        Codex / the design review pin: Drafter v2 AC #12 invariant preserved across
         this CRB entry point — weak candidates stay ephemeral.
         """
         if not picked_candidate_id:

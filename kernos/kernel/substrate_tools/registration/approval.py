@@ -184,7 +184,7 @@ async def resolve_and_validate_approval(
             f"caller instance_id={instance_id!r}"
         )
 
-    # Step 5b: modification target binding (Kit edit v1 → v2).
+    # Step 5b: modification target binding (the design review edit v1 → v2).
     if approval_event.event_type == "routine.modification.approved":
         prev_workflow_id = payload.get("prev_workflow_id") or ""
         if not prev_workflow_id:

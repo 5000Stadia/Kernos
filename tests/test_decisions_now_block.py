@@ -15,7 +15,7 @@ Rules enforced:
    explicitly says so, since the table is the canonical place).
 
 Rule 2 catches the bad case: hardcoded outdated test count. The
-deferral lane is allowed because the architect prefers to keep the
+deferral lane is allowed because the design review prefers to keep the
 block structurally stable across batches.
 """
 from __future__ import annotations

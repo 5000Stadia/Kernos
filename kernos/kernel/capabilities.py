@@ -15,7 +15,7 @@ Maintenance:
   user / agent" in one phrase, not "how is it implemented."
 
 **Scale note.** If this list grows past roughly 15-20 entries, surface
-to the architect for scope review. The matrix is meant to highlight
+to the design review for scope review. The matrix is meant to highlight
 load-bearing surfaces; at scale it should be partitioned (e.g.,
 user-facing vs internal) rather than just grown. Don't encode this
 as a hard test — it's a code-review heuristic, not an invariant.

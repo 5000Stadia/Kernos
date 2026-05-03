@@ -3,7 +3,7 @@
 Single renderer with kind-aware prompting. Branches internally on
 `briefing.decided_action.kind` and produces user-facing text.
 
-Method signature (per Kit edit, locked):
+Method signature (per the design review edit, locked):
 
     await render(briefing) -> PresenceRenderResult
 
@@ -12,7 +12,7 @@ adapter/event sink; the `result.streamed` flag signals whether
 streaming occurred during render. The renderer returns the final
 accumulated text in `result.text` regardless.
 
-B1 / B2 STRUCTURAL SAFETY (Kit edit, load-bearing):
+B1 / B2 STRUCTURAL SAFETY (the design review edit, load-bearing):
 
 For B1 termination rendering and B2-routed clarification rendering,
 the renderer MUST NOT receive `discovered_information`. Dedicated
@@ -32,7 +32,7 @@ The streaming surface is the adapter/event sink; render() awaits
 and returns PresenceRenderResult with the final accumulated text
 plus a `streamed` flag.
 
-Same-model default (Kit edit, locked): the renderer's chain_caller
+Same-model default (the design review edit, locked): the renderer's chain_caller
 is the same callable integration uses by default. Per-hook
 differentiation deferred until soak telemetry justifies.
 """
@@ -85,7 +85,7 @@ ChainCaller = Callable[
 class B2RenderInputs:
     """Safe input type for B2-routed clarification rendering.
 
-    Per Kit edit (load-bearing): the renderer's B2 path consumes
+    Per the design review edit (load-bearing): the renderer's B2 path consumes
     THIS type, NOT the full ClarificationPartialState. The
     `discovered_information` field is structurally absent — the
     renderer literally cannot access it because the type doesn't
@@ -140,7 +140,7 @@ class B2RenderInputs:
 class B1RenderInputs:
     """Safe input type for B1 termination rendering.
 
-    Per Kit edit (load-bearing): the renderer's B1 path consumes
+    Per the design review edit (load-bearing): the renderer's B1 path consumes
     THIS type. The `discovered_information` field is structurally
     absent. The unsafe field lives in the ReintegrationContext
     payload (audit-only at v1).

@@ -5,8 +5,8 @@ Per the COHORT-FAN-OUT-RUNNER spec:
 - `CohortDescriptor` (Section 1) — registration record. Declares
   the cohort's id, run callable, per-cohort timeout, default
   visibility, required-flag, safety-class flag, and execution
-  mode. Kit edit #2 added `execution_mode`; v1 only accepts
-  `async`. Sync callables are rejected at registration (Kit edit
+  mode. the design review edit #2 added `execution_mode`; v1 only accepts
+  `async`. Sync callables are rejected at registration (the design review edit
   #1).
 
 - `CohortContext` (Section 3) — bundle of per-turn inputs the
@@ -17,7 +17,7 @@ Per the COHORT-FAN-OUT-RUNNER spec:
 - `CohortFanOutResult` (Section 7) — runner output. List of
   CohortOutputs in registration order plus telemetry.
 
-- `ExecutionMode` (Kit edit #2) — only `ASYNC` accepted in v1;
+- `ExecutionMode` (the design review edit #2) — only `ASYNC` accepted in v1;
   reserved values for future extensions (`THREAD` for bounded
   thread-pool offload of sync work) live as enum members so
   registration errors can name the future-spec landing zone.
@@ -53,7 +53,7 @@ class CohortDescriptorError(ValueError):
 class ExecutionMode(str, Enum):
     """How a cohort's run callable is invoked.
 
-    Per Kit edit #2: v1 ONLY accepts `async`. Synchronous and
+    Per the design review edit #2: v1 ONLY accepts `async`. Synchronous and
     blocking work must explicitly offload via `loop.run_in_executor`
     inside an async run callable. The `THREAD` enum value is
     reserved for a future spec (bounded-executor isolation); it
@@ -196,7 +196,7 @@ class CohortDescriptor:
         Snake-case alphanumeric.
 
       - `run` — async callable `(CohortContext) -> CohortOutput`.
-        Sync callables are rejected at registration (Kit edit #1);
+        Sync callables are rejected at registration (the design review edit #1);
         the registry validates `inspect.iscoroutinefunction`.
 
       - `timeout_ms` — per-cohort wall-clock budget. The runner

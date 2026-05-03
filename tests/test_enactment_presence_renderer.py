@@ -122,7 +122,7 @@ def test_default_max_tokens_documented():
 
 @pytest.mark.asyncio
 async def test_render_returns_awaited_presence_render_result():
-    """Per Kit edit: render returns awaited PresenceRenderResult,
+    """Per the design review edit: render returns awaited PresenceRenderResult,
     NOT AsyncIterator. Pin verifies the return shape."""
     renderer = PresenceRenderer(chain_caller=_capture_chain("hello"))
     result = await renderer.render(_briefing(RespondOnly()))
@@ -213,7 +213,7 @@ async def test_execute_tool_terminal_uses_full_machinery_prompt():
 
 
 # ---------------------------------------------------------------------------
-# B1 / B2 STRUCTURAL SAFETY — sentinel test (architect-mandated)
+# B1 / B2 STRUCTURAL SAFETY — sentinel test (design review-mandated)
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ def test_b2_render_inputs_from_partial_state_drops_discovered_information():
 
 @pytest.mark.asyncio
 async def test_b2_sentinel_absent_from_renderer_prompt_input_and_output():
-    """Architect-mandated sentinel pin (acceptance criterion #18):
+    """Design Review-mandated sentinel pin (acceptance criterion #18):
     seed discovered_information with a restricted sentinel; verify
     the sentinel is absent from BOTH the renderer's prompt input AND
     the rendered output text.

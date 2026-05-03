@@ -137,7 +137,7 @@ class IntegrationInputs:
     # not SUCCESS. Non-empty means safety is degraded and
     # integration's filter phase must produce defer or
     # constrained_response — not respond_only / execute_tool /
-    # propose_tool. Per spec Section 2c + Kit's load-bearing
+    # propose_tool. Per spec Section 2c + the design review's load-bearing
     # input ("safety-degraded fail-soft must never be respond_only").
     # Backwards-compatible: defaults to empty tuple; pre-CAC
     # callers see no behavior change.
@@ -507,7 +507,7 @@ class IntegrationRunner:
 
         decided = decided_action_from_dict(tool_input.get("decided_action") or {})
 
-        # PDI Kit edit: action-shape decided_actions REQUIRE an
+        # PDI the design review edit: action-shape decided_actions REQUIRE an
         # explicit ActionEnvelope on the briefing. Parse from
         # tool_input when the kind warrants it; absent envelope on an
         # action-shape decision is a structural violation surfaced
@@ -554,7 +554,7 @@ class IntegrationRunner:
         # required + safety_class cohorts failed, the briefing's
         # decided_action MUST be defer or constrained_response.
         # respond_only / execute_tool / propose_tool are forbidden
-        # (Kit's load-bearing input: safety-degraded fail-soft
+        # (the design review's load-bearing input: safety-degraded fail-soft
         # must never be respond_only — and the same constraint
         # applies on the success path post-finalize). If the model
         # disobeyed, raise so the outer try/except routes to the
@@ -650,7 +650,7 @@ class IntegrationRunner:
         notes: str,
         error: str = "",
     ) -> Briefing:
-        # Per Kit's load-bearing input on COHORT-ADAPT-COVENANT:
+        # Per the design review's load-bearing input on COHORT-ADAPT-COVENANT:
         # safety-degraded fail-soft must NEVER be respond_only.
         # When required + safety_class cohorts failed, the fallback
         # is a Defer briefing rather than the standard minimal

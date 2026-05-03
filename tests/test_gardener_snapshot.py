@@ -1,6 +1,6 @@
 """Tests for the GardenerService snapshot read surface (C1 of CAG).
 
-Covers Section 7 of the COHORT-ADAPT-GARDENER spec + Kit edit #4:
+Covers Section 7 of the COHORT-ADAPT-GARDENER spec + the design review edit #4:
 
   - ProposalCoalescer.snapshot_pending: non-mutating tuple copy
   - EvolutionRecord populated by consult_evolution / consult_section

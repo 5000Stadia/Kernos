@@ -206,7 +206,7 @@ async def test_runtime_dispatches_to_execution_engine(
             "workflow_id": f"wf_smoke_{uuid.uuid4().hex[:8]}",
             "instance_id": "inst1",
             "name": "smoke",
-            "owner": "founder",
+            "owner": "owner",
             "version": "1",
             "bounds": {"iteration_count": 1},
             "verifier": {"flavor": "deterministic", "check": "x"},

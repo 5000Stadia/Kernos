@@ -12,7 +12,7 @@ constrained to:
 3. Section management (splits oversized sections, regenerates drifted
    summaries) — a sub-kind of evolution judgment.
 
-Discipline (per Kit design-review round):
+Discipline (per the design review design-review round):
   - Only pattern-declared heuristics plus Pattern 00's cross-pattern set
     — no inventing heuristics.
   - High-confidence matches only — low/medium log for pattern tuning
@@ -253,7 +253,7 @@ async def judge_evolution(
 
 
 #: Phrases that bypass the cheap-chain pre-filter and route directly to
-#: full extraction (still subject-matter-validated — Kit revision #1).
+#: full extraction (still subject-matter-validated — the design review revision #1).
 #: Surface-level string match, not semantic. Case-insensitive.
 EXPLICIT_PREFERENCE_PHRASES: tuple[str, ...] = (
     "remember that",
@@ -315,7 +315,7 @@ def detect_explicit_phrases(utterance: str) -> bool:
     return any(phrase in lower for phrase in EXPLICIT_PREFERENCE_PHRASES)
 
 
-#: Effect kinds wired in v1. Kit revision #2: if the LLM returns any
+#: Effect kinds wired in v1. the design review revision #2: if the LLM returns any
 #: other ``effect_kind``, the extraction is forced ``matched=false`` so
 #: no confirmation whisper surfaces for a preference that wouldn't do
 #: anything. Follow-on batches extend this set as new effects wire.
@@ -391,7 +391,7 @@ def _parse_preference_extraction(
 ) -> PreferenceExtractionResult:
     """Parse LLM output + apply subject-matter validation + novel downgrade.
 
-    Kit revision #2 enforcement: effect_kind must be in WIRED_EFFECT_KINDS
+    the design review revision #2 enforcement: effect_kind must be in WIRED_EFFECT_KINDS
     or the result is forced matched=false. The extraction layer never
     surfaces a preference whose effect isn't wired — no confirmation
     whisper fires for a preference that wouldn't do anything.
@@ -416,7 +416,7 @@ def _parse_preference_extraction(
         return PreferenceExtractionResult(matched=False)
 
     effect_kind = (data.get("effect_kind") or "").strip().lower()
-    # Kit revision #2: force matched=false when effect isn't wired in v1.
+    # the design review revision #2: force matched=false when effect isn't wired in v1.
     if effect_kind not in WIRED_EFFECT_KINDS:
         logger.info(
             "PREF_EXTRACTION_EFFECT_NOT_WIRED: effect_kind=%r — rejecting as v1 no-op",

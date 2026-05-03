@@ -163,7 +163,7 @@ class TestPromptPosture:
         assert "steward" in sp.lower() or "helping someone" in sp.lower()
 
     def test_system_prompt_is_not_policy_engine_toned(self):
-        """Spec §Kit v4 #4 — implementation must not adopt policy-engine tone.
+        """Spec §the design review v4 #4 — implementation must not adopt policy-engine tone.
         Any drift toward 'evaluate whether rules are violated' phrasing is a
         finding per the batch spec. This sentinel catches the most obvious
         policy-engine phrasings."""
@@ -350,7 +350,7 @@ class TestDispatcherGate:
 
     @pytest.mark.asyncio
     async def test_permission_matrix_rejection_bypasses_messenger(self):
-        """Layer 1 — Kit §0 / Spec §0: Messenger never runs on exchanges the
+        """Layer 1 — the design review §0 / Spec §0: Messenger never runs on exchanges the
         permission matrix refused. RM-native refusal, callback not invoked."""
         from kernos.kernel.relational_dispatch import RelationalDispatcher
 

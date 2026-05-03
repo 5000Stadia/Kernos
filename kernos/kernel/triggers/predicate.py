@@ -1,6 +1,6 @@
 """Three-part predicate model for the unified trigger runtime.
 
-Kit must-fix #1 split the predicate into three independently-
+the design review must-fix #1 split the predicate into three independently-
 extensible axes:
 
 * **EventSelector** — the existing AST from
@@ -115,10 +115,10 @@ class DispatchPolicy:
 
     * ``dedup_window_seconds`` — within this window, the same trigger
       + same Y-match key cannot fire twice. Default 300s.
-    * ``missed_window`` — ``'skip'`` (default) | ``'catch_up'``. Kit
+    * ``missed_window`` — ``'skip'`` (default) | ``'catch_up'``. the design review
       must-fix W10. ``catch_up`` fires exactly once per actual missed
       window keyed by the missed window itself, not by the restart
-      event (per Kit's post-fold AC7 wording).
+      event (per the design review's post-fold AC7 wording).
     * ``retry_on_dispatch_failure`` — bounded retry count for the
       runtime → WLP handoff. NOT for execution failures inside
       workflows; those route through WLP's own retry posture.

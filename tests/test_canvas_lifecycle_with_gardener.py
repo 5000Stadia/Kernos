@@ -3,7 +3,7 @@
 Spec: SPEC-CANVAS-SECTION-MARKERS + GARDENER COHORT, integration test.
 
 Scaled down from the spec's originally-proposed lifecycle (which
-included preference capture) because Pillar 5 is deferred per Kit
+included preference capture) because Pillar 5 is deferred per the design review
 review. This test exercises: canvas_create-with-intent → Gardener
 picks a pattern → pages instantiate → member writes content → Gardener
 runs continuous-evolution heuristics → high-confidence proposal

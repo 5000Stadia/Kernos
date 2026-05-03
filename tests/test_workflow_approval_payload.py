@@ -63,7 +63,7 @@ class TestApprovalRequestClassifier:
             "execution_id": "e-1", "gate_nonce": "n-1",
             "gate_name": "g1", "pause_reason": "confirm",
             "response_event_type": "user.approval",
-            "response_predicate": {"op": "actor_eq", "value": "founder"},
+            "response_predicate": {"op": "actor_eq", "value": "owner"},
         }
         assert is_approval_request_payload({APPROVAL_REQUEST_KEY: block})
 
@@ -112,7 +112,7 @@ async def stack(tmp_path):
     agents = AgentRegistry()
     await agents.start(str(tmp_path))
     await agents._insert_record(AgentRecord(
-        agent_id="founder", instance_id="inst_a",
+        agent_id="owner", instance_id="inst_a",
         provider_key="legacy-noop",
     ))
     wfr = WorkflowRegistry()
@@ -166,7 +166,7 @@ def _approval_workflow():
         instance_id="inst_a",
         name="approval e2e",
         description="",
-        owner="founder",
+        owner="owner",
         version="1.0",
         bounds=Bounds(iteration_count=1, wall_time_seconds=30),
         verifier=Verifier(flavor="deterministic", check="ok"),
@@ -176,7 +176,7 @@ def _approval_workflow():
                 gate_ref="g1",
                 continuation_rules=ContinuationRules(on_failure="abort"),
                 parameters={
-                    "agent_id": "founder",
+                    "agent_id": "owner",
                     "payload": {
                         APPROVAL_REQUEST_KEY: {
                             "execution_id": "{workflow.execution_id}",
@@ -186,7 +186,7 @@ def _approval_workflow():
                             "response_event_type": "user.approval",
                             "response_predicate": {
                                 "op": "actor_eq",
-                                "value": "founder",
+                                "value": "owner",
                             },
                         },
                     },
@@ -202,7 +202,7 @@ def _approval_workflow():
             gate_name="g1",
             pause_reason="approve please",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=5,
             bound_behavior_on_timeout="abort_workflow",
         )],
@@ -219,9 +219,9 @@ class TestApprovalRequestEndToEnd:
         await event_stream.emit("inst_a", "cc.batch.report", {})
         await event_stream.flush_now()
         await _wait_for(
-            lambda: bool(stack["inbox"]._items.get(("inst_a", "founder"), [])),
+            lambda: bool(stack["inbox"]._items.get(("inst_a", "owner"), [])),
         )
-        items = stack["inbox"]._items[("inst_a", "founder")]
+        items = stack["inbox"]._items[("inst_a", "owner")]
         assert len(items) == 1
         payload = items[0].payload
         # Block is present and complete (all six fields).
@@ -283,7 +283,7 @@ class TestPausedAtGateEvent:
         assert payload["pause_reason"] == "approve please"
         assert payload["approval_event_type"] == "user.approval"
         assert payload["approval_event_predicate"] == {
-            "op": "actor_eq", "value": "founder",
+            "op": "actor_eq", "value": "owner",
         }
         assert payload["timeout_seconds"] == 5
         assert payload["bound_behavior_on_timeout"] == "abort_workflow"

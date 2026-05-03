@@ -1,6 +1,6 @@
 """Tier classification + budgets — explicit pure-function routing (PDI C5).
 
-Per architect's C5 guidance: tier conditions are distinct, not a
+Per design review's C5 guidance: tier conditions are distinct, not a
 fuzzy ladder. The most common implementation error is conflating
 them — retry on a non-transient failure, or modify when retry would
 fix it. The routing logic lives here as a pure function so it is
@@ -24,7 +24,7 @@ Tier conditions (locked in C5):
       or a stub-reload schema-mismatch synthetic result).
     - Step's intent unchanged; mechanism changes.
     - Per-step modify budget remains (default 2).
-    - Envelope-validated (Kit edit — "same intent" is model assertion,
+    - Envelope-validated (the design review edit — "same intent" is model assertion,
       not runtime guarantee).
     - Effect: model emits modified Step; runtime dispatches the new
       step.
@@ -48,7 +48,7 @@ Tier conditions (locked in C5):
       covenant block, etc. → terminate with reintegration context.
     - B2 (user disambiguation needed): mid-action ambiguity; structured
       ClarificationNeeded constructed; reintegration stored for next
-      turn (NO same-turn integration re-entry per Kit edit).
+      turn (NO same-turn integration re-entry per the design review edit).
     Lands in C6.
 
 The classify_routing pure function is the single source of truth for
@@ -211,7 +211,7 @@ def classify_routing(
     every transition. Tier handlers consume the output; they never
     re-classify.
 
-    Routing rules (architect-locked):
+    Routing rules (design review-locked):
 
       1. PROCEED only when all three questions pass.
       2. TIER_1_RETRY only for transient failures with retry budget.

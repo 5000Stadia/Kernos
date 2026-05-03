@@ -114,7 +114,7 @@ Whole-output `Public`. Per V1 invariant + gardener precedent:
 
 ## Uniform disclosure gate
 
-Per Kit edit #4. Inheritance from `_search_knowledge` was not
+Per the design review edit #4. Inheritance from `_search_knowledge` was not
 sufficient — entity resolution was pulling linked KnowledgeEntry
 objects without the `requesting_member_id` filter, and
 `_collect_maybe_same_as` had no member-aware filtering at all.
@@ -133,7 +133,7 @@ One policy. Every source. Negative cases tested per source.
 
 ## Archives excluded from cohort path
 
-Per Kit edit #2. `_search_archives` calls `reasoning.complete_simple`
+Per the design review edit #2. `_search_archives` calls `reasoning.complete_simple`
 twice (Haiku) to select and extract archives. Including archive
 search in the per-turn cohort would silently add LLM cost to every
 Kernos turn — violating the cohort's no-LLM-call invariant.
@@ -154,7 +154,7 @@ exclusion be revisited without paying the LLM cost.
 
 ## Empty / error distinction
 
-Per Kit edit #6. Three distinct cases with distinct handling:
+Per the design review edit #6. Three distinct cases with distinct handling:
 
 | Case | retrieval_attempted | knowledge/entities | runner outcome |
 |---|---|---|---|
@@ -171,7 +171,7 @@ failures.
 
 ## State intercept short-circuit
 
-Per Kit edit #5 / spec Section 2b. When the preference/state
+Per the design review edit #5 / spec Section 2b. When the preference/state
 intercept fires (queries containing keywords like "preference",
 "setting", "notification", etc.), `search_structured` returns a
 snapshot with:

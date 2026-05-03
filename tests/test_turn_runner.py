@@ -4,7 +4,7 @@ Acceptance criterion focus:
   - #2: ReasoningService routes to TurnRunner when feature flag is True;
         runs existing reasoning loop unchanged when False.
   - #3: Public API of ReasoningService.process_turn() is unchanged.
-  - #7 (Kit edit): TurnRunner threads required_safety_cohort_failures
+  - #7 (the design review edit): TurnRunner threads required_safety_cohort_failures
         to IntegrationService at the boundary, not just runner-
         representable. Acceptance test asserts the metadata flows
         across the seam.
@@ -159,7 +159,7 @@ async def test_turn_runner_without_enactment_service_raises_clear_error():
 
 
 # ---------------------------------------------------------------------------
-# Safety-degraded plumbing seam (Kit edit — acceptance criterion #7)
+# Safety-degraded plumbing seam (the design review edit — acceptance criterion #7)
 # ---------------------------------------------------------------------------
 
 

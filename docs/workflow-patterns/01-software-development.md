@@ -12,7 +12,7 @@ The reference pattern. Build-with-shipping discipline. Applies when a member's i
 ## Dials
 
 - **Charter volatility: LOW.** Once the philosophical commitments are authored (what this software is, what it refuses to be, its core pillars), they're defended hard. Pillar refinements happen rarely — usually in response to a "feel moment" during implementation that reveals a pillar was misstated.
-- **Actor count: MEDIUM-HIGH.** Architect + implementer + verifier + possibly infra + possibly design + occasional contributors. Even solo development involves multiple agents (planning agent, implementation agent, verifier agent).
+- **Actor count: MEDIUM-HIGH.** Design Review + implementer + verifier + possibly infra + possibly design + occasional contributors. Even solo development involves multiple agents (planning agent, implementation agent, verifier agent).
 - **Time horizon: LONG.** Code outlives any given spec cycle. Decisions made six months ago must remain legible now.
 
 ## Artifact mapping

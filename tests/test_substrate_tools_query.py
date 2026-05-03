@@ -108,7 +108,7 @@ def _make_workflow(*, instance_id="inst_a", workflow_id="wf-1", metadata=None) -
         instance_id=instance_id,
         name="test-workflow",
         description="",
-        owner="founder",
+        owner="owner",
         version="1",
         bounds=Bounds(iteration_count=1),
         verifier=Verifier(flavor="deterministic", check="x == y"),

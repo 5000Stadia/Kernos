@@ -39,7 +39,7 @@
     "step": "4",
     "action": "write_file overwrite \u2014 update campaign notes",
     "expected": "Agent calls write_file (overwrite), confirms update",
-    "actual": "There's no campaign notes file yet \u2014 I haven't created it. Want me to create one now that includes all the existing history *plus* this new update about The Architect's identity reveal and the sewer escape? Just say the word.",
+    "actual": "There's no campaign notes file yet \u2014 I haven't created it. Want me to create one now that includes all the existing history *plus* this new update about The Design Review's identity reveal and the sewer escape? Just say the word.",
     "passed": true,
     "note": "",
     "timestamp": "2026-03-14T21:57:33.743095+00:00"

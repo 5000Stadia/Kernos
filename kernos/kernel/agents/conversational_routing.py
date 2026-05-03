@@ -7,7 +7,7 @@ registry only resolves once asked. This module is the small
 adapter between "we have a phrase + scope" and "here's a routing
 decision."
 
-Per Kit edit v1 → v2: the registry does NOT own intent detection.
+Per the design review edit v1 → v2: the registry does NOT own intent detection.
 This module mirrors that boundary — it doesn't decide WHEN to
 route, only what to do once the handler has decided to ask.
 

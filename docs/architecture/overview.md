@@ -137,4 +137,4 @@ For the design thinking behind specific choices, see `/docs/reference/`:
 - `design-build-the-missing-handle.md` — the workspace-discipline design frame
 - `design-tool-execution-mediation.md` — the safety-and-tool design frame
 - `architecture-notebook.md` — the reasoning behind the primitives (historical, still informative)
-- `blueprint-original-vision.md` — the original founder vision (historical)
+- `blueprint-original-vision.md` — the original owner vision (historical)

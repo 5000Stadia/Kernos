@@ -23,8 +23,8 @@ class TestDslLeafs:
         }
 
     def test_eq_member_id_uses_actor_eq(self):
-        assert compile_dsl('event.member_id == "founder"') == {
-            "op": "actor_eq", "value": "founder",
+        assert compile_dsl('event.member_id == "owner"') == {
+            "op": "actor_eq", "value": "owner",
         }
 
     def test_eq_correlation_id_uses_correlation_eq(self):
@@ -92,7 +92,7 @@ class TestDslComposites:
     def test_and(self):
         out = compile_dsl(
             'event.event_type == "cc.batch.report" '
-            'AND event.member_id == "founder"',
+            'AND event.member_id == "owner"',
         )
         assert out["op"] == "AND"
         assert len(out["operands"]) == 2

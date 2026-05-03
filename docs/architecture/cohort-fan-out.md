@@ -49,7 +49,7 @@ Each cohort registers via a `CohortDescriptor`:
 
 ## Registry
 
-Architect-controlled, not user-extensible (matches V1's deferral of
+Design Review-controlled, not user-extensible (matches V1's deferral of
 dynamic user-built cohorts). Cohorts register at boot via explicit
 calls; the runner consumes the registered list. The registry enforces:
 
@@ -92,7 +92,7 @@ check) and documents what it cannot.
 - Each task wraps the cohort's run callable in
   `asyncio.wait_for(timeout=timeout_ms/1000)`.
 - The runner awaits `asyncio.wait(tasks, timeout=global_timeout,
-  return_when=ALL_COMPLETED)` — explicit task bookkeeping per Kit
+  return_when=ALL_COMPLETED)` — explicit task bookkeeping per the design review
   edit #3, NOT `asyncio.gather`. `wait` cleanly handles partial
   completion + ordered reconstruction + cancellation/drain.
 - Pending tasks past the global cap get `.cancel()`'d and drained
@@ -102,7 +102,7 @@ Outputs are reconstructed in **registration order** regardless of
 completion order — integration's filter phase relies on stable
 ordering.
 
-## Synthetic outputs (Kit edit #4)
+## Synthetic outputs (the design review edit #4)
 
 Failure paths yield synthetic CohortOutputs so the result-list shape
 is invariant: every registered cohort produces exactly one

@@ -69,7 +69,7 @@ class TestActionTypeSurface:
 
 
 # ===========================================================================
-# NOT NULL target_id (Kit pin v1→v2)
+# NOT NULL target_id (the design review pin v1→v2)
 # ===========================================================================
 
 
@@ -114,7 +114,7 @@ class TestTargetIdNotNull:
         # PRAGMA returns notnull as an int column; should be 1.
         assert cols["target_id"][3] == 1, (
             "cohort_action_log.target_id MUST be declared NOT NULL "
-            "(Kit pin v1→v2). SQLite NULL in composite keys defeats "
+            "(the design review pin v1→v2). SQLite NULL in composite keys defeats "
             "UNIQUE semantics."
         )
 

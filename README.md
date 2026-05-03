@@ -93,7 +93,7 @@ A workflow has a **trigger** (an event on the system's stream), an **action sequ
 
 Workflows ship as portable `.workflow.yaml` or `.workflow.md` files. **Authorable, shareable, installable like skills.** A new workflow is a new file plus a `register_workflow` call — not a code change, not a deploy.
 
-The developing system itself runs through one of these workflows: the architect (Kernos) coordinates spec drafting, review, implementation, and approval as a multi-stage loop with human gates at design and push points. The same primitive can run a household morning briefing, a team status sweep, or a small business's invoicing pipeline.
+The developing system itself runs through one of these workflows: the design review (Kernos) coordinates spec drafting, review, implementation, and approval as a multi-stage loop with human gates at design and push points. The same primitive can run a household morning briefing, a team status sweep, or a small business's invoicing pipeline.
 
 **Kernos isn't only a thing you talk to. It's a thing that does work for you in the background, on schedules and triggers you set, with safety gates wherever they belong, and a ledger you can audit at any time.**
 

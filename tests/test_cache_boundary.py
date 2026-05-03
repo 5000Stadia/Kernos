@@ -9,7 +9,7 @@ class TestStaticDynamicSplit:
         from kernos.messages.handler import TurnContext
         ctx = TurnContext()
         ctx.system_prompt_static = "## RULES\nBe helpful.\n\n## ACTIONS\nYou have tools."
-        ctx.system_prompt_dynamic = "## NOW\nIt is 3pm.\n\n## STATE\nUser: Kit"
+        ctx.system_prompt_dynamic = "## NOW\nIt is 3pm.\n\n## STATE\nUser: the design review"
         ctx.system_prompt = ctx.system_prompt_static + "\n\n" + ctx.system_prompt_dynamic
         assert "RULES" in ctx.system_prompt
         assert "ACTIONS" in ctx.system_prompt

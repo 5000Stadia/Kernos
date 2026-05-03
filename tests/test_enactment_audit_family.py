@@ -1,7 +1,7 @@
 """Tests for the enactment.* audit family — completeness + invariants
 (PDI C7).
 
-Per architect's C7 guidance:
+Per design review's C7 guidance:
   - Seven enactment.* event types ship and are consistently shaped.
   - References-not-dumps: plan payloads in audit entries reference
     plans by ID; never embed plan content.
@@ -429,7 +429,7 @@ async def test_terminated_emits_with_required_fields():
 
 @pytest.mark.asyncio
 async def test_full_machinery_success_emits_dedicated_subtype():
-    """Per Kit re-review: full-machinery completions emit
+    """Per the design review re-review: full-machinery completions emit
     success_full_machinery, not success_thin_path. Path-distinguished
     subtypes give audit consumers diagnostic value when filtering by
     termination shape.

@@ -3,20 +3,20 @@
 Per the COHORT-ADAPT-GARDENER spec. Adapts gardener's existing
 state into a per-turn ``CohortOutput`` the integration layer can
 consume. v1 is a STATUS SURFACE only (Option A from the spec's
-conceptual question; Kit confirmed). The cohort:
+conceptual question; the design review confirmed). The cohort:
 
   - Reads gardener's non-mutating snapshot via
     ``GardenerService.current_observation_snapshot``. No model
     calls. No coalescer drain. No event emission.
   - Resolves the active canvas from ``CohortContext.active_spaces``
     using the explicit "exactly one canvas → use it; zero or
-    multiple → has_active_canvas: False" rule (Kit edit #5).
-  - Filters restricted-pattern items at source per Kit edit #3.
+    multiple → has_active_canvas: False" rule (the design review edit #5).
+  - Filters restricted-pattern items at source per the design review edit #3.
     The cohort returns one ``CohortOutput`` per turn with
     ``visibility=Public``; restricted items are absent from the
     payload entirely (not marked, not redacted, just absent).
   - Returns a fully-typed ``CohortOutput`` from the run callable
-    per Kit edit #2 (the runner mints the canonical ``cohort_run_id``).
+    per the design review edit #2 (the runner mints the canonical ``cohort_run_id``).
 
 The cohort's per-turn role is observational: surface what
 gardener has already concluded so integration can fold pending
@@ -65,12 +65,12 @@ CanvasResolver = Callable[[CohortContext], str | None]
 
 # Pattern-privacy predicate: given a pattern name, return True iff
 # the pattern is restricted. Restricted items are filtered out of
-# the cohort's payload entirely (Kit edit #3 / spec Section 4).
+# the cohort's payload entirely (the design review edit #3 / spec Section 4).
 RestrictedPatternPredicate = Callable[[str], bool]
 
 
 # ---------------------------------------------------------------------------
-# Active-canvas resolution (Kit edit #5)
+# Active-canvas resolution (the design review edit #5)
 # ---------------------------------------------------------------------------
 
 
@@ -81,7 +81,7 @@ def _default_canvas_resolver(
 ) -> str | None:
     """Default active-canvas resolution.
 
-    Rule per spec Section 2a + Kit edit #5: exactly one canvas
+    Rule per spec Section 2a + the design review edit #5: exactly one canvas
     space in ``ctx.active_spaces`` → use it. Zero or multiple →
     return None (cohort emits ``has_active_canvas: False``).
 

@@ -7,7 +7,7 @@ supports per-operation overrides. This module is the small adapter
 that turns a (descriptor, operation) pair into the existing gate's
 effect token.
 
-Mapping (Kit's response on question 1):
+Mapping (the design review's response on question 1):
 
     READ        → "read"
     SOFT_WRITE  → "soft_write"
@@ -36,7 +36,7 @@ GATE_EFFECT_FOR_CLASSIFICATION: dict[GateClassification, str] = {
     GateClassification.READ: "read",
     GateClassification.SOFT_WRITE: "soft_write",
     GateClassification.HARD_WRITE: "hard_write",
-    # Per Kit's response to question 1: delete maps to hard_write in v1.
+    # Per the design review's response to question 1: delete maps to hard_write in v1.
     # Promoting to a separate destructive_irreversible category is a
     # future spec; this mapping changes when that lands.
     GateClassification.DELETE: "hard_write",

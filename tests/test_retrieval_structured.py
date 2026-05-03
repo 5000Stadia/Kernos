@@ -243,7 +243,7 @@ async def test_search_structured_state_intercept_short_circuits():
 
 @pytest.mark.asyncio
 async def test_search_structured_unexpected_error_propagates():
-    """Per Kit edit #6: only embedding failure swallows. Other errors
+    """Per the design review edit #6: only embedding failure swallows. Other errors
     (e.g., state-store raising mid-query) bubble to the runner."""
     svc = _service()
     svc.state.query_knowledge = AsyncMock(
@@ -258,7 +258,7 @@ async def test_search_structured_unexpected_error_propagates():
 
 
 # ---------------------------------------------------------------------------
-# include_archives gating (Kit edit #2)
+# include_archives gating (the design review edit #2)
 # ---------------------------------------------------------------------------
 
 
@@ -294,7 +294,7 @@ async def test_search_structured_invokes_archive_when_included():
 
 
 # ---------------------------------------------------------------------------
-# Uniform disclosure gate — entity-linked knowledge (Kit edit #4)
+# Uniform disclosure gate — entity-linked knowledge (the design review edit #4)
 # ---------------------------------------------------------------------------
 
 

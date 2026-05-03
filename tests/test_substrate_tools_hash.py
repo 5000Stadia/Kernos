@@ -10,7 +10,7 @@ Pins:
   registered_at, version) is excluded.
 * Non-volatile fields (display_name, aliases, intent_summary,
   action_sequence, predicate, trigger, verifier, bounds) are included.
-* ``prev_version_id`` IS included (Kit edit v1 → v2) — modifications
+* ``prev_version_id`` IS included (the design review edit v1 → v2) — modifications
   cannot be retargeted by swapping prev_version_id while keeping the
   same hash.
 """
@@ -32,7 +32,7 @@ def _canonical_descriptor(**overrides) -> dict:
         "display_name": "Test Workflow",
         "aliases": ["test", "spec"],
         "intent_summary": "verify the canonical hash",
-        "owner": "founder",
+        "owner": "owner",
         "instance_id": "inst_a",
         "bounds": {"iteration_count": 1},
         "verifier": {"flavor": "deterministic", "check": "x == y"},
@@ -101,7 +101,7 @@ class TestDeterminism:
 class TestVolatileExclusion:
     def test_volatile_field_set_pinned(self):
         # Pin the exact set so adding a field is a deliberate substrate
-        # change. prev_version_id MUST NOT be in this set (Kit edit v1→v2).
+        # change. prev_version_id MUST NOT be in this set (the design review edit v1→v2).
         assert DESCRIPTOR_VOLATILE_FIELDS == frozenset({
             "id",
             "workflow_id",
@@ -197,13 +197,13 @@ class TestNonVolatileInclusion:
 
 
 # ===========================================================================
-# AC #20: prev_version_id is in the hash (Kit edit v1 → v2)
+# AC #20: prev_version_id is in the hash (the design review edit v1 → v2)
 # ===========================================================================
 
 
 class TestPrevVersionIdInclusion:
     def test_prev_version_id_changes_hash(self):
-        """The Kit edit guard: identical descriptors with different
+        """The the design review edit guard: identical descriptors with different
         prev_version_id values MUST hash differently. Without this,
         a modification approved against routine A could be applied to
         routine B by swapping prev_version_id at registration."""

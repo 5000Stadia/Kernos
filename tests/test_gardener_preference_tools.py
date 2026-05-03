@@ -193,7 +193,7 @@ async def test_extract_tool_unmatched_lightweight_returns_no_op(env):
 
 
 async def test_extract_tool_non_wired_effect_no_op(env):
-    """Kit revision #2 — LLM returns effect_kind=other → silent no-op."""
+    """the design review revision #2 — LLM returns effect_kind=other → silent no-op."""
     reasoning, svc, _, stub, _ = env
     canvas_id = await _make_sd_canvas(svc)
     stub.payload = {

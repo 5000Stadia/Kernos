@@ -10,7 +10,7 @@ V1's redaction invariant applies automatically — descriptions sit
 inside the redaction boundary; integration encodes their effect
 into presence_directive without quoting; presence never sees them.
 
-Per Kit edits #4 / #6 / #7 / #8:
+Per the design review edits #4 / #6 / #7 / #8:
 - Description hard-capped at 2000 chars (pathological-rule defense).
 - Rule count capped at 50 with safety-priority order
   (must_not+block > must_not+confirm > must_not+notify|silent >
@@ -51,12 +51,12 @@ logger = logging.getLogger(__name__)
 
 COHORT_ID = "covenant"
 TIMEOUT_MS = 300
-DESCRIPTION_CAP = 2000  # chars (Kit edit #5)
+DESCRIPTION_CAP = 2000  # chars (the design review edit #5)
 RULE_COUNT_CAP = 50
 RESTRICTED_REASON = "covenant_set"
 
 
-# Safety-priority truncation order (Kit edit #6). Within each tier,
+# Safety-priority truncation order (the design review edit #6). Within each tier,
 # recency (newest first). Safety-critical rules are never silently
 # dropped under the rule-count cap.
 def _safety_priority(rule: CovenantRule) -> int:
@@ -131,7 +131,7 @@ def _rank_and_truncate(
     tiebreaker). Across tiers, safety-critical rules ALWAYS
     survive the cap before lower-priority rules — never silently
     drop a must_not+block rule for a recency-newer preference
-    (Kit edit #6).
+    (the design review edit #6).
     """
     # Sort by (priority_tier, -created_at). created_at is ISO 8601 so
     # lexicographic descending = newer-first within tier.
@@ -168,7 +168,7 @@ def _negative_iso(iso: str) -> str:
 def _filter_member_scoped(
     rules: list[CovenantRule], member_id: str,
 ) -> list[CovenantRule]:
-    """Apply member filter Python-side (Kit edit #7).
+    """Apply member filter Python-side (the design review edit #7).
 
     Keeps:
       - instance-level rules (member_id == "")
@@ -241,7 +241,7 @@ def make_covenant_cohort_run(
             logger.exception("COVENANT_COHORT_QUERY_FAILED")
             raise
 
-        # Member filtering Python-side (Kit edit #7).
+        # Member filtering Python-side (the design review edit #7).
         filtered = _filter_member_scoped(raw_rules, ctx.member_id)
 
         if not filtered:

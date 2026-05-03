@@ -7,7 +7,7 @@ depends on the abstract Protocol. v1 ships ``NotionAgentInbox`` as
 the available concrete during the developing-Kernos period;
 installations choose whether to bind it.
 
-Provider-configuration-containment (Kit edit, narrow review):
+Provider-configuration-containment (the design review edit, narrow review):
 ``route_to_agent`` depends on a configured ``AgentInbox`` provider
 rather than a hardcoded default. The action library's
 ``RouteToAgentAction`` raises ``AgentInboxUnavailable`` with a clear
@@ -40,7 +40,7 @@ class AgentInboxUnavailable(RuntimeError):
 #
 # When a workflow's gate_ref action is a ``route_to_agent`` posting an
 # approval-shape message, the action's payload includes a documented
-# ``approval_request`` block. Receiving agents (founder UI, architect
+# ``approval_request`` block. Receiving agents (owner UI, design review
 # agent, future agents) read this block to know what response to
 # compose; the response event MUST carry ``execution_id`` and
 # ``gate_nonce`` in its payload so the engine's match logic resumes
@@ -82,11 +82,11 @@ Authoring example (descriptor `route_to_agent.parameters.payload`)::
         execution_id: "{workflow.execution_id}"
         gate_nonce:   "{workflow.gate_nonce}"
         gate_name:    "approve_deploy"
-        pause_reason: "founder must confirm before publishing"
+        pause_reason: "owner must confirm before publishing"
         response_event_type: "user.approval"
         response_predicate:
           op: actor_eq
-          value: founder
+          value: owner
 
 The engine substitutes ``{workflow.execution_id}`` /
 ``{workflow.gate_nonce}`` before dispatching the action. The receiver

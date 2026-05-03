@@ -1,9 +1,9 @@
 # DESIGN: Ledger Memory vs Facts — Why They're Separate and How Extraction Should Work
 
-**Status:** Design exploration for founder + Kit review before spec.
+**Status:** Design exploration for owner + the design review review before spec.
 **Date:** 2026-03-30
-**Context:** Challenging the per-turn extraction pipeline. Kit proposed
-checkpointed boundary-driven extraction. Founder asks: what IS the
+**Context:** Challenging the per-turn extraction pipeline. the design review proposed
+checkpointed boundary-driven extraction. Owner asks: what IS the
 dividing line between ledger memory and facts?
 
 ---

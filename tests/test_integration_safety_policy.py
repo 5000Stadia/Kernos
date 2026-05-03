@@ -1,6 +1,6 @@
 """Tests for the safety-policy plumbing — COHORT-ADAPT-COVENANT C1.
 
-Covers acceptance criteria 16, 17, 18 + Kit's load-bearing input
+Covers acceptance criteria 16, 17, 18 + the design review's load-bearing input
 (safety-degraded fail-soft must never be respond_only):
 
   - IntegrationInputs.required_safety_cohort_failures field exists
@@ -177,7 +177,7 @@ async def test_no_safety_failures_execute_tool_still_allowed():
             "narration_context": "reading the doc",
         },
         "presence_directive": "execute and narrate",
-        # PDI Kit edit: action-shape decided_actions REQUIRE an
+        # PDI the design review edit: action-shape decided_actions REQUIRE an
         # explicit ActionEnvelope. Integration constructs the envelope
         # alongside the decision; the runner rejects action-shape
         # output without one.
@@ -391,7 +391,7 @@ async def test_safety_failure_rejects_pivot():
 
 
 # ---------------------------------------------------------------------------
-# Kit's load-bearing input: safety-degraded fail-soft is never respond_only
+# the design review's load-bearing input: safety-degraded fail-soft is never respond_only
 # ---------------------------------------------------------------------------
 
 

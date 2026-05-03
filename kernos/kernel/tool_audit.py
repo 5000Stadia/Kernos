@@ -1,6 +1,6 @@
 """Audit-log integration for workshop tool invocations.
 
-Per the Kit-revised spec:
+Per the the design review-revised spec:
 
 - Service-bound and internal tool invocations both flow into the
   existing audit log (no new log surface). The shape adds two
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Normalized category vocabulary (Kit edit 4)
+# Normalized category vocabulary (the design review edit 4)
 # ---------------------------------------------------------------------------
 
 
@@ -112,7 +112,7 @@ class ToolInvocationAuditEntry:
     """One audit entry produced by a workshop tool invocation.
 
     Persists into the existing audit log. The shape adds the two
-    category fields the Kit-revised spec requires; everything else
+    category fields the the design review-revised spec requires; everything else
     matches the existing tool_call audit shape so operator-level
     filtering and replay continue to work.
 

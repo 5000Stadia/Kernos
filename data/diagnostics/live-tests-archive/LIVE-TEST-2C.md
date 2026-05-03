@@ -49,18 +49,18 @@ Ceiling re-lowered to 3000 (was recomputed to 156,668 after first compaction).
 | 6 | Send 1 D&D message (guard encounter) | Compaction fires (cumulative was 2841, ceiling now 3000) | **Compaction #2 fired.** compaction_number=2, global=2, history_tokens=3897 | PASS |
 | 7 | Check Ledger #1 unchanged | Byte-identical to Phase 1 capture | **SOFT PASS** — Content is identical. Regex boundary captures slightly different trailing whitespace (2937 vs 2932 chars) due to what follows the entry (Living State vs Compaction #2 header). The LLM did NOT modify Ledger #1 content. | SOFT PASS |
 | 8 | Check Compaction #2 appended | Present in document | ✅ Compaction #2 present, covers ratfolk negotiation, trap disarming, laboratory discovery, Captain Thorne connection, guard encounter | PASS |
-| 9 | Check Living State rewritten | Updated with Phase 2 content | ✅ Living State now includes lab evidence, Captain Thorne intel, The Architect, poison details, guard confrontation, Mara threat | PASS |
+| 9 | Check Living State rewritten | Updated with Phase 2 content | ✅ Living State now includes lab evidence, Captain Thorne intel, The Design Review, poison details, guard confrontation, Mara threat | PASS |
 
 **Compaction #2 document quality:**
 - Total: 12,988 chars across both Ledger entries + Living State
-- Ledger #2: Extremely detailed — includes ratfolk negotiation details, trap mechanics (natural 20), full lab inventory, all evidence items catalogued, Captain Thorne/Architect connection established
+- Ledger #2: Extremely detailed — includes ratfolk negotiation details, trap mechanics (natural 20), full lab inventory, all evidence items catalogued, Captain Thorne/Design Review connection established
 - Living State: Complete operational picture — current location, evidence in hand, allies, immediate decisions required, unresolved questions
 
 ### Phase 3: Historical Context Query
 
 | Step | Action | Expected | Actual | Result |
 |------|--------|----------|--------|--------|
-| 10 | Send: "What were we doing in the campaign? Remind me about the warehouse and Captain Thorne." | Agent references compaction-era content | Agent provided detailed recap including warehouse details (Ashen Veil symbol, tripwire, back room), Captain Thorne (supply manifest, Grey Meridian, payment ledger to The Architect), and current situation | PASS |
+| 10 | Send: "What were we doing in the campaign? Remind me about the warehouse and Captain Thorne." | Agent references compaction-era content | Agent provided detailed recap including warehouse details (Ashen Veil symbol, tripwire, back room), Captain Thorne (supply manifest, Grey Meridian, payment ledger to The Design Review), and current situation | PASS |
 | 11 | Check specific references | warehouse ✅, Thorne ✅, Pip ✅, Ashen Veil ✅ | All four references present in response | PASS |
 
 ### Phase 4: Daily Space — Separate Tracking
@@ -118,7 +118,7 @@ Daily (space_5b632b42)
 | 9 | Headroom estimation runs at space creation | ⏭ NOT TESTED | Gate 2 space creation didn't fire during this test. Code path tested in handler integration (estimate_headroom called in _trigger_gate2). |
 | 10 | Daily space gets default headroom | ✅ PASS | Daily initialized with conversation_headroom=8000, no LLM call. |
 | 11 | Ledger entries have message date ranges | ✅ PASS | Both D&D entries: `## Compaction #N — [start ISO] → [end ISO]` format. |
-| 12 | Minimum resolution floor holds | ✅ PASS | All named entities (Pip, Mara, Grimjaw, Thorne, The Architect, Denn), all decisions (DC 14, darkvision pending), all commitments (ratfolk obligation), all behavior-changing facts (poison undetectable in wine) preserved. |
+| 12 | Minimum resolution floor holds | ✅ PASS | All named entities (Pip, Mara, Grimjaw, Thorne, The Design Review, Denn), all decisions (DC 14, darkvision pending), all commitments (ratfolk obligation), all behavior-changing facts (poison undetectable in wine) preserved. |
 | 13 | Compaction document domain-adaptive | ✅ PASS | D&D: narrative style (story beats, character actions, world-building). Daily: operational style (task tracking, capability constraints, action items). Same prompt, different editorial voices. |
 | 14 | All existing tests pass | ✅ PASS | 568/568 passing. |
 

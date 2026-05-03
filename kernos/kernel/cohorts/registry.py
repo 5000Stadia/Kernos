@@ -1,16 +1,16 @@
 """Cohort registry.
 
-Per Section 2 of the COHORT-FAN-OUT-RUNNER spec: architect-controlled,
+Per Section 2 of the COHORT-FAN-OUT-RUNNER spec: design review-controlled,
 not user-extensible (matches V1's deferral of dynamic user-built
 cohorts). Cohorts register at boot via explicit calls; the runner
 consumes the registered list.
 
-Per Kit edit #1: sync callables are rejected at registration with a
+Per the design review edit #1: sync callables are rejected at registration with a
 clear error pointing at the requirement. The runner's failure-
 isolation guarantee only holds for cooperative coroutines, so v1
 refuses anything else at the boundary.
 
-Per Kit edit #2: `execution_mode` field on the descriptor; only
+Per the design review edit #2: `execution_mode` field on the descriptor; only
 `ASYNC` accepted in v1. `THREAD` is reserved for a future spec; the
 registry produces a clear error pointing at that future-spec
 landing zone rather than a generic value error.
@@ -37,7 +37,7 @@ _COHORT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class CohortRegistry:
-    """Architect-controlled cohort registry.
+    """Design Review-controlled cohort registry.
 
     The fan-out runner asks the registry for the registered list at
     invocation time and fires every member in parallel. Registration
@@ -49,7 +49,7 @@ class CohortRegistry:
         self._ids: set[str] = set()
 
     def register(self, descriptor: CohortDescriptor) -> None:
-        """Register a cohort. Validates Kit edit #1/#2 + uniqueness.
+        """Register a cohort. Validates the design review edit #1/#2 + uniqueness.
 
         Raises:
             CohortDescriptorError on validation failure.
@@ -105,7 +105,7 @@ class CohortRegistry:
             # Catch async callables wrapped behind a thin sync facade
             # by inspecting `inspect.unwrap` first. The check is
             # iscoroutinefunction on the unwrapped target. Anything
-            # not async is rejected per Kit edit #1.
+            # not async is rejected per the design review edit #1.
             unwrapped = inspect.unwrap(descriptor.run)
             if not inspect.iscoroutinefunction(unwrapped):
                 raise CohortDescriptorError(

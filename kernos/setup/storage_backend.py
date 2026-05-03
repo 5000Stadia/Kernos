@@ -10,7 +10,7 @@ Three backends:
 
 Per-install backend choice is recorded in ``config/storage_backend.yml``.
 
-**Kit's implementation hazard:** switching backends must be a cleanup
+**the design review's implementation hazard:** switching backends must be a cleanup
 operation, not a new write target. Ordering for every switch:
 
   1. Write every known secret to the target backend.
@@ -305,7 +305,7 @@ def active_backend(config_path: Path | None = None) -> StorageBackend | None:
 
 
 # ---------------------------------------------------------------------------
-# Switch (enforces Kit's ordering constraint)
+# Switch (enforces the design review's ordering constraint)
 # ---------------------------------------------------------------------------
 
 

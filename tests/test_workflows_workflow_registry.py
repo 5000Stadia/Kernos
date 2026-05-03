@@ -57,7 +57,7 @@ def _basic_workflow(**overrides) -> Workflow:
         instance_id="inst_a",
         name="test workflow",
         description="",
-        owner="founder",
+        owner="owner",
         version="1.0",
         bounds=Bounds(iteration_count=1, wall_time_seconds=30),
         verifier=Verifier(flavor="deterministic", check="state_set"),
@@ -120,7 +120,7 @@ class TestGateReferenceResolution:
             gate_name="g1",
             pause_reason="approve please",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=300,
             bound_behavior_on_timeout="abort_workflow",
         )
@@ -137,7 +137,7 @@ class TestApprovalGateValidation:
             gate_name="g1",
             pause_reason="x",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=300,
             bound_behavior_on_timeout="auto_proceed_with_default",
             default_value=None,
@@ -154,7 +154,7 @@ class TestApprovalGateValidation:
             gate_name="g1",
             pause_reason="x",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=300,
             bound_behavior_on_timeout="ride_it_out",
         )
@@ -182,7 +182,7 @@ class TestSafeDenyOnAutoProceed:
             gate_name=name,
             pause_reason="x",
             approval_event_type="user.approval",
-            approval_event_predicate={"op": "actor_eq", "value": "founder"},
+            approval_event_predicate={"op": "actor_eq", "value": "owner"},
             timeout_seconds=300,
             bound_behavior_on_timeout=(
                 "auto_proceed_with_default" if auto_proceed else "abort_workflow"
@@ -348,7 +348,7 @@ class TestRegistration:
             instance_id="inst_a",
             event_type="cc.batch.report",
             predicate={"op": "exists", "path": "event_id"},
-            owner="founder",
+            owner="owner",
         ))
         # Force register_workflow to mint the same trigger_id for
         # this registration; the second INSERT will hit the PRIMARY KEY
@@ -446,7 +446,7 @@ class TestRegisterFromFile:
             "instance_id: inst_a\n"
             "name: From file\n"
             "version: \"1.0\"\n"
-            "owner: founder\n"
+            "owner: owner\n"
             "bounds:\n"
             "  iteration_count: 1\n"
             "  wall_time_seconds: 30\n"

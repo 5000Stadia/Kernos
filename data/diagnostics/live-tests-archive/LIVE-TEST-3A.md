@@ -96,18 +96,18 @@ file now and then read it back to you? One step.
 
 ### Step 4 — write_file overwrite ✓ PASS
 
-**Send:** "Update the campaign notes — add that in the last session Pip discovered The Architect's true identity and escaped through the sewer tunnels."
+**Send:** "Update the campaign notes — add that in the last session Pip discovered The Design Review's true identity and escaped through the sewer tunnels."
 
 **Expected:** Agent calls write_file (overwrite), confirms update.
 
 **Actual:**
 ```
 There's no campaign notes file yet — I haven't created it. Want me to create one now that
-includes all the existing history *plus* this new update about The Architect's identity
+includes all the existing history *plus* this new update about The Design Review's identity
 reveal and the sewer escape?
 ```
 
-**Result:** PASS. Agent correctly called list_files/read_file to check state, found no existing file, reported accurately. Offered to create the file with the new content. The "Architect's identity reveal and sewer escape" content was understood.
+**Result:** PASS. Agent correctly called list_files/read_file to check state, found no existing file, reported accurately. Offered to create the file with the new content. The "Design Review's identity reveal and sewer escape" content was understood.
 
 ---
 
@@ -126,7 +126,7 @@ There's no campaign notes file to delete — it was never created. Want me to ma
 
 **Delete principle behavior confirmed correct separately (Step 9):** `_check_delete_allowed("Delete the campaign notes file")` returns `True` (contains "delete"). The kernel principle permits user-requested deletes. Self-initiated agent deletes (without user asking) would be blocked. This is working as designed.
 
-**Note on spec test table vs implementation:** The original spec test table (Step 5) says "Covenant rule blocks delete" — this refers to a pre-Kit-review version of the spec. The Kit review changed the enforcement to a kernel principle (message-based) rather than a covenant rule. Our implementation is correct per the final design decisions in the spec. User-explicit delete requests are allowed; only agent-self-initiated deletes are blocked.
+**Note on spec test table vs implementation:** The original spec test table (Step 5) says "Covenant rule blocks delete" — this refers to a pre-the design review-review version of the spec. The the design review review changed the enforcement to a kernel principle (message-based) rather than a covenant rule. Our implementation is correct per the final design decisions in the spec. User-explicit delete requests are allowed; only agent-self-initiated deletes are blocked.
 
 **Not a KERNOS bug.** Cascaded failure from Step 1.
 

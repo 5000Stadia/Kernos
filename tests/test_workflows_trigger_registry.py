@@ -46,7 +46,7 @@ def _make_trigger(**overrides) -> Trigger:
         instance_id="inst_a",
         event_type="cc.batch.report",
         predicate=_eq_predicate("payload.kind", "report"),
-        owner="founder",
+        owner="owner",
     )
     base.update(overrides)
     return Trigger(**base)

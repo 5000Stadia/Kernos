@@ -1,6 +1,6 @@
 """Tests for the friction observer (PDI C6).
 
-Per architect's C6 guidance: write-only sink. Tickets accumulate;
+Per design review's C6 guidance: write-only sink. Tickets accumulate;
 they do NOT affect dispatch. The Protocol exposes only record() —
 no query method through which a ticket could feed back to routing.
 """

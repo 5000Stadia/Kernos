@@ -5,10 +5,10 @@ Acceptance criteria covered:
         briefing.decided_action.kind.
   - #9: Render-only kinds take thin path: respond_only, defer,
         constrained_response, pivot, clarification_needed,
-        propose_tool (Kit edit — propose_tool is render-only).
+        propose_tool (the design review edit — propose_tool is render-only).
   - #10: Dispatch kind takes full machinery path: execute_tool only.
         (C4 stubs full machinery; C5+ implements.)
-  - #11: Thin path is render-only (Kit edit). Tests verify thin path
+  - #11: Thin path is render-only (the design review edit). Tests verify thin path
         performs NO tool dispatch under any condition.
   - Hard rule (acceptance #28): safety-degraded fail-soft never
         produces respond_only — but this is upstream; thin path
@@ -140,7 +140,7 @@ async def test_pivot_takes_thin_path():
 
 @pytest.mark.asyncio
 async def test_propose_tool_takes_thin_path_with_proposal_rendered_subtype():
-    """Per Kit edit: propose_tool is render-only on the thin path.
+    """Per the design review edit: propose_tool is render-only on the thin path.
     The proposal is awaiting next-turn user confirmation; this turn
     renders the proposal text only. Subtype reflects the rendering
     so audit can distinguish from plain conversational thin-path."""
@@ -822,7 +822,7 @@ async def test_tier_2_modify_on_corrective_signal():
 
 @pytest.mark.asyncio
 async def test_tier_2_modify_envelope_violation_terminates_b1():
-    """Per Kit edit: tier-2 modify is envelope-validated. A modified
+    """Per the design review edit: tier-2 modify is envelope-validated. A modified
     step that crosses allowed_tool_classes is rejected; B1 fires."""
     audit_sink: list[dict] = []
     bad_modified = _step(step_id="bad-mod", tool_class="slack")
@@ -1079,7 +1079,7 @@ async def test_tier_4_reassemble_budget_exhaustion_terminates_b1():
 
 @pytest.mark.asyncio
 async def test_tier_4_reassemble_envelope_violation_terminates_b1():
-    """Per Kit edit: tier-4 reassemble new-plan path is envelope-
+    """Per the design review edit: tier-4 reassemble new-plan path is envelope-
     validated. A reassembled plan that crosses allowed_tool_classes
     terminates B1."""
     initial_plan = _plan(steps=[_step(step_id="i")], plan_id="plan-i")
@@ -1199,7 +1199,7 @@ def test_enactment_service_has_no_integration_dependency_by_construction():
     named or referencing 'integration'. Same-turn integration re-entry
     on B2 is impossible because the dependency is unreachable.
 
-    Per architect's C6 guidance: not a runtime check; an import-time /
+    Per design review's C6 guidance: not a runtime check; an import-time /
     construction-time impossibility."""
     import inspect
     sig = inspect.signature(EnactmentService.__init__)
@@ -1449,7 +1449,7 @@ async def test_friction_ticket_carries_redacted_telemetry_fields():
     }
 
 
-# ----- PDI C6: confirmation boundary tests (architect mandate) -----
+# ----- PDI C6: confirmation boundary tests (design review mandate) -----
 
 
 @pytest.mark.asyncio

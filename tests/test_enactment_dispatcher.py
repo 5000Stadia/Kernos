@@ -457,7 +457,7 @@ async def test_trace_sink_shared_with_reasoning_service_drain():
 
 @pytest.mark.asyncio
 async def test_dispatcher_does_not_drain_or_clear_trace_sink():
-    """Drain-ordering invariant (Kit final-signoff): dispatcher only
+    """Drain-ordering invariant (the design review final-signoff): dispatcher only
     appends. The handler owns the drain via
     ReasoningService.drain_tool_trace()."""
     sink: list[dict] = []

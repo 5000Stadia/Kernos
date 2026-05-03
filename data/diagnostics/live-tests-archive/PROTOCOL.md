@@ -18,7 +18,7 @@ Live tests use **direct handler invocation** — calling `MessageHandler.process
 
 A test harness script (e.g., `tests/live/run_2c_live.py`) constructs the handler with real persistence stores pointing at `./data`, sends messages in sequence, and inspects state between exchanges via CLI-equivalent calls.
 
-The founder reviews live test results and addresses issues as needed.
+The owner reviews live test results and addresses issues as needed.
 
 ---
 

@@ -110,8 +110,8 @@ but skipped in automation mode.
 
 ## Architectural enforcement
 
-Per Kit's CCV1 closure verdict (2026-05-02), the substrate-
-fidelity invariant is now load-bearing in the architect primer.
+Per the design review's CCV1 closure verdict (2026-05-02), the substrate-
+fidelity invariant is now load-bearing in the design review primer.
 Future migrations of the assembly-to-model pipeline must assert
 model-call inputs (system, messages, tools) at the seam, not
 user-facing response text. The three PDI input-fidelity

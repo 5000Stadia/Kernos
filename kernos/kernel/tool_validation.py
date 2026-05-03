@@ -1,6 +1,6 @@
 """Authoring-pattern validation for workshop tools.
 
-Per the Kit-revised spec, register_tool inspects the tool's
+Per the the design review-revised spec, register_tool inspects the tool's
 implementation source for patterns that bypass the runtime-context
 accessor. The tool's runtime context is invocation-scoped (Section 7
 of the spec): the per-member data directory, credentials accessor,
@@ -15,7 +15,7 @@ hardcoded absolute paths, raw filesystem access bypassing the
 runtime-context API, hardcoded member or instance identifiers, and
 direct reads of secret environment variables.
 
-Force-register flag (Kit edit 5): a tool author can pass force=True
+Force-register flag (the design review edit 5): a tool author can pass force=True
 to bypass these authoring-pattern checks. Force-registered tools are
 logged as overrides and surface only to the author. They do NOT
 bypass member isolation — runtime enforcement (the four checks in

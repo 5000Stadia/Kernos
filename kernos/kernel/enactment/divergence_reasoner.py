@@ -8,7 +8,7 @@ Four methods (locked surface):
     emit_pivot_step(inputs) -> Step
     formulate_clarification(inputs) -> ClarificationFormulationResult
 
-Per Kit edit (locked): the deterministic vs. prose split lives
+Per the design review edit (locked): the deterministic vs. prose split lives
 INSIDE judge_divergence. Modify, pivot, and clarification
 generation are SEPARATE hooks — they don't compose under a single
 evaluate() call.
@@ -26,7 +26,7 @@ judge_divergence path semantics:
     kind from the model's verdict.
 
 All four methods use the same chain caller (v1 same-model default
-locked per Kit edit). Per-hook differentiation deferred until soak
+locked per the design review edit). Per-hook differentiation deferred until soak
 telemetry justifies. Per-hook timing telemetry recorded so soak can
 justify later optimization.
 
@@ -426,7 +426,7 @@ class DivergenceReasoner:
     async def judge_divergence(
         self, inputs: DivergenceJudgeInputs
     ) -> DivergenceJudgment:
-        """Per Kit edit: the deterministic vs. prose split lives
+        """Per the design review edit: the deterministic vs. prose split lives
         inside this method. When the expectation has structured
         signals, those evaluate as a pure function — no model call.
         When prose-only OR structured passed but a deeper match needs
@@ -514,7 +514,7 @@ class DivergenceReasoner:
     ) -> ClarificationFormulationResult:
         """Tier-5 B2: produces ClarificationFormulationResult; the
         EnactmentService constructs ClarificationNeeded directly
-        from this output (no integration call). Per Kit edit, NO
+        from this output (no integration call). Per the design review edit, NO
         same-turn integration re-entry — the dependency is
         structurally absent on EnactmentService."""
         system = _CLARIFICATION_SYSTEM_PROMPT

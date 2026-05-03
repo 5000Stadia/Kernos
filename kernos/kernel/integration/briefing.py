@@ -6,7 +6,7 @@ contract (raw cohort outputs, secret covenants, hidden memory,
 restricted context-space material). Presence sees the briefing.
 The schema here is the architecture's safety surface.
 
-Per the revised INTEGRATION-LAYER spec (architect verdict
+Per the revised INTEGRATION-LAYER spec (design review verdict
 "REVISE TO MATCH REALITY", 2026-04-26):
 
 - Section 1 fixes the Briefing schema: ContextItem array,
@@ -179,7 +179,7 @@ class Outcome(str, Enum):
     filter phase reads `outcome != success` to recognise failed
     cohorts.
 
-    Per Kit edit #8: timeout cause is split into `timeout_per_cohort`
+    Per the design review edit #8: timeout cause is split into `timeout_per_cohort`
     (cohort exceeded its own `timeout_ms`) vs `timeout_global` (cohort
     cancelled because the global wall-clock cap was hit). The two
     cases differ in operator interpretation and downstream policy.
@@ -210,7 +210,7 @@ class CohortOutput:
     so audit serialisation is straightforward. Restricted cohorts'
     output must NOT be copied into briefing text — see Visibility.
 
-    Runner-owned metadata (added by COHORT-FAN-OUT-RUNNER, Kit edit
+    Runner-owned metadata (added by COHORT-FAN-OUT-RUNNER, the design review edit
     #4): `outcome` and `error_summary`. These live OUTSIDE the
     cohort-specific `output` payload to avoid namespace collision —
     real cohorts may legitimately use a `status` key inside
@@ -729,7 +729,7 @@ _ALLOWED_AMBIGUITY_TYPES = ("target", "parameter", "approach", "intent", "other"
 class ClarificationPartialState:
     """Bounded state attached to a B2-routed clarification.
 
-    Per Kit edit: typed dataclass with explicit char caps rather
+    Per the design review edit: typed dataclass with explicit char caps rather
     than a free-form dict. First-pass clarifications carry
     `partial_state=None` (nothing has been attempted yet); B2
     clarifications carry a populated state with the attempted
@@ -1184,7 +1184,7 @@ class AuditTrace:
 
 
 # ---------------------------------------------------------------------------
-# ActionEnvelope (PDI V1 extension — Kit edit)
+# ActionEnvelope (PDI V1 extension — the design review edit)
 # ---------------------------------------------------------------------------
 
 
@@ -1203,7 +1203,7 @@ _ACTION_SHAPE_KINDS: frozenset[ActionKind] = frozenset(
 class ActionEnvelope:
     """Explicit constraints on an action-shape decided_action.
 
-    Per Kit edit: ActionEnvelope is structural, not computed from
+    Per the design review edit: ActionEnvelope is structural, not computed from
     prose. EnactmentService validates every plan-changing tier
     (initial plan + Tier-2 modify + Tier-3 pivot + Tier-4
     reassemble) against this envelope. Violation → terminate B1.
@@ -1302,7 +1302,7 @@ class ActionEnvelope:
 
 def action_kind_requires_envelope(kind: ActionKind) -> bool:
     """True when a decided_action of this kind must carry a Briefing
-    action_envelope. PDI Kit edit: only execute_tool dispatches; only
+    action_envelope. PDI the design review edit: only execute_tool dispatches; only
     execute_tool requires the envelope. Conversational + render-only
     kinds (including propose_tool, which is render-only) do not."""
     return kind in _ACTION_SHAPE_KINDS
@@ -1402,7 +1402,7 @@ class Briefing:
             raise BriefingValidationError(
                 "Briefing.action_envelope must be None or an ActionEnvelope"
             )
-        # Action-shape decided_actions require an envelope (Kit edit).
+        # Action-shape decided_actions require an envelope (the design review edit).
         # Render-only kinds must NOT carry an envelope — keeps the
         # contract crisp: an envelope only exists when there's a real
         # dispatch to constrain.

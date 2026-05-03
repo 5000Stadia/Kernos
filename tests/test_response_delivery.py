@@ -402,7 +402,7 @@ async def test_tool_iteration_counter_increments_explicitly():
 
 @pytest.mark.asyncio
 async def test_response_delivery_does_not_drain_trace_sink():
-    """Drain-ordering invariant (Kit final-signoff): response_delivery
+    """Drain-ordering invariant (the design review final-signoff): response_delivery
     writes/bridges into the trace sink but MUST NOT drain or clear
     it. The handler owns the drain.
 

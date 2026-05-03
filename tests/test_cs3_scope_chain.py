@@ -123,7 +123,7 @@ class TestScopeChainKnowledgeSearch:
         # Create knowledge in parent space
         parent_ke = _make_knowledge("k1", "Budget is $45k", space="parent_space")
         child_ke = _make_knowledge("k2", "Henderson meeting notes", space="child_space")
-        global_ke = _make_knowledge("k3", "User is named Kit", space="")
+        global_ke = _make_knowledge("k3", "User is named the design review", space="")
         await store.add_knowledge(parent_ke)
         await store.add_knowledge(child_ke)
         await store.add_knowledge(global_ke)

@@ -1,10 +1,10 @@
 # WORKFLOW-TRIGGERS-CONSOLIDATION v1
 
-**Status:** Draft for Kit review-before-CC. Framing-pass approved at
-`352ffafef4db817db26fe8e6471ccb5c` (Kit verdict: APPROVE DIRECTION;
+**Status:** Draft for the design review review-before-CC. Framing-pass approved at
+`352ffafef4db817db26fe8e6471ccb5c` (the design review verdict: APPROVE DIRECTION;
 all 7 must-fix edits + 1 missed-seam folded). v1 spec drafted by CC
-(architect-on-rotation), deliberated with Codex on architectural
-decisions D1–D7, posted here for Kit review.
+(design review-on-rotation), deliberated with Codex on architectural
+decisions D1–D7, posted here for the design review review.
 
 **Substrate position:** rides on shipped CRB main v1, Drafter v2, STS,
 WDP, WLP, MODEL-AND-STATUS-V1. Closes the precursor-arc gap between
@@ -19,12 +19,12 @@ runtime that evaluates `descriptor.triggers` field on registered
 workflows and fires the workflow's action sequence is missing —
 shipping CRB without it half-meets the user-facing claim.
 
-The architect's framing pinned **Option B with A as convergence
+The design review's framing pinned **Option B with A as convergence
 trajectory**: existing user-facing surfaces (`manage_schedule`,
 calendar-event-trigger preferences) preserved; underneath, all three
 shapes evaluate through one runtime. That runtime ships in this spec.
 
-The framing also pinned **Founder's generalization** — `before/after Y`
+The framing also pinned **Owner's generalization** — `before/after Y`
 is a relationship operator that should keep `Y` neutral. v1 ships
 calendar / scheduler / internal Kernos events as first-class sources,
 with email + Notion source contracts defined for v1.x polling
@@ -83,7 +83,7 @@ construction.
 
 ## Three-part predicate model
 
-The framing's must-fix #1 (Kit pin) splits the predicate into three
+The framing's must-fix #1 (the design review pin) splits the predicate into three
 independently-extensible axes. Source code shape:
 
 ```python
@@ -485,7 +485,7 @@ Mirrors CRB approval→STS pattern (framing must-fix #6):
 Same trigger + same Y → same key → UNIQUE constraint catches
 duplicates. Replay produces identical key.
 
-### WLP idempotent dispatch (Kit must-fix, post-fold)
+### WLP idempotent dispatch (the design review must-fix, post-fold)
 
 The dispatch boundary has two distinct idempotency layers and they
 must compose cleanly across the crash window between
@@ -519,7 +519,7 @@ WLP by `fire_id`:
   re-dispatch is itself idempotent at WLP, so a network-retry
   storm cannot produce duplicate executions.
 
-This closes the seam Kit identified: a crash between WLP accept
+This closes the seam the design review identified: a crash between WLP accept
 and `mark_dispatched` no longer looks like a re-dispatch
 opportunity to the recovery sweep.
 
@@ -823,7 +823,7 @@ Codex review confer:
 
 ## Kick-back triggers
 
-Implementer escalates to architect when:
+Implementer escalates to design review when:
 
 1. **WLP `execute_workflow` contract doesn't match dispatch shape.**
    v1 assumes WLP exposes `execute_workflow(workflow_id, payload) →
@@ -841,7 +841,7 @@ Implementer escalates to architect when:
 4. **Pattern 05 strike reveals dependent imports.** If
    `pattern_heuristics.py` is referenced by code other than
    gardener (where the framing says it's dead-by-accident), the
-   strike requires architect call on each reference.
+   strike requires design review call on each reference.
 5. **CRB Compiler extension breaks an existing CRB v1 test pin.**
    If translating `descriptor.triggers → TriggerPredicate` requires
    modifying CRB v1 acceptance criteria, surface before C5 (the
@@ -859,7 +859,7 @@ Implementer escalates to architect when:
    transaction shape can't accommodate the additional
    trigger-registration step, surface before C5 — the alternative
    (best-effort registration with a recovery sweep) is a different
-   substrate posture and requires architect-level decision.
+   substrate posture and requires design review-level decision.
 8. **Catch-up cannot derive one canonical "latest missed window."**
    v1 pins "claim ONE catch-up fire per predicate after restart,
    regardless of downtime length." This requires the predicate's

@@ -3,7 +3,7 @@
 Covers:
 - Original four required fields preserved (back-compat with existing
   workshop tools).
-- Per-operation classification (Kit edit 1).
+- Per-operation classification (the design review edit 1).
 - Tool-level shorthand fallback.
 - Fail-closed default (soft_write) when nothing declared.
 - Service-id cross-validation against the registry.
@@ -120,7 +120,7 @@ def test_classification_defaults_to_soft_write_when_nothing_declared():
 
 
 def test_default_is_fail_closed_not_read():
-    """Per architect's revision 1: missing classification fails closed,
+    """Per design review's revision 1: missing classification fails closed,
     not open. Previously the implicit default was read; now it's soft_write."""
     desc = parse_tool_descriptor(_valid_minimal())
     assert desc.classification_for(None) != GateClassification.READ
@@ -149,12 +149,12 @@ def test_invalid_classification_raises():
 
 
 # ---------------------------------------------------------------------------
-# Per-operation classification (Kit edit 1)
+# Per-operation classification (the design review edit 1)
 # ---------------------------------------------------------------------------
 
 
 def test_per_operation_classification_overrides_tool_shorthand():
-    """Kit edit 1: per-operation overrides at gate-routing time when
+    """the design review edit 1: per-operation overrides at gate-routing time when
     both are present."""
     raw = _valid_minimal()
     raw["gate_classification"] = "soft_write"  # tool-level shorthand
@@ -276,7 +276,7 @@ def test_aggregation_per_member_explicit_accepted():
 
 
 def test_aggregation_cross_member_rejected_with_pointer():
-    """Per Kit's call: cross_member reserved-but-rejected in v1.
+    """Per the design review's call: cross_member reserved-but-rejected in v1.
     Error message points at the future spec."""
     raw = _valid_minimal()
     raw["aggregation"] = "cross_member"

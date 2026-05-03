@@ -12,7 +12,7 @@ The system prompt is intentionally explicit about:
   - the four-layer model (cohorts → integration → presence → expression)
   - the named phases (collect / filter / integrate / decide / brief)
   - the read-only tool surface restriction
-  - the redaction invariant (Kit edit #4 — the load-bearing safety
+  - the redaction invariant (the design review edit #4 — the load-bearing safety
     property: integration may use restricted inputs, briefing must be
     presence-safe)
   - the `__finalize_briefing__` contract
@@ -177,7 +177,7 @@ FINALIZE_TOOL_SCHEMA: dict = {
                     "instruction only."
                 ),
             },
-            # PDI Kit edit: action_envelope is REQUIRED when
+            # PDI the design review edit: action_envelope is REQUIRED when
             # decided_action.kind is execute_tool. Conversational and
             # render-only kinds (including propose_tool) MUST omit it
             # — there's no dispatch to constrain.

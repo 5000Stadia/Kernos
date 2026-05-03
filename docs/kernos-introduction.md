@@ -195,7 +195,7 @@ and [`architecture/integration-wire-live.md`](architecture/integration-wire-live
 - **Set behavioral rules once.** "Always confirm before spending
   money." "Don't ask follow-ups about food logging." "Never reference
   the surprise party." Captured once, enforced permanently.
-- **Share access selectively.** Add a spouse, a co-founder, a
+- **Share access selectively.** Add a spouse, a co-owner, a
   housemate. Declare what each can see. The system makes judgment
   calls inside the permissions.
 - **Get smarter over time.** The system compacts conversations,

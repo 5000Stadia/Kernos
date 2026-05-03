@@ -138,7 +138,7 @@ def test_cohort_output_default_outcome_is_success():
 
 
 def test_cohort_output_synthetic_with_outcome_and_error_summary():
-    """COHORT-FAN-OUT-RUNNER Kit edit #4: synthetic outputs carry
+    """COHORT-FAN-OUT-RUNNER the design review edit #4: synthetic outputs carry
     outcome + error_summary as runner-owned metadata; output dict
     stays empty."""
     co = CohortOutput(
@@ -195,7 +195,7 @@ def test_cohort_output_rejects_non_outcome_value():
 
 
 def test_outcome_enum_has_five_variants():
-    """Per Kit edit #8: timeout split into per-cohort vs global."""
+    """Per the design review edit #8: timeout split into per-cohort vs global."""
     assert {o.value for o in Outcome} == {
         "success",
         "timeout_per_cohort",
@@ -965,7 +965,7 @@ def test_briefing_respond_only_rejects_action_envelope():
 
 
 def test_briefing_propose_tool_rejects_action_envelope():
-    """Per Kit edit: propose_tool is render-only on the thin path. The
+    """Per the design review edit: propose_tool is render-only on the thin path. The
     actual execute_tool that fires on the next turn carries its own
     envelope. propose_tool itself MUST NOT carry one."""
     with pytest.raises(BriefingValidationError, match="action_envelope"):

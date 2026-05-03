@@ -23,7 +23,7 @@ def _yaml_workflow_text() -> str:
         instance_id: inst_a
         name: Morning briefing
         version: "1.0"
-        owner: founder
+        owner: owner
         bounds:
           iteration_count: 1
           wall_time_seconds: 30
@@ -54,7 +54,7 @@ def _json_workflow_text() -> str:
         "instance_id": "inst_a",
         "name": "Morning briefing",
         "version": "1.0",
-        "owner": "founder",
+        "owner": "owner",
         "bounds": {"iteration_count": 1, "wall_time_seconds": 30},
         "verifier": {"flavor": "deterministic", "check": "briefing_delivered"},
         "action_sequence": [
@@ -78,7 +78,7 @@ def _markdown_workflow_text() -> str:
         instance_id: inst_a
         name: Morning briefing
         version: "1.0"
-        owner: founder
+        owner: owner
         bounds:
           iteration_count: 1
           wall_time_seconds: 30

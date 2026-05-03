@@ -10,7 +10,7 @@ DOMAIN-AGENT-REGISTRY C3. Pins:
       4. Default-agent three-step priority chain
       5. NotFound
   - Paused records are NOT discovered by natural resolution
-    (Kit edit, v1 → v2)
+    (the design review edit, v1 → v2)
   - Ranker injection works without baked-in dependency (AC #12);
     no ranker = step 3 skipped
   - Default-agent priority chain four cases (AC #16):
@@ -85,7 +85,7 @@ class TestExactAgentId:
 
     async def test_paused_agent_id_not_resolved(self, registry):
         """Paused records must NOT be returned by resolve_natural;
-        only get_by_id returns them. Kit edit v1 → v2."""
+        only get_by_id returns them. the design review edit v1 → v2."""
         await registry.register_agent(_record(
             agent_id="paused-agent", status="paused",
         ))

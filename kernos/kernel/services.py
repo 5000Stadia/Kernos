@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 class AuthType(str, Enum):
     """Auth onboarding mechanism for a service.
 
-    Per the Kit-revised spec: cookie_upload is not in this enum until
+    Per the the design review-revised spec: cookie_upload is not in this enum until
     BROWSER-COOKIE-IMPORT ships. Adding it before then would let
     services register with an auth type that has no implementation.
     """
@@ -67,7 +67,7 @@ class ChannelType(str, Enum):
 
 # The auth-type-by-channel-type matrix.
 #
-# Per the Kit-revised spec: each auth type pairs with the channels
+# Per the the design review-revised spec: each auth type pairs with the channels
 # where its onboarding flow can run safely. The onboarding flow
 # refuses anything outside this matrix with a clear message and a
 # pointer to the alternative.

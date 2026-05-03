@@ -169,7 +169,7 @@ def make_memory_cohort_run(
                 include_archives=False,  # spec Section 4d: archives via remember pull
             )
         except Exception:  # pragma: no cover - defensive guard
-            # Per Kit edit #6: only embedding/vector failure becomes
+            # Per the design review edit #6: only embedding/vector failure becomes
             # graceful empty inside the retrieval service. Anything
             # propagating to here is an unexpected bug; let the
             # runner observe outcome=error.

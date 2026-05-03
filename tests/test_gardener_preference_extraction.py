@@ -2,7 +2,7 @@
 
 Covers:
   - detect_explicit_phrases pure helper
-  - _parse_preference_extraction subject-matter validation (Kit rev #2)
+  - _parse_preference_extraction subject-matter validation (the design review rev #2)
   - _parse_preference_extraction novel-preference confidence downgrade
   - judge_preference_extraction end-to-end with a stubbed reasoning service
   - GardenerService.consult_preference_extraction integration
@@ -59,7 +59,7 @@ def test_neutral_utterance_is_not_explicit():
 
 
 def test_explicit_phrase_list_is_stable():
-    # Kit revision #1 relies on this vocabulary; guard it against silent edits.
+    # the design review revision #1 relies on this vocabulary; guard it against silent edits.
     assert "remember that" in EXPLICIT_PREFERENCE_PHRASES
     assert "from now on" in EXPLICIT_PREFERENCE_PHRASES
     assert "always" in EXPLICIT_PREFERENCE_PHRASES
@@ -131,11 +131,11 @@ def test_parse_threshold_match_surfaces():
     assert result.should_surface
 
 
-# Kit revision #2: non-wired effect_kind forces matched=false.
+# the design review revision #2: non-wired effect_kind forces matched=false.
 
 
 def test_parse_other_effect_kind_forces_unmatched():
-    """Kit revision #2 — preferences whose effect isn't wired (suppression
+    """the design review revision #2 — preferences whose effect isn't wired (suppression
     or threshold in v1) must silently no-op. No confirmation whisper fires."""
     raw = json.dumps({
         "matched": True,

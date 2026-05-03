@@ -78,7 +78,7 @@ class EntityResult:
 # ---------------------------------------------------------------------------
 # Structured snapshot types (COHORT-ADAPT-MEMORY)
 #
-# Per the spec's Section 2a + Kit edits #3, #5, #6, #7: structured
+# Per the spec's Section 2a + the design review edits #3, #5, #6, #7: structured
 # retrieval surface that shares the collect+policy+rank+budget-shape
 # pipeline with the existing formatted `search()` path.
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ class EntityMatch:
     """Public, structured form of an entity-graph match.
 
     `knowledge_count` reflects post-disclosure-filter linked entries
-    (Kit edit #4). `uncertainty_notes` carries MAYBE_SAME_AS edges
+    (the design review edit #4). `uncertainty_notes` carries MAYBE_SAME_AS edges
     after filtering to entities the requesting member can see.
     """
 
@@ -157,11 +157,11 @@ class RetrievalSnapshot:
       - "normal" — regular semantic + entity-graph retrieval
       - "state_intercept" — preference/state intercept fired;
         knowledge/entities/archive empty, state_intercept populated
-        (Kit edit #5; spec Section 2b)
+        (the design review edit #5; spec Section 2b)
 
     `retrieval_attempted` distinguishes graceful-empty-on-
     embedding-failure (False) from genuine empty results (True).
-    Per Kit edit #6 / spec criterion 16. Other unexpected bugs
+    Per the design review edit #6 / spec criterion 16. Other unexpected bugs
     are NOT swallowed here; they propagate to the runner.
     """
 
@@ -347,7 +347,7 @@ class RetrievalService:
                 active_space_id, len(scope_chain) - 1, scope_chain)
 
         # Build the permission map once and thread it through every
-        # disclosure-gate-aware payload source (Kit edit #4).
+        # disclosure-gate-aware payload source (the design review edit #4).
         permission_map = None
         if requesting_member_id and instance_db is not None:
             from kernos.kernel.disclosure_gate import build_permission_map
@@ -401,7 +401,7 @@ class RetrievalService:
             logger.warning("Retrieval: archive search failed: %s", archive_result)
             archive_result = None
 
-        # Collect MAYBE_SAME_AS for uncertainty notes (gated per Kit edit #4)
+        # Collect MAYBE_SAME_AS for uncertainty notes (gated per the design review edit #4)
         maybe_same_as = await self._collect_maybe_same_as(
             instance_id, entity_results,
             requesting_member_id=requesting_member_id,
@@ -497,7 +497,7 @@ class RetrievalService:
     ) -> list[EntityResult]:
         """Search entities by name/alias match. Walks scope chain.
 
-        Per COHORT-ADAPT-MEMORY Kit edit #4: the disclosure gate
+        Per COHORT-ADAPT-MEMORY the design review edit #4: the disclosure gate
         applies to the linked KnowledgeEntries pulled by
         `_resolve_entity_knowledge` too — not just the
         `_search_knowledge` semantic path. Pass requesting_member_id
@@ -550,7 +550,7 @@ class RetrievalService:
     ) -> list[KnowledgeEntry]:
         """Gather all knowledge linked to this entity, resolving SAME_AS edges.
 
-        Per Kit edit #4: when requesting_member_id + permission_map
+        Per the design review edit #4: when requesting_member_id + permission_map
         are supplied, filter linked entries through the disclosure
         gate before returning. Without that filter, entity resolution
         would surface entries the active member shouldn't see.
@@ -669,7 +669,7 @@ class RetrievalService:
     ) -> list[tuple[EntityNode, EntityNode]]:
         """Collect MAYBE_SAME_AS edges for matched entities.
 
-        Per Kit edit #4: filter pairs to those where the OTHER node
+        Per the design review edit #4: filter pairs to those where the OTHER node
         references at least one knowledge entry the requesting
         member can see. If all the other node's referencing
         knowledge is gated out, the uncertainty note can't be
@@ -737,17 +737,17 @@ class RetrievalService:
         """Structured retrieval surface — collect + policy + rank + budget-shape.
 
         Same pipeline as `search()`; differs only in output shape
-        (`RetrievalSnapshot` vs. formatted text). Per Kit edit #3
+        (`RetrievalSnapshot` vs. formatted text). Per the design review edit #3
         the two paths cannot drift — they share the entity / knowledge /
         archive / state-intercept logic via the same internal helpers.
 
-        Per Kit edit #2: archive search is gated behind
+        Per the design review edit #2: archive search is gated behind
         `include_archives` because today's `_search_archives`
         invokes Haiku twice. The cohort path passes `False`; the
         legacy `remember`-tool path passes `True` (preserves
         existing archive coverage).
 
-        Per Kit edit #6: only embedding/vector failure produces
+        Per the design review edit #6: only embedding/vector failure produces
         ``retrieval_attempted=False`` with empty arrays. Every
         other unexpected error propagates so the cohort runner
         (or the caller) can register an outcome=error rather than
@@ -756,7 +756,7 @@ class RetrievalService:
         now = utc_now()
         query_lower = query.lower()
 
-        # State intercept short-circuit (Kit edit #5).
+        # State intercept short-circuit (the design review edit #5).
         _state_keywords = [
             "preference", "setting", "notification", "trigger",
             "what's set up", "what do i have", "what is set",
@@ -803,7 +803,7 @@ class RetrievalService:
 
         # Embed the query. Embedding failure is the only error path
         # that produces ``retrieval_attempted=False`` with empty
-        # arrays; everything else propagates (Kit edit #6).
+        # arrays; everything else propagates (the design review edit #6).
         try:
             query_embedding = await self.embeddings.embed(query)
         except Exception as exc:

@@ -24,7 +24,7 @@ fire_window_key)`` which:
 3. On dispatch return, persists the ``workflow_execution_id`` via
    ``mark_dispatched``.
 
-Recovery sweep (``recover()``) closes the Kit must-fix seam
+Recovery sweep (``recover()``) closes the the design review must-fix seam
 (post-fold AC6 scenario #2): for any pending row past
 ``claim_lease``, query WLP by fire_id BEFORE re-dispatching. If
 WLP has the execution, ``reconcile_to_dispatched`` advances the
@@ -96,7 +96,7 @@ WLPDispatchHook = Callable[..., Awaitable[str]]
 
 # WLP execution-status lookup — used by the recovery sweep to
 # check whether a dispatched row's workflow actually ran. C2
-# wires only the fire_id-based lookup (closes the Kit seam);
+# wires only the fire_id-based lookup (closes the the design review seam);
 # the dispatched-past-lease completion check uses the existing
 # ExecutionEngine.get_execution surface.
 WLPLookupHook = Callable[[str], Awaitable[str | None]]
@@ -736,7 +736,7 @@ class TriggerEvaluationRuntime:
            ``claim_lease`` (default 60s). For each row: query WLP
            by fire_id (the C1a lookup). If WLP has an execution,
            reconcile the outbox row to ``dispatched`` without
-           re-invoking WLP — this closes the Kit must-fix seam
+           re-invoking WLP — this closes the the design review must-fix seam
            (post-fold AC6 scenario #2). If WLP doesn't have it,
            reclaim the row to this runtime's claim_owner and
            re-dispatch with the same fire_id (which is itself
@@ -751,7 +751,7 @@ class TriggerEvaluationRuntime:
             raise RuntimeError("TriggerEvaluationRuntime not started")
         recovered = 0
 
-        # Pending past lease — close the Kit seam.
+        # Pending past lease — close the the design review seam.
         pendings = await self._outbox.find_pending_past_lease(
             claim_lease_seconds=60,
         )
@@ -780,7 +780,7 @@ class TriggerEvaluationRuntime:
                     recovered += 1
                     logger.info(
                         "WTC v1 recover: reconciled fire_id=%s to "
-                        "execution=%s (Kit seam closure)",
+                        "execution=%s (the design review seam closure)",
                         record.fire_id, existing,
                     )
                 continue

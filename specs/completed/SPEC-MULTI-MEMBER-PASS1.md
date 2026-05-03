@@ -1,6 +1,6 @@
 # SPEC: Multi-Member Integration Pass 1 (`MULTI-MEMBER-PASS1`)
 
-**Kit review:** Approved across multiple rounds (2026-04-13).
+**the design review review:** Approved across multiple rounds (2026-04-13).
 **Design document:** https://www.notion.so/341ffafef4db81228c06e1c449f5a917
 **Complete system description:** https://www.notion.so/341ffafef4db818c8f57ca4dd7fb327f
 **Blocks:** Cross-Member Messaging, all subsequent multi-member work.

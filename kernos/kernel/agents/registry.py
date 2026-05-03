@@ -21,7 +21,7 @@ workflow descriptor referencing ``spec-agent`` resolves to
 different concrete agents per instance, which is what makes the
 "same workflow installs across instances" story work.
 
-Lifecycle (per spec, Kit edit v1 → v2): ``active`` is routable and
+Lifecycle (per spec, the design review edit v1 → v2): ``active`` is routable and
 discoverable; ``paused`` is resolvable for audit/admin only
 (``get_by_id`` returns the record but ``resolve_natural`` skips it
 and dispatch raises ``AgentPaused``); ``retired`` is terminal —
@@ -76,7 +76,7 @@ class AgentNotRegistered(AgentRegistryError):
 
 class AgentPaused(AgentRegistryError):
     """Raised when an active dispatch (or a new workflow registration)
-    targets a ``paused`` agent. Per Kit's v1 → v2 lifecycle
+    targets a ``paused`` agent. Per the design review's v1 → v2 lifecycle
     clarification: paused means "don't send work" — the agent's
     pipeline is draining for reconfiguration."""
 
@@ -114,7 +114,7 @@ class AgentInboxProviderUnavailable(AgentRegistryError):
 class AliasCollisionError(AgentRegistryError):
     """Raised at registration when one of the proposed aliases is
     already claimed by another active record in the same instance.
-    Per Kit seam #2 — alias collisions fail closed at registration
+    Per the design review seam #2 — alias collisions fail closed at registration
     rather than silently overwriting."""
 
     def __init__(
@@ -154,7 +154,7 @@ class Ambiguity:
     """Multiple plausible candidates. The caller decides whether
     to ask the user (conversational routing) or fail-closed
     (workflow registration via natural-language reference, per
-    Kit's extra catch — registration treats Ambiguity as a
+    the design review's extra catch — registration treats Ambiguity as a
     structural failure)."""
     candidates: tuple["AgentRecord", ...]
 
@@ -199,7 +199,7 @@ class AgentResolverRanker(Protocol):
 # than runner-up, resolver returns Ambiguity instead of Match —
 # the spec calls this out as "materially higher than runner-up
 # AND no collision risk." Picking 0.15 as a default; tests can
-# override by passing concrete confidences. Kit-review-question
+# override by passing concrete confidences. the design review-review-question
 # #3 left the threshold as implementation judgment.
 _RANKER_CONFIDENCE_MARGIN = 0.15
 
@@ -419,7 +419,7 @@ class AgentRegistry:
         """Return the AgentRecord for the given ``(instance_id, agent_id)``
         composite key, regardless of status. Caller checks ``record.status``
         and handles ``paused`` / ``retired`` via typed errors per the
-        Kit-edit v1 → v2 lifecycle clarification — the registry does
+        the design review-edit v1 → v2 lifecycle clarification — the registry does
         not filter by status here."""
         if self._db is None:
             return None
@@ -580,12 +580,12 @@ class AgentRegistry:
         At no step does the resolver silently pick when collision
         risk is nontrivial. Workflow registration that consumes
         this surface treats Ambiguity as a registration-time
-        failure (Kit's extra catch). Conversational routing
+        failure (the design review's extra catch). Conversational routing
         surfaces it as a clarification question.
 
         Paused records are NOT discoverable via natural-language
         resolution — only ``get_by_id`` returns them, for
-        audit / admin surfaces (Kit edit, v1 → v2: paused = "don't
+        audit / admin surfaces (the design review edit, v1 → v2: paused = "don't
         send work").
         """
         if self._db is None:

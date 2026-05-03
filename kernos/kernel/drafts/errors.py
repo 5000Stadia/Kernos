@@ -3,7 +3,7 @@
 Per SPEC-WDP: 1 base + 8 typed subclasses. Distinct error types
 let callers handle different failure modes without parsing
 strings. ``DraftAliasCollision`` is intentionally distinct from
-``DraftEnvelopeInvalid`` (Kit edit, v1 → v2) because the failure
+``DraftEnvelopeInvalid`` (the design review edit, v1 → v2) because the failure
 mode and remediation differ.
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ class DraftEnvelopeInvalid(DraftError):
 class DraftAliasCollision(DraftError):
     """Raised when a create or update introduces an alias already
     used by another active (non-terminal) draft in the same
-    instance. Distinct from ``DraftEnvelopeInvalid`` (Kit edit,
+    instance. Distinct from ``DraftEnvelopeInvalid`` (the design review edit,
     v1 → v2) — the remediation is different (rename vs. reshape)."""
 
 
@@ -58,7 +58,7 @@ class ReadyStateMutationRequiresDemotion(DraftError):
     ``status='shaping'`` demotion in the same call. Prevents
     ready-validated drafts from accumulating edits and ending up
     structurally invalid while still appearing committable
-    (Kit edit, v1 → v2).
+    (the design review edit, v1 → v2).
 
     Substantive content fields:
       - partial_spec_json

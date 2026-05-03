@@ -28,7 +28,7 @@ Research/
 config/llm_chains.yml
 config/storage_backend.yml
 
-# Async file-drop channel between Claude Code and the founder-side
+# Async file-drop channel between Claude Code and the owner-side
 # Codex (see .codex_handoff/README.md). Operational artifacts —
 # review requests + responses — never committed.
 .codex_handoff/

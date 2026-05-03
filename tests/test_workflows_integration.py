@@ -110,7 +110,7 @@ def _morning_briefing_yaml() -> str:
         instance_id: inst_a
         name: Morning briefing
         version: "1.0"
-        owner: founder
+        owner: owner
         bounds:
           iteration_count: 1
           wall_time_seconds: 30
@@ -177,7 +177,7 @@ class TestWebhookEndToEnd:
             instance_id: inst_a
             name: webhook demo
             version: "1.0"
-            owner: founder
+            owner: owner
             bounds:
               iteration_count: 1
               wall_time_seconds: 30
@@ -233,7 +233,7 @@ class TestApprovalGateEndToEnd:
             instance_local: true
             name: gated demo
             version: "1.0"
-            owner: founder
+            owner: owner
             bounds:
               iteration_count: 1
               wall_time_seconds: 60
@@ -246,7 +246,7 @@ class TestApprovalGateEndToEnd:
                 approval_event_type: user.approval
                 approval_event_predicate:
                   op: actor_eq
-                  value: founder
+                  value: owner
                 timeout_seconds: 5
                 bound_behavior_on_timeout: abort_workflow
             action_sequence:
@@ -283,7 +283,7 @@ class TestApprovalGateEndToEnd:
             "inst_a", "user.approval",
             {"execution_id": gated.execution_id,
              "gate_nonce": gated.gate_nonce},
-            member_id="founder",
+            member_id="owner",
         )
         await event_stream.flush_now()
         # Post-gate action runs.

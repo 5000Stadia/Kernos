@@ -58,7 +58,7 @@ class FieldProvenance:
     * ``expected_type`` — a string description of the expected type
       (kept as text rather than a runtime type so optional / union
       types are documented without import gymnastics in the map).
-    * ``wiring_state`` (Kit-required, three-state):
+    * ``wiring_state`` (the design review-required, three-state):
 
       - ``"wired"`` — populate_field has explicit routing returning
         real content.
@@ -351,7 +351,7 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
             "wiring (C4) registers register_gardener_cohort in server.py "
             "and the integration runner copies the cohort output through "
             "into the packet's memory zone. Pre-cohort-output turns see "
-            "an empty tuple — decoupled-only enrichment per Kit's spec "
+            "an empty tuple — decoupled-only enrichment per the design review's spec "
             "clarification (legacy doesn't render gardener observations)."
         ),
     ),
@@ -593,7 +593,7 @@ class PopulationContext:
 
     # C4 additions — gardener cohort output. Empty until production
     # wiring extracts the gardener_cohort's CohortOutput onto this
-    # field. Decoupled-only enrichment per Kit's spec clarification
+    # field. Decoupled-only enrichment per the design review's spec clarification
     # (legacy doesn't render gardener observations).
     gardener_observations: tuple[dict[str, Any], ...] = ()
 

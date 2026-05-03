@@ -1,4 +1,4 @@
-"""Runtime enforcement of the four checks the Kit-revised spec
+"""Runtime enforcement of the four checks the the design review-revised spec
 requires at every workshop tool invocation.
 
 Covers:
@@ -11,7 +11,7 @@ Covers:
 - Sandbox check: pass for paths under data_dir, fail for paths
   above, fail via symlink resolution.
 - Composed enforce_invocation: runs all four; first failure raises;
-  force-registered tools (per Kit edit 5) still subject to runtime
+  force-registered tools (per the design review edit 5) still subject to runtime
   enforcement.
 """
 
@@ -665,7 +665,7 @@ def test_enforce_invocation_first_failure_raises_specific_subclass(
 def test_force_registered_tool_still_subject_to_runtime_enforcement(
     tmp_path, store, notion_registry,
 ):
-    """Kit edit 5: force-register bypasses authoring-pattern validation
+    """the design review edit 5: force-register bypasses authoring-pattern validation
     only. Runtime enforcement still applies. Construct an invocation
     where the descriptor author was force-registered; the four checks
     must still fire if their preconditions fail."""

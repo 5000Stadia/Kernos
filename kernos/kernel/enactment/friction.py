@@ -1,6 +1,6 @@
 """Friction observer — write-only sink for tier-1/2 exhaustion (PDI C6).
 
-Per spec Section 5g (and architect's C6 guidance):
+Per spec Section 5g (and design review's C6 guidance):
   - The friction observer accumulates tickets describing tier-1 retry
     or tier-2 modify exhaustion on a specific (tool, operation) pair
     within a single turn.

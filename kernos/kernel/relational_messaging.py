@@ -11,7 +11,7 @@ permission checks, atomic state transitions, and two delivery paths:
   - Next-turn surfacing for elevated and normal urgency (queued, picked
     up during the recipient's assemble phase)
 
-Kit's sole implementation hazard in v5 review was atomic state transitions.
+the design review's sole implementation hazard in v5 review was atomic state transitions.
 The StateStore's new transition_relational_message_state() is implemented
 as genuine CAS (SQLite: UPDATE ... WHERE state=? + rowcount check; JSON:
 read-check-write under filelock). Never read-check-write at the call site.

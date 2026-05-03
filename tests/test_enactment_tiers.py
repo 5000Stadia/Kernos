@@ -1,6 +1,6 @@
 """Tests for tier classification — pure-function routing (PDI C5).
 
-Per architect's C5 guidance: tier conditions are distinct, not a
+Per design review's C5 guidance: tier conditions are distinct, not a
 fuzzy ladder. The most common implementation error is conflating
 them. classify_routing is the explicit testable pure function; tests
 pin every transition.

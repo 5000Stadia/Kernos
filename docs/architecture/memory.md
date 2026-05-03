@@ -133,7 +133,7 @@ This is what makes the per-member architecture durable over time. A family of th
 ## What this architecture makes easy
 
 - **Long-arc grounding.** A household that has used Kernos for six months, or a team that has used it across three quarterly cycles, can retrieve the arc of what happened — not just a summary of what the system thinks happened. The Archive Ledger is addressable.
-- **Trustworthy fact reference.** When the agent says *"you mentioned you prefer morning meetings"* or *"your co-founder asked about the Q3 runway two weeks ago"*, the fact has a stable ID, a known source span, and a reconciled history.
+- **Trustworthy fact reference.** When the agent says *"you mentioned you prefer morning meetings"* or *"your co-owner asked about the Q3 runway two weeks ago"*, the fact has a stable ID, a known source span, and a reconciled history.
 - **Graceful supersession.** When a fact changes (the member's role, the team's process, the kid's teacher this year), the `update` verb supersedes cleanly — the old value is archived, the new value replaces it under the same ID, and references to the ID keep working.
 - **Sensitivity at harvest time.** Each new or updated fact is classified (open/contextual/personal) at the moment it's extracted, so the disclosure-gate (see [Messenger](disclosure-and-messenger.md)) has the information it needs from day one.
 - **Per-member privacy.** Because facts are `owner_member_id`-keyed, cross-member disclosure is deliberate, not accidental. A fact about member A is not in member B's agent's context unless the permission matrix and the Messenger both say it belongs there.

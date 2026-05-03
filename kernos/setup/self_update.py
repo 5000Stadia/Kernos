@@ -400,7 +400,7 @@ def enforce_or_continue(
 
     resolved_data_dir = data_dir or os.getenv("KERNOS_DATA_DIR", "./data")
 
-    # INSTALL-FOR-STOCK-CONNECTORS Section 7 (Kit edit #2): run the
+    # INSTALL-FOR-STOCK-CONNECTORS Section 7 (the design review edit #2): run the
     # shared install-hook runner after pip install so substrate that
     # needs install-time work (e.g. browser binaries, directory
     # permissions) gets handled. Fresh installs invoke the same

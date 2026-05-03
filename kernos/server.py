@@ -460,7 +460,7 @@ async def on_ready():
         config=CohortFanOutConfig(),
     )
 
-    # Hook chain callers — v1 same-model default (Kit edit, locked).
+    # Hook chain callers — v1 same-model default (the design review edit, locked).
     # All hooks share this base chain caller; per-turn telemetry
     # wrapping happens in the provider closure below.
     primary_chain = chains.get("primary", [])
@@ -498,7 +498,7 @@ async def on_ready():
             conversation_id=conversation_id,
         )
 
-    # Architect-lean (a) loud-failure surface for v1: until the
+    # Design Review-lean (a) loud-failure surface for v1: until the
     # workshop-registry binding lands, full-machinery tool dispatch
     # raises STRUCTURALLY at the descriptor-lookup layer rather than
     # returning None (which would silently produce a graceful

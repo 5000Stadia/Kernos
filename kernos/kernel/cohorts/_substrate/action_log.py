@@ -10,7 +10,7 @@ The action log records each side effect keyed by
 
     (cohort_id, instance_id, source_event_id, action_type, target_id)
 
-with NOT NULL ``target_id`` (Kit pin v1→v2). SQLite NULL values in
+with NOT NULL ``target_id`` (the design review pin v1→v2). SQLite NULL values in
 composite PKs do NOT compare equal under UNIQUE constraint semantics —
 two NULL ``target_id`` rows would coexist and defeat dedupe. Every v1
 action type produces a deterministic, non-null ``target_id`` (draft_id,
@@ -97,7 +97,7 @@ class ActionLogInvalidActionType(ActionLogError):
 
 class ActionLogInvalidTarget(ActionLogError):
     """Raised when ``target_id`` is empty or ``None``. The substrate
-    requires NOT NULL composite-key components (Kit pin v1→v2)."""
+    requires NOT NULL composite-key components (the design review pin v1→v2)."""
 
 
 class ActionLogConflict(ActionLogError):

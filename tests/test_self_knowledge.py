@@ -662,5 +662,5 @@ class TestNoSoulMd:
         prompt = _build_system_prompt(msg, "", soul, PRIMARY_TEMPLATE, [])
         # SOUL.md contained distinctive phrases that should not appear
         assert "SOUL.md" not in prompt
-        assert "Founder built me" not in prompt
-        assert "Trust Founder completely" not in prompt
+        assert "Owner built me" not in prompt
+        assert "Trust Owner completely" not in prompt

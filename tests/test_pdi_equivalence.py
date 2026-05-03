@@ -1,6 +1,6 @@
 """Equivalence test suite for PDI (PDI C7) + CCV1 C6 extensions.
 
-Per Kit edit + architect's C7 guidance, equivalence is asserted along
+Per the design review edit + design review's C7 guidance, equivalence is asserted along
 five dimensions:
   1. User-facing outcome (functional equivalence; precise wording
      may differ — model variance is acceptable).
@@ -211,7 +211,7 @@ def assert_audit_categories_compatible(
 def assert_latency_telemetry_observable(
     legacy_ms: int, new_ms: int
 ) -> None:
-    """Per Kit edit: new path's latency overhead is observable
+    """Per the design review edit: new path's latency overhead is observable
     (expected; quantified in equivalence report). Pin: both paths
     record finite durations."""
     assert legacy_ms >= 0
@@ -533,7 +533,7 @@ async def test_equivalence_defer_thin_path():
 
 @pytest.mark.asyncio
 async def test_equivalence_propose_tool_render_only():
-    """propose_tool is render-only on thin path (Kit edit). No tool
+    """propose_tool is render-only on thin path (the design review edit). No tool
     dispatch fires; the legacy path's equivalent behavior is the same
     proposal text + awaited next-turn user confirmation."""
     presence = _FakePresence("Should I send the email?")
@@ -848,7 +848,7 @@ def test_feature_flag_default_off_means_legacy_path_runs(monkeypatch):
 
 
 def test_equivalence_test_infrastructure_uses_fake_store_not_live_calls():
-    """Architectural pin per Kit edit: equivalence tests use fakes
+    """Architectural pin per the design review edit: equivalence tests use fakes
     for mutating tools; no live calls to external services."""
     # The FakeMutatingStore class in this module has no live network
     # calls. Verify by inspecting its source for forbidden calls.
@@ -869,7 +869,7 @@ def test_equivalence_test_infrastructure_uses_fake_store_not_live_calls():
 
 @pytest.mark.asyncio
 async def test_five_dimension_equivalence_pin():
-    """Architect mandate: equivalence dimensions are user-facing
+    """Design Review mandate: equivalence dimensions are user-facing
     outcome + tool calls/args + side-effect ordering + audit/redaction
     + latency telemetry. This test exercises one dimension per
     assertion to pin all five are exercised in the suite."""

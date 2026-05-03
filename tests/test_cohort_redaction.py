@@ -1,6 +1,6 @@
 """Tests for the cohort error_summary sanitizer.
 
-Covers Section 5b of the COHORT-FAN-OUT-RUNNER spec (Kit edit #7):
+Covers Section 5b of the COHORT-FAN-OUT-RUNNER spec (the design review edit #7):
 truncate, strip token-like patterns, strip Authorization/Bearer/API-
 key headers, strip credential directory paths, no stack traces in
 output. Conservative redaction — false positives over false

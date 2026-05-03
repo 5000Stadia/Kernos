@@ -20,7 +20,7 @@ Behavior matrix:
   | Existing service_state.json (any context)  | Re-prompt on TTY; non-TTY warns and exits     |
 
 No TUI dependency in v1; stdlib `input()` and `print()` only
-(Kit edit #7 / spec acceptance criterion 10).
+(the design review edit #7 / spec acceptance criterion 10).
 """
 
 from __future__ import annotations

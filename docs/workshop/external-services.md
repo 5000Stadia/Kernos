@@ -119,4 +119,4 @@ Tools that aggregate data across members (a household-spending summary, a shared
 - **UI for credential management.** v1 is CLI plus adapter prompts. Richer UX is future work.
 - **Federation across Kernos instances.** Out.
 
-If your tool needs one of these, it's the primitive that needs to grow — not your tool. File a kick-back through the architect inbox naming the gap.
+If your tool needs one of these, it's the primitive that needs to grow — not your tool. File a kick-back through the design review inbox naming the gap.

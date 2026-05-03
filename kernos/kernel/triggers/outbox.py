@@ -420,7 +420,7 @@ class FireOutbox:
         without requiring claim_owner. Returns True iff the row was
         reconciled (was pending; now dispatched). False otherwise.
 
-        Used by the recovery sweep to close the seam Kit identified
+        Used by the recovery sweep to close the seam the design review identified
         between WLP accept and the runtime's persist.
         """
         if self._db is None:

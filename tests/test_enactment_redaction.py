@@ -1,6 +1,6 @@
 """Redaction invariant tests for enactment.* audit entries (PDI C7).
 
-Per architect's C7 guidance: enactment audit entries MUST NOT contain
+Per design review's C7 guidance: enactment audit entries MUST NOT contain
 restricted content — covenant rule descriptions, restricted memory
 content, restricted context-space material. The existing redaction
 code path applies; this test surface verifies covenant rule text
@@ -361,13 +361,13 @@ async def test_dispatch_error_summary_redaction_responsibility_documented():
 
 
 # ---------------------------------------------------------------------------
-# Redaction — covenant-block scenario (architect-mandated test)
+# Redaction — covenant-block scenario (design review-mandated test)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_covenant_block_b1_termination_does_not_leak_rule_text():
-    """Architect-mandated: covenant rule descriptions don't leak into
+    """Design Review-mandated: covenant rule descriptions don't leak into
     enactment audit even when covenant blocks an action.
 
     The covenant policy lives upstream of EnactmentService — the

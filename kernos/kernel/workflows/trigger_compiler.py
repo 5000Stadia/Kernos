@@ -13,7 +13,7 @@ Two compilation paths land here:
        event.payload.message contains "deploy"
        event.payload.task_id exists
        event.payload.task_id not exists
-       event.member_id == "founder"
+       event.member_id == "owner"
        event.correlation_id == "cor-123"
 
    AND/OR composition at the top level. Parenthesised

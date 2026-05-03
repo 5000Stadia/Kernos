@@ -366,7 +366,7 @@ class TestFireOutboxTransitions:
         )
 
     async def test_reconcile_to_dispatched_closes_seam(self, outbox):
-        # Kit must-fix scenario: WLP returned an execution_id; the
+        # the design review must-fix scenario: WLP returned an execution_id; the
         # runtime crashed before mark_dispatched. Recovery sweep
         # invokes reconcile_to_dispatched without claim_owner.
         record = await outbox.claim_fire(

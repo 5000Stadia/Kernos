@@ -42,4 +42,4 @@ Every AI agent framework faces the same set of hard problems. Kernos solves them
 
 ## Who Built It
 
-Built by Kit, sole architect and developer. Designed and constructed from first principles over 6 weeks. 1,600+ automated tests. Every mechanism — from the compaction system to the hierarchical context spaces to the tool-building workspace — designed, specified, implemented, and tested by one person with one vision: a second brain that works while you sleep.
+Built by the design review, sole design review and developer. Designed and constructed from first principles over 6 weeks. 1,600+ automated tests. Every mechanism — from the compaction system to the hierarchical context spaces to the tool-building workspace — designed, specified, implemented, and tested by one person with one vision: a second brain that works while you sleep.

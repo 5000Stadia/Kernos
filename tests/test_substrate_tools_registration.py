@@ -104,7 +104,7 @@ def _basic_descriptor(*, instance_id="inst_a", workflow_id=None, **overrides) ->
         "instance_id": instance_id,
         "name": "test-workflow",
         "description": "test",
-        "owner": "founder",
+        "owner": "owner",
         "version": "1",
         "bounds": {"iteration_count": 1},
         "verifier": {"flavor": "deterministic", "check": "x == y"},
@@ -142,7 +142,7 @@ async def _emit_proposed(
 
 async def _emit_approved(
     crb_emitter, *, instance_id, descriptor_hash, correlation_id,
-    approved_by="founder", member_id="mem_owner",
+    approved_by="owner", member_id="mem_owner",
     source_turn_id="turn_x",
 ) -> str:
     """Emit a routine.approved event via the CRB emitter and return its event_id."""
@@ -167,7 +167,7 @@ async def _emit_approved(
 async def _emit_modification_approved(
     crb_emitter, *, instance_id, descriptor_hash, correlation_id,
     prev_workflow_id, change_summary="modify",
-    approved_by="founder", member_id="mem_owner",
+    approved_by="owner", member_id="mem_owner",
     source_turn_id="turn_x",
 ) -> str:
     await crb_emitter.emit(
@@ -342,7 +342,7 @@ class TestEnvelopeSourceAuthority:
                 "correlation_id": "corr-legacy",
                 "descriptor_hash": desc_hash,
                 "instance_id": "inst_a",
-                "approved_by": "founder",
+                "approved_by": "owner",
                 "member_id": "mem_owner",
                 "source_turn_id": "turn_x",
             },
@@ -402,7 +402,7 @@ class TestAuthorityFields:
             "correlation_id": correlation_id,
             "descriptor_hash": desc_hash,
             "instance_id": "inst_a",
-            "approved_by": "founder",
+            "approved_by": "owner",
             "member_id": "mem_owner",
             "source_turn_id": "turn_x",
         }
@@ -438,7 +438,7 @@ class TestProposalAnchor:
                 "correlation_id": "no-proposal-corr",
                 "descriptor_hash": desc_hash,
                 "instance_id": "inst_a",
-                "approved_by": "founder",
+                "approved_by": "owner",
                 "member_id": "mem_owner",
                 "source_turn_id": "turn_x",
             },
@@ -469,7 +469,7 @@ class TestProposalAnchor:
                 "correlation_id": correlation_id,
                 "descriptor_hash": approved_hash,
                 "instance_id": "inst_a",
-                "approved_by": "founder",
+                "approved_by": "owner",
                 "member_id": "mem_owner",
                 "source_turn_id": "turn_x",
             },
@@ -512,7 +512,7 @@ class TestProposalAnchor:
                 "correlation_id": correlation_id,
                 "descriptor_hash": desc_hash,
                 "instance_id": "inst_a",
-                "approved_by": "founder",
+                "approved_by": "owner",
                 "member_id": "mem_owner",
                 "source_turn_id": "turn_x",
             },
@@ -852,7 +852,7 @@ class TestModificationBinding:
                 "correlation_id": correlation_id,
                 "descriptor_hash": desc_hash,
                 "instance_id": "inst_a",
-                "approved_by": "founder",
+                "approved_by": "owner",
                 "member_id": "mem_owner",
                 "source_turn_id": "turn_x",
                 "prev_workflow_id": "",  # missing
@@ -1041,7 +1041,7 @@ class TestPostCodexHardening:
                 "correlation_id": correlation_id,
                 "descriptor_hash": desc_hash,
                 "instance_id": "inst_a",
-                "approved_by": "founder",
+                "approved_by": "owner",
                 "member_id": "mem_owner",
                 "source_turn_id": "turn_x",
             },

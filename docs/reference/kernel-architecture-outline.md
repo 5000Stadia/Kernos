@@ -2,7 +2,7 @@
 
 ## An Architecture Outline — v2
 
-> This document synthesizes the Phase 1B brainstorm between founder, architect, and OSBuilder (OpenClaw's primary agent). It defines what the kernel IS, what its primitives are, how they compose, and what they produce for the end user. It is the anchor document from which 1B specifications will be shaped.
+> This document synthesizes the Phase 1B brainstorm between owner, design review, and OSBuilder (OpenClaw's primary agent). It defines what the kernel IS, what its primitives are, how they compose, and what they produce for the end user. It is the anchor document from which 1B specifications will be shaped.
 >
 > **The elegance principle:** Every layer of complexity must justify itself with value the user would miss if it weren't there. If you can remove a feature and the system still feels good, the feature wasn't worth building. This is the filter for every decision in this document and every spec that follows from it.
 
@@ -260,7 +260,7 @@ This comes from the consolidation daemon (see Part 5) during idle processing. It
 
 **Worked example — the web dev scenario:**
 
-This example illustrates all five primitives, multiple agents, and the kernel's orchestration. It also covers the complex mid-project pivot the founder described.
+This example illustrates all five primitives, multiple agents, and the kernel's orchestration. It also covers the complex mid-project pivot the owner described.
 
 **Initial request:**
 
@@ -606,6 +606,6 @@ Model names. Agent names. Task decomposition. Capability graphs. Event streams. 
 
 ---
 
-*v2 — incorporating founder feedback on LLM registry via providers, quality/cost tiers, emergent briefings, long-term memory scaling, event-driven situation model, context boundary discipline, capability installation framing, user profiles, notification timing, managed resources as agent-built systems, insight generation, and the elegance principle as design filter.*
+*v2 — incorporating owner feedback on LLM registry via providers, quality/cost tiers, emergent briefings, long-term memory scaling, event-driven situation model, context boundary discipline, capability installation framing, user profiles, notification timing, managed resources as agent-built systems, insight generation, and the elegance principle as design filter.*
 
 *This outline is the foundation for Phase 1B specifications. The specs will scope Layer 1 — what gets built now — with specific acceptance criteria for each component, ruthlessly filtered by: does the plumber's simple text still feel instant, and does every new piece of infrastructure justify its existence with value?*

@@ -1,4 +1,4 @@
-"""Per-operation safety resolution at dispatch time (PDI Kit edit).
+"""Per-operation safety resolution at dispatch time (PDI the design review edit).
 
 Many tools have a single tool name with multiple operations selected
 by argument values. `manage_covenants` is the canonical example: same

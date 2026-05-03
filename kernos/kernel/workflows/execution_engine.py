@@ -12,7 +12,7 @@ ACTION-LOOP-PRIMITIVE shape: intent (trigger event payload), gather
 via the action library), verify (per-step verifier + workflow-level
 verifier), decide (complete / abort / retry).
 
-Synthetic CohortContext-equivalent (Kit edit, narrow review): the
+Synthetic CohortContext-equivalent (the design review edit, narrow review): the
 context constructed at execution start matches the shipped
 ``CohortContext`` shape — ``instance_id``, ``member_id``,
 ``user_message`` (synthetic placeholder describing the trigger
@@ -130,7 +130,7 @@ class WorkflowExecution:
     # consults the in-memory waiter table, never SQL nonce values,
     # so this is hygienic debt rather than a wake vector.
     gate_nonce: str = ""
-    # WTC v1 C1 (Kit must-fix): fire_id is the application-layer
+    # WTC v1 C1 (the design review must-fix): fire_id is the application-layer
     # idempotency key supplied by the unified trigger runtime when
     # dispatching through the outbox. Empty for the legacy
     # _on_trigger_match path. The partial unique index on the
@@ -198,7 +198,7 @@ class WorkflowExecution:
 # ---------------------------------------------------------------------------
 
 
-# WTC v1 C1 (Kit must-fix): the ``fire_id`` column is the
+# WTC v1 C1 (the design review must-fix): the ``fire_id`` column is the
 # application-layer idempotency key for cross-process WLP dispatch
 # dedup. Empty for legacy in-process Trigger-matched executions
 # (those don't carry an outbox fire_id). Non-empty values are
@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS workflow_executions (
 CREATE INDEX IF NOT EXISTS idx_executions_state
     ON workflow_executions(instance_id, state);
 """
-# WTC v1 C1 (Kit must-fix): the partial unique index on fire_id is
+# WTC v1 C1 (the design review must-fix): the partial unique index on fire_id is
 # DELIBERATELY NOT in the schema string — legacy DBs without the
 # fire_id column would fail at this CREATE INDEX before the
 # migration block below has a chance to ALTER the column in. The
@@ -269,7 +269,7 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
             if "duplicate column name" not in str(exc).lower():
                 raise
 
-    # WTC v1 C1 (Kit must-fix): same idempotent ALTER pattern for
+    # WTC v1 C1 (the design review must-fix): same idempotent ALTER pattern for
     # fire_id. Pre-existing executions get an empty fire_id and are
     # therefore exempt from the partial unique index — only outbox-
     # driven dispatch (execute_workflow) populates the column.
@@ -671,7 +671,7 @@ class ExecutionEngine:
 
         WLP-GATE-SCOPING C1: emits ``workflow.execution_paused_at_gate``
         with the full gate descriptor + the engine-minted gate_nonce
-        so downstream agents (founder UI, AgentInbox listeners) know
+        so downstream agents (owner UI, AgentInbox listeners) know
         what fields to compose into a valid approval response.
         """
         await event_stream.emit(
@@ -747,7 +747,7 @@ class ExecutionEngine:
         match AND the engine-minted nonce + execution_id binding.
         Either failing means the event does not wake this paused
         execution. This closes the bypass risk where a broad
-        descriptor predicate (e.g. ``actor_eq founder``) would
+        descriptor predicate (e.g. ``actor_eq owner``) would
         otherwise let any approval from that actor wake any paused
         execution waiting on the same event_type.
         """
@@ -999,7 +999,7 @@ class ExecutionEngine:
         """Public entry point used by the unified trigger runtime
         (WTC v1) for outbox-driven cross-process dispatch.
 
-        Idempotent on ``fire_id`` (Kit must-fix, post-fold). Behaviour:
+        Idempotent on ``fire_id`` (the design review must-fix, post-fold). Behaviour:
 
         1. SELECT the row with this ``fire_id`` first. If present,
            return its ``execution_id`` — the original execution
@@ -1083,7 +1083,7 @@ class ExecutionEngine:
         claim_lease. Returns the workflow_execution_id for the
         supplied fire_id, or None when no execution exists.
 
-        WTC v1 (Kit must-fix). Closes the seam between WLP accept
+        WTC v1 (the design review must-fix). Closes the seam between WLP accept
         and trigger-runtime mark_dispatched: the recovery sweep
         consults this method first, reconciles to dispatched/
         completed without re-invoking execute_workflow when the

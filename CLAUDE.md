@@ -46,7 +46,7 @@ These are non-negotiable. Violating any of these is a build failure regardless o
 - Run `pytest` — all tests green.
 - Verify architectural constraints (especially import isolation — grep for it).
 - Update the relevant `docs/` section to reflect any new or changed components from this spec. The docs are the canonical reference for how the system works.
-- Do NOT update DECISIONS.md status yourself. The founder and architect handle that.
+- Do NOT update DECISIONS.md status yourself. The owner and design review handle that.
 
 ## Code Style
 

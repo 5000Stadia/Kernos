@@ -1,13 +1,13 @@
 # SPEC: Soul Architecture Revision + Bootstrap Fix (`SOUL-REVISION`)
 
-**Priority:** Urgent. Fixes soul contamination bug from Pass 1 and revises the soul model based on founder direction.
+**Priority:** Urgent. Fixes soul contamination bug from Pass 1 and revises the soul model based on owner direction.
 **Depends on:** Multi-Member Integration Pass 1 (shipped)
 
 ## Intention
 
 Pass 1 split the soul into instance-level identity (agent_name, emoji, personality_notes) shared across all members, plus per-member profiles (display_name, timezone, etc.). This was the wrong boundary.
 
-The founder's direction: "Kernos" is the platform name, not the agent's name. The agent doesn't have an identity until a member hatches it. Each member should be able to have their own uniquely named agent with its own personality — or inherit an existing one. The hatching process must always include naming the agent. There is no fallback to "Kernos" as the agent identity.
+The owner's direction: "Kernos" is the platform name, not the agent's name. The agent doesn't have an identity until a member hatches it. Each member should be able to have their own uniquely named agent with its own personality — or inherit an existing one. The hatching process must always include naming the agent. There is no fallback to "Kernos" as the agent identity.
 
 This spec moves the soul from instance-level to per-member, adds a hatching mode setting, and fixes the bootstrap consolidation bug where every member graduation was overwriting shared personality_notes.
 
@@ -107,7 +107,7 @@ Existing single-user instances have a soul.json with agent_name, emoji, personal
 
 ## What This Spec Does NOT Include
 
-- Soul governance policy (Kit's spec — versioning, approval flows, mutation rules). That's a layer on top of this.
+- Soul governance policy (the design review's spec — versioning, approval flows, mutation rules). That's a layer on top of this.
 - Shared spaces (parked)
 - Per-member capability connections (Pass 3)
 

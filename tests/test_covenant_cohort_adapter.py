@@ -470,7 +470,7 @@ async def test_scenario_14_redaction_invariant_end_to_end():
 
 
 # ---------------------------------------------------------------------------
-# 15. Directive sanitization (Kit edit #4)
+# 15. Directive sanitization (the design review edit #4)
 # ---------------------------------------------------------------------------
 
 

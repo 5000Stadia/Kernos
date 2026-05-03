@@ -1,7 +1,7 @@
 """Messenger prompt — steward posture, structural adherence framing.
 
 This is the prompt shape the Messenger cohort uses on the cheap chain. Per
-the spec (§1.1) and Kit's v4 closing note, the tone is *steward*, not
+the spec (§1.1) and the design review's v4 closing note, the tone is *steward*, not
 *policy engine*. The cohort is a person's helper judging what serves the
 member — not a rule-checker verifying compliance.
 

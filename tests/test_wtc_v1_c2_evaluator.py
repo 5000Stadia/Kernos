@@ -8,7 +8,7 @@ Pins:
 * Race-safe claim under concurrent matches (only one fire per
   window).
 * All four AC6 crash-recovery scenarios end-to-end through the
-  outbox + runtime, including the new scenario #2 (Kit must-fix
+  outbox + runtime, including the new scenario #2 (the design review must-fix
   seam — crash after WLP accept before mark_dispatched).
 * Idempotency invariant: each scenario produces exactly one
   workflow execution.
@@ -438,7 +438,7 @@ class TestAC6CrashRecovery:
         await rt.stop()
 
     async def test_scenario_2_crash_after_wlp_accept(self, tmp_path):
-        """Kit must-fix scenario. Runtime claims fire → calls
+        """the design review must-fix scenario. Runtime claims fire → calls
         WLP.execute_workflow → WLP creates execution row and
         returns → runtime crashes BEFORE persisting
         workflow_execution_id / status='dispatched' on
@@ -480,7 +480,7 @@ class TestAC6CrashRecovery:
         assert recovered == 1
         # No second WLP invocation.
         assert after_calls == before_calls, (
-            "Kit must-fix invariant: recovery must NOT re-invoke "
+            "the design review must-fix invariant: recovery must NOT re-invoke "
             "WLP when fire_id is already known to WLP"
         )
         # Outbox row is now dispatched, linked to the original

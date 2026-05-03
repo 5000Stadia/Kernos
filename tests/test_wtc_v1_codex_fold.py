@@ -166,7 +166,7 @@ async def test_complex_selector_lands_in_unfiltered_bucket(runtime):
         event_selector={
             "op": "AND", "operands": [
                 {"op": "eq", "path": "event_type", "value": "user.message"},
-                {"op": "eq", "path": "payload.from", "value": "kit"},
+                {"op": "eq", "path": "payload.from", "value": "design review"},
             ],
         },
         temporal_relation=TemporalRelation(kind="on"),

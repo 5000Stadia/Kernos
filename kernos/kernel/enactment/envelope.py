@@ -1,11 +1,11 @@
 """Envelope validation — the structural enforcer of "EnactmentService
 never changes decided_action" (PDI C5).
 
-Per Kit edit on PDI: ActionEnvelope is structural, not prose-derived.
+Per the design review edit on PDI: ActionEnvelope is structural, not prose-derived.
 Validation runs at every plan-changing tier:
 
   - Initial plan creation (this commit, C5).
-  - Tier-2 modify (C5; per Kit edit, not just pivot/reassemble).
+  - Tier-2 modify (C5; per the design review edit, not just pivot/reassemble).
   - Tier-3 pivot (C5).
   - Tier-4 reassemble (C6).
 

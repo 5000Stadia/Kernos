@@ -54,7 +54,7 @@ def _wf(workflow_id="wf-1", instance_id="inst_a") -> Workflow:
         instance_id=instance_id,
         name="renamed-test",
         description="",
-        owner="founder",
+        owner="owner",
         version="1",
         bounds=Bounds(iteration_count=1),
         verifier=Verifier(flavor="deterministic", check="x == y"),
@@ -102,7 +102,7 @@ class TestRename:
             "instance_id: inst_a\n"
             "name: from file\n"
             "description: \"\"\n"
-            "owner: founder\n"
+            "owner: owner\n"
             "version: \"1\"\n"
             "bounds:\n"
             "  iteration_count: 1\n"
@@ -207,7 +207,7 @@ class TestLazyMigration:
             await db.execute(
                 "INSERT INTO workflows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    "legacy_wf", "inst_a", "legacy", "", "founder", "1",
+                    "legacy_wf", "inst_a", "legacy", "", "owner", "1",
                     "active", "{}", "2026-04-29T00:00:00+00:00",
                 ),
             )

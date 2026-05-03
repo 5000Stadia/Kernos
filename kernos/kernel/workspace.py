@@ -1,7 +1,7 @@
 """Agentic Workspace — manifest, artifact lifecycle, and tool registration.
 
 Every space can be a workspace. When the agent builds something (a tool,
-a script, a project), it's tracked here as an artifact following Kit's
+a script, a project), it's tracked here as an artifact following the design review's
 four-layer model: Artifact → Descriptor → Surface → Store.
 
 The workspace_manifest.json in each space's directory is the source of truth.

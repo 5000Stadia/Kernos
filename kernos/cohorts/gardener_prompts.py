@@ -86,7 +86,7 @@ def build_preference_extraction_prompt(ctx) -> tuple[str, str]:
     The prompt is strictly scoped to canvas-behavior preferences. The
     subject-matter validation is both prompt-side (explicit instructions
     + known effect kinds) and post-parse (force matched=false on any
-    unknown effect_kind — see ``_parse_preference_extraction``). Kit
+    unknown effect_kind — see ``_parse_preference_extraction``). the design review
     revisions #1 + #2 are guarded at both layers.
     """
     from kernos.cohorts.gardener import PreferenceExtractionContext

@@ -127,7 +127,7 @@ async def test_email_source_payload_shape(event_stream_started):
         message_id="msg_001",
         thread_id="thr_001",
         from_address="owner@example.com",
-        from_name="Kit",
+        from_name="the design review",
         to_addresses=["bob@example.com"],
         cc_addresses=["copilot@kernos.dev"],
         subject="WTC v1 review",
@@ -150,7 +150,7 @@ async def test_email_source_payload_shape(event_stream_started):
     assert p["message_id"] == "msg_001"
     assert p["thread_id"] == "thr_001"
     assert p["from_address"] == "owner@example.com"
-    assert p["from_name"] == "Kit"
+    assert p["from_name"] == "the design review"
     assert p["to_addresses"] == ["bob@example.com"]
     assert p["cc_addresses"] == ["copilot@kernos.dev"]
     assert p["subject"] == "WTC v1 review"
@@ -193,9 +193,9 @@ async def test_email_predicate_fires_on_sender_match(
     payload.from_address fires when an observed email matches
     that sender, and not otherwise."""
     await runtime.register(
-        trigger_id="email-from-kit",
+        trigger_id="email-from-design review",
         instance_id="inst1",
-        workflow_id="wf-respond-to-kit",
+        workflow_id="wf-respond-to-design review",
         predicate=TriggerPredicate(
             event_selector={
                 "op": "AND",
@@ -228,7 +228,7 @@ async def test_email_predicate_fires_on_sender_match(
     await event_stream.flush_now()
 
     assert len(wlp.dispatch_calls) == 1
-    assert wlp.dispatch_calls[0]["workflow_id"] == "wf-respond-to-kit"
+    assert wlp.dispatch_calls[0]["workflow_id"] == "wf-respond-to-design review"
     await src.stop()
 
 
