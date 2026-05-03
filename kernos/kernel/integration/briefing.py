@@ -541,6 +541,19 @@ class ProposeTool:
     tool_id: str = ""
     arguments: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
+    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 2a (the design review
+    # verdict 2026-05-03): the propose-tool kind prompt distinguishes
+    # read-only (call inline) from destructive (propose-then-confirm).
+    # Effect MUST reach the model as deterministic substrate so the
+    # safety property doesn't depend on model inference from tool name
+    # alone. Backward-compat default is the empty string (treated as
+    # "unknown / propose conservatively" by the renderer); existing
+    # callers pre-Fold-2a remain valid until they're migrated.
+    # Recognized values: "read", "soft_write", "hard_write", "unknown".
+    # Same architectural pattern as covenant determinism in CCV1:
+    # substrate flows deterministically AND the integration LLM may
+    # add framing on top.
+    effect: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.tool_id, str) or not self.tool_id.strip():
@@ -556,6 +569,11 @@ class ProposeTool:
             raise BriefingValidationError(
                 "ProposeTool.reason must be a non-empty string"
             )
+        if not isinstance(self.effect, str):
+            raise BriefingValidationError(
+                f"ProposeTool.effect must be a string; got "
+                f"{type(self.effect).__name__}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -563,6 +581,7 @@ class ProposeTool:
             "tool_id": self.tool_id,
             "arguments": dict(self.arguments),
             "reason": self.reason,
+            "effect": self.effect,
         }
 
     @classmethod
@@ -572,6 +591,7 @@ class ProposeTool:
             tool_id=str(data.get("tool_id", "")),
             arguments=dict(data.get("arguments", {}) or {}),
             reason=str(data.get("reason", "")),
+            effect=str(data.get("effect", "")),
         )
 
 

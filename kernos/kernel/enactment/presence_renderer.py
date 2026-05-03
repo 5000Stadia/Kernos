@@ -645,11 +645,43 @@ def _user_message_propose_tool(briefing: Briefing) -> str:
     decided = briefing.decided_action
     if not isinstance(decided, ProposeTool):
         return _user_message_respond_only(briefing)
+    # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 2a: surface the
+    # integration phase's effect classification so the model has the
+    # deterministic context the kind prompt asks it to respect (read
+    # → call inline, destructive → propose-then-confirm). Effect
+    # comes from the integration LLM's classification + the gate's
+    # tool-effects map; the renderer threads it through verbatim.
+    # Empty effect (legacy / pre-Fold-2a callers) renders as
+    # "unknown — treat as soft_write conservatively" so the prompt
+    # still has an unambiguous signal even when the field isn't set.
+    effect = decided.effect or "unknown"
+    if effect == "unknown":
+        effect_line = (
+            "## Tool effect (deterministic substrate)\n"
+            "unknown — treat as soft_write conservatively (propose first)"
+        )
+    elif effect == "read":
+        effect_line = (
+            "## Tool effect (deterministic substrate)\n"
+            "read — non-destructive; safe to call inline rather than propose"
+        )
+    elif effect in ("soft_write", "hard_write"):
+        effect_line = (
+            f"## Tool effect (deterministic substrate)\n"
+            f"{effect} — destructive or affects others; propose first"
+        )
+    else:
+        effect_line = (
+            f"## Tool effect (deterministic substrate)\n"
+            f"{effect} — treat as soft_write conservatively (propose first)"
+        )
     return (
         f"## Directive\n{briefing.presence_directive}\n\n"
         f"## Proposed tool\n{decided.tool_id}\n\n"
+        f"{effect_line}\n\n"
         f"## Reason for proposal\n{decided.reason}\n\n"
-        f"Render the proposal awaiting user confirmation."
+        f"Render the proposal awaiting user confirmation if effect "
+        f"warrants it; call inline if effect is read."
     )
 
 
