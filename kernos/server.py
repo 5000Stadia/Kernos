@@ -640,6 +640,7 @@ async def on_ready():
     )
 
     _thin_path_ctx = ThinPathContext(
+        chains=chains,
         chain_caller=_shared_chain_caller,
         cohort_runner=cohort_runner,
         dispatcher_event_emitter=_dispatcher_event_emitter,

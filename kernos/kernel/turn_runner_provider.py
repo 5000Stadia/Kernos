@@ -47,7 +47,7 @@ class ThinPathContext:
     Lifecycle:
 
       1. Launcher constructs an empty ``ThinPathContext``.
-      2. Launcher sets the early-bound fields (``chain_caller``,
+      2. Launcher sets the early-bound fields (``chains``,
          ``cohort_runner``, the dispatcher / audit / integration
          emitters) before constructing ``ReasoningService``.
       3. Launcher calls ``build_turn_runner_provider(ctx)`` and passes
@@ -62,9 +62,20 @@ class ThinPathContext:
     after step 3 propagate transparently. This preserves the late-
     binding semantics of the original in-launcher closures without
     requiring each launcher to re-create them.
+
+    CHAIN-CALLER-PARITY-V1: the canonical source for chain selection
+    is ``chains`` (the ChainConfig). Per-turn the factory builds a
+    resilient chain caller via ``build_resilient_chain_caller(chains=
+    ctx.chains, request=request, ...)``, preserving chain fallback,
+    context-window pre-flight skip, and model-override resolution.
+    The legacy ``chain_caller`` field is retained for tests / edge
+    callers that want to inject a specific callable (no resilience).
     """
 
     # Set in step 2 (early-bound):
+    # Canonical chain selection surface — preferred for production:
+    chains: Any = None
+    # Legacy / test-injection callable — used only when chains is None:
     chain_caller: Any = None
     cohort_runner: Any = None
     dispatcher_event_emitter: Any = None
@@ -94,6 +105,266 @@ class _RendererTurnInputs:
     member_id: str
     space_id: str
     turn_id: str
+
+
+def _default_safety_margin() -> float:
+    """Per-call safety margin applied to each chain entry's effective
+    ceiling. Mirrors ``ReasoningService._context_safety_margin``."""
+    import os
+    raw = os.environ.get("KERNOS_CONTEXT_SAFETY_MARGIN", "")
+    try:
+        v = float(raw)
+        if 0.0 <= v < 1.0:
+            return v
+    except ValueError:
+        pass
+    return 0.10
+
+
+def _default_catalog_provider() -> dict[str, Any]:
+    """Best-effort load of the model registry. Empty dict on failure
+    so the chain caller falls through to tolerant routing."""
+    try:
+        from kernos.models import load_catalog
+        result = load_catalog()
+        return result.cards_by_name if result is not None else {}
+    except Exception:
+        return {}
+
+
+def build_resilient_chain_caller(
+    *,
+    chains: Any,
+    request: Any = None,
+    chain_name: str = "primary",
+    catalog_provider: Callable[[], dict[str, Any]] | None = None,
+    safety_margin: float | None = None,
+    request_model: str | None = None,
+    trace_callback: Callable[..., None] | None = None,
+) -> Callable[..., Awaitable[Any]]:
+    """Build a per-turn chain caller with the three resilience behaviors
+    that the legacy ``_call_chain`` provided.
+
+    CHAIN-CALLER-PARITY-V1 (2026-05-03): preserves these behaviors at
+    the thin-path seam so the strike commit can remove the legacy
+    helper without regressing production functionality:
+
+      1. **Chain fallback.** Iterate the resolved primary-chain
+         entries; on a provider error from one entry, try the next.
+         Surface ``LLMChainExhausted`` when all entries are exhausted.
+      2. **Context-window pre-flight skip.** Before each provider
+         call, consult the merged catalog and skip entries whose
+         effective ceiling cannot fit the estimated payload. Raise
+         ``ChainPayloadTooLarge`` when no entry fits.
+      3. **Model-override resolution.** Read ``request.model_override``
+         and route through ``model_routing.resolve_effective_chain``
+         to compute the effective chain plus head model. The override
+         is "preferred first attempt" — natural fallback applies on
+         override-head failure.
+
+    The override is resolved at build time (per-turn). The returned
+    closure has the standard chain-caller signature
+    ``(system, messages, tools, max_tokens, *, conversation_id="")``
+    and iterates the resolved entries with fallback + pre-flight skip.
+
+    Construction parameters mirror legacy semantics:
+      - ``chains``: ChainConfig (the configured chain dict).
+      - ``request``: per-turn ReasoningRequest; provides
+        ``model_override``, ``trace``, ``conversation_id``,
+        ``model``. None acceptable for callers without per-turn
+        context.
+      - ``chain_name``: which chain to dispatch (default "primary").
+      - ``catalog_provider``: callable returning the model-card
+        dict; defaults to lazy load of ``kernos.models`` registry.
+      - ``safety_margin``: per-call margin against ceiling; defaults
+        to ``_default_safety_margin()`` reading
+        ``KERNOS_CONTEXT_SAFETY_MARGIN``.
+      - ``request_model``: substitute model on entry 0 unless the
+        head was overridden. Defaults to ``request.model``.
+      - ``trace_callback``: ``(level, source, event, detail) -> None``
+        for trace recording; defaults to no-op.
+    """
+    from kernos.kernel.exceptions import (
+        ChainPayloadTooLarge,
+        LLMChainExhausted,
+        ReasoningConnectionError,
+        ReasoningProviderError,
+    )
+    from kernos.kernel.model_routing import resolve_effective_chain
+    from kernos.kernel.token_estimator import estimate_tokens
+
+    if catalog_provider is None:
+        catalog_provider = _default_catalog_provider
+    if safety_margin is None:
+        safety_margin = _default_safety_margin()
+    if trace_callback is None:
+        trace_callback = lambda *args, **kwargs: None  # noqa: E731
+    if request_model is None and request is not None:
+        request_model = getattr(request, "model", "") or None
+
+    # Resolve the effective chain at build time using the per-turn
+    # request's model_override. The resolver handles stale chain
+    # names + stale head specs gracefully.
+    override = getattr(request, "model_override", None) if request is not None else None
+    eff = resolve_effective_chain(
+        chains=chains,
+        requested_chain=chain_name,
+        override=override,
+    )
+    resolved_chain_name = eff.chain_name
+    resolved_entries = list(eff.entries)
+    if not resolved_entries:
+        resolved_entries = list(
+            chains.get(resolved_chain_name)
+            or chains.get("primary", [])
+            or []
+        )
+
+    # Codex post-impl fold from the legacy implementation: when the
+    # override carries an explicit (provider, model) head spec, entry
+    # 0's model must NOT be replaced by request_model.
+    head_was_overridden = bool(
+        override is not None
+        and override.get("override_provider")
+        and override.get("override_model")
+        and not eff.stale_head_spec
+    )
+
+    async def _resilient_chain_caller(
+        system: Any,
+        messages: list,
+        tools: list,
+        max_tokens: int,
+        *,
+        conversation_id: str = "",
+    ) -> Any:
+        # Pre-flight payload estimate; same estimator the legacy
+        # helper uses.
+        est_tokens = estimate_tokens(
+            system=system, messages=messages, tools=tools,
+        )
+        catalog = catalog_provider() or {}
+        called_count = 0
+        skipped_count = 0
+        largest_ceiling: int | None = None
+        attempts: list[tuple[str, str, str]] = []
+        last_exc: Exception | None = None
+
+        for i, entry in enumerate(resolved_entries):
+            # Determine the model to use for this entry. Entry 0
+            # gets request_model unless the head was explicitly
+            # overridden; subsequent entries always use their
+            # configured model.
+            if i == 0 and head_was_overridden:
+                model = entry.model
+            else:
+                model = request_model if (i == 0 and request_model) else entry.model
+            pname = getattr(entry.provider, "provider_name", "unknown")
+
+            # Pre-flight context-window skip. Tolerant: missing
+            # cards fall through (preserves behavior for unknown
+            # models). The legacy helper warns once per process for
+            # unknown models; the new seam is intentionally quieter
+            # — diagnostics live in the trace_callback.
+            card = catalog.get(model) if catalog else None
+            if card is not None and getattr(card, "effective_max_input_tokens", 0):
+                ceiling = card.effective_max_input_tokens
+                if largest_ceiling is None or ceiling > largest_ceiling:
+                    largest_ceiling = ceiling
+                threshold = int(ceiling * (1.0 - safety_margin))
+                if est_tokens > threshold:
+                    skipped_count += 1
+                    skip_reason = (
+                        f"skipped: payload {est_tokens} tokens exceeds "
+                        f"threshold {threshold} (ceiling {ceiling}, "
+                        f"margin {safety_margin:.0%})"
+                    )
+                    trace_callback(
+                        "info", "reasoning", "CHAIN_SKIP",
+                        f"chain={resolved_chain_name} entry={pname} "
+                        f"model={model} estimated_tokens={est_tokens} "
+                        f"threshold={threshold}",
+                    )
+                    logger.info(
+                        "CHAIN[%s]: skip %s/%s — %s",
+                        resolved_chain_name, pname, model, skip_reason,
+                    )
+                    attempts.append((pname, model, skip_reason))
+                    continue
+
+            # Forward conversation_id if set so the wire-shape seam
+            # reaches Codex's prompt_cache_key (see codex_provider
+            # docstring).
+            try:
+                called_count += 1
+                response = await entry.provider.complete(
+                    model=model,
+                    system=system,
+                    messages=messages,
+                    tools=tools,
+                    max_tokens=max_tokens,
+                    conversation_id=conversation_id,
+                )
+                if i > 0:
+                    # Partial fallback succeeded — silent per the
+                    # LLM-SETUP-AND-FALLBACK contract.
+                    trace_callback(
+                        "info", "reasoning", "FALLBACK_USED",
+                        f"chain={resolved_chain_name} via {pname}/{model} "
+                        f"(skipped {i} entries)",
+                    )
+                    logger.info(
+                        "CHAIN[%s]: success via %s/%s",
+                        resolved_chain_name, pname, model,
+                    )
+                return response
+            except (ReasoningProviderError, ReasoningConnectionError) as exc:
+                trace_callback(
+                    "warning", "reasoning", "CHAIN_FALLBACK",
+                    f"chain={resolved_chain_name} {pname}/{model} "
+                    f"failed: {str(exc)[:150]}",
+                )
+                logger.warning(
+                    "CHAIN[%s]: %s/%s failed: %s",
+                    resolved_chain_name, pname, model, exc,
+                )
+                last_exc = exc
+                attempts.append((pname, model, str(exc)))
+                continue
+
+        # Distinct exhaustion paths: payload-too-large vs all-failed.
+        if called_count == 0 and skipped_count > 0:
+            trace_callback(
+                "error", "reasoning", "CHAIN_PAYLOAD_TOO_LARGE",
+                f"chain={resolved_chain_name} estimated_tokens={est_tokens} "
+                f"largest_ceiling={largest_ceiling} skipped={skipped_count}",
+            )
+            logger.error(
+                "CHAIN[%s]: payload too large for any entry "
+                "(estimated=%d, largest_ceiling=%s)",
+                resolved_chain_name, est_tokens, largest_ceiling,
+            )
+            raise ChainPayloadTooLarge(
+                chain_name=resolved_chain_name,
+                estimated_tokens=est_tokens,
+                largest_ceiling=largest_ceiling,
+                attempts=attempts,
+            )
+
+        trace_callback(
+            "error", "reasoning", "CHAIN_EXHAUSTED",
+            f"chain={resolved_chain_name} all "
+            f"{len(resolved_entries)} entries exhausted",
+        )
+        logger.error(
+            "CHAIN[%s]: all %d providers failed",
+            resolved_chain_name, len(resolved_entries),
+        )
+        raise LLMChainExhausted(
+            chain_name=resolved_chain_name, attempts=attempts,
+        )
+
+    return _resilient_chain_caller
 
 
 def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tuple]:
@@ -131,8 +402,25 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         from kernos.kernel.turn_runner import TurnRunner
 
         telemetry = AggregatedTelemetry()
+        # CHAIN-CALLER-PARITY-V1: when ctx.chains is set (production
+        # path), build a per-turn resilient chain caller that closes
+        # over the request for model-override resolution and carries
+        # chain fallback + context-window pre-flight skip. Falls back
+        # to ctx.chain_caller for tests / edge callers that injected
+        # a specific callable.
+        if ctx.chains is not None:
+            def _trace_cb(level, source, event, detail, **kw):
+                if request is not None and getattr(request, "trace", None):
+                    request.trace.record(level, source, event, detail, **kw)
+            base_chain_caller = build_resilient_chain_caller(
+                chains=ctx.chains,
+                request=request,
+                trace_callback=_trace_cb,
+            )
+        else:
+            base_chain_caller = ctx.chain_caller
         wrapped_chain = wrap_chain_caller_with_telemetry(
-            ctx.chain_caller, telemetry,
+            base_chain_caller, telemetry,
         )
 
         planner = Planner(
@@ -443,6 +731,11 @@ def setup_default_thin_path_context(
         return {"error": f"integration dispatcher not yet wired; tool={tool_id!r}"}
 
     return ThinPathContext(
+        # CHAIN-CALLER-PARITY-V1: chains is the canonical source. The
+        # per-turn factory builds the resilient chain caller from this.
+        chains=chains,
+        # Legacy callable retained for compat; per-turn factory prefers
+        # the resilient caller built from `chains`.
         chain_caller=_chain_caller,
         cohort_runner=cohort_runner,
         dispatcher_event_emitter=_dispatcher_event_emitter,
@@ -458,6 +751,7 @@ def setup_default_thin_path_context(
 
 __all__ = [
     "ThinPathContext",
+    "build_resilient_chain_caller",
     "build_turn_runner_provider",
     "setup_default_thin_path_context",
     "wire_live_thin_path",
