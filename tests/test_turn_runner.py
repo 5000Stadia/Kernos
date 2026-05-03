@@ -114,20 +114,22 @@ def _inputs(turn_id: str = "turn-x") -> TurnRunnerInputs:
 # ---------------------------------------------------------------------------
 
 
-def test_feature_flag_default_off(monkeypatch):
-    """With the env unset, the decoupled path is OFF."""
+def test_feature_flag_default_on(monkeypatch):
+    """With the env unset, thin path is the default (CCV1 C7 default flip 2026-05-03)."""
     monkeypatch.delenv(FEATURE_FLAG_ENV, raising=False)
-    assert use_decoupled_turn_runner() is False
+    assert use_decoupled_turn_runner() is True
 
 
-@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
-def test_feature_flag_on_for_truthy_values(monkeypatch, value):
+@pytest.mark.parametrize("value", ["", "1", "true", "TRUE", "yes", "on", "maybe", "anything"])
+def test_feature_flag_on_for_non_optout_values(monkeypatch, value):
+    """Any value outside the legacy opt-out set keeps thin-path default."""
     monkeypatch.setenv(FEATURE_FLAG_ENV, value)
     assert use_decoupled_turn_runner() is True
 
 
-@pytest.mark.parametrize("value", ["", "0", "false", "off", "no", "maybe"])
-def test_feature_flag_off_for_falsy_values(monkeypatch, value):
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", "off", "no"])
+def test_feature_flag_off_only_for_explicit_optout(monkeypatch, value):
+    """Only explicit legacy opt-out values flip the flag off."""
     monkeypatch.setenv(FEATURE_FLAG_ENV, value)
     assert use_decoupled_turn_runner() is False
 
@@ -412,11 +414,14 @@ async def test_reasoning_service_routes_to_turn_runner_when_flag_on(monkeypatch)
 async def test_reasoning_service_skips_turn_runner_when_flag_off(monkeypatch):
     """Flag off → legacy reasoning path runs. We assert routing by
     confirming the wired TurnRunner is NOT consulted; we don't run
-    the full legacy loop here (that's covered in test_reasoning.py)."""
+    the full legacy loop here (that's covered in test_reasoning.py).
+
+    Post-CCV1-C7-flip (2026-05-03): unset = thin path. Explicit
+    opt-out to legacy is now `setenv("0")` rather than `delenv`."""
     from kernos.kernel.reasoning import ReasoningService
     from kernos.providers.base import Provider
 
-    monkeypatch.delenv(FEATURE_FLAG_ENV, raising=False)
+    monkeypatch.setenv(FEATURE_FLAG_ENV, "0")
 
     class _UnreachableTurnRunner:
         async def run_turn(self, inputs):

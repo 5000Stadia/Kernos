@@ -540,10 +540,13 @@ def _make_handler(
 
     Both paths share the same ``mock_provider`` capture seam.
     """
+    # Post-CCV1-C7-flip (2026-05-03): thin path is the default. The
+    # legacy parameterization explicitly opts out via "0" rather
+    # than relying on unset semantics, since unset now means thin.
     if decoupled:
         monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     else:
-        monkeypatch.delenv(FEATURE_FLAG_ENV, raising=False)
+        monkeypatch.setenv(FEATURE_FLAG_ENV, "0")
 
     mcp = MagicMock(spec=MCPClientManager)
     mcp.get_tools.return_value = tools or []

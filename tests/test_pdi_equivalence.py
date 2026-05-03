@@ -826,19 +826,22 @@ async def test_latency_telemetry_observable_on_thin_path():
 
 
 # ---------------------------------------------------------------------------
-# Existing tests still pass with feature flag OFF (non-negotiable)
+# Default flag behavior — flipped 2026-05-03 (CCV1 C7 default flip)
 # ---------------------------------------------------------------------------
 
 
-def test_feature_flag_default_off_means_legacy_path_runs(monkeypatch):
-    """The decoupled-turn-runner flag is OFF by default. Legacy
-    reasoning path runs unchanged. Existing test suite passes
-    without modification — verified by the broader test runner."""
+def test_feature_flag_default_on_means_thin_path_runs(monkeypatch):
+    """The decoupled-turn-runner flag is ON by default after CCV1 C7
+    flip (2026-05-03). Thin path runs unless explicitly opted-out
+    via "0" / "false" / "no" / "off". The opt-out path keeps legacy
+    reachable as oracle during the stabilization window."""
     from kernos.kernel.turn_runner import (
         FEATURE_FLAG_ENV,
         use_decoupled_turn_runner,
     )
     monkeypatch.delenv(FEATURE_FLAG_ENV, raising=False)
+    assert use_decoupled_turn_runner() is True
+    monkeypatch.setenv(FEATURE_FLAG_ENV, "0")
     assert use_decoupled_turn_runner() is False
 
 

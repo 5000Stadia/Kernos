@@ -248,9 +248,13 @@ async def test_build_dev_handler_legacy_path_also_boots(isolated_env, monkeypatc
     """The soak runbook runs each scenario on both paths (legacy
     oracle vs. decoupled). Pin: build_dev_handler with
     decoupled=False boots successfully too — it threads through the
-    legacy reasoning loop instead of the per-turn TurnRunner."""
+    legacy reasoning loop instead of the per-turn TurnRunner.
+
+    Post-CCV1-C7-flip (2026-05-03): legacy is now opt-out; the test
+    explicitly sets the flag to "0" rather than relying on unset
+    semantics."""
     from kernos.repl import build_dev_handler, shutdown_dev_handler
-    monkeypatch.delenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", raising=False)
+    monkeypatch.setenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", "0")
 
     chains, _mock_provider = _make_chain_with_mock_provider()
     with patch(
