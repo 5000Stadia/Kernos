@@ -855,6 +855,93 @@ def _format_diff_report(
 
 
 # ---------------------------------------------------------------------------
+# Per-turn shape checklist (baseline assertions, applied to every scenario)
+# ---------------------------------------------------------------------------
+#
+# Every automated scenario runs these assertions in addition to its
+# scenario-specific ones. Captures "the proper shape of a turn"
+# mechanically — boot succeeded, dump emitted, no traceback, core
+# substrate zones assembled, request_tool reaches the LLM. Mismatch
+# on any of these means something fundamental is broken even before
+# scenario-specific signals matter.
+#
+# Founder-driven posture (2026-05-03): CC runs soaks autonomously
+# and surfaces anomalies; the per-turn shape checklist is the
+# mechanical surface for "did this turn fire correctly." Failures
+# here route to "structural / blocks-flip" by definition.
+
+_BASELINE_CONSOLE_ASSERTIONS: tuple[ConsoleAssertion, ...] = (
+    ConsoleAssertion(
+        description="checklist-1: REPL boot succeeded (handler ready)",
+        pattern=r"repl: handler ready",
+    ),
+    ConsoleAssertion(
+        description="checklist-2: /dump command emitted (context captured)",
+        pattern=r"DUMP: context written to",
+    ),
+    ConsoleAssertion(
+        description="checklist-3: no exception traceback in run",
+        pattern=r"^Traceback \(most recent call last\):",
+        must_appear=False,
+    ),
+    ConsoleAssertion(
+        description="checklist-4: no abuse-prevention block (BLOCKED_SENDER)",
+        pattern=r"BLOCKED_SENDER",
+        must_appear=False,
+    ),
+)
+
+_BASELINE_DUMP_ASSERTIONS: tuple[DumpAssertion, ...] = (
+    DumpAssertion(
+        description="checklist-5: ## RULES zone present (operating principles)",
+        needle="## RULES",
+    ),
+    DumpAssertion(
+        description="checklist-6: ## NOW zone present (current time + state)",
+        needle="## NOW",
+    ),
+    DumpAssertion(
+        description="checklist-7: ## STATE zone present (preferences + spaces)",
+        needle="## STATE",
+    ),
+    DumpAssertion(
+        description="checklist-8: request_tool reaches tools list (CCV1 C5)",
+        needle='"name": "request_tool"',
+    ),
+)
+
+
+def _format_checklist() -> str:
+    """Return a human-readable checklist for `--checklist` flag."""
+    lines: list[str] = []
+    lines.append("# Per-turn shape checklist (applied to every automated scenario)")
+    lines.append("")
+    lines.append("Captures the mechanical signals every successful Kernos turn "
+                 "should produce. Failures here are structural by definition; "
+                 "the diff-report classifier routes them to blocks-flip.")
+    lines.append("")
+    lines.append("## Console signals")
+    for a in _BASELINE_CONSOLE_ASSERTIONS:
+        polarity = "must appear" if a.must_appear else "must NOT appear"
+        lines.append(f"* **{a.description}** — pattern `{a.pattern}` ({polarity})")
+    lines.append("")
+    lines.append("## Dump zones + tool surface")
+    for a in _BASELINE_DUMP_ASSERTIONS:
+        polarity = "must appear" if a.must_appear else "must NOT appear"
+        lines.append(f"* **{a.description}** — looks for `{a.needle!r}` ({polarity})")
+    lines.append("")
+    lines.append("## Path-specific notes")
+    lines.append("* Thin path: tool dispatch with `seam=live_integration_dispatcher` "
+                 "is read-only; full machinery dispatches use the executor seam")
+    lines.append("* Legacy path: same checklist applies; differences vs thin "
+                 "are surfaced by the diff-report classifier, not this checklist")
+    lines.append("* Known-and-deferred tool surface gaps (4 asymmetric + 11 "
+                 "symmetric, see --coverage-audit) do NOT fail the checklist; "
+                 "they're flagged as known divergences in the diff-report")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -996,8 +1083,12 @@ async def _run_scenario(
         snapshot.write_text(dump_text)
         dump_path_str = str(snapshot)
 
-    console_results = _validate_console(stdout, s.console_assertions)
-    dump_results = _validate_dump(dump_text, s.dump_assertions)
+    # Baseline + scenario assertions stack: baseline first so the
+    # checklist items appear at the top of the per-scenario report.
+    all_console = _BASELINE_CONSOLE_ASSERTIONS + s.console_assertions
+    all_dump = _BASELINE_DUMP_ASSERTIONS + s.dump_assertions
+    console_results = _validate_console(stdout, all_console)
+    dump_results = _validate_dump(dump_text, all_dump)
 
     return ScenarioResult(
         scenario_name=s.name,
@@ -1450,6 +1541,15 @@ def main() -> int:
             "the equivalence soak."
         ),
     )
+    parser.add_argument(
+        "--checklist", action="store_true",
+        help=(
+            "print the per-turn shape checklist (the baseline "
+            "assertions applied to every automated scenario) and "
+            "exit. Useful for understanding what 'a correctly fired "
+            "turn' should look like, mechanically."
+        ),
+    )
     args = parser.parse_args()
 
     if args.list:
@@ -1460,6 +1560,10 @@ def main() -> int:
 
     if args.coverage_audit:
         print(_format_coverage_audit())
+        return 0
+
+    if args.checklist:
+        print(_format_checklist())
         return 0
 
     selected: list[Scenario]
