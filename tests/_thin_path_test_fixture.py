@@ -77,7 +77,13 @@ def make_test_turn_runner_provider(
         runaway loops in misbehaved tests.
     """
 
-    async def _stub_provider_factory(request: Any, event_emitter: Any) -> tuple:
+    # Production _build_per_turn_runner (server.py / repl.py / shared
+    # helper) is a sync function returning the (TurnRunner, delivery)
+    # tuple. ReasoningService._run_via_turn_runner_provider unpacks
+    # that tuple sync (no await). The fixture must match — making
+    # _stub_provider_factory async would have it return a coroutine,
+    # which can't be unpacked. Codex C5-review found this bug 2026-05-03.
+    def _stub_provider_factory(request: Any, event_emitter: Any) -> tuple:
         class _StubDelivery:
             async def emit_request_event(self) -> None:
                 return None

@@ -476,6 +476,8 @@ async def test_handler_creates_task_via_engine():
     mock_provider = AsyncMock(spec=Provider)
     registry = _make_mock_registry()
     reasoning = ReasoningService(mock_provider, events, mcp, audit)
+    from tests._thin_path_test_fixture import wire_test_thin_path
+    wire_test_thin_path(reasoning, provider=mock_provider, mcp=mcp)
 
     # Use a mock engine to capture what task was passed
     mock_engine = AsyncMock(spec=TaskEngine)
@@ -537,6 +539,8 @@ async def test_handler_uses_task_result_text_as_response():
     mock_provider = AsyncMock(spec=Provider)
     registry = _make_mock_registry()
     reasoning = ReasoningService(mock_provider, events, mcp, audit)
+    from tests._thin_path_test_fixture import wire_test_thin_path
+    wire_test_thin_path(reasoning, provider=mock_provider, mcp=mcp)
 
     mock_engine = AsyncMock(spec=TaskEngine)
     from kernos.kernel.task import Task, TaskStatus

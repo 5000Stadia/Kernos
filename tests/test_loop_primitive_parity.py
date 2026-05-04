@@ -148,3 +148,41 @@ def test_three_make_helpers_use_shared_fixture():
         "must invoke wire_test_thin_path on the service so the "
         "post-strike construction contract is honored."
     )
+
+
+def test_every_reasoning_service_construction_in_named_test_files_is_wired():
+    """Pin: every ``ReasoningService(...)`` construction in the three
+    helper files is followed by a ``wire_test_thin_path(reasoning,
+    ...)`` call within ten lines.
+
+    Codex C5-review (2026-05-03) found that test_handler.py had two
+    ad-hoc ReasoningService constructions outside ``_make_handler``
+    that the original parity-V1 commit didn't wire. Latent bug —
+    masked by the legacy reasoning loop being still alive — would
+    have manifested post-strike. This pin catches the same shape of
+    drift in any future addition.
+    """
+    import re
+    helper_files = [
+        "tests/test_reasoning.py",
+        "tests/test_engine.py",
+        "tests/test_handler.py",
+    ]
+    failures: list[str] = []
+    for relpath in helper_files:
+        src = (_REPO_ROOT / relpath).read_text()
+        lines = src.splitlines()
+        for i, line in enumerate(lines):
+            if not re.search(r"=\s*ReasoningService\(", line):
+                continue
+            # Look ahead up to 10 lines for wire_test_thin_path.
+            window = "\n".join(lines[i:i + 10])
+            if "wire_test_thin_path" not in window:
+                failures.append(f"{relpath}:{i + 1}")
+    assert not failures, (
+        "TEST-INFRA-PARITY-V1: ReasoningService constructions "
+        f"without wire_test_thin_path within 10 lines: {failures}. "
+        "Each construction site must wire the stub turn-runner-"
+        "provider so the post-strike construction contract is "
+        "honored. See _thin_path_test_fixture.wire_test_thin_path."
+    )
