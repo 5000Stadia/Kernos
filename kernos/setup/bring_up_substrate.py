@@ -42,10 +42,15 @@ Per the design review direction:
 * Expanded scope: ``ProviderRegistry``, ``ContextBriefRegistry``,
   ``DraftRegistry`` (STS dependencies) all brought up.
 
-Out of scope for this commit: ``CRBApprovalFlow``,
-``InstallProposalStore``, ``CRBProposalAuthor``. Those need their
-own event-subscription wiring + LLM client; follow-up commit
-(C5c-bringup-crb).
+CRB scope (folded in from C5c-bringup-crb): ``InstallProposalStore``
+gets its sqlite started, ``CRBProposalAuthor`` is constructed against
+a :class:`ReasoningLLMAdapter` over ``handler.reasoning``, and
+``CRBApprovalFlow`` is wired with restricted ports
+(:class:`DraftRegistryReadAdapter`, :class:`SubstrateToolsSTSAdapter`,
+:class:`CRBEventEmitter` over the registered ``"crb"`` source_module).
+The 5-tuple — store + author + flow + draft port + sts port — moves
+the substrate one step closer to surfacing routine.proposed →
+routine.approved end-to-end.
 
 Failure posture: the bring-up is intentionally fail-loud. If a
 component fails to construct, server.py logs and continues with
@@ -60,6 +65,12 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from kernos.kernel.agents.registry import AgentRegistry
+    from kernos.kernel.crb.approval.flow import CRBApprovalFlow
+    from kernos.kernel.crb.events import CRBEventEmitter
+    from kernos.kernel.crb.proposal.author import CRBProposalAuthor
+    from kernos.kernel.crb.proposal.install_proposal_store import (
+        InstallProposalStore,
+    )
     from kernos.kernel.drafts.registry import DraftRegistry
     from kernos.kernel.substrate_tools.facade import SubstrateTools
     from kernos.kernel.substrate_tools.query.context_brief import (
@@ -96,6 +107,10 @@ class Substrate:
     runtime: "TriggerEvaluationRuntime"
     internal_event_adapter: "InternalEventAdapter"
     substrate_tools: "SubstrateTools"
+    install_proposal_store: "InstallProposalStore"
+    crb_event_emitter: "CRBEventEmitter"
+    crb_proposal_author: "CRBProposalAuthor"
+    crb_approval_flow: "CRBApprovalFlow"
 
 
 async def bring_up_substrate(
@@ -195,9 +210,50 @@ async def bring_up_substrate(
         runtime=runtime,
     )
 
+    # --- CRB approval flow + dependencies ----------------------------
+    # InstallProposalStore (sqlite-backed proposal state machine),
+    # CRBProposalAuthor (LLM-driven user-facing wording), and the
+    # CRBApprovalFlow that orchestrates them. Restricted ports keep CRB
+    # from accessing capabilities outside its remit.
+    from kernos.kernel import event_stream as _event_stream
+    from kernos.kernel.crb.approval.flow import CRBApprovalFlow
+    from kernos.kernel.crb.bringup_adapters import (
+        DraftRegistryReadAdapter,
+        ReasoningLLMAdapter,
+        SubstrateToolsSTSAdapter,
+    )
+    from kernos.kernel.crb.events import CRB_SOURCE_MODULE, CRBEventEmitter
+    from kernos.kernel.crb.proposal.author import CRBProposalAuthor
+    from kernos.kernel.crb.proposal.install_proposal_store import (
+        InstallProposalStore,
+    )
+
+    install_proposal_store = InstallProposalStore()
+    await install_proposal_store.start(data_dir)
+
+    # EmitterRegistry is a process singleton. Idempotent fetch keeps
+    # bring-up safe across repeated calls within one process (rare in
+    # production, common in tests).
+    registry = _event_stream.emitter_registry()
+    crb_emitter_raw = registry.get(CRB_SOURCE_MODULE) or registry.register(
+        CRB_SOURCE_MODULE
+    )
+    crb_event_emitter = CRBEventEmitter(emitter=crb_emitter_raw)
+
+    crb_proposal_author = CRBProposalAuthor(
+        llm_client=ReasoningLLMAdapter(reasoning=handler.reasoning),
+    )
+    crb_approval_flow = CRBApprovalFlow(
+        install_proposal_store=install_proposal_store,
+        draft_port=DraftRegistryReadAdapter(draft_registry=draft_registry),
+        sts_port=SubstrateToolsSTSAdapter(substrate_tools=substrate_tools),
+        event_emitter=crb_event_emitter,
+        author=crb_proposal_author,
+    )
+
     logger.info(
         "WTC v1 C5c-bringup: substrate live — runtime=%s engine=%s "
-        "verbs=%d",
+        "verbs=%d crb=ready",
         runtime.claim_owner, "started", len(action_library._verbs),
     )
 
@@ -213,6 +269,10 @@ async def bring_up_substrate(
         runtime=runtime,
         internal_event_adapter=internal_event_adapter,
         substrate_tools=substrate_tools,
+        install_proposal_store=install_proposal_store,
+        crb_event_emitter=crb_event_emitter,
+        crb_proposal_author=crb_proposal_author,
+        crb_approval_flow=crb_approval_flow,
     )
 
 
@@ -220,6 +280,7 @@ async def tear_down_substrate(substrate: Substrate) -> None:
     """Stop the substrate's components in reverse construction order.
     Best-effort: failures are logged but don't propagate."""
     for label, coro_factory in (
+        ("install_proposal_store", substrate.install_proposal_store.stop),
         ("internal_event_adapter", substrate.internal_event_adapter.stop),
         ("runtime", substrate.runtime.stop),
         ("execution_engine", substrate.execution_engine.stop),
