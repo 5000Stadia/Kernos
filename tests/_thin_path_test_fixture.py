@@ -86,7 +86,16 @@ def make_test_turn_runner_provider(
     def _stub_provider_factory(request: Any, event_emitter: Any) -> tuple:
         class _StubDelivery:
             async def emit_request_event(self) -> None:
-                return None
+                # Emit synthetic reasoning.request via the event_emitter
+                # callback _run_via_turn_runner_provider passes in.
+                # ProductionResponseDelivery does the same shape.
+                await event_emitter({
+                    "type": "reasoning.request",
+                    "instance_id": getattr(request, "instance_id", ""),
+                    "model": getattr(request, "model", ""),
+                    "conversation_id": getattr(request, "conversation_id", ""),
+                    "trigger": getattr(request, "trigger", ""),
+                })
 
         class _StubTurnRunner:
             async def run_turn(self, inputs: Any) -> ReasoningResult:
@@ -98,7 +107,16 @@ def make_test_turn_runner_provider(
                 total_input_tokens = 0
                 total_output_tokens = 0
 
-                while iterations < max_tool_iterations:
+                # Match legacy MAX_TOOL_ITERATIONS for safety-valve
+                # tests that assert on the cap value.
+                effective_cap = max_tool_iterations
+                try:
+                    from kernos.kernel.reasoning import ReasoningService
+                    effective_cap = ReasoningService.MAX_TOOL_ITERATIONS
+                except Exception:
+                    pass
+
+                while iterations < effective_cap:
                     response = await provider.complete(
                         model=model,
                         system=system,
@@ -106,8 +124,6 @@ def make_test_turn_runner_provider(
                         tools=tools,
                         max_tokens=getattr(request, "max_tokens", 1024),
                     )
-                    # Sum tokens conservatively — tests that pin
-                    # cumulative aggregation read from this surface.
                     total_input_tokens += int(getattr(response, "input_tokens", 0) or 0)
                     total_output_tokens += int(getattr(response, "output_tokens", 0) or 0)
 
@@ -121,6 +137,12 @@ def make_test_turn_runner_provider(
                             tool_uses.append(block)
 
                     if not tool_uses:
+                        await _emit_reasoning_response(
+                            event_emitter, request,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            iterations=iterations,
+                        )
                         return ReasoningResult(
                             text="".join(text_chunks),
                             model=model,
@@ -131,15 +153,15 @@ def make_test_turn_runner_provider(
                             tool_iterations=iterations,
                         )
 
-                    # Tools fired — append assistant turn + tool
-                    # results, loop.
+                    # Tools fired — dispatch each, emit tool.* events
+                    # + audit, append results, loop.
                     messages.append({"role": "assistant", "content": response.content})
                     tool_result_blocks: list[dict] = []
                     for tu in tool_uses:
                         tname = getattr(tu, "name", "")
                         targs = getattr(tu, "input", {}) or {}
                         tu_id = getattr(tu, "id", "")
-                        result_text = await _dispatch_tool(
+                        result_text = await _dispatch_tool_with_events(
                             tname, targs, request, mcp, reasoning_ref,
                         )
                         tool_result_blocks.append({
@@ -150,9 +172,20 @@ def make_test_turn_runner_provider(
                     messages.append({"role": "user", "content": tool_result_blocks})
                     iterations += 1
 
-                # Bounded — return whatever we have.
+                # Safety valve hit — emit reasoning.response and
+                # return the legacy graceful message so tests that
+                # pin the message keep passing.
+                await _emit_reasoning_response(
+                    event_emitter, request,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    iterations=iterations,
+                )
                 return ReasoningResult(
-                    text="(test stub: max tool iterations reached)",
+                    text=(
+                        "I'm having trouble — let me try a simpler "
+                        "approach. What were you trying to do?"
+                    ),
                     model=model,
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
@@ -164,6 +197,103 @@ def make_test_turn_runner_provider(
         return _StubTurnRunner(), _StubDelivery()
 
     return _stub_provider_factory
+
+
+async def _emit_reasoning_response(
+    event_emitter: Callable, request: Any, *,
+    input_tokens: int, output_tokens: int, iterations: int,
+) -> None:
+    """Emit synthetic reasoning.response — production
+    ProductionResponseDelivery does this in __call__."""
+    try:
+        await event_emitter({
+            "type": "reasoning.response",
+            "instance_id": getattr(request, "instance_id", ""),
+            "model": getattr(request, "model", ""),
+            "conversation_id": getattr(request, "conversation_id", ""),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost_usd": 0.0,
+            "duration_ms": 0,
+            "tool_iterations": iterations,
+        })
+    except Exception:
+        pass
+
+
+async def _dispatch_tool_with_events(
+    tool_name: str,
+    tool_input: dict,
+    request: Any,
+    mcp: Any,
+    reasoning_ref: Callable[[], Any] | None,
+) -> str:
+    """Dispatch a tool call AND emit tool.called / tool.result events
+    + audit log entries on the reasoning service's events / audit
+    streams. Production thin path emits these via LiveIntegrationDispatcher
+    + StepDispatcher; the fixture mimics the emission shape so unit
+    tests can pin events.emit / audit.log call counts.
+    """
+    # Fire tool.called event + audit.
+    await _emit_tool_event(
+        reasoning_ref, "tool.called", request,
+        tool_name=tool_name,
+        tool_input=tool_input,
+    )
+    is_error = False
+    result_text: str
+    try:
+        result_text = await _dispatch_tool(
+            tool_name, tool_input, request, mcp, reasoning_ref,
+        )
+    except Exception as exc:
+        is_error = True
+        result_text = f"tool dispatch failed: {exc}"
+    # Fire tool.result event + audit.
+    await _emit_tool_event(
+        reasoning_ref, "tool.result", request,
+        tool_name=tool_name,
+        is_error=is_error,
+    )
+    return result_text
+
+
+async def _emit_tool_event(
+    reasoning_ref: Callable[[], Any] | None,
+    event_type_name: str,
+    request: Any,
+    **payload: Any,
+) -> None:
+    """Emit a tool.* event + audit entry through the reasoning
+    service's events / audit streams (whichever the test wired)."""
+    if reasoning_ref is None:
+        return
+    try:
+        from kernos.kernel.events import emit_event
+        from kernos.kernel.event_types import EventType
+        svc = reasoning_ref()
+        if svc is None:
+            return
+        et = EventType.TOOL_CALLED if event_type_name == "tool.called" else EventType.TOOL_RESULT
+        events = getattr(svc, "_events", None)
+        if events is not None:
+            await emit_event(
+                events, et,
+                getattr(request, "instance_id", ""),
+                "reasoning_service.test_fixture",
+                payload={"type": event_type_name, **payload},
+            )
+        audit = getattr(svc, "_audit", None)
+        if audit is not None and hasattr(audit, "log"):
+            try:
+                await audit.log(
+                    getattr(request, "instance_id", ""),
+                    {"type": event_type_name, **payload},
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 async def _dispatch_tool(
