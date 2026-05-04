@@ -214,8 +214,25 @@ def _import_kernel_schemas() -> list[dict]:
 class KernelToolDescriptor:
     """Canonical kernel-tool descriptor.
 
-    Five fields per the workshop-tool prep design note's contract.
-    Workshop tools (future spec) plug into the same shape.
+    Six fields per the workshop-tool prep design note's contract:
+
+      - ``name`` / ``description`` / ``input_schema`` / ``policy_metadata``
+        carry the surface every consumer reads.
+      - ``schema`` carries the full original schema dict (Anthropic-
+        style ``{name, description, input_schema}``) so consumers
+        that pass the schema verbatim into the LLM tool call have
+        the source-of-truth dict, not a derived view.
+      - ``dispatch_reference`` is the workshop-tool contract field.
+        For kernel tools it is ``None`` because dispatch is encoded
+        in ``ReasoningService.execute_tool``'s elif chain (the elif
+        chain IS the dispatch reference; encoding it as a string
+        here would be lossy). For workshop tools (future spec) it
+        carries an importable callable reference or service-id
+        string the workshop dispatcher resolves at call time.
+
+    Codex review (2026-05-04) caught the mismatch where the design
+    note listed ``dispatch_reference`` but the dataclass omitted it;
+    field added so kernel and workshop tools share the exact contract.
     """
 
     name: str
@@ -223,6 +240,7 @@ class KernelToolDescriptor:
     input_schema: dict
     schema: dict  # full original schema dict (Anthropic / OpenAI tool shape)
     policy_metadata: dict  # always_pinned, future fields
+    dispatch_reference: Any = None  # None for kernel tools (elif-chain dispatch); populated for workshop tools
 
 
 def kernel_tool_schemas() -> list[dict]:

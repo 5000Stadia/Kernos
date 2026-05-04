@@ -233,13 +233,19 @@ def test_always_pinned_policy_round_trips_through_descriptor():
 
 
 def test_registrar_shape_descriptor_fields():
-    """Pin: KernelToolDescriptor exposes the five fields the workshop-
-    prep design note's contract requires. Adding a future workshop
-    tool plugs into this exact shape; future spec authors verify the
-    surface here.
+    """Pin: KernelToolDescriptor exposes the six fields the workshop-
+    prep design note's contract requires. Kernel tools today carry
+    name/description/input_schema/schema/policy_metadata fully and
+    leave dispatch_reference at None (their dispatch lives in
+    ReasoningService.execute_tool's elif chain, which the elif IS).
+    Workshop tools (future spec) populate dispatch_reference with
+    an importable callable reference / service-id string the
+    workshop dispatcher resolves at call time. Adding/removing
+    fields requires updating the design note in the same commit.
     """
     expected_fields = {
-        "name", "description", "input_schema", "schema", "policy_metadata",
+        "name", "description", "input_schema", "schema",
+        "policy_metadata", "dispatch_reference",
     }
     actual_fields = {f.name for f in KernelToolDescriptor.__dataclass_fields__.values()}
     assert actual_fields == expected_fields, (
@@ -249,6 +255,25 @@ def test_registrar_shape_descriptor_fields():
         f"minimum future contract; adding/removing fields requires updating "
         f"the design note in the same commit."
     )
+
+
+def test_kernel_tool_descriptors_leave_dispatch_reference_none():
+    """Pin: kernel tools (which dispatch via ReasoningService.execute_
+    tool's elif chain) carry dispatch_reference=None. Workshop tools
+    populate it. If a kernel tool ships with a non-None dispatch_
+    reference, it's drifted into workshop-shape territory and the
+    spec author should consider whether the elif-chain dispatch is
+    still the right home.
+    """
+    for d in kernel_tool_descriptors():
+        assert d.dispatch_reference is None, (
+            f"kernel tool {d.name!r} has non-None dispatch_reference="
+            f"{d.dispatch_reference!r}; kernel tools dispatch via "
+            f"ReasoningService.execute_tool's elif chain. If this "
+            f"changed deliberately, update the workshop-prep design "
+            f"note in kernel_tool_registry's docstring to document "
+            f"the new contract."
+        )
 
 
 def test_registrar_descriptors_well_formed():
