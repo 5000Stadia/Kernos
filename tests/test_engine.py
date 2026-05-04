@@ -63,6 +63,10 @@ def _make_engine() -> tuple[TaskEngine, AsyncMock, AsyncMock]:
     events.emit.return_value = None
 
     reasoning = ReasoningService(mock_provider, events, mcp, audit)
+    # TEST-INFRA-PARITY-V1 (2026-05-03): wire stub turn_runner_provider
+    # so post-strike construction contract is honored.
+    from tests._thin_path_test_fixture import wire_test_thin_path
+    wire_test_thin_path(reasoning, provider=mock_provider, mcp=mcp)
     engine = TaskEngine(reasoning=reasoning, events=events)
     return engine, mock_provider, events
 

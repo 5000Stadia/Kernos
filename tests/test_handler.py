@@ -156,6 +156,10 @@ def _make_handler(tools: list[dict] | None = None) -> tuple[MessageHandler, Asyn
     mock_provider = AsyncMock(spec=Provider)
     registry = _make_mock_registry(tools)
     reasoning = ReasoningService(mock_provider, events, mcp, audit)
+    # TEST-INFRA-PARITY-V1 (2026-05-03): wire stub turn_runner_provider
+    # so post-strike construction contract is honored.
+    from tests._thin_path_test_fixture import wire_test_thin_path
+    wire_test_thin_path(reasoning, provider=mock_provider, mcp=mcp)
     engine = TaskEngine(reasoning=reasoning, events=events)
     handler = MessageHandler(mcp, conversations, tenants, audit, events, state, reasoning, registry, engine)
     handler.preference_parsing_enabled = False  # Disable in tests — avoids consuming mock side_effects

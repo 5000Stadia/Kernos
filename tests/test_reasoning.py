@@ -66,6 +66,12 @@ def _make_service(mock_provider=None, tools_for_mcp=None, read_tool_names: list[
 
     service = ReasoningService(mock_provider, events, mcp, audit)
 
+    # TEST-INFRA-PARITY-V1 (2026-05-03): wire stub turn_runner_provider
+    # so post-strike construction contract is honored. Runs a minimal
+    # tool-use loop against the mocks.
+    from tests._thin_path_test_fixture import wire_test_thin_path
+    wire_test_thin_path(service, provider=mock_provider, mcp=mcp)
+
     # Wire a registry so the dispatch gate can classify tools
     if read_tool_names:
         cap = CapabilityInfo(
