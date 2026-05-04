@@ -137,6 +137,7 @@ def make_test_turn_runner_provider(
                             tool_uses.append(block)
 
                     if not tool_uses:
+                        cost = _compute_cost(model, total_input_tokens, total_output_tokens)
                         await _emit_reasoning_response(
                             event_emitter, request,
                             input_tokens=total_input_tokens,
@@ -148,7 +149,7 @@ def make_test_turn_runner_provider(
                             model=model,
                             input_tokens=total_input_tokens,
                             output_tokens=total_output_tokens,
-                            estimated_cost_usd=0.0,
+                            estimated_cost_usd=cost,
                             duration_ms=0,
                             tool_iterations=iterations,
                         )
@@ -199,6 +200,15 @@ def make_test_turn_runner_provider(
     return _stub_provider_factory
 
 
+def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Best-effort cost computation matching production ``estimate_cost``."""
+    try:
+        from kernos.kernel.events import estimate_cost
+        return estimate_cost(model, input_tokens, output_tokens)
+    except Exception:
+        return 0.0
+
+
 async def _emit_reasoning_response(
     event_emitter: Callable, request: Any, *,
     input_tokens: int, output_tokens: int, iterations: int,
@@ -206,14 +216,15 @@ async def _emit_reasoning_response(
     """Emit synthetic reasoning.response — production
     ProductionResponseDelivery does this in __call__."""
     try:
+        model = getattr(request, "model", "")
         await event_emitter({
             "type": "reasoning.response",
             "instance_id": getattr(request, "instance_id", ""),
-            "model": getattr(request, "model", ""),
+            "model": model,
             "conversation_id": getattr(request, "conversation_id", ""),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "estimated_cost_usd": 0.0,
+            "estimated_cost_usd": _compute_cost(model, input_tokens, output_tokens),
             "duration_ms": 0,
             "tool_iterations": iterations,
         })
@@ -246,6 +257,16 @@ async def _dispatch_tool_with_events(
         result_text = await _dispatch_tool(
             tool_name, tool_input, request, mcp, reasoning_ref,
         )
+        # Legacy convention: tool result strings starting with
+        # "Tool error" or containing the literal "Error:" prefix
+        # mark the result as errored. Some MCP tools return error-
+        # shaped strings rather than raising. Pattern-match to
+        # preserve the legacy is_error semantics tests pin.
+        if isinstance(result_text, str) and (
+            result_text.startswith("Tool error")
+            or result_text.startswith("Error:")
+        ):
+            is_error = True
     except Exception as exc:
         is_error = True
         result_text = f"tool dispatch failed: {exc}"
@@ -254,6 +275,8 @@ async def _dispatch_tool_with_events(
         reasoning_ref, "tool.result", request,
         tool_name=tool_name,
         is_error=is_error,
+        success=not is_error,
+        error=(result_text if is_error else None),
     )
     return result_text
 
@@ -286,9 +309,15 @@ async def _emit_tool_event(
         audit = getattr(svc, "_audit", None)
         if audit is not None and hasattr(audit, "log"):
             try:
+                # Audit type matches the legacy shape: "tool_call" for the
+                # call event, "tool_result" for the result event.
+                audit_type = (
+                    "tool_call" if event_type_name == "tool.called"
+                    else "tool_result"
+                )
                 await audit.log(
                     getattr(request, "instance_id", ""),
-                    {"type": event_type_name, **payload},
+                    {"type": audit_type, "event": event_type_name, **payload},
                 )
             except Exception:
                 pass

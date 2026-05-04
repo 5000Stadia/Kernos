@@ -44,10 +44,10 @@ class TestKernelToolRegistration:
     def test_in_kernel_tools_set(self):
         assert "request_space_action" in ReasoningService._KERNEL_TOOLS
 
-    def test_paths_include_loop_and_confirmed(self):
-        paths = ReasoningService._KERNEL_TOOL_PATHS["request_space_action"]
-        assert "loop" in paths
-        assert "confirmed" in paths
+    # test_paths_include_loop_and_confirmed retired by CCV1 C7 strike
+    # (2026-05-03) — the legacy "loop" path is gone; only "confirmed"
+    # (and "helper" for canvas) remain in _KERNEL_TOOL_PATHS. Test pinned
+    # the dual-path semantics that no longer exist post-strike.
 
 
 class TestEnvelopeBuilder:

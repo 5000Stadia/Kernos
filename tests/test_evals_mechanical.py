@@ -432,27 +432,6 @@ def test_parser_mixed_semantic_and_mechanical():
 # ---------------------------------------------------------------------------
 
 
-def test_log_format_tool_dispatch_string_is_stable():
-    from pathlib import Path
-    src = Path("kernos/kernel/reasoning.py").read_text(encoding="utf-8")
-    # The runner's regex needs `TOOL_DISPATCH: name=<name>` somewhere in
-    # the logged message. Rewriting the prefix or reordering fields would
-    # break mechanical tool rubrics.
-    assert 'TOOL_DISPATCH: name=%s' in src, (
-        "reasoning.py TOOL_DISPATCH log format drifted — "
-        "_EvalLogCapture regex _TOOL_DISPATCH_RE must be updated in the "
-        "same commit, or this test breaks."
-    )
-
-
-def test_log_format_agent_result_string_is_stable():
-    from pathlib import Path
-    src = Path("kernos/kernel/reasoning.py").read_text(encoding="utf-8")
-    assert 'AGENT_RESULT: tool=%s success=%s' in src, (
-        "reasoning.py AGENT_RESULT log format drifted — "
-        "_EvalLogCapture regex _AGENT_RESULT_RE must be updated in the "
-        "same commit, or this test breaks."
-    )
 
 
 def test_log_format_surface_leak_detected_string_is_stable():
@@ -474,3 +453,17 @@ def test_projector_schema_registry_lists_all_runner_kinds():
         "relationships", "covenants", "outbound", "conversation_log",
     }
     assert expected == set(PROJECTOR_SCHEMAS.keys())
+
+
+# ---------------------------------------------------------------------------
+# test_log_format_*_is_stable tests removed by CCV1 C7 strike (2026-05-03).
+# These pinned legacy-loop log-line formats (TOOL_DISPATCH: name=%s,
+# AGENT_RESULT: %s) that were inside _execute_single_tool. The strike
+# removed that wrapper; live dispatchers now emit TOOL_CALLED /
+# TOOL_RESULT events instead. The eval mechanical rubric's regex
+# patterns migrated to the new event-stream-based capture (see
+# _EvalLogCapture). Tests retire with the legacy log-line shape per
+# the architect's "retired by architectural transition" subprinciple.
+# ---------------------------------------------------------------------------
+
+

@@ -36,15 +36,8 @@ os.environ.setdefault(
     "KERNOS_DATA_DIR", tempfile.mkdtemp(prefix="kernos-test-data-"),
 )
 
-# CCV1 C7 default flip (2026-05-03): the production default for
-# KERNOS_USE_DECOUPLED_TURN_RUNNER is now ON (thin path). Most
-# legacy unit tests construct ``ReasoningService`` without wiring a
-# TurnRunner and rely on the legacy reasoning loop. Force the flag
-# to "0" at session start so legacy unit tests run unchanged. Tests
-# that specifically exercise the thin path opt back in via
-# ``monkeypatch.setenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", "1")``.
-#
-# This is a test-environment-only override. The production path
-# remains thin-by-default; only the unit-test process sees this
-# session-level opt-out.
-os.environ["KERNOS_USE_DECOUPLED_TURN_RUNNER"] = "0"
+# CCV1 C7 strike (2026-05-03): the legacy reasoning loop is gone;
+# thin path is THE path. The KERNOS_USE_DECOUPLED_TURN_RUNNER flag
+# is removed. Tests construct ReasoningService with turn_runner_provider
+# wired via the shared fixture at tests/_thin_path_test_fixture.py
+# (TEST-INFRA-PARITY-V1).

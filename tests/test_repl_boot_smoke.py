@@ -71,7 +71,6 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("KERNOS_INSTANCE_ID", "repl:smoke")
     monkeypatch.setenv("KERNOS_SECRETS_DIR", str(tmp_path / "secrets-dev"))
     monkeypatch.setenv("KERNOS_STORE_BACKEND", "json")
-    monkeypatch.setenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", "1")
     return tmp_path
 
 
@@ -244,66 +243,11 @@ async def test_dev_handler_substrate_reaches_model_call(isolated_env):
 # ---------------------------------------------------------------------------
 
 
-async def test_build_dev_handler_legacy_path_also_boots(isolated_env, monkeypatch):
-    """The soak runbook runs each scenario on both paths (legacy
-    oracle vs. decoupled). Pin: build_dev_handler with
-    decoupled=False boots successfully too — it threads through the
-    legacy reasoning loop instead of the per-turn TurnRunner.
-
-    Post-CCV1-C7-flip (2026-05-03): legacy is now opt-out; the test
-    explicitly sets the flag to "0" rather than relying on unset
-    semantics."""
-    from kernos.repl import build_dev_handler, shutdown_dev_handler
-    monkeypatch.setenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", "0")
-
-    chains, _mock_provider = _make_chain_with_mock_provider()
-    with patch(
-        "kernos.providers.chains.build_chains_from_env",
-        return_value=(chains, None),
-    ):
-        handler = await build_dev_handler(decoupled=False)
-    try:
-        assert handler is not None
-        # The handler is functional regardless of which path; legacy
-        # path uses _reason_with_chain instead of the turn_runner_provider.
-        assert handler.reasoning is not None
-    finally:
-        await shutdown_dev_handler(handler)
-
 
 # ---------------------------------------------------------------------------
 # Codex C5-review BLOCKER fold pins
 # ---------------------------------------------------------------------------
 
-
-async def test_decoupled_false_overrides_env_when_already_set(isolated_env, monkeypatch):
-    """Codex C5-review BLOCKER (Q1) pin: build_dev_handler(decoupled=False)
-    must force the legacy path even when KERNOS_USE_DECOUPLED_TURN_RUNNER
-    is already set to "1" in the env. The C6 runbook runs each
-    scenario twice (legacy oracle + decoupled); without this fix the
-    legacy run would silently still take the decoupled path on any
-    env where the flag was inherited from .env."""
-    from kernos.repl import build_dev_handler, shutdown_dev_handler
-
-    # Start with the decoupled flag set — simulating .env-inherited state.
-    monkeypatch.setenv("KERNOS_USE_DECOUPLED_TURN_RUNNER", "1")
-
-    chains, _mock_provider = _make_chain_with_mock_provider()
-    with patch(
-        "kernos.providers.chains.build_chains_from_env",
-        return_value=(chains, None),
-    ):
-        handler = await build_dev_handler(decoupled=False)
-    try:
-        # The env var must have been forced to "0"/"" by the boot.
-        # use_decoupled_turn_runner() reads env each call; under
-        # decoupled=False the legacy reasoning loop must run.
-        assert os.environ.get("KERNOS_USE_DECOUPLED_TURN_RUNNER", "") == "0", (
-            "decoupled=False must force the env flag off even when "
-            "KERNOS_USE_DECOUPLED_TURN_RUNNER was already set"
-        )
-    finally:
-        await shutdown_dev_handler(handler)
 
 
 async def test_select_member_returns_repl_identity_with_repl_platform(isolated_env):

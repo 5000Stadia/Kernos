@@ -30,7 +30,7 @@ Components:
    where full-machinery dispatch requires it. Per Fold 8: emits
    ``tool.called`` and ``tool.result`` events on every dispatch +
    logs an audit entry, matching the per-call event shape the legacy
-   path emits via ``_execute_single_tool``.
+   path used to emit via the legacy ``_execute_single_tool`` wrapper (removed in CCV1 C7 strike 2026-05-03).
 4. ``build_renderer_to_integration_adapter`` — Fold 1 verdict: the
    adapter shim that bridges PresenceRenderer's keyword-style
    dispatcher contract to the integration runner's positional
@@ -285,7 +285,7 @@ class LiveIntegrationDispatcher:
 
     Fold 8 — emits ``tool.called`` and ``tool.result`` events plus
     an audit entry on every dispatch, matching the per-call event
-    shape legacy emits via ``_execute_single_tool``. Audit and trace
+    shape the legacy path used to emit via ``_execute_single_tool`` (removed in CCV1 C7 strike 2026-05-03). Audit and trace
     parity is required for Batch 3 equivalence soak.
     """
 

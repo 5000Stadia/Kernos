@@ -74,7 +74,7 @@ class ChainPayloadTooLarge(ReasoningError):
 class LLMChainExhausted(ReasoningError):
     """Every provider in a named chain failed on this turn.
 
-    Raised by ``ReasoningService._call_chain`` after exhausting the chain.
+    Raised by ``build_resilient_chain_caller`` (kernos.kernel.turn_runner_provider) after exhausting the chain.
     The handler catches this exception specifically and delivers a
     pre-rendered failure message to the user via the platform adapter,
     *instead of* an LLM reply — on turns where this exception fires, the

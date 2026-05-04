@@ -830,20 +830,6 @@ async def test_latency_telemetry_observable_on_thin_path():
 # ---------------------------------------------------------------------------
 
 
-def test_feature_flag_default_on_means_thin_path_runs(monkeypatch):
-    """The decoupled-turn-runner flag is ON by default after CCV1 C7
-    flip (2026-05-03). Thin path runs unless explicitly opted-out
-    via "0" / "false" / "no" / "off". The opt-out path keeps legacy
-    reachable as oracle during the stabilization window."""
-    from kernos.kernel.turn_runner import (
-        FEATURE_FLAG_ENV,
-        use_decoupled_turn_runner,
-    )
-    monkeypatch.delenv(FEATURE_FLAG_ENV, raising=False)
-    assert use_decoupled_turn_runner() is True
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "0")
-    assert use_decoupled_turn_runner() is False
-
 
 # ---------------------------------------------------------------------------
 # Mutating tools use fakes — pin the test infrastructure contract

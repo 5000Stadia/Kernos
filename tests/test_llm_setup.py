@@ -9,7 +9,7 @@ Covers:
   * Benchmark snapshot reader — setup-time-only surface, returns dict.
   * Chain config IO — add / remove / set-model in place.
   * Startup health check — binary config read, no network, no LLM.
-  * LLMChainExhausted — raised by _call_chain when every entry fails;
+  * LLMChainExhausted — raised by build_resilient_chain_caller when every entry fails;
     handler delivers the pre-rendered failure message instead of an LLM reply.
 
 **Zero-LLM-call:** None of these tests make an LLM call. They validate the
@@ -570,42 +570,3 @@ class TestChainExhaustion:
         assert "primary" in msg
         assert "kernos setup llm" in msg
 
-    @pytest.mark.asyncio
-    async def test_call_chain_raises_llm_chain_exhausted_when_all_fail(self):
-        """Core contract: _call_chain raises LLMChainExhausted on full failure."""
-        from kernos.kernel.exceptions import (
-            LLMChainExhausted,
-            ReasoningProviderError,
-        )
-        from kernos.providers.base import ChainEntry
-
-        class FailProvider:
-            provider_name = "fail"
-            async def complete(self, **kw):
-                raise ReasoningProviderError("simulated provider failure")
-
-        # Build a minimal ReasoningService-like object for _call_chain.
-        # We only need: self._chains, self._trace, self._handler.
-        from kernos.kernel.reasoning import ReasoningService
-
-        svc = ReasoningService.__new__(ReasoningService)
-        svc._chains = {
-            "primary": [
-                ChainEntry(provider=FailProvider(), model="m1"),
-                ChainEntry(provider=FailProvider(), model="m2"),
-            ]
-        }
-        svc._trace = lambda *a, **kw: None
-        svc._handler = None
-        # Pre-flight skip support — empty catalog disables skip; both
-        # entries route normally and the fail-after-call path still
-        # raises LLMChainExhausted.
-        svc._catalog_cards = {}
-        svc._unknown_model_warned = set()
-
-        with pytest.raises(LLMChainExhausted) as excinfo:
-            await svc._call_chain(
-                "primary", "sys", [], [], max_tokens=10,
-            )
-        assert excinfo.value.chain_name == "primary"
-        assert len(excinfo.value.attempts) == 2

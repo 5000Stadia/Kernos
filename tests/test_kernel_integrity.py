@@ -89,6 +89,8 @@ def _make_real_handler(tmp_path):
     mock_provider = AsyncMock(spec=Provider)
     mock_provider.main_model = "claude-sonnet-4-6"
     reasoning = ReasoningService(mock_provider, events, mcp, audit)
+    from tests._thin_path_test_fixture import wire_test_thin_path
+    wire_test_thin_path(reasoning, provider=mock_provider, mcp=mcp)
     engine = TaskEngine(reasoning=reasoning, events=events)
     handler = MessageHandler(
         mcp, conversations, tenants, audit, events, state, reasoning, registry, engine

@@ -72,7 +72,7 @@ from kernos.kernel.tool_descriptor import (
     OperationClassification,
     ToolDescriptor,
 )
-from kernos.kernel.turn_runner import FEATURE_FLAG_ENV, TurnRunner
+from kernos.kernel.turn_runner import TurnRunner
 from kernos.persistence import AuditStore
 from kernos.persistence.json_file import JsonAuditStore
 from kernos.providers.base import ContentBlock, Provider, ProviderResponse
@@ -361,7 +361,6 @@ async def test_thin_path_through_real_audit_and_event_surfaces(
     JsonAuditStore + REAL EventType. Thin-path turn (RespondOnly)
     succeeds; integration's audit entry persists via the real
     signature."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, executor = _build_production_equivalent_wiring(
         audit=real_audit_store,
         events=real_event_stream,
@@ -418,7 +417,6 @@ async def test_full_machinery_through_real_audit_and_event_surfaces(
         ),
     )
 
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, executor = _build_production_equivalent_wiring(
         audit=real_audit_store,
         events=real_event_stream,

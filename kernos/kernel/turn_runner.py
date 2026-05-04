@@ -24,12 +24,10 @@ C2 scope: skeleton + feature-flag routing. The services are typed via
 Protocols so they can be stubbed for tests; concrete classes wire in
 later commits.
 
-Feature flag (per spec Section 7): KERNOS_USE_DECOUPLED_TURN_RUNNER
-read each call. **Default ON as of 2026-05-03 (CCV1 C7 default flip).**
-ReasoningService.reason() routes to TurnRunner.run_turn() unless the
-flag is explicitly set to a falsy opt-out value AND a TurnRunner
-instance has been wired. Set the flag to "0" / "false" / "no" / "off"
-to opt back to the legacy reasoning loop (oracle-during-stabilization).
+CCV1 C7 strike (2026-05-03): the legacy reasoning loop has been
+removed; thin path is THE path. The KERNOS_USE_DECOUPLED_TURN_RUNNER
+feature flag is gone. ReasoningService.reason() always routes through
+the TurnRunner provider per the construction contract.
 
 Acceptance criterion 7 (the design review edit) — load-bearing seam:
 required_safety_cohort_failures must flow TurnRunner →
@@ -41,7 +39,6 @@ the plumbing is consistent across call sites.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
@@ -62,46 +59,8 @@ from kernos.kernel.integration.runner import IntegrationInputs
 logger = logging.getLogger(__name__)
 
 
-# Feature flag environment variable. Default ON as of 2026-05-03
-# (CCV1 C7 default flip). Set to "0" / "false" / "no" / "off" to
-# opt back to the legacy reasoning loop (oracle-during-stabilization).
-# Any other value (including unset, empty, or truthy) keeps the
-# decoupled-turn-runner default. The flag is read each call so
-# operators can flip it without restarting.
-FEATURE_FLAG_ENV = "KERNOS_USE_DECOUPLED_TURN_RUNNER"
-
-
-# Explicit opt-out values for the legacy path. Anything outside this
-# set (including unset) keeps the thin-path default.
-_LEGACY_OPT_OUT_VALUES = frozenset({"0", "false", "no", "off"})
-
-
-def use_decoupled_turn_runner() -> bool:
-    """Return True (thin path) unless explicitly opted-out to legacy.
-
-    **Default ON as of 2026-05-03** (CCV1 C7 default flip). The
-    equivalence soak demonstrated parity-against-legacy on the
-    existing 27-tool catalog (run dir 2026-05-03T19-38-28; 6/6
-    scenarios PASS on both paths; only structural divergence was
-    LLM-driven MEMORY zone variance, classified stylistic by
-    architect).
-
-    Opt back to legacy by setting KERNOS_USE_DECOUPLED_TURN_RUNNER
-    to "0" / "false" / "no" / "off" — keeps legacy reachable as
-    oracle during the stabilization window. Legacy strike commit
-    follows; once landed this function (and the flag itself) become
-    obsolete.
-
-    The flag's intent is per-instance flippable per spec Section 7;
-    v1 is a process-level env var since Kernos has no central
-    per-instance config registry yet.
-    """
-    raw = os.environ.get(FEATURE_FLAG_ENV, "").strip().lower()
-    return raw not in _LEGACY_OPT_OUT_VALUES
-
-
 # ---------------------------------------------------------------------------
-# Service protocols (concrete classes land in C3 / C4-C6)
+# Service protocols (concrete classes live in enactment + integration)
 # ---------------------------------------------------------------------------
 
 
@@ -359,10 +318,8 @@ class TurnRunnerNotWired(RuntimeError):
 
 __all__ = [
     "EnactmentServiceLike",
-    "FEATURE_FLAG_ENV",
     "IntegrationServiceLike",
     "TurnRunner",
     "TurnRunnerInputs",
     "TurnRunnerNotWired",
-    "use_decoupled_turn_runner",
 ]

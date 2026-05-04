@@ -8,7 +8,7 @@ Acceptance criterion focus:
         to IntegrationService at the boundary, not just runner-
         representable. Acceptance test asserts the metadata flows
         across the seam.
-  - #34: Feature flag features.use_decoupled_turn_runner defaults to False.
+  - (Note: feature flag KERNOS_USE_DECOUPLED_TURN_RUNNER removed in CCV1 C7 strike 2026-05-03.)
 
 C2 covers the plumbing only; concrete IntegrationService and
 EnactmentService land in C3+. These tests use Protocol-conforming
@@ -36,12 +36,10 @@ from kernos.kernel.integration.briefing import (
 from kernos.kernel.integration.runner import IntegrationInputs
 from kernos.kernel.turn_runner import (
     EnactmentServiceLike,
-    FEATURE_FLAG_ENV,
     IntegrationServiceLike,
     TurnRunner,
     TurnRunnerInputs,
     TurnRunnerNotWired,
-    use_decoupled_turn_runner,
 )
 
 
@@ -114,24 +112,7 @@ def _inputs(turn_id: str = "turn-x") -> TurnRunnerInputs:
 # ---------------------------------------------------------------------------
 
 
-def test_feature_flag_default_on(monkeypatch):
-    """With the env unset, thin path is the default (CCV1 C7 default flip 2026-05-03)."""
-    monkeypatch.delenv(FEATURE_FLAG_ENV, raising=False)
-    assert use_decoupled_turn_runner() is True
 
-
-@pytest.mark.parametrize("value", ["", "1", "true", "TRUE", "yes", "on", "maybe", "anything"])
-def test_feature_flag_on_for_non_optout_values(monkeypatch, value):
-    """Any value outside the legacy opt-out set keeps thin-path default."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, value)
-    assert use_decoupled_turn_runner() is True
-
-
-@pytest.mark.parametrize("value", ["0", "false", "FALSE", "off", "no"])
-def test_feature_flag_off_only_for_explicit_optout(monkeypatch, value):
-    """Only explicit legacy opt-out values flip the flag off."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, value)
-    assert use_decoupled_turn_runner() is False
 
 
 # ---------------------------------------------------------------------------
@@ -370,98 +351,4 @@ def _reasoning_request():
     )
 
 
-@pytest.mark.asyncio
-async def test_reasoning_service_routes_to_turn_runner_when_flag_on(monkeypatch):
-    from kernos.kernel.reasoning import ReasoningResult, ReasoningService
-    from kernos.providers.base import Provider
 
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
-
-    class _RecordingTurnRunner:
-        def __init__(self) -> None:
-            self.received_inputs: TurnRunnerInputs | None = None
-
-        async def run_turn(self, inputs: TurnRunnerInputs):
-            self.received_inputs = inputs
-            return ReasoningResult(
-                text="from-turn-runner",
-                model="claude-sonnet-4-6",
-                input_tokens=0,
-                output_tokens=0,
-                estimated_cost_usd=0.0,
-                duration_ms=0,
-                tool_iterations=0,
-            )
-
-    turn_runner = _RecordingTurnRunner()
-    service = ReasoningService(
-        provider=AsyncMock(spec=Provider),
-        turn_runner=turn_runner,
-    )
-    result = await service.reason(_reasoning_request())
-
-    assert isinstance(result, ReasoningResult)
-    assert result.text == "from-turn-runner"
-    # The reasoning request was translated into TurnRunnerInputs and
-    # handed to the wired runner.
-    assert turn_runner.received_inputs is not None
-    assert turn_runner.received_inputs.instance_id == "inst-1"
-    assert turn_runner.received_inputs.member_id == "mem-1"
-    assert turn_runner.received_inputs.user_message == "hi"
-
-
-@pytest.mark.asyncio
-async def test_reasoning_service_skips_turn_runner_when_flag_off(monkeypatch):
-    """Flag off → legacy reasoning path runs. We assert routing by
-    confirming the wired TurnRunner is NOT consulted; we don't run
-    the full legacy loop here (that's covered in test_reasoning.py).
-
-    Post-CCV1-C7-flip (2026-05-03): unset = thin path. Explicit
-    opt-out to legacy is now `setenv("0")` rather than `delenv`."""
-    from kernos.kernel.reasoning import ReasoningService
-    from kernos.providers.base import Provider
-
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "0")
-
-    class _UnreachableTurnRunner:
-        async def run_turn(self, inputs):
-            raise AssertionError(
-                "TurnRunner should not be invoked when flag is OFF"
-            )
-
-    # The TurnRunner is wired but the flag is OFF — service must not
-    # route to it. We don't run the legacy loop end-to-end (no live
-    # provider); instead assert the routing decision via a dummy
-    # check: calling .reason() with a stub provider that errors lets
-    # us confirm the legacy path was entered, not the TurnRunner.
-    service = ReasoningService(
-        provider=AsyncMock(spec=Provider),
-        turn_runner=_UnreachableTurnRunner(),
-    )
-
-    # We don't care about a successful end-to-end legacy run here —
-    # just that the TurnRunner is not consulted. The legacy path
-    # will run with a mock provider; if it errors, that's fine; the
-    # test only fails if _UnreachableTurnRunner.run_turn was called.
-    try:
-        await service.reason(_reasoning_request())
-    except AssertionError:
-        raise  # the unreachable runner was invoked
-    except Exception:
-        pass  # legacy-path provider errors are expected here
-
-
-@pytest.mark.asyncio
-async def test_reasoning_service_raises_when_flag_on_without_turn_runner(
-    monkeypatch,
-):
-    """Flag on + no TurnRunner wired → clear error rather than a
-    half-formed turn."""
-    from kernos.kernel.reasoning import ReasoningService
-    from kernos.providers.base import Provider
-
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
-    service = ReasoningService(provider=AsyncMock(spec=Provider))
-
-    with pytest.raises(TurnRunnerNotWired, match="no TurnRunner was provided"):
-        await service.reason(_reasoning_request())

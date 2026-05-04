@@ -848,6 +848,8 @@ class TestKernelToolRouting:
 
         service = ReasoningService(provider, events, mcp, audit)
         service.set_retrieval(retrieval)
+        from tests._thin_path_test_fixture import wire_test_thin_path
+        wire_test_thin_path(service, provider=provider, mcp=mcp)
 
         # First response: tool_use (remember), second: text
         provider.complete = AsyncMock(side_effect=[
@@ -911,6 +913,8 @@ class TestKernelToolRouting:
 
         service = ReasoningService(provider, events, mcp, audit)
         service.set_retrieval(AsyncMock())  # Retrieval wired but not for this call
+        from tests._thin_path_test_fixture import wire_test_thin_path
+        wire_test_thin_path(service, provider=provider, mcp=mcp)
 
         # Wire registry so dispatch gate classifies calendar_create as "read"
         from kernos.capability.registry import CapabilityInfo, CapabilityRegistry, CapabilityStatus

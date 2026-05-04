@@ -104,7 +104,7 @@ from kernos.kernel.state import (
     StateStore,
 )
 from kernos.kernel.template import PRIMARY_TEMPLATE
-from kernos.kernel.turn_runner import FEATURE_FLAG_ENV, TurnRunner
+from kernos.kernel.turn_runner import TurnRunner
 from kernos.messages.handler import (
     _INHERIT_HATCHING_PROMPT,
     _UNIQUE_HATCHING_PROMPT,
@@ -540,13 +540,8 @@ def _make_handler(
 
     Both paths share the same ``mock_provider`` capture seam.
     """
-    # Post-CCV1-C7-flip (2026-05-03): thin path is the default. The
-    # legacy parameterization explicitly opts out via "0" rather
-    # than relying on unset semantics, since unset now means thin.
-    if decoupled:
-        monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
-    else:
-        monkeypatch.setenv(FEATURE_FLAG_ENV, "0")
+    # Post-CCV1-C7-strike (2026-05-03): thin path is the only path.
+    _ = decoupled  # parameter retained for compat; legacy path removed
 
     mcp = MagicMock(spec=MCPClientManager)
     mcp.get_tools.return_value = tools or []
@@ -689,7 +684,6 @@ def _message_text(messages: list[dict]) -> str:
 
 
 PATHS = [
-    pytest.param(False, id="legacy"),
     pytest.param(True, id="decoupled"),
 ]
 

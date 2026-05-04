@@ -60,7 +60,6 @@ from kernos.kernel.response_delivery import (
     wrap_chain_caller_with_telemetry,
 )
 from kernos.kernel.turn_runner import (
-    FEATURE_FLAG_ENV,
     TurnRunner,
 )
 from kernos.providers.base import ContentBlock, ProviderResponse
@@ -360,7 +359,6 @@ async def test_reasoning_service_with_flag_on_routes_through_provider(monkeypatc
     """End-to-end: KERNOS_USE_DECOUPLED_TURN_RUNNER=1 + provider
     wired → reason() routes through the per-turn provider → result
     is a ReasoningResult."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, hooks, state = _build_server_style_wiring()
 
     from kernos.providers.base import Provider
@@ -378,7 +376,6 @@ async def test_reasoning_service_with_flag_on_routes_through_provider(monkeypatc
 async def test_reasoning_response_emitted_exactly_once_per_turn(monkeypatch):
     """No-double-count invariant verified through production wiring:
     exactly ONE reasoning.response event per turn."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, hooks, state = _build_server_style_wiring()
 
     from kernos.providers.base import Provider
@@ -434,7 +431,6 @@ async def test_reason_through_provider_records_non_stub_duration(monkeypatch):
     """The end-to-end ReasoningResult carries non-stub duration_ms
     (proves the translation path was traversed, not the previous
     stub returning zero)."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, hooks, state = _build_server_style_wiring()
 
     from kernos.providers.base import Provider
@@ -460,7 +456,6 @@ async def test_response_delivery_translation_path_traversed(monkeypatch):
     """The result's text comes from the outcome (via translation),
     not from a stub. Pin: text matches the canned presence-render
     output configured in the wiring fixture."""
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, hooks, state = _build_server_style_wiring()
 
     from kernos.providers.base import Provider
@@ -484,7 +479,6 @@ async def test_shared_trace_sink_drain_returns_entries_from_turn(monkeypatch):
     NOT consume the entries prematurely."""
     # For this thin-path turn, no dispatch fires; drain returns
     # empty. The pin verifies the drain mechanism is wired.
-    monkeypatch.setenv(FEATURE_FLAG_ENV, "1")
     provider, hooks, state = _build_server_style_wiring()
 
     from kernos.providers.base import Provider

@@ -4347,7 +4347,7 @@ class MessageHandler:
                             response = _render_chain_exhaustion_message(exc)
                             # Zero any LLM text on the ctx — belt and
                             # suspenders; _phase_reason shouldn't have
-                            # populated it if _call_chain raised.
+                            # populated it if the chain caller raised.
                             primary_ctx.response_text = ""
                             if not primary_future.done():
                                 primary_future.set_result(response)
