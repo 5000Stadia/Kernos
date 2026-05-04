@@ -987,38 +987,29 @@ class MessageHandler:
         reasoning.set_workspace(self._workspace)
 
     def _register_kernel_tools_in_catalog(self) -> None:
-        """Register kernel tools in the universal catalog at boot."""
-        _kernel_descs = {
-            "request_tool": "Request access to a specific tool or capability",
-            "read_doc": "Read system documentation pages",
-            "dismiss_whisper": "Dismiss a proactive awareness whisper",
-            "manage_capabilities": "List, enable, or disable capability connections",
-            "remember_details": "Search memory for detailed information",
-            "remember": "Search memory and knowledge base",
-            "write_file": "Create or update a text file in the current space",
-            "read_file": "Read a file from the current or parent space",
-            "list_files": "List all files including inherited from parents",
-            "delete_file": "Soft-delete a file",
-            "read_source": "Read system source code for debugging",
-            "read_soul": "Read the agent's personality and identity configuration",
-            "update_soul": "Update agent personality or identity",
-            "manage_covenants": "List, add, update, or remove standing rules",
-            "manage_channels": "List or configure messaging channels",
-            "send_to_channel": "Send a message to an outbound channel (SMS, etc.)",
-            "manage_schedule": "View and manage scheduled triggers and automations",
-            "inspect_state": "View active preferences, triggers, and rules",
-            "execute_code": "Execute Python code in a sandboxed environment for building tools and running computations",
-            "manage_workspace": "Manage workspace artifacts — list, add, update, or archive built tools and scripts",
-            "register_tool": "Register a workspace-built tool in the universal catalog from a .tool.json descriptor",
-            "manage_plan": "Create, execute, and manage self-directed plans for complex multi-step tasks",
-            "read_runtime_trace": "Read structured runtime trace — provider errors, tool failures, gate decisions, timing",
-            "diagnose_issue": "Diagnose a system issue using runtime trace, source code, and friction reports",
-            "propose_fix": "Write a structured fix spec for a diagnosed issue",
-            "submit_spec": "Submit a proposed fix spec for implementation",
-            "manage_members": "Two code types: 'invite' creates a NEW person with fresh agent/spaces/context. 'connect_platform' links the CURRENT member to a new platform (same agent/spaces/history). Also: list members, remove.",
-        }
-        for name, desc in _kernel_descs.items():
-            self._tool_catalog.register(name, desc, "kernel")
+        """Register kernel tools in the universal catalog at boot.
+
+        KERNEL-TOOL-REGISTRY-V1 (2026-05-04): consumes the canonical
+        registrar at ``kernos.kernel.kernel_tool_registry``. The
+        hardcoded dict that hand-maintained 27 entries (and drifted
+        from the dispatch authority's 42 — leaving canvas, relational,
+        diagnostic, cross-space, external tools dispatched-but-
+        invisible) is gone. Adding a new kernel tool to the registrar
+        surfaces it here automatically; the parity-pin tests at
+        ``tests/test_kernel_tool_registry_parity.py`` fail CI on any
+        drift between dispatch authority + registrar + this catalog.
+
+        The catalog entry's description is one line for the surfacer
+        LLM. Schema descriptions can be longer (Anthropic-style
+        multi-line); truncate at first period or at 200 chars,
+        matching the existing MCP-tool registration's rule.
+        """
+        from kernos.kernel.kernel_tool_registry import kernel_tool_descriptors
+        for desc in kernel_tool_descriptors():
+            short = desc.description.split(".")[0].strip()[:200]
+            if not short:
+                short = desc.name.replace("_", " ")
+            self._tool_catalog.register(desc.name, short, "kernel")
 
     # MCP tools excluded from the catalog (still registered as MCP tools, just not surfaced)
     _MCP_CATALOG_EXCLUDE = {"brave_local_search"}  # Rate limits on single calls; web_search covers it

@@ -482,48 +482,34 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             pass
 
     # --- Three-tier tool surfacing (TOOL-SURFACING-REDESIGN) ----------------
-    from kernos.kernel.reasoning import REQUEST_TOOL, READ_DOC_TOOL, REMEMBER_DETAILS_TOOL, MANAGE_CAPABILITIES_TOOL
-    from kernos.kernel.awareness import DISMISS_WHISPER_TOOL
+    #
+    # KERNEL-TOOL-REGISTRY-V1 (2026-05-04): the kernel-tool schema map
+    # is now derived from the canonical registrar at
+    # ``kernos.kernel.kernel_tool_registry``. The hand-maintained
+    # ``_all_kernel`` list (which drifted from dispatch authority by
+    # ~15 tools — canvas, model diagnostics, parts of cross-space + the
+    # canvas-preference flow — left dispatched-but-invisible to the
+    # surfacer) is gone. Adding a new kernel tool to the registrar
+    # surfaces it here automatically; the parity-pin tests at
+    # ``tests/test_kernel_tool_registry_parity.py`` fail CI on any
+    # drift between dispatch authority + registrar + this map.
+    #
+    # The retrieval-conditional include of REMEMBER_TOOL is preserved
+    # for back-compat: when ``handler._retrieval`` is None the surfacer
+    # still surfaces remember (it's wired into execute_tool's elif
+    # chain regardless), but historically this aggregation only
+    # included it when retrieval was wired. Keep the conditional to
+    # match the legacy assemble shape exactly.
+    from kernos.kernel.kernel_tool_registry import kernel_tool_schema_map
     from kernos.kernel.tool_catalog import ALWAYS_PINNED, COMMON_MCP_NAMES, TOOL_TOKEN_BUDGET, SURFACER_SCHEMA
 
-    # Build the kernel tool schema map (needed for all tiers)
-    _kernel_tool_map: dict[str, dict] = {}
-    from kernos.kernel.files import FILE_TOOLS
-    from kernos.kernel.reasoning import READ_SOURCE_TOOL, READ_SOUL_TOOL, UPDATE_SOUL_TOOL
-    from kernos.kernel.covenant_manager import MANAGE_COVENANTS_TOOL
-    from kernos.kernel.channels import MANAGE_CHANNELS_TOOL, SEND_TO_CHANNEL_TOOL
-    from kernos.kernel.scheduler import MANAGE_SCHEDULE_TOOL
-    from kernos.kernel.tools import INSPECT_STATE_TOOL
-    from kernos.kernel.code_exec import EXECUTE_CODE_TOOL
-    from kernos.kernel.workspace import MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL
-    from kernos.kernel.execution import MANAGE_PLAN_TOOL
-    from kernos.kernel.external_agents.tool import CONSULT_TOOL
-    from kernos.kernel.cross_space.tool import REQUEST_SPACE_ACTION_TOOL
-    _all_kernel = FILE_TOOLS + [REQUEST_TOOL, READ_DOC_TOOL, DISMISS_WHISPER_TOOL,
-                            MANAGE_CAPABILITIES_TOOL, REMEMBER_DETAILS_TOOL,
-                            READ_SOURCE_TOOL, READ_SOUL_TOOL, UPDATE_SOUL_TOOL,
-                            MANAGE_COVENANTS_TOOL, MANAGE_CHANNELS_TOOL,
-                            SEND_TO_CHANNEL_TOOL, MANAGE_SCHEDULE_TOOL,
-                            INSPECT_STATE_TOOL, EXECUTE_CODE_TOOL,
-                            MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL,
-                            MANAGE_PLAN_TOOL, CONSULT_TOOL,
-                            REQUEST_SPACE_ACTION_TOOL]
-    from kernos.kernel.runtime_trace import READ_RUNTIME_TRACE_TOOL
-    from kernos.kernel.diagnostics import DIAGNOSE_ISSUE_TOOL, PROPOSE_FIX_TOOL, SUBMIT_SPEC_TOOL
-    from kernos.kernel.members import MANAGE_MEMBERS_TOOL
-    from kernos.kernel.relational_tools import (
-        SEND_RELATIONAL_MESSAGE_TOOL, RESOLVE_RELATIONAL_MESSAGE_TOOL,
-    )
-    _all_kernel.extend([
-        READ_RUNTIME_TRACE_TOOL, DIAGNOSE_ISSUE_TOOL, PROPOSE_FIX_TOOL,
-        SUBMIT_SPEC_TOOL, MANAGE_MEMBERS_TOOL,
-        SEND_RELATIONAL_MESSAGE_TOOL, RESOLVE_RELATIONAL_MESSAGE_TOOL,
-    ])
-    if handler._retrieval:
-        from kernos.kernel.retrieval import REMEMBER_TOOL
-        _all_kernel.append(REMEMBER_TOOL)
-    for t in _all_kernel:
-        _kernel_tool_map[t["name"]] = t
+    _kernel_tool_map: dict[str, dict] = dict(kernel_tool_schema_map())
+    if not handler._retrieval:
+        # Match legacy aggregation shape: when retrieval isn't wired,
+        # remember was historically excluded from this map (the kernel
+        # dispatch path still works but the surfacer skipped it).
+        _kernel_tool_map.pop("remember", None)
+    _all_kernel = list(_kernel_tool_map.values())
 
     # === BUDGETED TOOL WINDOW (SPEC-TOOL-WINDOW) ===
     # Two zones: PINNED (always loaded) + ACTIVE (token-budgeted, LRU eviction)
