@@ -105,6 +105,8 @@ class DispatchGate:
             "list_parcels", "inspect_parcel",
             # CANVAS-V1
             "canvas_list", "page_read", "page_list", "page_search",
+            # REFERENCE-PRIMITIVE-V1
+            "request_reference",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -132,6 +134,16 @@ class DispatchGate:
             # lists). Reversible — the confirm/discard action is explicit.
             "canvas_preference_extract",
             "canvas_preference_confirm",
+            # REFERENCE-PRIMITIVE-V1: store_reference + create_collection
+            # write user-data files; the four recovery primitives mutate
+            # catalog state. All reversible (tombstone is reversible via
+            # restore; supersede/move-to-canvas track provenance).
+            "store_reference",
+            "create_reference_collection",
+            "move_reference_to_canvas",
+            "mark_reference_superseded",
+            "quarantine_reference",
+            "restore_reference_from_quarantine",
         }
 
         if tool_name in _KERNEL_READS:

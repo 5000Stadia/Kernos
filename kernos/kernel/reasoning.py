@@ -625,7 +625,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -712,6 +712,18 @@ class ReasoningService:
         "page_search":                 frozenset({"confirmed", "helper"}),
         "canvas_preference_extract":   frozenset({"confirmed", "helper"}),
         "canvas_preference_confirm":   frozenset({"confirmed", "helper"}),
+        # REFERENCE-PRIMITIVE-V1 — seven tools dispatched on the
+        # confirmed path. request_reference is read-classified
+        # (read-only catalog navigation + injection); the other six
+        # are soft_write (file writes, catalog mutations — all
+        # reversible via tombstone / restore).
+        "request_reference":                  frozenset({"confirmed"}),
+        "store_reference":                    frozenset({"confirmed"}),
+        "create_reference_collection":        frozenset({"confirmed"}),
+        "move_reference_to_canvas":           frozenset({"confirmed"}),
+        "mark_reference_superseded":          frozenset({"confirmed"}),
+        "quarantine_reference":               frozenset({"confirmed"}),
+        "restore_reference_from_quarantine":  frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1170,10 +1182,124 @@ class ReasoningService:
                                 "canvas_preference_extract",
                                 "canvas_preference_confirm"):
                 return await self._handle_canvas_tool(tool_name, tool_input, request)
+            elif tool_name in (
+                "request_reference", "store_reference",
+                "create_reference_collection",
+                "move_reference_to_canvas",
+                "mark_reference_superseded",
+                "quarantine_reference",
+                "restore_reference_from_quarantine",
+            ):
+                return await self._handle_reference_tool(
+                    tool_name, tool_input, request,
+                )
             else:
                 return f"Kernel tool '{tool_name}' not handled."
         else:
             return await self._mcp.call_tool(tool_name, tool_input)
+
+    async def _handle_reference_tool(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        request: "ReasoningRequest",
+    ) -> str:
+        """Dispatch helper for the seven REFERENCE-PRIMITIVE-V1 tools.
+
+        Resolves :class:`ReferenceService` from
+        ``handler._wlp_substrate.reference_service`` (production) or
+        ``handler._reference_service`` (test convenience). Returns a
+        friendly string when the substrate isn't bound — surfaces
+        the gap rather than crashing the turn."""
+        import json as _json
+        from kernos.kernel.reference.tools import ReferenceServiceContext
+
+        service = None
+        handler = getattr(self, "_handler", None)
+        if handler is not None:
+            substrate = getattr(handler, "_wlp_substrate", None)
+            if substrate is not None:
+                service = getattr(substrate, "reference_service", None)
+            if service is None:
+                service = getattr(handler, "_reference_service", None)
+        if service is None:
+            return (
+                "Reference primitive substrate is not available — "
+                "the catalog hasn't been wired in this process."
+            )
+        ctx = ReferenceServiceContext(
+            instance_id=request.instance_id,
+            domain_id=request.active_space_id,
+            member_id=getattr(request, "member_id", "") or "",
+        )
+        try:
+            if tool_name == "request_reference":
+                result = await service.handle_request_reference(
+                    ctx=ctx,
+                    brief_request=tool_input.get("brief_request", ""),
+                )
+            elif tool_name == "store_reference":
+                result = await service.handle_store_reference(
+                    ctx=ctx,
+                    content=tool_input.get("content", ""),
+                    collection=tool_input.get("collection", ""),
+                    filename=tool_input.get("filename", ""),
+                    trust_tier=tool_input.get(
+                        "trust_tier", "agent_authored",
+                    ),
+                    metadata=tool_input.get("metadata") or {},
+                )
+            elif tool_name == "create_reference_collection":
+                result = await service.handle_create_reference_collection(
+                    ctx=ctx,
+                    name=tool_input.get("name", ""),
+                    purpose=tool_input.get("purpose", ""),
+                    trust_tier=tool_input.get(
+                        "trust_tier", "agent_authored",
+                    ),
+                    refresh_policy=tool_input.get(
+                        "refresh_policy", "snapshot",
+                    ),
+                    provenance=tool_input.get("provenance") or {},
+                )
+            elif tool_name == "move_reference_to_canvas":
+                result = await service.handle_move_reference_to_canvas(
+                    ctx=ctx,
+                    entry_id=tool_input.get("entry_id", ""),
+                    target_canvas=tool_input.get("target_canvas", ""),
+                )
+            elif tool_name == "mark_reference_superseded":
+                result = await service.handle_mark_reference_superseded(
+                    ctx=ctx,
+                    old_entry_id=tool_input.get("old_entry_id", ""),
+                    new_entry_id=tool_input.get("new_entry_id", ""),
+                    reason=tool_input.get("reason", ""),
+                )
+            elif tool_name == "quarantine_reference":
+                result = await service.handle_quarantine_reference(
+                    ctx=ctx,
+                    entry_id=tool_input.get("entry_id", ""),
+                    reason=tool_input.get("reason", ""),
+                )
+            elif tool_name == "restore_reference_from_quarantine":
+                result = (
+                    await service.handle_restore_reference_from_quarantine(
+                        ctx=ctx,
+                        entry_id=tool_input.get("entry_id", ""),
+                    )
+                )
+            else:
+                return f"Reference tool {tool_name!r} not handled."
+            return _json.dumps(result, indent=2, default=str)
+        except Exception as exc:
+            logger.exception(
+                "REFERENCE_TOOL_DISPATCH_FAILED tool=%s exc=%s",
+                tool_name, exc,
+            )
+            return (
+                f"Reference tool {tool_name} failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
 
     def _is_concurrent_safe(self, tool_name: str) -> bool:
         """A tool is concurrent-safe ONLY if explicitly classified as 'read'.

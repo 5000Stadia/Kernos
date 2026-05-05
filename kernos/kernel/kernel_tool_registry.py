@@ -146,6 +146,7 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.retrieval import REMEMBER_TOOL
     from kernos.kernel.runtime_trace import READ_RUNTIME_TRACE_TOOL
     from kernos.kernel.scheduler import MANAGE_SCHEDULE_TOOL
+    from kernos.kernel.reference.tools import REFERENCE_TOOL_SCHEMAS
     from kernos.kernel.workspace import MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL
 
     schemas: list[dict] = []
@@ -202,6 +203,10 @@ def _import_kernel_schemas() -> list[dict]:
         REQUEST_SPACE_ACTION_TOOL,
         CONSULT_TOOL,
     ])
+    # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
+    # store_reference, create_reference_collection + four recovery
+    # primitives). Schemas live in their owning module.
+    schemas.extend(REFERENCE_TOOL_SCHEMAS)
     return schemas
 
 
