@@ -24,11 +24,12 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
+
+from kernos.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -349,10 +350,6 @@ def _new_entry_id() -> str:
     return f"ref_{uuid.uuid4().hex[:16]}"
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 class CatalogStore:
     """SQLite-backed durable store for the reference catalog.
 
@@ -596,7 +593,7 @@ class CatalogStore:
         """Mark all entries for a file as tombstoned. Returns the row
         count tombstoned. No-op if the file has no entries."""
         assert self._db is not None
-        now = _now_iso()
+        now = utc_now()
         async with self._write_lock:
             cursor = await self._db.execute(
                 "UPDATE reference_catalog SET tombstoned = 1, "
@@ -627,7 +624,7 @@ class CatalogStore:
         provenance = dict(entry.provenance_metadata)
         provenance["prior_trust_tier"] = entry.trust_tier
         provenance["quarantine_reason"] = reason
-        provenance["quarantined_at"] = _now_iso()
+        provenance["quarantined_at"] = utc_now()
         provenance["quarantined_by"] = quarantined_by
         async with self._write_lock:
             await self._db.execute(
@@ -659,7 +656,7 @@ class CatalogStore:
             prior = TRUST_AGENT_AUTHORED
         provenance = dict(entry.provenance_metadata)
         provenance.pop("prior_trust_tier", None)
-        provenance["restored_at"] = _now_iso()
+        provenance["restored_at"] = utc_now()
         provenance["restored_by"] = restored_by
         # auto_inducible follows trust tier defaults (see spec
         # §"Conservative defaults for v1"); restoration enables it
@@ -694,7 +691,7 @@ class CatalogStore:
         provenance = dict(old_entry.provenance_metadata)
         provenance["superseded_by"] = new_entry_id
         provenance["supersede_reason"] = reason
-        provenance["superseded_at"] = _now_iso()
+        provenance["superseded_at"] = utc_now()
         async with self._write_lock:
             await self._db.execute(
                 "UPDATE reference_catalog SET tombstoned = 1, "
@@ -702,7 +699,7 @@ class CatalogStore:
                 "provenance_metadata = ? "
                 "WHERE entry_id = ?",
                 (
-                    _now_iso(),
+                    utc_now(),
                     f"superseded_by:{new_entry_id}",
                     json.dumps(provenance),
                     old_entry_id,
@@ -725,7 +722,7 @@ class CatalogStore:
             raise UnknownEntry(f"entry_id={entry_id!r}")
         provenance = dict(entry.provenance_metadata)
         provenance["moved_to_canvas"] = target_canvas
-        provenance["moved_at"] = _now_iso()
+        provenance["moved_at"] = utc_now()
         provenance["moved_by"] = moved_by
         async with self._write_lock:
             await self._db.execute(
@@ -734,7 +731,7 @@ class CatalogStore:
                 "provenance_metadata = ? "
                 "WHERE entry_id = ?",
                 (
-                    _now_iso(),
+                    utc_now(),
                     f"moved_to_canvas:{target_canvas}",
                     json.dumps(provenance),
                     entry_id,

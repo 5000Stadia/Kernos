@@ -103,6 +103,8 @@ def _import_kernel_schemas() -> list[dict]:
     name. Filesystem discovery is intentionally avoided.
     """
     # Tools collected in the central schemas module.
+    # READ_DOC_TOOL retired in REFERENCE-PRIMITIVE-V1; see
+    # kernos.kernel.reference.tools for the replacement surface.
     from kernos.kernel.tools.schemas import (
         CANVAS_LIST_TOOL,
         CANVAS_CREATE_TOOL,
@@ -113,7 +115,6 @@ def _import_kernel_schemas() -> list[dict]:
         CANVAS_PREFERENCE_EXTRACT_TOOL,
         CANVAS_PREFERENCE_CONFIRM_TOOL,
         REQUEST_TOOL,
-        READ_DOC_TOOL,
         REMEMBER_DETAILS_TOOL,
         MANAGE_CAPABILITIES_TOOL,
         READ_SOURCE_TOOL,
@@ -171,8 +172,8 @@ def _import_kernel_schemas() -> list[dict]:
         DISMISS_WHISPER_TOOL,
         MANAGE_CAPABILITIES_TOOL,
         REQUEST_TOOL,
-        # Substrate introspection
-        READ_DOC_TOOL,
+        # Substrate introspection (read_doc retired —
+        # REFERENCE-PRIMITIVE-V1 ships request_reference instead)
         READ_SOURCE_TOOL,
         READ_SOUL_TOOL,
         UPDATE_SOUL_TOOL,

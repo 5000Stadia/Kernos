@@ -435,30 +435,12 @@ REQUEST_TOOL = {
 }
 
 
-READ_DOC_TOOL = {
-    "name": "read_doc",
-    "description": (
-        "Read Kernos documentation. Use when you need to understand a capability, "
-        "behavior, or how the system works. Your docs are at docs/ — read the "
-        "relevant section to answer accurately. "
-        "Examples: 'index.md', 'capabilities/web-browsing.md', 'behaviors/covenants.md', "
-        "'architecture/memory.md', 'identity/who-you-are.md', 'roadmap/vision.md'"
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": (
-                    "Path relative to docs/. "
-                    "Examples: 'index.md', 'capabilities/web-browsing.md', "
-                    "'behaviors/covenants.md', 'architecture/context-spaces.md'"
-                ),
-            },
-        },
-        "required": ["path"],
-    },
-}
+# READ_DOC_TOOL was retired in REFERENCE-PRIMITIVE-V1 — canonical
+# documentation reaches via request_reference now. See
+# kernos/kernel/reference/tools.py for the replacement surface and
+# the spec body §"read_doc retirement" for the six-criteria
+# discipline applied. read_source and read_soul stay (distinct
+# purposes — Python source code and per-member identity).
 
 
 REMEMBER_DETAILS_TOOL = {
@@ -493,41 +475,10 @@ REMEMBER_DETAILS_TOOL = {
 }
 
 
-def read_doc(path: str) -> str:
-    """Read a Kernos documentation file from docs/.
-
-    Security: only allows reads within the docs/ directory.
-    Rejects paths with '..', absolute paths, or paths outside docs/.
-    """
-    from pathlib import Path
-
-    if path.startswith("/") or path.startswith("\\"):
-        return "Error: Absolute paths are not allowed. Use a relative path like 'capabilities/web-browsing.md'."
-
-    if ".." in path:
-        return "Error: Path traversal ('..') is not allowed."
-
-    # Resolve docs/ root relative to the repo
-    import importlib
-    kernos_root = Path(importlib.import_module("kernos").__file__).parent
-    docs_root = kernos_root.parent / "docs"
-    target = (docs_root / path).resolve()
-
-    if not str(target).startswith(str(docs_root.resolve())):
-        return "Error: Path resolves outside the docs/ directory."
-
-    if not target.exists():
-        # List available files to help the agent find the right one
-        available = []
-        for f in sorted(docs_root.rglob("*.md")):
-            available.append(str(f.relative_to(docs_root)))
-        hint = "\n".join(f"  - {a}" for a in available[:30])
-        return f"Error: File not found: docs/{path}\n\nAvailable docs:\n{hint}"
-
-    if not target.is_file():
-        return f"Error: Not a file: docs/{path}"
-
-    return target.read_text(encoding="utf-8")
+# read_doc helper was retired in REFERENCE-PRIMITIVE-V1. Canonical
+# docs/ content is reached via request_reference; the catalog +
+# cohort path replaces direct path-based reads. See
+# kernos/kernel/reference/tools.py.
 
 
 MANAGE_CAPABILITIES_TOOL = {

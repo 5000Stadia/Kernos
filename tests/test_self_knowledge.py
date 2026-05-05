@@ -187,10 +187,12 @@ class TestDocsHint:
         from kernos.messages.reference import DOCS_HINT
         assert len(DOCS_HINT) > 20
 
-    def test_docs_hint_references_docs_and_read_doc(self):
+    def test_docs_hint_references_request_reference(self):
+        """REFERENCE-PRIMITIVE-V1: DOCS_HINT now points at the new
+        catalog-mediated reach (request_reference) instead of the
+        retired direct-path read_doc."""
         from kernos.messages.reference import DOCS_HINT
-        assert "docs/" in DOCS_HINT
-        assert "read_doc" in DOCS_HINT
+        assert "request_reference" in DOCS_HINT
 
 
 class TestDocsDirectory:
@@ -232,57 +234,34 @@ class TestDocsDirectory:
             assert (docs / name).exists(), f"Missing: roadmap/{name}"
 
 
-class TestReadDocTool:
-    """Test the read_doc kernel tool."""
+class TestReadDocRetired:
+    """REFERENCE-PRIMITIVE-V1: read_doc is retired. The replacement
+    surface is request_reference; the old direct-path tool no
+    longer exists in the kernel-tool catalog or dispatch."""
 
-    def test_tool_definition(self):
-        from kernos.kernel.reasoning import READ_DOC_TOOL
-        assert READ_DOC_TOOL["name"] == "read_doc"
-        assert "path" in READ_DOC_TOOL["input_schema"]["properties"]
+    def test_read_doc_not_in_kernel_tools(self):
+        assert "read_doc" not in ReasoningService._KERNEL_TOOLS
 
-    def test_in_kernel_tools(self):
-        assert "read_doc" in ReasoningService._KERNEL_TOOLS
+    def test_request_reference_in_kernel_tools(self):
+        assert "request_reference" in ReasoningService._KERNEL_TOOLS
 
-    def test_classified_as_read(self):
+    def test_request_reference_classified_as_read(self):
         provider = MagicMock()
         events = MagicMock()
         mcp = MagicMock()
         audit = MagicMock()
         r = ReasoningService(provider, events, mcp, audit)
-        assert r._classify_tool_effect("read_doc", None) == "read"
+        assert r._classify_tool_effect("request_reference", None) == "read"
 
-    def test_read_index(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("index.md")
-        assert "Kernos" in result
-        assert "Error" not in result
-
-    def test_read_nested_doc(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("capabilities/web-browsing.md")
-        assert "browser" in result.lower() or "Browser" in result
-        assert "Error" not in result
-
-    def test_reject_path_traversal(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("../secrets/api.key")
-        assert "Error" in result
-
-    def test_reject_absolute_path(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("/etc/passwd")
-        assert "Error" in result
-
-    def test_nonexistent_shows_available(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("nonexistent.md")
-        assert "Error" in result
-        assert "Available docs" in result
-
-    def test_read_vision(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("roadmap/vision.md")
-        assert "personal intelligence" in result.lower()
+    def test_vision_doc_still_present(self):
+        """The canonical vision doc still ships from docs/. The agent
+        reaches it via request_reference now (the old direct-path
+        read_doc was retired in REFERENCE-PRIMITIVE-V1)."""
+        from pathlib import Path
+        vision = Path(__file__).parent.parent / "docs" / "roadmap" / "vision.md"
+        assert vision.exists()
+        body = vision.read_text(encoding="utf-8")
+        assert "personal intelligence" in body.lower()
 
 
 class TestSystemSpaceProvisioningSlimmed:
@@ -545,8 +524,14 @@ class TestDocsCoverSoul:
         assert soul_doc.exists()
 
     def test_soul_doc_covers_tools(self):
-        from kernos.kernel.reasoning import _read_doc
-        result = _read_doc("architecture/soul.md")
+        # Read directly from the local docs path; read_doc was
+        # retired in REFERENCE-PRIMITIVE-V1, but the docs/ directory
+        # still ships canonical content. The reach mechanism for
+        # agents is now request_reference; for tests we read the
+        # file directly.
+        from pathlib import Path
+        soul_doc = Path(__file__).parent.parent / "docs" / "architecture" / "soul.md"
+        result = soul_doc.read_text(encoding="utf-8")
         assert "read_soul" in result
         assert "update_soul" in result
 

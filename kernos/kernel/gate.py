@@ -100,12 +100,13 @@ class DispatchGate:
         """
         _KERNEL_READS = {
             "remember", "remember_details", "list_files", "read_file",
-            "dismiss_whisper", "read_source", "read_doc", "read_soul",
+            "dismiss_whisper", "read_source", "read_soul",
             "request_tool", "inspect_state",
             "list_parcels", "inspect_parcel",
             # CANVAS-V1
             "canvas_list", "page_read", "page_list", "page_search",
-            # REFERENCE-PRIMITIVE-V1
+            # REFERENCE-PRIMITIVE-V1 (read_doc retired here; canonical
+            # docs reach via request_reference)
             "request_reference",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics

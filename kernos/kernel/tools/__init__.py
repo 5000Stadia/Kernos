@@ -1,8 +1,11 @@
 """Kernel tool schemas and helpers.
 
 Tool schemas are JSON dicts defining the tool's name, description, and input_schema.
-Pure helper functions (_read_doc, _read_source) are co-located with their schemas.
+Pure helper functions (_read_source) are co-located with their schemas.
 Tool HANDLERS remain in ReasoningService for now (they need the full service context).
+
+REFERENCE-PRIMITIVE-V1: read_doc retired here. Canonical documentation
+now reaches via ``request_reference`` — see kernos/kernel/reference/.
 """
 from kernos.kernel.tools.schemas import (
     CANVAS_CREATE_TOOL,
@@ -20,7 +23,6 @@ from kernos.kernel.tools.schemas import (
     PAGE_READ_TOOL,
     PAGE_SEARCH_TOOL,
     PAGE_WRITE_TOOL,
-    READ_DOC_TOOL,
     READ_SOURCE_TOOL,
     READ_SOUL_TOOL,
     REMEMBER_DETAILS_TOOL,
@@ -29,7 +31,6 @@ from kernos.kernel.tools.schemas import (
     SET_CHAIN_MODEL_TOOL,
     UPDATE_SOUL_TOOL,
     SOUL_UPDATABLE_FIELDS,
-    read_doc,
     read_source,
 )
 
@@ -49,7 +50,6 @@ __all__ = [
     "PAGE_READ_TOOL",
     "PAGE_SEARCH_TOOL",
     "PAGE_WRITE_TOOL",
-    "READ_DOC_TOOL",
     "READ_SOURCE_TOOL",
     "READ_SOUL_TOOL",
     "REMEMBER_DETAILS_TOOL",
@@ -58,6 +58,5 @@ __all__ = [
     "SET_CHAIN_MODEL_TOOL",
     "UPDATE_SOUL_TOOL",
     "SOUL_UPDATABLE_FIELDS",
-    "read_doc",
     "read_source",
 ]

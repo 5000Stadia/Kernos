@@ -44,10 +44,10 @@ TOOL_RESULT_CHAR_BUDGET = 4000  # ~1000 tokens
 
 # Tool schemas extracted to kernos/kernel/tools/schemas.py
 from kernos.kernel.tools import (
-    REQUEST_TOOL, READ_DOC_TOOL, REMEMBER_DETAILS_TOOL,
+    REQUEST_TOOL, REMEMBER_DETAILS_TOOL,
     MANAGE_CAPABILITIES_TOOL, READ_SOURCE_TOOL,
     READ_SOUL_TOOL, UPDATE_SOUL_TOOL, SOUL_UPDATABLE_FIELDS,
-    read_doc as _read_doc, read_source as _read_source,
+    read_source as _read_source,
     SOUL_UPDATABLE_FIELDS as _SOUL_UPDATABLE_FIELDS,
 )
 
@@ -625,7 +625,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_doc", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -680,7 +680,6 @@ class ReasoningService:
         "remember":                    frozenset({"confirmed"}),
         "dismiss_whisper":             frozenset({"confirmed"}),
         "read_source":                 frozenset({"confirmed"}),
-        "read_doc":                    frozenset({"confirmed"}),
         "read_soul":                   frozenset({"confirmed"}),
         "update_soul":                 frozenset({"confirmed"}),
         "manage_covenants":            frozenset({"confirmed"}),
@@ -961,8 +960,6 @@ class ReasoningService:
                     tool_input.get("path", ""),
                     tool_input.get("section", ""),
                 )
-            elif tool_name == "read_doc":
-                return _read_doc(tool_input.get("path", ""))
             elif tool_name == "read_soul":
                 # Per-member: return member profile (the real identity state)
                 member_id = getattr(request, "member_id", "")

@@ -48,10 +48,10 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from kernos.utils import utc_now
 from kernos.kernel.reference.catalog import (
     CatalogEntry,
     CatalogStore,
@@ -207,10 +207,6 @@ Collection purpose paragraph:"""
 # ---------------------------------------------------------------------------
 # Cataloging payloads (input to the cohort)
 # ---------------------------------------------------------------------------
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _new_entry_id() -> str:
@@ -443,7 +439,7 @@ class CatalogingCohort:
                     entry_type=ENTRY_TYPE_FILE,
                     scope=scope,
                     category=category,
-                    indexed_at=_now_iso(),
+                    indexed_at=utc_now(),
                     trust_tier=trust_tier,
                     auto_inducible=trust_tier != "quarantined",
                     provenance_metadata=provenance,
@@ -562,7 +558,7 @@ class CatalogingCohort:
             entry_type=ENTRY_TYPE_COLLECTION,
             scope=scope,
             category=collection_name,
-            indexed_at=_now_iso(),
+            indexed_at=utc_now(),
             trust_tier=trust_tier,
             auto_inducible=trust_tier != "quarantined",
             provenance_metadata=provenance,
@@ -571,7 +567,7 @@ class CatalogingCohort:
             refresh_policy=refresh_policy,
             member_file_count=len(member_files),
             member_file_paths=member_files,
-            last_refreshed_at=_now_iso(),
+            last_refreshed_at=utc_now(),
             owner_domain_id=owner_domain_id,
         )
         await self._catalog.upsert_collection_entry(entry=entry)

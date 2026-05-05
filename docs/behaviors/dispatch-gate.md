@@ -39,7 +39,7 @@ When the gate returns DENIED or CONFLICT:
 
 | Effect | Gate behavior | Examples |
 |--------|-------------|----------|
-| read | Bypass (no gate) | remember, list_files, read_file, read_soul, read_source, read_doc, request_tool |
+| read | Bypass (no gate) | remember, list_files, read_file, read_soul, read_source, request_reference, request_tool |
 | soft_write | Gate evaluates | write_file, delete_file, update_soul, manage_covenants, evaluate (browser JS) |
 | hard_write | Gate evaluates | create-event, send-email, delete-event |
 

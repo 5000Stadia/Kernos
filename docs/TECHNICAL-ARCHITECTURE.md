@@ -1,6 +1,6 @@
 # KERNOS Technical Architecture Document
 
-> **What this is:** A map of what exists today — components, data structures, data flows, and interfaces. The agent reads this via `read_doc`. If the code and this document disagree, fix this document.
+> **What this is:** A map of what exists today — components, data structures, data flows, and interfaces. The agent reaches this via `request_reference` (REFERENCE-PRIMITIVE-V1; the legacy direct-path `read_doc` was retired). If the code and this document disagree, fix this document.
 >
 > **Last updated:** 2026-04-12 (reflects: through Telegram Adapter, Platform-Locked Codes, Member Identity, SQLite Migration, Bjork Activation, Improvement Loop T1+T2)
 
@@ -262,7 +262,7 @@ Three named chains: **primary** (main reasoning), **simple** (extraction, compac
 
 ### Dispatch Order
 
-1. **Kernel tools** — Intercepted before MCP. Current set: remember, write_file, read_file, list_files, delete_file, execute_code, manage_workspace, register_tool, inspect_state, request_tool, dismiss_whisper, read_source, read_doc, read_soul, update_soul, manage_covenants, manage_capabilities, manage_channels, send_to_channel, manage_schedule, manage_plan, manage_members, read_runtime_trace, diagnose_issue, propose_fix, submit_spec.
+1. **Kernel tools** — Intercepted before MCP. Current set: remember, write_file, read_file, list_files, delete_file, execute_code, manage_workspace, register_tool, inspect_state, request_tool, dismiss_whisper, read_source, read_soul, update_soul, manage_covenants, manage_capabilities, manage_channels, send_to_channel, manage_schedule, manage_plan, manage_members, read_runtime_trace, diagnose_issue, propose_fix, submit_spec, request_reference, store_reference, create_reference_collection, move_reference_to_canvas, mark_reference_superseded, quarantine_reference, restore_reference_from_quarantine. (read_doc retired in REFERENCE-PRIMITIVE-V1.)
 2. **MCP tools** — Routed via MCPClientManager.call_tool()
 3. **Workspace tools** — Detected via `catalog.has_workspace_tool()`. Executed via `workspace.execute_workspace_tool()` in the tool's home space.
 

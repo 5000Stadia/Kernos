@@ -24,7 +24,7 @@ WARNING kernos.kernel.covenant_manager: COVENANT_VALIDATE: failed (API status 40
 ERROR kernos.kernel.reasoning: ReasoningRateLimitError: 429 rate limit hit
 
 These are internal system errors visible because developer mode is enabled.
-You can discuss them, diagnose them (read_doc or read_source), or ignore them.
+You can discuss them, diagnose them (request_reference or read_source), or ignore them.
 [END DEVELOPER]
 ```
 

@@ -564,7 +564,9 @@ def test_unknown_effect_tool_not_concurrent_safe():
     assert service._is_concurrent_safe("mystery_tool") is False
     # Kernel reads are concurrent-safe
     assert service._is_concurrent_safe("remember") is True
-    assert service._is_concurrent_safe("read_doc") is True
+    # REFERENCE-PRIMITIVE-V1: read_doc retired; request_reference is
+    # the new read-classified reach mechanism for canonical docs.
+    assert service._is_concurrent_safe("request_reference") is True
     # Kernel writes are not
     assert service._is_concurrent_safe("write_file") is False
     assert service._is_concurrent_safe("delete_file") is False

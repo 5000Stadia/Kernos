@@ -100,7 +100,7 @@ class ErrorBuffer:
         lines.extend(entries)
         lines.append(
             "\nThese are internal system errors visible because developer mode is enabled. "
-            "You can discuss them, diagnose them (read_doc or read_source), or ignore them."
+            "You can discuss them, diagnose them (request_reference or read_source), or ignore them."
         )
         lines.append("[END DEVELOPER]")
         return "\n".join(lines)
@@ -2167,7 +2167,8 @@ class MessageHandler:
         """Write capabilities-overview.md to the system space.
 
         Self-knowledge docs (how-i-work.md, kernos-reference.md, how-to-connect-tools.md)
-        are deprecated — replaced by docs/ + read_doc() (SPEC-3J).
+        are deprecated — replaced by docs/ + request_reference() (SPEC-3J +
+        REFERENCE-PRIMITIVE-V1; the old direct-path read_doc tool is retired).
         Only capabilities-overview.md remains (dynamically updated on install/uninstall).
         """
         if not getattr(self, "_files", None):
