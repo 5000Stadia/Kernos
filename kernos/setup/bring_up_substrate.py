@@ -278,7 +278,10 @@ async def bring_up_substrate(
         REFERENCE_SOURCE_MODULE,
         ReferenceEventEmitter as _RefEventEmitter,
     )
-    from kernos.kernel.reference.ingest import IngestionScanner as _IngScanner
+    from kernos.kernel.reference.ingest import (
+        IngestionScanner as _IngScanner,
+        docs_source_root as _docs_source_root,
+    )
     from kernos.kernel.reference.tools import ReferenceService as _RefService
     from pathlib import Path as _Path
 
@@ -321,6 +324,30 @@ async def bring_up_substrate(
         references_root=references_root,
         instance_id=_substrate_instance_id,
     )
+
+    # First-boot catalog hydration. The instance-scoped ``docs/`` source
+    # root is registered now (it ships with every install). Per-domain
+    # ``references/`` roots are registered lazily as domains accrue
+    # references; the cohort tool path also fires async cataloging
+    # directly when an agent stores material, so the per-domain scan
+    # is not load-bearing for v1. The scan is fire-and-forget on a
+    # background task so bring-up doesn't block on file walks.
+    try:
+        _docs_root_path = _Path(__file__).resolve().parent.parent.parent / "docs"
+        if _docs_root_path.exists() and _docs_root_path.is_dir():
+            reference_ingestion_scanner.add_source(
+                _docs_source_root(_docs_root_path)
+            )
+            import asyncio as _asyncio
+            _asyncio.create_task(
+                reference_ingestion_scanner.scan(),
+                name="reference_first_boot_scan",
+            )
+    except Exception:  # pragma: no cover
+        logger.exception(
+            "REFERENCE_BRINGUP_FIRST_BOOT_SCAN_FAILED — catalog will hydrate "
+            "lazily via hash-mismatch-on-retrieval; non-blocking"
+        )
 
     logger.info(
         "WTC v1 C5c-bringup: substrate live — runtime=%s engine=%s "

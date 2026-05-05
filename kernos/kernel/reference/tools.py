@@ -438,6 +438,26 @@ class ReferenceService:
                     "Navigator chose an entry not in the visible catalog."
                 ),
             }
+        # Collection-level entries surface as a map (purpose +
+        # member-file count), NOT injected file content. The
+        # injection path operates on file-level entries; collection
+        # entries don't carry a (file_path, line_range) — they are
+        # metadata pointers to a directory of files.
+        if chosen.entry_type == "collection":
+            return {
+                "status": "ok_collection",
+                "entry_id": chosen.entry_id,
+                "collection_name": chosen.collection_name,
+                "purpose": chosen.purpose,
+                "trust_tier": chosen.trust_tier,
+                "refresh_policy": chosen.refresh_policy,
+                "member_file_count": chosen.member_file_count,
+                "member_file_paths": list(chosen.member_file_paths),
+                "message": (
+                    "Collection map surfaced. Use a more specific brief "
+                    "to target a member file."
+                ),
+            }
         result = await inject_entry(
             entry_id=entry_id,
             catalog=self._catalog,
@@ -643,6 +663,32 @@ class ReferenceService:
         }
 
     # ------------------------------------------------------------------
+    # Visibility check (defense-in-depth on mutating recovery primitives)
+    # ------------------------------------------------------------------
+
+    async def _caller_can_mutate(
+        self,
+        ctx: ReferenceServiceContext,
+        entry_id: str,
+    ) -> bool:
+        """Return True iff the entry is visible in the caller's domain.
+
+        Mutation through any recovery primitive (move_to_canvas,
+        supersede, quarantine, restore) requires that the caller
+        can SEE the entry under the visibility rule. Otherwise an
+        agent with a guessed ``entry_id`` from another domain could
+        tombstone or quarantine it. Reads compose visibility through
+        ``list_visible``; writes need this explicit re-check.
+        """
+        entry = await self._catalog.get_entry(entry_id=entry_id)
+        if entry is None:
+            return False
+        if entry.scope == SCOPE_INSTANCE:
+            return True
+        domain = parse_domain_from_scope(entry.scope)
+        return bool(domain) and domain == ctx.domain_id
+
+    # ------------------------------------------------------------------
     # Recovery primitives
     # ------------------------------------------------------------------
 
@@ -653,6 +699,11 @@ class ReferenceService:
         entry_id: str,
         target_canvas: str,
     ) -> dict[str, Any]:
+        if not await self._caller_can_mutate(ctx, entry_id):
+            return {
+                "status": "error",
+                "error": "entry not visible in the caller's domain",
+            }
         try:
             updated = await self._catalog.mark_moved_to_canvas(
                 entry_id=entry_id,
@@ -688,6 +739,16 @@ class ReferenceService:
         new_entry_id: str,
         reason: str,
     ) -> dict[str, Any]:
+        if not await self._caller_can_mutate(ctx, old_entry_id):
+            return {
+                "status": "error",
+                "error": "old entry not visible in the caller's domain",
+            }
+        if not await self._caller_can_mutate(ctx, new_entry_id):
+            return {
+                "status": "error",
+                "error": "new entry not visible in the caller's domain",
+            }
         try:
             await self._catalog.supersede(
                 old_entry_id=old_entry_id,
@@ -718,6 +779,11 @@ class ReferenceService:
         entry_id: str,
         reason: str,
     ) -> dict[str, Any]:
+        if not await self._caller_can_mutate(ctx, entry_id):
+            return {
+                "status": "error",
+                "error": "entry not visible in the caller's domain",
+            }
         try:
             entry = await self._catalog.quarantine_entry(
                 entry_id=entry_id,
@@ -747,6 +813,11 @@ class ReferenceService:
         ctx: ReferenceServiceContext,
         entry_id: str,
     ) -> dict[str, Any]:
+        if not await self._caller_can_mutate(ctx, entry_id):
+            return {
+                "status": "error",
+                "error": "entry not visible in the caller's domain",
+            }
         try:
             entry, prior = await self._catalog.restore_entry(
                 entry_id=entry_id,

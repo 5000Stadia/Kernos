@@ -682,12 +682,23 @@ class CatalogStore:
         reason: str,
     ) -> None:
         """Tombstone the old entry and record the supersession link
-        in its provenance. The new entry is independently created;
-        this method only links + tombstones."""
+        in its provenance. The new entry must already exist (and be
+        non-tombstoned); this method only links + tombstones, it
+        does not create the new entry. Raises :class:`UnknownEntry`
+        if either entry is missing — broken supersession chains are
+        a worse failure than refusing the operation."""
         assert self._db is not None
         old_entry = await self.get_entry(entry_id=old_entry_id)
         if old_entry is None:
             raise UnknownEntry(f"old_entry_id={old_entry_id!r}")
+        new_entry = await self.get_entry(entry_id=new_entry_id)
+        if new_entry is None:
+            raise UnknownEntry(f"new_entry_id={new_entry_id!r}")
+        if new_entry.tombstoned:
+            raise CatalogStoreError(
+                f"new_entry_id={new_entry_id!r} is tombstoned; cannot "
+                "supersede with a dead row"
+            )
         provenance = dict(old_entry.provenance_metadata)
         provenance["superseded_by"] = new_entry_id
         provenance["supersede_reason"] = reason

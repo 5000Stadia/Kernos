@@ -130,13 +130,19 @@ def _category_for_file(root: SourceRoot, file_path: Path) -> str:
 
 
 class IngestionScanner:
-    """Per-turn scanner that compares the catalog against the on-disk
-    source roots and enqueues file-change events for the cohort.
+    """Trigger-driven scanner that compares the catalog against the
+    on-disk source roots and enqueues file-change events for the
+    cohort.
 
-    Construction is cheap; ``scan()`` is the single entry point and
-    is safe to call from inside a per-turn loop tick. Concurrent
-    scans (e.g. two overlapping turns) are guarded by an asyncio
-    lock so the same file isn't enqueued twice."""
+    Construction is cheap; ``scan()`` is the single entry point.
+    Production wiring fires ``scan()`` on (a) first-boot bring-up
+    and (b) auto-update completion — not per-turn — so steady-state
+    cost is zero. Concurrent invocations are not guarded by a lock;
+    duplicate enqueues are absorbed by the cohort's per-file
+    transactional rebuild (the second run lands an identical row
+    set as the first; nothing corrupts). If two scans race, the
+    cohort processes both; harmless but wasteful — keep concurrent
+    callers single-flight at the wiring layer."""
 
     def __init__(
         self,

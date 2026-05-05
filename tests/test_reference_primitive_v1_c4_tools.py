@@ -25,6 +25,7 @@ from kernos.kernel import event_stream
 from kernos.kernel.reference.catalog import (
     CatalogEntry,
     CatalogStore,
+    ENTRY_TYPE_COLLECTION,
     ENTRY_TYPE_FILE,
     SCOPE_INSTANCE,
     TRUST_AGENT_AUTHORED,
@@ -440,3 +441,169 @@ async def test_move_to_canvas_recovery(service_setup):
     after = await catalog.get_entry(entry_id=e.entry_id)
     assert after is not None and after.tombstoned is True
     assert after.provenance_metadata["moved_to_canvas"] == "My Tools / Notes"
+
+
+# ---------------------------------------------------------------------------
+# Cross-domain mutation guard (Codex review fix)
+# ---------------------------------------------------------------------------
+
+
+async def test_recovery_primitives_reject_cross_domain_mutation(
+    service_setup,
+):
+    """An agent in domain X with a guessed entry_id from domain Y
+    must NOT be able to quarantine / restore / move-to-canvas /
+    supersede the foreign entry. Visibility leak via mutation was
+    the gap Codex flagged."""
+    service, catalog, _, _, _, tmp_path = service_setup
+    fp = tmp_path / "refs/B/secret.md"
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_text("## A\n\nbody\n", encoding="utf-8")
+    domain_b_entry = CatalogEntry(
+        entry_id="ref_other_domain",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=scope_for_domain("space-B"),
+        category="refs",
+        indexed_at="2026-05-04T00:00:00+00:00",
+        trust_tier=TRUST_AGENT_AUTHORED,
+        file_path=str(fp),
+        section_title="A",
+        one_line="oneline",
+        line_start=1, line_end=3,
+        source_hash=compute_source_hash(fp.read_bytes()),
+        owner_domain_id="space-B",
+    )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp),
+        new_entries=[domain_b_entry],
+    )
+    ctx_a = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="attacker",
+    )
+    # quarantine across domain — refused.
+    qr = await service.handle_quarantine_reference(
+        ctx=ctx_a, entry_id="ref_other_domain",
+        reason="trying to quarantine someone else's data",
+    )
+    assert qr["status"] == "error"
+    # restore across domain — refused.
+    rr = await service.handle_restore_reference_from_quarantine(
+        ctx=ctx_a, entry_id="ref_other_domain",
+    )
+    assert rr["status"] == "error"
+    # move_to_canvas across domain — refused.
+    mr = await service.handle_move_reference_to_canvas(
+        ctx=ctx_a, entry_id="ref_other_domain",
+        target_canvas="My Stuff / X",
+    )
+    assert mr["status"] == "error"
+    # The entry remains untouched.
+    untouched = await catalog.get_entry(entry_id="ref_other_domain")
+    assert untouched is not None
+    assert untouched.tombstoned is False
+    assert untouched.trust_tier == TRUST_AGENT_AUTHORED
+
+
+async def test_supersede_rejects_cross_domain_pairs(service_setup):
+    """Supersede requires both old AND new entries visible in the
+    caller's domain; mixing scopes is refused."""
+    service, catalog, _, _, _, tmp_path = service_setup
+    own = await _seed_authored_entry(catalog, tmp_path)
+    fp_b = tmp_path / "refs/B/x.md"
+    fp_b.parent.mkdir(parents=True, exist_ok=True)
+    fp_b.write_text("## A\n\nbody\n", encoding="utf-8")
+    other = CatalogEntry(
+        entry_id="ref_b_only",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=scope_for_domain("space-B"),
+        category="refs",
+        indexed_at="2026-05-04T00:00:00+00:00",
+        trust_tier=TRUST_AGENT_AUTHORED,
+        file_path=str(fp_b),
+        section_title="A",
+        one_line="oneline",
+        line_start=1, line_end=3,
+        source_hash=compute_source_hash(fp_b.read_bytes()),
+        owner_domain_id="space-B",
+    )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp_b), new_entries=[other],
+    )
+    ctx_a = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="attacker",
+    )
+    res = await service.handle_mark_reference_superseded(
+        ctx=ctx_a,
+        old_entry_id=own.entry_id,
+        new_entry_id="ref_b_only",
+        reason="x",
+    )
+    assert res["status"] == "error"
+    # Old entry NOT tombstoned because supersede refused.
+    untouched = await catalog.get_entry(entry_id=own.entry_id)
+    assert untouched is not None
+    assert untouched.tombstoned is False
+
+
+async def test_supersede_validates_new_entry_exists(service_setup):
+    """supersede() raises UnknownEntry if the new_entry_id doesn't
+    exist; supersession chains stay consistent."""
+    service, catalog, _, _, _, tmp_path = service_setup
+    own = await _seed_authored_entry(catalog, tmp_path)
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    res = await service.handle_mark_reference_superseded(
+        ctx=ctx,
+        old_entry_id=own.entry_id,
+        new_entry_id="ref_does_not_exist",
+        reason="x",
+    )
+    assert res["status"] == "error"
+    untouched = await catalog.get_entry(entry_id=own.entry_id)
+    assert untouched is not None and untouched.tombstoned is False
+
+
+# ---------------------------------------------------------------------------
+# Collection-level navigator response (Codex review fix)
+# ---------------------------------------------------------------------------
+
+
+async def test_request_reference_collection_returns_map_not_inject(
+    service_setup,
+):
+    """When the navigator picks a collection-level entry,
+    handle_request_reference returns a map shape (purpose +
+    member-file count), NOT an inject_entry result that would fail
+    on the missing file_path."""
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+    coll = CatalogEntry(
+        entry_id="ref_collection_only",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_COLLECTION,
+        scope=scope_for_domain("space-A"),
+        category="vendor-x",
+        indexed_at="2026-05-04T00:00:00+00:00",
+        trust_tier=TRUST_EXTERNAL_SNAPSHOT,
+        collection_name="vendor-x",
+        purpose="Vendor X API documentation",
+        refresh_policy="snapshot",
+        member_file_count=3,
+        member_file_paths=["auth.md", "rate-limits.md", "errors.md"],
+        owner_domain_id="space-A",
+    )
+    await catalog.upsert_collection_entry(entry=coll)
+    nav.next_response = "ref_collection_only"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    result = await service.handle_request_reference(
+        ctx=ctx, brief_request="anything about vendor X",
+    )
+    assert result["status"] == "ok_collection"
+    assert result["collection_name"] == "vendor-x"
+    assert result["purpose"] == "Vendor X API documentation"
+    assert result["member_file_count"] == 3
+    assert "content" not in result  # no inject; this is a map.
