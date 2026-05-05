@@ -86,6 +86,11 @@ if TYPE_CHECKING:  # pragma: no cover
     from kernos.kernel.workflows.ledger import WorkflowLedger
     from kernos.kernel.workflows.trigger_registry import TriggerRegistry
     from kernos.kernel.workflows.workflow_registry import WorkflowRegistry
+    from kernos.kernel.reference.catalog import CatalogStore
+    from kernos.kernel.reference.cohort import CatalogingCohort
+    from kernos.kernel.reference.events import ReferenceEventEmitter
+    from kernos.kernel.reference.ingest import IngestionScanner
+    from kernos.kernel.reference.tools import ReferenceService
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,12 @@ class Substrate:
     crb_event_emitter: "CRBEventEmitter"
     crb_proposal_author: "CRBProposalAuthor"
     crb_approval_flow: "CRBApprovalFlow"
+    # REFERENCE-PRIMITIVE-V1 C-bringup
+    reference_catalog: "CatalogStore"
+    reference_event_emitter: "ReferenceEventEmitter"
+    reference_cohort: "CatalogingCohort"
+    reference_ingestion_scanner: "IngestionScanner"
+    reference_service: "ReferenceService"
 
 
 async def bring_up_substrate(
@@ -251,9 +262,69 @@ async def bring_up_substrate(
         author=crb_proposal_author,
     )
 
+    # --- Reference primitive substrate -------------------------------
+    # REFERENCE-PRIMITIVE-V1 C-bringup: catalog store + cataloging
+    # cohort + ingestion scanner + agent-facing tool service. The
+    # ``"reference"`` source_module registers idempotently with the
+    # EmitterRegistry. Source roots (docs/ + per-domain references/)
+    # are NOT pre-registered here — registration happens lazily as
+    # the per-turn ingestion check identifies new domains.
+    from kernos.kernel.reference.bringup_adapters import (
+        ReferenceCheapLLMAdapter,
+    )
+    from kernos.kernel.reference.catalog import CatalogStore as _CatalogStore
+    from kernos.kernel.reference.cohort import CatalogingCohort as _CatCohort
+    from kernos.kernel.reference.events import (
+        REFERENCE_SOURCE_MODULE,
+        ReferenceEventEmitter as _RefEventEmitter,
+    )
+    from kernos.kernel.reference.ingest import IngestionScanner as _IngScanner
+    from kernos.kernel.reference.tools import ReferenceService as _RefService
+    from pathlib import Path as _Path
+
+    reference_catalog = _CatalogStore()
+    await reference_catalog.start(data_dir)
+
+    ref_emitter_raw = registry.get(REFERENCE_SOURCE_MODULE) or registry.register(
+        REFERENCE_SOURCE_MODULE
+    )
+    reference_event_emitter = _RefEventEmitter(emitter=ref_emitter_raw)
+
+    reference_llm = ReferenceCheapLLMAdapter(reasoning=handler.reasoning)
+    # The instance_id here is the SUBSTRATE-level instance id used
+    # for catalog row keying. Per-turn dispatch will pass the
+    # caller's instance_id in the ReferenceServiceContext. v1 ships
+    # single-tenant, so the substrate-level id is the canonical
+    # value for catalog rows; multi-tenant support adds a per-call
+    # override at the service boundary.
+    _substrate_instance_id = "default"
+    reference_cohort = _CatCohort(
+        catalog=reference_catalog,
+        emitter=reference_event_emitter,
+        llm=reference_llm,
+        instance_id=_substrate_instance_id,
+    )
+    await reference_cohort.start()
+    reference_ingestion_scanner = _IngScanner(
+        catalog=reference_catalog,
+        cohort=reference_cohort,
+        emitter=reference_event_emitter,
+        instance_id=_substrate_instance_id,
+    )
+    references_root = _Path(data_dir) / "references"
+    references_root.mkdir(parents=True, exist_ok=True)
+    reference_service = _RefService(
+        catalog=reference_catalog,
+        cohort=reference_cohort,
+        emitter=reference_event_emitter,
+        navigator_llm=reference_llm,
+        references_root=references_root,
+        instance_id=_substrate_instance_id,
+    )
+
     logger.info(
         "WTC v1 C5c-bringup: substrate live — runtime=%s engine=%s "
-        "verbs=%d crb=ready",
+        "verbs=%d crb=ready reference=ready",
         runtime.claim_owner, "started", len(action_library._verbs),
     )
 
@@ -273,6 +344,11 @@ async def bring_up_substrate(
         crb_event_emitter=crb_event_emitter,
         crb_proposal_author=crb_proposal_author,
         crb_approval_flow=crb_approval_flow,
+        reference_catalog=reference_catalog,
+        reference_event_emitter=reference_event_emitter,
+        reference_cohort=reference_cohort,
+        reference_ingestion_scanner=reference_ingestion_scanner,
+        reference_service=reference_service,
     )
 
 
@@ -280,6 +356,8 @@ async def tear_down_substrate(substrate: Substrate) -> None:
     """Stop the substrate's components in reverse construction order.
     Best-effort: failures are logged but don't propagate."""
     for label, coro_factory in (
+        ("reference_cohort", substrate.reference_cohort.stop),
+        ("reference_catalog", substrate.reference_catalog.stop),
         ("install_proposal_store", substrate.install_proposal_store.stop),
         ("internal_event_adapter", substrate.internal_event_adapter.stop),
         ("runtime", substrate.runtime.stop),
