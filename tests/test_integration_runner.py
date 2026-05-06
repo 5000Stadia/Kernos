@@ -284,6 +284,92 @@ async def test_runner_iterates_with_read_only_tool_call():
 
 
 # ---------------------------------------------------------------------------
+# Multi-tool-use regression: Codex Responses-API mismatch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_runner_drops_undispatched_tool_uses_from_chain_history():
+    """Regression for the Codex 400 "No tool output found for function
+    call <id>" error. When the model emits multiple tool_use blocks in
+    one response, the runner dispatches only tool_uses[0]. The other
+    tool_use blocks must NOT land in the assistant message that goes
+    back to the provider — otherwise the next chain call has N
+    function_call events with only 1 function_call_output, and Codex
+    rejects the input."""
+    chain_invocations: list[list[dict]] = []
+    call_count = {"n": 0}
+
+    async def chain(system, messages, tools, max_tokens, **_):
+        # Capture the messages list passed in on each call so we can
+        # verify the assistant message is balanced.
+        chain_invocations.append([dict(m) for m in messages])
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # Model emits THREE tool_use blocks in one response.
+            return _resp(
+                _text_block("I need the doc and a memory hit."),
+                _tool_use_block(
+                    "drive_read_doc",
+                    {"file_id": "abc-123"},
+                    id_="tu_dispatched",
+                ),
+                _tool_use_block(
+                    "search_memory",
+                    {"q": "Q3 plan"},
+                    id_="tu_orphan_1",
+                ),
+                _tool_use_block(
+                    "drive_read_doc",
+                    {"file_id": "def-456"},
+                    id_="tu_orphan_2",
+                ),
+            )
+        return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
+
+    async def dispatcher(tool_id, args, inputs):
+        return {
+            "invocation_id": "inv-1",
+            "title": "doc",
+            "markdown": "body",
+        }
+
+    runner, _ = _make_runner(chain_caller=chain, dispatcher=dispatcher)
+    await runner.run(_make_inputs())
+
+    # On the SECOND call (after one dispatch), the chain history sent
+    # to the provider must contain a balanced assistant message —
+    # exactly ONE tool_use (the dispatched one), NOT all three.
+    assert len(chain_invocations) == 2
+    second_messages = chain_invocations[1]
+    # The trailing assistant message before the last user/tool_result
+    # turn is the one we just appended.
+    assistant_msgs = [
+        m for m in second_messages if m.get("role") == "assistant"
+    ]
+    assert assistant_msgs, "expected the assistant message to land in history"
+    last_assistant = assistant_msgs[-1]
+    tool_use_blocks_in_history = [
+        b for b in last_assistant.get("content", [])
+        if isinstance(b, dict) and b.get("type") == "tool_use"
+    ]
+    assert len(tool_use_blocks_in_history) == 1, (
+        f"expected exactly 1 tool_use in the assistant message, got "
+        f"{len(tool_use_blocks_in_history)} — orphans would cause Codex "
+        f"to reject the input with 'No tool output found for function "
+        f"call <id>'"
+    )
+    assert tool_use_blocks_in_history[0]["id"] == "tu_dispatched"
+    # The text block from the response is preserved.
+    text_blocks = [
+        b for b in last_assistant.get("content", [])
+        if isinstance(b, dict) and b.get("type") == "text"
+    ]
+    assert len(text_blocks) == 1
+    assert "doc and a memory hit" in text_blocks[0]["text"]
+
+
+# ---------------------------------------------------------------------------
 # Read-only enforcement
 # ---------------------------------------------------------------------------
 

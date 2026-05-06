@@ -348,12 +348,29 @@ class IntegrationRunner:
                 ) or f"{tool_use.name}:iter{iterations}"
                 tools_called.append(str(invocation_ref))
 
+                # The integration runner dispatches one tool per
+                # iteration (tool_uses[0]). If the model returned
+                # multiple tool_use blocks in the same response, the
+                # extras are dropped here — they'd otherwise produce
+                # a function_call/function_call_output mismatch on
+                # the next provider call (Codex's Responses API
+                # rejects input with unmatched function_call events:
+                # "No tool output found for function call <id>").
+                # Preserve text and the dispatched tool_use; filter
+                # any other tool_use blocks the model emitted.
+                assistant_content: list[dict] = []
+                for b in response.content:
+                    btype = getattr(b, "type", None)
+                    if btype == "tool_use" and getattr(b, "id", "") != tool_use.id:
+                        # Orphan tool_use — would have no matching
+                        # tool_result. Drop to keep the chain
+                        # balanced.
+                        continue
+                    assistant_content.append(_block_to_api_dict(b))
                 chain_messages.append(
                     {
                         "role": "assistant",
-                        "content": [
-                            _block_to_api_dict(b) for b in response.content
-                        ],
+                        "content": assistant_content,
                     }
                 )
                 chain_messages.append(
