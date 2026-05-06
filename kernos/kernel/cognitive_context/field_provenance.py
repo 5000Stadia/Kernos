@@ -150,7 +150,11 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
             "preserves substitution flexibility). Selection is "
             "structural: _UNIQUE_HATCHING_PROMPT when "
             "member_profile.agent_name is empty; "
-            "_INHERIT_HATCHING_PROMPT when set. None when graduated."
+            "_INHERIT_HATCHING_PROMPT when set. Gated on "
+            "member_profile.hatched (turn 1 only) — None once hatched, "
+            "matching the handler-side rules-block gate. The block "
+            "carries turn-1 framing ('first message is arrival', "
+            "'just joined') that is contradictory past response one."
         ),
     ),
     "rules.covenants": FieldProvenance(
@@ -651,7 +655,13 @@ async def populate_field(name: str, ctx: PopulationContext) -> Any:
             _UNIQUE_HATCHING_PROMPT,
         )
         graduated = bool(ctx.member_profile.get("bootstrap_graduated", False))
-        if graduated:
+        hatched = bool(ctx.member_profile.get("hatched", False))
+        # Gate on hatched (turn 1 only), not on graduated. The block
+        # content carries turn-1-only framing ("first message is
+        # arrival", "{name} just joined") that is contradictory past
+        # the first response. Matches the rules-block gate in
+        # kernos.messages.handler._build_rules_block.
+        if graduated or hatched:
             return None
         return (
             _INHERIT_HATCHING_PROMPT

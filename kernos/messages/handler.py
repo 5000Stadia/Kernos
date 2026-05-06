@@ -541,27 +541,40 @@ def _build_rules_block(
         parts.append(contracts_text)
     # Per-member bootstrap: check member profile first, fall back to soul (legacy/tests)
     _graduated = (member_profile or {}).get("bootstrap_graduated", False) or soul.bootstrap_graduated
+    _hatched = (member_profile or {}).get("hatched", False) or soul.hatched
     if not _graduated:
         # Layer 1: Full personality foundation — tone, warmth, anti-patterns, presence.
-        # This is the soul of the first conversation and must never be stripped out.
+        # The presence-first orientation is the soul of the first 15
+        # conversations and stays active until graduation. Its content
+        # is timeless ("you're here, attentive to this moment") and
+        # appropriate to render every pre-graduation turn.
         parts.append(template.bootstrap_prompt)
-        # Layer 2: Hatching-specific instructions — naming, identity, relationship mode.
-        _name = (member_profile or {}).get("display_name", "") or "there"
-        _agent_name = (member_profile or {}).get("agent_name", "")
-        _name_instruction = (
-            f"You already know their name — {_name}. DO NOT ask for it again."
-            if _name and _name != "there" else
-            "You don't know their name yet. Ask naturally."
-        )
-        if _agent_name:
-            # Inherit mode or agent already named — identity layer only
-            parts.append(_INHERIT_HATCHING_PROMPT.format(
-                display_name=_name, agent_name=_agent_name,
-                name_instruction=_name_instruction))
-        else:
-            # Unique hatching — agent has no name, identity layer
-            parts.append(_UNIQUE_HATCHING_PROMPT.format(
-                display_name=_name, name_instruction=_name_instruction))
+        # Layer 2: Hatching-specific instructions — naming, identity,
+        # relationship mode. Gated on ``hatched`` (turn 1 only), NOT on
+        # ``bootstrap_graduated``. The block content carries turn-1-only
+        # framing — "Your first message is arrival. Just arrival." for
+        # UNIQUE, "{name} just joined" for INHERIT — and is contradictory
+        # past the first response. Bundling it with Layer 1 was the cause
+        # of the "I'm here. A little under-lit on context…" recovery-state
+        # leak: when integration emitted a thin directive on turns 2-14,
+        # presence fell back to the system-prompt arrival framing.
+        if not _hatched:
+            _name = (member_profile or {}).get("display_name", "") or "there"
+            _agent_name = (member_profile or {}).get("agent_name", "")
+            _name_instruction = (
+                f"You already know their name — {_name}. DO NOT ask for it again."
+                if _name and _name != "there" else
+                "You don't know their name yet. Ask naturally."
+            )
+            if _agent_name:
+                # Inherit mode or agent already named — identity layer only
+                parts.append(_INHERIT_HATCHING_PROMPT.format(
+                    display_name=_name, agent_name=_agent_name,
+                    name_instruction=_name_instruction))
+            else:
+                # Unique hatching — agent has no name, identity layer
+                parts.append(_UNIQUE_HATCHING_PROMPT.format(
+                    display_name=_name, name_instruction=_name_instruction))
     return "## RULES\n" + "\n\n".join(parts)
 
 

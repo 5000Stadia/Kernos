@@ -801,6 +801,53 @@ async def test_hatching_prompt_present_during_hatching(
     )
 
 
+@pytest.mark.parametrize("decoupled", PATHS)
+@pytest.mark.parametrize("mode", HATCHING_MODES)
+async def test_hatching_prompt_drops_after_turn_one(
+    mode, decoupled, monkeypatch
+):
+    """The hatching block (UNIQUE / INHERIT) carries turn-1-only
+    framing — "Your first message is arrival. Just arrival." for
+    UNIQUE, "{name} just joined" for INHERIT. After the first
+    response, ``member_profile.hatched`` flips True; the block must
+    drop from the system prompt even though graduation hasn't fired
+    (15-interaction threshold). The presence-first ``bootstrap_prompt``
+    stays through graduation; only the arrival-framed hatching layer
+    drops.
+
+    Regression for the live-test "I'm here. A little under-lit on
+    context…" leak — the symptom of the hatching block firing for all
+    15 pre-graduation turns.
+    """
+    agent_name, excerpt = mode
+    handler, mock_provider = _make_handler(
+        decoupled=decoupled,
+        monkeypatch=monkeypatch,
+        bootstrap_graduated=False,
+        agent_name=agent_name,
+    )
+    _wire_instance_db(handler, member_profile={
+        "display_name": "TestUser",
+        "agent_name": agent_name,
+        "bootstrap_graduated": False,
+        "hatched": True,
+        "interaction_count": 3,
+    })
+    system, _tools, _messages = await _run_capture(handler, mock_provider)
+    assert excerpt not in system, (
+        f"Hatching prompt ({excerpt!r}) must NOT appear after the "
+        f"member has hatched (turn 2+). bootstrap_prompt stays through "
+        f"graduation; the arrival-framed layer drops on hatched=True. "
+        f"system head: {system[:400]!r}"
+    )
+    # The presence-first orientation (bootstrap_prompt) must STILL be
+    # present — its content is timeless across pre-graduation turns.
+    assert "request_reference" in system, (
+        "bootstrap_prompt content (request_reference reach) expected "
+        "to remain through graduation, even after hatched=True."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test 4 — covenants reach the model deterministically (not LLM-synthesized)
 # Source: Hunt-list row 4 + the design review covenant verdict. Green at: C3a.
