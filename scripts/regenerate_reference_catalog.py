@@ -46,6 +46,15 @@ from typing import Any
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
+# Load .env so KERNOS_LLM_PROVIDER and friends populate before chain
+# construction runs. Other entry points (cli.py, app.py, repl.py) do
+# the same thing at module import; the regen script is no different.
+try:
+    from dotenv import load_dotenv as _load_dotenv  # noqa: E402
+    _load_dotenv()
+except ImportError:
+    pass
+
 from kernos.kernel.reference.baked import (  # noqa: E402
     MANIFEST_VERSION,
     BakedArtifact,
@@ -111,9 +120,8 @@ async def _build_llm_complete():
     # The regen path doesn't run a turn loop, so a no-op turn runner is
     # adequate; only complete_simple is exercised.
     resolve_openai_codex_credential()
-    chains = build_chains_from_env()
+    chains, primary_provider = build_chains_from_env()
     from unittest.mock import AsyncMock, MagicMock
-    primary_provider = chains["primary"][0].provider
     events = MagicMock()
     events.emit = AsyncMock(return_value=None)
     mcp = MagicMock()
@@ -125,7 +133,7 @@ async def _build_llm_complete():
         turn_runner_provider=lambda *a, **kw: None,  # not used
     )
     reasoning._chains = chains  # type: ignore[attr-defined]
-    adapter = ReferenceCheapLLMAdapter(reasoning)
+    adapter = ReferenceCheapLLMAdapter(reasoning=reasoning)
     return adapter.complete
 
 
