@@ -330,19 +330,50 @@ async def bring_up_substrate(
     # ``references/`` roots are registered lazily as domains accrue
     # references; the cohort tool path also fires async cataloging
     # directly when an agent stores material, so the per-domain scan
-    # is not load-bearing for v1. The scan is fire-and-forget on a
-    # background task so bring-up doesn't block on file walks.
+    # is not load-bearing for v1.
+    #
+    # The scan itself is gated behind ``KERNOS_REFERENCE_FIRST_BOOT_SCAN``
+    # (default off). With ~100 docs files split into ~850 H2 sections,
+    # an unconditional scan fires that many ``complete_simple`` calls
+    # against the cataloging cohort — a ~40-minute LLM-call deluge that
+    # restarts on every ``/wipe`` (which clears the catalog along with
+    # the rest of ``data/``). Founder direction is that scan should be
+    # trigger-driven (on git pull / on store_reference write), not
+    # per-boot. Until the trigger wiring lands, opt-in via env var:
+    #
+    #   KERNOS_REFERENCE_FIRST_BOOT_SCAN=1   # eager hydration
+    #
+    # Without the flag, the source root is still registered (so the
+    # scanner can be invoked on demand later) and the catalog hydrates
+    # lazily via hash-mismatch-on-retrieval for files that are already
+    # cataloged. Files that were never cataloged stay uncataloged until
+    # an explicit scan, but request_reference will simply miss them
+    # rather than triggering a runaway.
     try:
         _docs_root_path = _Path(__file__).resolve().parent.parent.parent / "docs"
         if _docs_root_path.exists() and _docs_root_path.is_dir():
             reference_ingestion_scanner.add_source(
                 _docs_source_root(_docs_root_path)
             )
-            import asyncio as _asyncio
-            _asyncio.create_task(
-                reference_ingestion_scanner.scan(),
-                name="reference_first_boot_scan",
-            )
+            import os as _os
+            if _os.environ.get("KERNOS_REFERENCE_FIRST_BOOT_SCAN", "0") == "1":
+                import asyncio as _asyncio
+                _asyncio.create_task(
+                    reference_ingestion_scanner.scan(),
+                    name="reference_first_boot_scan",
+                )
+                logger.info(
+                    "REFERENCE_FIRST_BOOT_SCAN: launched (env opt-in) — "
+                    "expect ~%d LLM calls as %d docs hydrate",
+                    sum(1 for _ in _docs_root_path.rglob("*.md")) * 8,
+                    sum(1 for _ in _docs_root_path.rglob("*.md")),
+                )
+            else:
+                logger.info(
+                    "REFERENCE_FIRST_BOOT_SCAN: skipped (default; set "
+                    "KERNOS_REFERENCE_FIRST_BOOT_SCAN=1 to opt in). Catalog "
+                    "hydrates lazily on hash-mismatch and store_reference."
+                )
     except Exception:  # pragma: no cover
         logger.exception(
             "REFERENCE_BRINGUP_FIRST_BOOT_SCAN_FAILED — catalog will hydrate "
