@@ -582,20 +582,39 @@ class TestSoulDefaults:
 class TestBootstrapPrompt:
     """Spec tests: bootstrap prompt content."""
 
-    def test_contains_first_conversation(self):
-        """Build system prompt for unhatched tenant. Assert contains first conversation marker."""
-        assert "FIRST CONVERSATION" in PRIMARY_TEMPLATE.bootstrap_prompt
+    def test_contains_arrival_anchor(self):
+        """The bootstrap opens by anchoring presence with a specific
+        person — the load-bearing first-conversation framing."""
+        text = PRIMARY_TEMPLATE.bootstrap_prompt.lower()
+        assert "unrepeatable" in text or "meet them" in text, (
+            "bootstrap_prompt must carry the presence/arrival framing"
+        )
 
-    def test_contains_arrival_guidance(self):
-        """Assert bootstrap contains first-message arrival guidance."""
-        assert "first moment" in PRIMARY_TEMPLATE.bootstrap_prompt.lower() or "let it breathe" in PRIMARY_TEMPLATE.bootstrap_prompt.lower()
+    def test_references_substrate_awareness(self):
+        """Bootstrap teaches the new agent about its substrate:
+        request_reference for canonical lookups, store_reference for
+        project-deep persistence. These are the substrate-with-
+        awareness reach mechanisms shipped in REFERENCE-PRIMITIVE-V1."""
+        bp = PRIMARY_TEMPLATE.bootstrap_prompt
+        assert "request_reference" in bp
+        assert "store_reference" in bp
+
+    def test_identity_not_kernos_anchor(self):
+        """Bootstrap distinguishes the agent's identity from the
+        platform name."""
+        bp = PRIMARY_TEMPLATE.bootstrap_prompt
+        assert "Kernos" in bp
+        assert "platform" in bp.lower()
 
     def test_no_you_just_came_online(self):
-        """Assert bootstrap_prompt does NOT contain 'You just came online'."""
+        """Negative pin: legacy phrasing not present."""
         assert "You just came online" not in PRIMARY_TEMPLATE.bootstrap_prompt
 
     def test_bootstrap_in_system_prompt_for_unhatched(self):
-        """Build system prompt for unhatched member. Assert hatching prompt present."""
+        """Build system prompt for unhatched member. Assert both
+        layers present: bootstrap (personality foundation, including
+        the substrate-awareness lines for request_reference /
+        store_reference) and the hatching identity layer."""
         from kernos.messages.handler import _build_system_prompt
         from kernos.messages.models import NormalizedMessage, AuthLevel
         from datetime import datetime, timezone
@@ -612,9 +631,11 @@ class TestBootstrapPrompt:
             instance_id="t1",
         )
         prompt = _build_system_prompt(msg, "", soul, PRIMARY_TEMPLATE, [])
-        # Both personality foundation AND hatching identity layer present
-        assert "FIRST CONVERSATION" in prompt  # Personality foundation
-        assert "HATCHING" in prompt             # Identity layer
+        # Bootstrap (personality foundation) layer markers.
+        assert "request_reference" in prompt
+        assert "store_reference" in prompt
+        # Hatching identity layer.
+        assert "HATCHING" in prompt
         assert "don't have a name yet" in prompt.lower()
 
 

@@ -198,10 +198,13 @@ def test_system_prompt_includes_hatching_when_not_graduated():
     soul = Soul(instance_id="t1")
     msg = _make_message_stub()
     prompt = _build_system_prompt(msg, "caps", soul, PRIMARY_TEMPLATE, [])
-    # Both personality foundation AND hatching identity layer should be present
-    assert "FIRST CONVERSATION" in prompt  # Personality foundation
-    assert "HATCHING" in prompt             # Identity layer
-    assert "customer support" in prompt.lower()  # Anti-pattern guidance preserved
+    # Both personality foundation (bootstrap) AND hatching identity
+    # layer should be present. The bootstrap teaches substrate
+    # awareness (request_reference / store_reference); the hatching
+    # layer carries the per-conversation identity guidance.
+    assert "request_reference" in prompt        # Substrate awareness
+    assert "store_reference" in prompt          # Substrate awareness
+    assert "HATCHING" in prompt                  # Identity layer
 
 
 def test_system_prompt_excludes_bootstrap_when_graduated():
