@@ -1,0 +1,67 @@
+{
+  "file_path": "docs/architecture/integration-layer.md",
+  "source_hash": "5394811af1ffa54221634f5daa96b4dde6d8c6ee716fbc896d2b24039b79f4a9",
+  "generated_at": "2026-05-06T17:47:41.835898+00:00",
+  "sections": [
+    {
+      "section_title": "What integration is",
+      "one_line": "Integration turns cohort outputs and context into the briefing presence sees, filtering restricted material",
+      "line_start": 14,
+      "line_end": 30
+    },
+    {
+      "section_title": "Briefing schema",
+      "one_line": "Schema for the frozen briefing artifact: context, action, presence directive, and audit trace",
+      "line_start": 31,
+      "line_end": 83
+    },
+    {
+      "section_title": "CohortOutput contract",
+      "one_line": "Schema for cohort adapter outputs used by integration, audit, and redaction rules",
+      "line_start": 84,
+      "line_end": 101
+    },
+    {
+      "section_title": "Internal phases",
+      "one_line": "Named runtime phases and their instrumentation in the Kernos loop",
+      "line_start": 102,
+      "line_end": 114
+    },
+    {
+      "section_title": "Iterative prep loop",
+      "one_line": "Iterative retrieval loop that gathers info or finalizes the briefing",
+      "line_start": 115,
+      "line_end": 129
+    },
+    {
+      "section_title": "Depth guardrails",
+      "one_line": "Integration depth limits and timeout guardrails for iterations, summaries, filters, and tokens",
+      "line_start": 130,
+      "line_end": 141
+    },
+    {
+      "section_title": "Fail-soft fallback",
+      "one_line": "Minimal respond_only briefing used when integration fails, with failure audits and cause notes.",
+      "line_start": 142,
+      "line_end": 167
+    },
+    {
+      "section_title": "Audit log",
+      "one_line": "Audit records for integration briefing runs, with success/error status and briefing references",
+      "line_start": 168,
+      "line_end": 184
+    },
+    {
+      "section_title": "Architectural placement",
+      "one_line": "Where Kernos integration code lives and how the runner is wired for later use",
+      "line_start": 185,
+      "line_end": 199
+    },
+    {
+      "section_title": "Spec arc following this primitive",
+      "one_line": "Follow-on specs that target this primitive contract",
+      "line_start": 200,
+      "line_end": 218
+    }
+  ]
+}

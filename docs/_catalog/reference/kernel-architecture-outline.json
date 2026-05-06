@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/reference/kernel-architecture-outline.md",
+  "source_hash": "28d84b4b29a417c0e9dfd980fbfba306e519a065c3da2e16dab2e15bd77582a7",
+  "generated_at": "2026-05-06T18:18:13.656686+00:00",
+  "sections": [
+    {
+      "section_title": "An Architecture Outline — v2",
+      "one_line": "Kernel architecture vision and core primitives for shaping Phase 1B specifications",
+      "line_start": 3,
+      "line_end": 10
+    },
+    {
+      "section_title": "Part 1: The Thesis",
+      "one_line": "Kernos thesis on the kernel’s role, architecture, and core design principles",
+      "line_start": 11,
+      "line_end": 40
+    },
+    {
+      "section_title": "Part 2: The Five Primitives",
+      "one_line": "Core Kernos architecture primitives: event stream, state store, capability graph, reasoning, and task engine",
+      "line_start": 41,
+      "line_end": 203
+    },
+    {
+      "section_title": "Part 3: Three Modes of Operation",
+      "one_line": "Kernos operation modes for reactive, proactive, and generative work",
+      "line_start": 204,
+      "line_end": 314
+    },
+    {
+      "section_title": "Part 4: Agents in this Architecture",
+      "one_line": "How Kernos agents are instantiated, refined, and given context, capabilities, and contracts",
+      "line_start": 315,
+      "line_end": 384
+    },
+    {
+      "section_title": "Part 5: The Awareness Loop and Background Processing",
+      "one_line": "Background event handling for proactive alerts, memory consolidation, and optional daily briefings",
+      "line_start": 385,
+      "line_end": 432
+    },
+    {
+      "section_title": "Part 6: User Profiles and Adaptive Behavior",
+      "one_line": "Using long-term memory to build user profiles and adapt responses",
+      "line_start": 433,
+      "line_end": 461
+    },
+    {
+      "section_title": "Part 7: What the User Experiences",
+      "one_line": "How users experience Kernos from first chat to daily use",
+      "line_start": 462,
+      "line_end": 503
+    },
+    {
+      "section_title": "Part 8: What Agents Experience",
+      "one_line": "Agent-facing view of the kernel: identity, context, capabilities, contract, task, and expected outputs",
+      "line_start": 504,
+      "line_end": 522
+    },
+    {
+      "section_title": "Part 9: Implementation Layers",
+      "one_line": "Kernos implementation roadmap across foundation, proactive agents, and ecosystem layers",
+      "line_start": 523,
+      "line_end": 585
+    },
+    {
+      "section_title": "Part 10: Design Decisions This Outline Encodes",
+      "one_line": "Core Kernos architecture choices and principles that shape the Phase 1B specs",
+      "line_start": 586,
+      "line_end": 611
+    }
+  ]
+}

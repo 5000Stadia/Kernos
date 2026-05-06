@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/architecture/install.md",
+  "source_hash": "d9b21e567195064eca34b0d1daf541e24b5c33cce6cb99c168f6cd12f13377e2",
+  "generated_at": "2026-05-06T17:46:58.336018+00:00",
+  "sections": [
+    {
+      "section_title": "Conceptual shape",
+      "one_line": "Default connector install and disabled-by-default service behavior",
+      "line_start": 13,
+      "line_end": 22
+    },
+    {
+      "section_title": "ServiceState + ServiceStateStore",
+      "one_line": "Per-install service state record and atomic store for enabled/disabled service settings",
+      "line_start": 23,
+      "line_end": 45
+    },
+    {
+      "section_title": "Two-layer enforcement",
+      "one_line": "Disabled service hiding and invocation blocking at surfacing and dispatch layers",
+      "line_start": 46,
+      "line_end": 60
+    },
+    {
+      "section_title": "CLI surface",
+      "one_line": "CLI reference for service state, credentials, and setup commands",
+      "line_start": 61,
+      "line_end": 72
+    },
+    {
+      "section_title": "First-run flow",
+      "one_line": "Initial setup behavior for first run, including service-state bootstrap and interactive prompts",
+      "line_start": 73,
+      "line_end": 89
+    },
+    {
+      "section_title": "Credential key",
+      "one_line": "Credential key generation, permissions, status reporting, and hook restrictions",
+      "line_start": 90,
+      "line_end": 115
+    },
+    {
+      "section_title": "Install hook runner",
+      "one_line": "Shared hook runner for installs and updates, handling registration, ordering, checks, and status tracking.",
+      "line_start": 116,
+      "line_end": 158
+    },
+    {
+      "section_title": "Migration of existing installs",
+      "one_line": "Migrating existing installs to synthetic state for pre-spec data dirs without service_state.json",
+      "line_start": 159,
+      "line_end": 173
+    },
+    {
+      "section_title": "Audit categories",
+      "one_line": "Audit event categories for install lifecycle actions and scope rules",
+      "line_start": 174,
+      "line_end": 187
+    },
+    {
+      "section_title": "Architectural placement",
+      "one_line": "Placement of setup, service-state, hook, and CLI code in the Kernos tree",
+      "line_start": 188,
+      "line_end": 210
+    },
+    {
+      "section_title": "Composition",
+      "one_line": "Composition of disabled flags, relevance, and promotion across Kernos services, connectors, and surfacing primitives",
+      "line_start": 211,
+      "line_end": 227
+    },
+    {
+      "section_title": "Path forward",
+      "one_line": "Future plans for onboarding, connector installs, and install-hook support",
+      "line_start": 228,
+      "line_end": 241
+    }
+  ]
+}

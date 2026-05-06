@@ -1,0 +1,61 @@
+{
+  "file_path": "docs/architecture/crb.md",
+  "source_hash": "a8f06f8a4686c73596afdbb1cc64d0d5b5c761eb6c8f8b82ef7eed27c2394376",
+  "generated_at": "2026-05-06T17:43:16.923720+00:00",
+  "sections": [
+    {
+      "section_title": "Where it sits",
+      "one_line": "How the CRB service fits into the proposal flow and divides timing vs wording decisions",
+      "line_start": 7,
+      "line_end": 31
+    },
+    {
+      "section_title": "Module layout",
+      "one_line": "CRB module structure and submodule roles",
+      "line_start": 32,
+      "line_end": 45
+    },
+    {
+      "section_title": "Approval flow state machine",
+      "one_line": "Approval proposal lifecycle state machine and transition rules",
+      "line_start": 46,
+      "line_end": 59
+    },
+    {
+      "section_title": "Restricted ports",
+      "one_line": "Restricted Protocol ports for CRBApprovalFlow, limiting draft reads, workflow registration, and event emission.",
+      "line_start": 60,
+      "line_end": 71
+    },
+    {
+      "section_title": "Event shapes",
+      "one_line": "CRB event types and source_module authority for event_stream approval flow",
+      "line_start": 72,
+      "line_end": 85
+    },
+    {
+      "section_title": "Author temperature pin",
+      "one_line": "Limits proposal-author LLM temperature so user-approved proposal text stays predictable",
+      "line_start": 86,
+      "line_end": 89
+    },
+    {
+      "section_title": "Crash-safe registration handoff",
+      "one_line": "Crash-safe recovery of approved proposals before STS registration completes",
+      "line_start": 90,
+      "line_end": 95
+    },
+    {
+      "section_title": "Anti-fragmentation invariant",
+      "one_line": "Constraints preventing CRB from adding duplicate context state, shadow registries, or passive loops",
+      "line_start": 96,
+      "line_end": 101
+    },
+    {
+      "section_title": "Bring-up",
+      "one_line": "CRB substrate bring-up and tear-down for the bundle and port adapters",
+      "line_start": 102,
+      "line_end": 114
+    }
+  ]
+}

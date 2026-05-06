@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/architecture/disclosure-and-messenger.md",
+  "source_hash": "e4a1203b5c00cde7f1609dd879ea51488c0392176bbae289af80a82348808ffe",
+  "generated_at": "2026-05-06T17:44:25.747653+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why multi-member agents need more than access control to avoid revealing sensitive info at the wrong time.",
+      "line_start": 5,
+      "line_end": 14
+    },
+    {
+      "section_title": "The layers",
+      "one_line": "Kernos layers for identity, permission, and welfare checks on member exchanges",
+      "line_start": 15,
+      "line_end": 53
+    },
+    {
+      "section_title": "Why this isn't just a second filter",
+      "one_line": "Why Kernos keeps permissions separate from contextual welfare judgments",
+      "line_start": 54,
+      "line_end": 63
+    },
+    {
+      "section_title": "The judgment inputs",
+      "one_line": "Inputs the Messenger uses to judge an exchange and the context it deliberately ignores",
+      "line_start": 64,
+      "line_end": 91
+    },
+    {
+      "section_title": "The three outcomes in detail",
+      "one_line": "How the Messenger handles exchanges: leave them unchanged, revise them, or refer them back to the member.",
+      "line_start": 92,
+      "line_end": 119
+    },
+    {
+      "section_title": "The always-respond invariant",
+      "one_line": "Guaranteeing every judge_exchange path returns a response",
+      "line_start": 120,
+      "line_end": 125
+    },
+    {
+      "section_title": "Where the Messenger lives in the turn pipeline",
+      "one_line": "Messenger hook placement in the turn pipeline and how dispatch falls back safely",
+      "line_start": 126,
+      "line_end": 144
+    },
+    {
+      "section_title": "Why the Messenger runs on cheap-chain only",
+      "one_line": "Why Messenger stays on the cheap chain and improves through prompt iteration",
+      "line_start": 145,
+      "line_end": 152
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "Handling changing disclosures, temporary sensitivity, surprise plans, and referral when uncertain",
+      "line_start": 153,
+      "line_end": 163
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Limits and non-goals of the Kernos architecture",
+      "line_start": 164,
+      "line_end": 170
+    },
+    {
+      "section_title": "Related architecture",
+      "one_line": "Architecture references for cohort discipline, safety gates, and context spaces",
+      "line_start": 171,
+      "line_end": 176
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Messenger cohort code entry points and dispatch boundaries",
+      "line_start": 177,
+      "line_end": 182
+    }
+  ]
+}

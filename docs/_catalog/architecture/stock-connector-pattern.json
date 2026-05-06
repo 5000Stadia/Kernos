@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/architecture/stock-connector-pattern.md",
+  "source_hash": "1e20fa5fd8eef25bf9e143d01acd063c46a44a029197e0016d6f8a20f8147377",
+  "generated_at": "2026-05-06T17:56:11.256942+00:00",
+  "sections": [
+    {
+      "section_title": "The four components",
+      "one_line": "Core pieces of a stock connector and how they fit Kernos",
+      "line_start": 7,
+      "line_end": 17
+    },
+    {
+      "section_title": "Where each component lives",
+      "one_line": "Repo layout for service descriptors, tool files, and boot-time registration",
+      "line_start": 18,
+      "line_end": 33
+    },
+    {
+      "section_title": "How the connector composes with the primitive",
+      "one_line": "Connector authors use the primitive for credentials, gating, enforcement, and audit",
+      "line_start": 34,
+      "line_end": 45
+    },
+    {
+      "section_title": "What the connector author actually writes",
+      "one_line": "Service, tool, onboarding, gate, and audit files connector authors must define",
+      "line_start": 46,
+      "line_end": 87
+    },
+    {
+      "section_title": "How fresh-Kernos approaches a new connector",
+      "one_line": "Process for adding a new stock connector to Kernos, including descriptors, tools, tests, and live checks",
+      "line_start": 88,
+      "line_end": 103
+    },
+    {
+      "section_title": "When the pattern doesn't fit",
+      "one_line": "Cases where the connector pattern does not fit and alternate integration approaches are needed",
+      "line_start": 104,
+      "line_end": 112
+    }
+  ]
+}

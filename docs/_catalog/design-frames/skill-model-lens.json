@@ -1,0 +1,55 @@
+{
+  "file_path": "docs/design-frames/skill-model-lens.md",
+  "source_hash": "fdd05b9af12505bd7488b56d412c404f174948921ce1be6b394409ff74c93ddb",
+  "generated_at": "2026-05-06T18:08:38.836265+00:00",
+  "sections": [
+    {
+      "section_title": "The frame",
+      "one_line": "How Kernos models agent capabilities across substrate, surface, lifecycle, and scope",
+      "line_start": 5,
+      "line_end": 12
+    },
+    {
+      "section_title": "Substrate — where a capability physically lives",
+      "one_line": "How Kernos capabilities are implemented across kernel, MCP, and workspace-built tools.",
+      "line_start": 13,
+      "line_end": 22
+    },
+    {
+      "section_title": "Surface — how a capability appears to the agent",
+      "one_line": "How Kernos decides which capabilities surface to the agent on each turn",
+      "line_start": 23,
+      "line_end": 36
+    },
+    {
+      "section_title": "Lifecycle — how a capability comes into existence and evolves",
+      "one_line": "How capabilities are created, activated, promoted, and deprecated across lifecycles",
+      "line_start": 37,
+      "line_end": 48
+    },
+    {
+      "section_title": "Scope — who can see a capability",
+      "one_line": "Who can see a capability across instance, member, or space scope",
+      "line_start": 49,
+      "line_end": 58
+    },
+    {
+      "section_title": "Two grounded examples",
+      "one_line": "Real-world examples of Kernos scope and tool surfacing in a small business and family household",
+      "line_start": 59,
+      "line_end": 76
+    },
+    {
+      "section_title": "Why this frame matters",
+      "one_line": "Why the four-axis frame keeps capabilities organized and easy for agents to use",
+      "line_start": 77,
+      "line_end": 82
+    },
+    {
+      "section_title": "Related",
+      "one_line": "Related topics on tool dispatch, action loops, and workspace-built tools",
+      "line_start": 83,
+      "line_end": 87
+    }
+  ]
+}

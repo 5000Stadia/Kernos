@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/EXTERNAL-AGENTS.md",
+  "source_hash": "997ac161da4064df10320328344284114b8af48aeffb3a691a6bfe755473f962",
+  "generated_at": "2026-05-06T17:32:50.939426+00:00",
+  "sections": [
+    {
+      "section_title": "When to use which mode",
+      "one_line": "Choosing between consult and build modes for external agents",
+      "line_start": 12,
+      "line_end": 20
+    },
+    {
+      "section_title": "When to use which harness",
+      "one_line": "Choosing the right external agent harness for reviews, questions, and code changes",
+      "line_start": 21,
+      "line_end": 32
+    },
+    {
+      "section_title": "When to consult — and when not to",
+      "one_line": "When Kernos consultation is worth the token and latency cost",
+      "line_start": 33,
+      "line_end": 46
+    },
+    {
+      "section_title": "What the agent calls",
+      "one_line": "Agent tool calls for consultations and code execution backends",
+      "line_start": 47,
+      "line_end": 84
+    },
+    {
+      "section_title": "Aider — special note",
+      "one_line": "Aider backend availability in v1 and its lack of consult mode",
+      "line_start": 85,
+      "line_end": 93
+    },
+    {
+      "section_title": "Reentrancy policy — what consultation cannot do",
+      "one_line": "Consultation reentrancy rules for allowed contexts, blocked paths, and depth limits",
+      "line_start": 94,
+      "line_end": 118
+    },
+    {
+      "section_title": "Audit + observability",
+      "one_line": "Consultation logging, status tracking, and SQL queries for troubleshooting and monitoring",
+      "line_start": 119,
+      "line_end": 154
+    },
+    {
+      "section_title": "Architecture",
+      "one_line": "Kernos external agent architecture and compatibility facade layout",
+      "line_start": 155,
+      "line_end": 179
+    },
+    {
+      "section_title": "Composition with shipped substrate",
+      "one_line": "How Kernos fits with shipped substrate components, logging, and per-member consultation handling",
+      "line_start": 180,
+      "line_end": 193
+    },
+    {
+      "section_title": "Future arcs",
+      "one_line": "Planned follow-on features and integrations for Kernos beyond v1",
+      "line_start": 194,
+      "line_end": 207
+    },
+    {
+      "section_title": "References",
+      "one_line": "External agent consultation spec, code, and test references",
+      "line_start": 208,
+      "line_end": 214
+    }
+  ]
+}

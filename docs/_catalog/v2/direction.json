@@ -1,0 +1,85 @@
+{
+  "file_path": "docs/v2/direction.md",
+  "source_hash": "f7118c8f62650f68fa652a502bc7cc6448418380b0f60a9ccfeca3013c001872",
+  "generated_at": "2026-05-06T18:21:08.569557+00:00",
+  "sections": [
+    {
+      "section_title": "The inversion",
+      "one_line": "V1-to-V2 shift from turn-driven runtime to continuous cognition kernel",
+      "line_start": 5,
+      "line_end": 12
+    },
+    {
+      "section_title": "What a Cognition Kernel does",
+      "one_line": "Kernels maintain a live world model, reflect and project on state changes, and surface only relevant signals.",
+      "line_start": 13,
+      "line_end": 24
+    },
+    {
+      "section_title": "The six characters",
+      "one_line": "Six fictional AI analogies for V2’s architecture and behavior",
+      "line_start": 25,
+      "line_end": 37
+    },
+    {
+      "section_title": "Why continuous, not turn-driven",
+      "one_line": "Rationale for a continuous Kernos architecture that can notice changes between turns and act proactively",
+      "line_start": 38,
+      "line_end": 51
+    },
+    {
+      "section_title": "Why silence is the default output",
+      "one_line": "Why the Kernel defaults to silence and only surfaces highly relevant, timely notices",
+      "line_start": 52,
+      "line_end": 61
+    },
+    {
+      "section_title": "Forward modeling and bounded autonomy",
+      "one_line": "Projecting near-term outcomes to decide when Kernos acts automatically, asks for approval, or holds back.",
+      "line_start": 62,
+      "line_end": 75
+    },
+    {
+      "section_title": "Principal modeling",
+      "one_line": "Member preference model used to guide relevance filtering and action classification",
+      "line_start": 76,
+      "line_end": 83
+    },
+    {
+      "section_title": "Fused streams",
+      "one_line": "Combining calendar, email, location, and other streams into one world model",
+      "line_start": 84,
+      "line_end": 97
+    },
+    {
+      "section_title": "SPEC-COGNITION-KERNEL-V1",
+      "one_line": "Foundational V2 kernel substrate for world model, supervisor, and restartability",
+      "line_start": 98,
+      "line_end": 118
+    },
+    {
+      "section_title": "After SPEC-COGNITION-KERNEL-V1",
+      "one_line": "Post-kernel spec roadmap from reflection and projection to outbound signals and bounded autonomy",
+      "line_start": 119,
+      "line_end": 131
+    },
+    {
+      "section_title": "What V2 inherits from V1",
+      "one_line": "V1 safety architecture carried forward as the alignment substrate for V2",
+      "line_start": 132,
+      "line_end": 139
+    },
+    {
+      "section_title": "What V2 explicitly does not promise",
+      "one_line": "V2 scope limits and explicit non-promises",
+      "line_start": 140,
+      "line_end": 147
+    },
+    {
+      "section_title": "Related",
+      "one_line": "Links to V1 alignment, roadmap, and architecture docs relevant to V2",
+      "line_start": 148,
+      "line_end": 152
+    }
+  ]
+}

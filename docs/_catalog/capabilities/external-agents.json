@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/capabilities/external-agents.md",
+  "source_hash": "71a1aa325414855a6b3df871f23fbc8c915ec22c38e2f5493326953a9577540e",
+  "generated_at": "2026-05-06T18:03:17.882595+00:00",
+  "sections": [
+    {
+      "section_title": "What it does",
+      "one_line": "Delegating research, code generation, and reasoning to another agent with consult",
+      "line_start": 7,
+      "line_end": 16
+    },
+    {
+      "section_title": "Tool shape",
+      "one_line": "consult tool call format and harness backend selection",
+      "line_start": 17,
+      "line_end": 28
+    },
+    {
+      "section_title": "Reentrancy guard",
+      "one_line": "Limits recursive consult calls with a configurable depth cap per substrate",
+      "line_start": 29,
+      "line_end": 32
+    },
+    {
+      "section_title": "Consultation log",
+      "one_line": "Audit trail of consult invocations, results, timing, and replayable decision history",
+      "line_start": 33,
+      "line_end": 36
+    },
+    {
+      "section_title": "Agent-surface wiring",
+      "one_line": "Consult tool registry wiring and sandboxed soft-write effect classification for agent surfaces",
+      "line_start": 37,
+      "line_end": 40
+    },
+    {
+      "section_title": "When NOT to use it",
+      "one_line": "When consult should be avoided in favor of simpler, faster, or routine tool use",
+      "line_start": 41,
+      "line_end": 47
+    }
+  ]
+}

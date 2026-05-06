@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/operating/reference-catalog-baked.md",
+  "source_hash": "181ef19625442ea1e0d9bf473b9871f4744c22ed5fc42f0238d509f8ca807bb8",
+  "generated_at": "2026-05-06T18:13:37.078063+00:00",
+  "sections": [
+    {
+      "section_title": "Why this exists",
+      "one_line": "Reason the catalog is prebuilt so installs avoid rescanning docs and slow startup work",
+      "line_start": 8,
+      "line_end": 22
+    },
+    {
+      "section_title": "Three load-bearing principles",
+      "one_line": "Core runtime and CI invariants for baked data, hash validation, and explicit drift handling",
+      "line_start": 23,
+      "line_end": 37
+    },
+    {
+      "section_title": "Contributor workflow",
+      "one_line": "Workflow for regenerating the docs catalog and enforcing freshness before commits",
+      "line_start": 38,
+      "line_end": 59
+    },
+    {
+      "section_title": "Files in the repo",
+      "one_line": "Catalog file layout mirroring the docs tree and pairing catalog updates with doc changes",
+      "line_start": 60,
+      "line_end": 76
+    },
+    {
+      "section_title": "Manifest format",
+      "one_line": "JSON schema for the catalog manifest and its deterministic entry ordering",
+      "line_start": 77,
+      "line_end": 93
+    },
+    {
+      "section_title": "Artifact format",
+      "one_line": "JSON schema for documentation artifacts and section metadata",
+      "line_start": 94,
+      "line_end": 111
+    },
+    {
+      "section_title": "What happens on bring-up",
+      "one_line": "Startup catalog hydration from manifest, including hash checks, skips, and first-boot fallback",
+      "line_start": 112,
+      "line_end": 129
+    },
+    {
+      "section_title": "Recovery / dev hatch",
+      "one_line": "Recovery hatch for triggering live catalog scans when the baked artifact is missing or stale.",
+      "line_start": 130,
+      "line_end": 141
+    },
+    {
+      "section_title": "What is unchanged",
+      "one_line": "Unchanged live cataloging path for data/references and its components; only docs/ is intercepted at bring-up",
+      "line_start": 142,
+      "line_end": 148
+    },
+    {
+      "section_title": "Verification",
+      "one_line": "Catalog freshness verification for pytest and CI",
+      "line_start": 149,
+      "line_end": 159
+    },
+    {
+      "section_title": "Embedded live test",
+      "one_line": "Full live test of baked catalog hydration, drift detection, and freshness checks",
+      "line_start": 160,
+      "line_end": 169
+    }
+  ]
+}

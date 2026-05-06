@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/index.md",
+  "source_hash": "5fe3d1653948912c0ec0ed5c88323865a0e4df241d2b4b68ebcdcfdad1545e6e",
+  "generated_at": "2026-05-06T18:10:47.143109+00:00",
+  "sections": [
+    {
+      "section_title": "Kernos documentation map",
+      "one_line": "Starting point for navigating Kernos canonical documentation and finding all docs sections",
+      "line_start": 7,
+      "line_end": 14
+    },
+    {
+      "section_title": "How It Works",
+      "one_line": "Kernos architecture and how messages flow through adapters, handler, and kernel",
+      "line_start": 15,
+      "line_end": 24
+    },
+    {
+      "section_title": "Core Principles",
+      "one_line": "Fundamental rules for responsible, honest, and careful stewardship of a user's digital life",
+      "line_start": 25,
+      "line_end": 34
+    },
+    {
+      "section_title": "Documentation Structure",
+      "one_line": "Guide to the documentation sections and what each covers",
+      "line_start": 35,
+      "line_end": 46
+    },
+    {
+      "section_title": "Recent additions (post-Multi-Member V1)",
+      "one_line": "Post-Multi-Member V1 documentation for new Kernos architecture, tools, references, triggers, and workflows",
+      "line_start": 47,
+      "line_end": 64
+    }
+  ]
+}

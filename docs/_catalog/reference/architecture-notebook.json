@@ -1,0 +1,91 @@
+{
+  "file_path": "docs/reference/architecture-notebook.md",
+  "source_hash": "8dd3ae0c65a0d08e733c6be7fae97d0974d95c114b676e577cbbf25588c5cdc2",
+  "generated_at": "2026-05-06T18:14:28.211227+00:00",
+  "sections": [
+    {
+      "section_title": "⚠️ HISTORICAL — Last updated 2026-03-06",
+      "one_line": "Archive of architectural rationale, design options, and deferred decisions for future phases",
+      "line_start": 1,
+      "line_end": 18
+    },
+    {
+      "section_title": "TABLE OF CONTENTS",
+      "one_line": "Overview of Kernos documentation sections and roadmap",
+      "line_start": 19,
+      "line_end": 35
+    },
+    {
+      "section_title": "1. FOUNDATIONAL INSIGHTS",
+      "one_line": "Core kernel principles that guide all phases and interfaces",
+      "line_start": 36,
+      "line_end": 85
+    },
+    {
+      "section_title": "2. PHASE 1B: KERNEL INTERNALS",
+      "one_line": "Kernel architecture and the five core primitives behind reactive, proactive, and generative modes",
+      "line_start": 86,
+      "line_end": 129
+    },
+    {
+      "section_title": "3. PHASE 2: MULTI-AGENT & PROACTIVE",
+      "one_line": "Architecture for background memory, inline context, consolidation, and proactive notifications",
+      "line_start": 130,
+      "line_end": 199
+    },
+    {
+      "section_title": "4. PHASE 2-3: CONTEXT SPACES",
+      "one_line": "Isolated per-topic context windows, routing, handoff notes, and cross-context memory",
+      "line_start": 200,
+      "line_end": 287
+    },
+    {
+      "section_title": "5. PHASE 2-3: BEHAVIORAL CONTRACTS",
+      "one_line": "Behavior rules for agent musts, must-nots, preferences, and human escalation points",
+      "line_start": 288,
+      "line_end": 326
+    },
+    {
+      "section_title": "6. PHASE 2-3: CAPABILITY ACQUISITION",
+      "one_line": "How KERNOS discovers, acquires, and installs new capabilities with user approval",
+      "line_start": 327,
+      "line_end": 350
+    },
+    {
+      "section_title": "7. PHASE 3: MULTI-LLM ARCHITECTURE",
+      "one_line": "Planning model routing across multiple LLMs with cost and effectiveness tracking",
+      "line_start": 351,
+      "line_end": 379
+    },
+    {
+      "section_title": "8. PHASE 3-4: AGENT LIFECYCLE",
+      "one_line": "Agent creation, personalization, refinement, evaluation, and coordination in Kernos",
+      "line_start": 380,
+      "line_end": 409
+    },
+    {
+      "section_title": "9. REAL SCENARIOS THAT SHAPED DESIGN",
+      "one_line": "Real-world examples that shaped Kernos architecture, tenancy, and capability design",
+      "line_start": 410,
+      "line_end": 480
+    },
+    {
+      "section_title": "10. LESSONS FROM OSBUILDER (OPENCLAW)",
+      "one_line": "OpenClaw lessons on orchestration, memory, routing, proactive behavior, and event-driven architecture",
+      "line_start": 481,
+      "line_end": 508
+    },
+    {
+      "section_title": "11. PHASE 2 PREPARATION — RESEARCH LEADS",
+      "one_line": "Research leads to study before writing Phase 2 specs",
+      "line_start": 509,
+      "line_end": 574
+    },
+    {
+      "section_title": "12. OPEN QUESTIONS — NO ANSWER YET",
+      "one_line": "Open architectural questions and unresolved design issues",
+      "line_start": 575,
+      "line_end": 605
+    }
+  ]
+}

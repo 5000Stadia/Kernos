@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/capabilities/calendar.md",
+  "source_hash": "d941d23d4753e67d744b2c81d83c4355d6e7521ac7d56b61ac5ba45f9e0f824f",
+  "generated_at": "2026-05-06T18:01:19.887397+00:00",
+  "sections": [
+    {
+      "section_title": "What You Can Do",
+      "one_line": "Available calendar actions: read, create, update, delete events, check availability, and get current time.",
+      "line_start": 5,
+      "line_end": 14
+    },
+    {
+      "section_title": "Available Tools",
+      "one_line": "Kernos calendar tools for reading, creating, updating, deleting, and finding events",
+      "line_start": 15,
+      "line_end": 32
+    },
+    {
+      "section_title": "Date Awareness",
+      "one_line": "Built-in awareness of the current date and time versus precise timezone lookup",
+      "line_start": 33,
+      "line_end": 36
+    },
+    {
+      "section_title": "Setup",
+      "one_line": "Google OAuth credential setup for connecting a Google account through the handoff flow",
+      "line_start": 37,
+      "line_end": 40
+    },
+    {
+      "section_title": "Planned",
+      "one_line": "Planned calendar-triggered proactive notifications and reminders",
+      "line_start": 41,
+      "line_end": 43
+    }
+  ]
+}

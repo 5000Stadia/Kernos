@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/workshop-external-services.md",
+  "source_hash": "a015ea365259009c7a7b15411243ef053a10e7bb949ab69f56c7120b28bddcd7",
+  "generated_at": "2026-05-06T17:58:54.168999+00:00",
+  "sections": [
+    {
+      "section_title": "Mental model — the AppData pattern",
+      "one_line": "How Kernos separates shared tools from per-member state, credentials, and aggregation",
+      "line_start": 3,
+      "line_end": 13
+    },
+    {
+      "section_title": "What this primitive lands",
+      "one_line": "Core modules and wiring included in this primitive",
+      "line_start": 14,
+      "line_end": 28
+    },
+    {
+      "section_title": "Credentials",
+      "one_line": "Member service credential storage and encryption key management",
+      "line_start": 29,
+      "line_end": 63
+    },
+    {
+      "section_title": "Service descriptors",
+      "one_line": "External service definitions, fields, and auth/channel rules for Kernos service bindings",
+      "line_start": 64,
+      "line_end": 89
+    },
+    {
+      "section_title": "Tool descriptor model",
+      "one_line": "Tool descriptor schema and metadata for tool permissions and routing",
+      "line_start": 90,
+      "line_end": 121
+    },
+    {
+      "section_title": "Authoring-pattern validation (registration time)",
+      "one_line": "Checks tool code for hardcoded paths, IDs, and secret env reads before registration",
+      "line_start": 122,
+      "line_end": 137
+    },
+    {
+      "section_title": "Runtime context (invocation-scoped)",
+      "one_line": "Tool invocation context for member, instance, space, storage, and credentials",
+      "line_start": 138,
+      "line_end": 150
+    },
+    {
+      "section_title": "Runtime enforcement (the design review edit 2)",
+      "one_line": "Invocation-time checks that enforce tool integrity, authority, credentials, and sandboxing",
+      "line_start": 151,
+      "line_end": 161
+    },
+    {
+      "section_title": "Audit-log integration",
+      "one_line": "Audit logging for tool invocations, category fields, and SHA-256 payload digests",
+      "line_start": 162,
+      "line_end": 170
+    },
+    {
+      "section_title": "Composition with existing primitives",
+      "one_line": "How tools fit existing credentials, covenants, and standing orders through the agent layer",
+      "line_start": 171,
+      "line_end": 176
+    },
+    {
+      "section_title": "Future hooks",
+      "one_line": "Future hooks for stock integrations, tool visibility, cookie import, and member aggregation",
+      "line_start": 177,
+      "line_end": 182
+    }
+  ]
+}

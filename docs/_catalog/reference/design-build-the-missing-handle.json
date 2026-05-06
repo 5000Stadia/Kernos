@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/reference/design-build-the-missing-handle.md",
+  "source_hash": "8c6fe31a28c0efc28c90ded9722e213473d981a372f801390259ad2b8597c4da",
+  "generated_at": "2026-05-06T18:16:05.358288+00:00",
+  "sections": [
+    {
+      "section_title": "The Principle",
+      "one_line": "Guideline for adding small reusable capabilities when recurring friction is cheaper to fix than work around",
+      "line_start": 9,
+      "line_end": 18
+    },
+    {
+      "section_title": "What This Solves",
+      "one_line": "Recurring friction detection and the smallest durable fix to remove it",
+      "line_start": 19,
+      "line_end": 29
+    },
+    {
+      "section_title": "Decision Test: When Should Kernos Build a Handle?",
+      "one_line": "Criteria for deciding when Kernos should build a handle",
+      "line_start": 30,
+      "line_end": 42
+    },
+    {
+      "section_title": "Boundaries",
+      "one_line": "Criteria for what tools and automation belong in Kernos",
+      "line_start": 43,
+      "line_end": 60
+    },
+    {
+      "section_title": "Preferred Implementation Form",
+      "one_line": "Guidelines for choosing simple, safe, replaceable implementation forms for Kernos utilities",
+      "line_start": 61,
+      "line_end": 82
+    },
+    {
+      "section_title": "Classification",
+      "one_line": "Guidelines for classifying handles as task-local by default or promoting them to system-level capabilities",
+      "line_start": 83,
+      "line_end": 94
+    },
+    {
+      "section_title": "Lifecycle",
+      "one_line": "Decision flow for identifying friction, building fixes, and keeping or discarding them",
+      "line_start": 95,
+      "line_end": 104
+    },
+    {
+      "section_title": "Anti-Patterns (Explicitly Forbidden)",
+      "one_line": "Forbidden overengineering and unnecessary tool-building patterns in Kernos",
+      "line_start": 105,
+      "line_end": 114
+    },
+    {
+      "section_title": "Evaluation Criteria",
+      "one_line": "Criteria for judging whether a handle is worth keeping",
+      "line_start": 115,
+      "line_end": 133
+    },
+    {
+      "section_title": "Examples",
+      "one_line": "Good and bad examples of when to build a narrow Kernos tool",
+      "line_start": 134,
+      "line_end": 150
+    },
+    {
+      "section_title": "Posture",
+      "one_line": "Kernos’s operational self-maintenance in service of better human outcomes",
+      "line_start": 151,
+      "line_end": 155
+    }
+  ]
+}

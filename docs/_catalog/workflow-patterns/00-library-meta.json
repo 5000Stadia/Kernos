@@ -1,0 +1,61 @@
+{
+  "file_path": "docs/workflow-patterns/00-library-meta.md",
+  "source_hash": "77941e3d81e1fde8cd5ada4ef3d380c349a6a2b365deb8f969cd9dfb9d7d21f5",
+  "generated_at": "2026-05-06T18:21:36.949991+00:00",
+  "sections": [
+    {
+      "section_title": "Purpose",
+      "one_line": "Judgment inputs for Gardener canvas shaping at creation and evolution",
+      "line_start": 10,
+      "line_end": 13
+    },
+    {
+      "section_title": "Contract with the Gardener",
+      "one_line": "How the Gardener applies patterns as defaults, tracks member reshaping, and feeds deviations back into patterns",
+      "line_start": 14,
+      "line_end": 17
+    },
+    {
+      "section_title": "How the Gardener selects a pattern",
+      "one_line": "Choosing a pattern from charter volatility, actor count, and time horizon",
+      "line_start": 18,
+      "line_end": 27
+    },
+    {
+      "section_title": "How the Gardener blends patterns",
+      "one_line": "Rules for combining distinct member patterns into linked multi-canvas shapes without merging them",
+      "line_start": 28,
+      "line_end": 33
+    },
+    {
+      "section_title": "Member intent hooks — translation layer",
+      "one_line": "Mapping member utterances to persistent canvas preferences",
+      "line_start": 34,
+      "line_end": 39
+    },
+    {
+      "section_title": "Pattern structure — required sections",
+      "one_line": "Standard required sections and order for Kernos patterns",
+      "line_start": 40,
+      "line_end": 51
+    },
+    {
+      "section_title": "Evolution heuristics — cross-pattern",
+      "one_line": "Cross-pattern heuristics for review, promotion, merge, split, and scope-mismatch flags",
+      "line_start": 52,
+      "line_end": 63
+    },
+    {
+      "section_title": "Catalog — authored and planned",
+      "one_line": "Catalog of authored and planned Kernos document types and templates",
+      "line_start": 64,
+      "line_end": 91
+    },
+    {
+      "section_title": "Library self-evolution",
+      "one_line": "Heuristics for revising, deprecating, and adding patterns based on canvas usage",
+      "line_start": 92,
+      "line_end": 101
+    }
+  ]
+}

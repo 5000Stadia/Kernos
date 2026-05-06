@@ -1,0 +1,55 @@
+{
+  "file_path": "docs/behaviors/scheduler.md",
+  "source_hash": "67c27009ccf3cfa33f52fa8e8dd7dd8dbd26aa6103171fdc83c62526e22e0f76",
+  "generated_at": "2026-05-06T18:01:01.893903+00:00",
+  "sections": [
+    {
+      "section_title": "How It Works",
+      "one_line": "Trigger storage and 60-second scheduler evaluation loop",
+      "line_start": 5,
+      "line_end": 8
+    },
+    {
+      "section_title": "Trigger Types",
+      "one_line": "Types of triggers and their authorization requirements for notifications and tool calls",
+      "line_start": 9,
+      "line_end": 14
+    },
+    {
+      "section_title": "manage_schedule Tool",
+      "one_line": "Scheduled action management: create, list, update, pause, resume, and remove triggers",
+      "line_start": 15,
+      "line_end": 32
+    },
+    {
+      "section_title": "Time Handling",
+      "one_line": "Local time parsing, storage, and recurring trigger scheduling",
+      "line_start": 33,
+      "line_end": 38
+    },
+    {
+      "section_title": "Failure Handling",
+      "one_line": "Handling trigger delivery, tool-call, and MCP connection failures",
+      "line_start": 39,
+      "line_end": 44
+    },
+    {
+      "section_title": "Lifecycle",
+      "one_line": "Trigger statuses and their meanings",
+      "line_start": 45,
+      "line_end": 53
+    },
+    {
+      "section_title": "Storage",
+      "one_line": "Atomic storage of trigger state in data/{instance_id}/state/triggers.json",
+      "line_start": 54,
+      "line_end": 57
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "Paths for scheduler, trigger, and tick loop code in Kernos",
+      "line_start": 58,
+      "line_end": 65
+    }
+  ]
+}

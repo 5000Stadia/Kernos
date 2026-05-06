@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/capabilities/relational-messaging.md",
+  "source_hash": "32bc76b6fe967d43e38ac03fa7246809fd37d53f260c096341ef1dfe4eafbf86",
+  "generated_at": "2026-05-06T18:05:36.513426+00:00",
+  "sections": [
+    {
+      "section_title": "Tools",
+      "one_line": "Member tools for sending relational messages, resolving them, and managing members and relationships",
+      "line_start": 5,
+      "line_end": 12
+    },
+    {
+      "section_title": "How it composes with relationships",
+      "one_line": "Relationship permission profiles for message disclosure and sensitivity gating",
+      "line_start": 13,
+      "line_end": 27
+    },
+    {
+      "section_title": "Recent-surfaced reference window",
+      "one_line": "1-hour reference window for surfaced messages, with soft-write state flips and relay-log audit",
+      "line_start": 28,
+      "line_end": 31
+    },
+    {
+      "section_title": "When to use",
+      "one_line": "Choosing the right Kernos tool for relaying messages, clearing them, and managing relationships",
+      "line_start": 32,
+      "line_end": 39
+    },
+    {
+      "section_title": "Effect classification",
+      "one_line": "Effect categories for relational message actions and member management operations",
+      "line_start": 40,
+      "line_end": 44
+    }
+  ]
+}

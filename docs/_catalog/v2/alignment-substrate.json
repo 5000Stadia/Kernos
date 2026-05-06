@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/v2/alignment-substrate.md",
+  "source_hash": "d4e468075ce4e5d80554827c2c41bcca1c8fe394f4894fedd8129da28bc1f7b7",
+  "generated_at": "2026-05-06T18:20:08.887777+00:00",
+  "sections": [
+    {
+      "section_title": "The retrofit problem",
+      "one_line": "Why retrofitting safety onto capability-first agents causes regressions",
+      "line_start": 5,
+      "line_end": 20
+    },
+    {
+      "section_title": "The substrate-first alternative",
+      "one_line": "Kernos V1's substrate-first path for safe continuous cognition",
+      "line_start": 21,
+      "line_end": 37
+    },
+    {
+      "section_title": "What V1 built that V2 inherits",
+      "one_line": "Foundational V1 architecture elements that V2's Cognition Kernel reuses",
+      "line_start": 38,
+      "line_end": 77
+    },
+    {
+      "section_title": "Three V2 discipline principles",
+      "one_line": "V2 operating principles for the Cognition Kernel, silence-first surfacing, and expanding alignment disciplines",
+      "line_start": 78,
+      "line_end": 99
+    },
+    {
+      "section_title": "Why this matters for the portfolio frame",
+      "one_line": "Portfolio case for Kernos V1 as substrate-first alignment for future continuous agents",
+      "line_start": 100,
+      "line_end": 109
+    },
+    {
+      "section_title": "Related",
+      "one_line": "Links to V2 direction, cohort architecture, safety, and disclosure docs",
+      "line_start": 110,
+      "line_end": 115
+    }
+  ]
+}

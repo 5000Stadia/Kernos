@@ -1,0 +1,61 @@
+{
+  "file_path": "docs/architecture/cohort-gardener.md",
+  "source_hash": "09c45ae63d7a46d8c3d057d98e2f0442ddbfec06cb90e78086bebaa62a86230a",
+  "generated_at": "2026-05-06T17:40:44.445061+00:00",
+  "sections": [
+    {
+      "section_title": "What the adapter does",
+      "one_line": "Gardener cohort adapter for turning frozen gardener state into a per-turn CohortOutput",
+      "line_start": 8,
+      "line_end": 35
+    },
+    {
+      "section_title": "Snapshot read surface",
+      "one_line": "Read-only snapshot of current proposals and recent evolution state",
+      "line_start": 36,
+      "line_end": 62
+    },
+    {
+      "section_title": "Active-canvas resolution",
+      "one_line": "Selecting the active canvas from ctx.active_spaces using a strict one-canvas-only rule",
+      "line_start": 63,
+      "line_end": 80
+    },
+    {
+      "section_title": "Output schema",
+      "one_line": "Schema for cohort output, proposals, and evolution summaries",
+      "line_start": 81,
+      "line_end": 116
+    },
+    {
+      "section_title": "Visibility model",
+      "one_line": "Whole-output visibility and source-side filtering of restricted cohort items",
+      "line_start": 117,
+      "line_end": 136
+    },
+    {
+      "section_title": "Cohort descriptor",
+      "one_line": "Gardener cohort metadata: async mode, timeout, visibility, required, and safety flags",
+      "line_start": 137,
+      "line_end": 151
+    },
+    {
+      "section_title": "What this adapter does NOT change",
+      "one_line": "Adapter behavior that remains unchanged",
+      "line_start": 152,
+      "line_end": 165
+    },
+    {
+      "section_title": "Architectural placement",
+      "one_line": "Module layout and boot-time wiring for the gardener cohort adapter and registry",
+      "line_start": 166,
+      "line_end": 183
+    },
+    {
+      "section_title": "Path forward",
+      "one_line": "Planned next steps for Kernos adapter development and pipeline integration",
+      "line_start": 184,
+      "line_end": 197
+    }
+  ]
+}

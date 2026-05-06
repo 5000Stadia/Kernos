@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/05-time-bounded-event.md",
+  "source_hash": "359be47d876e8cc33264869cb42aa0a5f56bbfad4b0588d5dc3fb7ac7aee2b5c",
+  "generated_at": "2026-05-06T18:23:57.048446+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Core planning dials for event volatility, actor count, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Mapping Kernos documentation artifacts to event planning documents and their roles",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Starter document and workstream structure for planning an event",
+      "line_start": 31,
+      "line_end": 80
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Phase-based rules for escalating event planning, monitoring workstreams, vendors, guests, budget, and scope",
+      "line_start": 81,
+      "line_end": 139
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member intent triggers for routing common requests into preferences and task flows",
+      "line_start": 140,
+      "line_end": 154
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Crisis handling, organizer access, surprise privacy, and archival for complex events",
+      "line_start": 155,
+      "line_end": 189
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Guidance for linking event canvases to creative, client, operations, and recurring program canvases",
+      "line_start": 190,
+      "line_end": 198
+    }
+  ]
+}

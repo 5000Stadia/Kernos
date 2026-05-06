@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/15-multi-project-operations.md",
+  "source_hash": "b165820ae8f1e0e8550505caeba26a7108a9c4c3a904c3c4c4d56039269a1ae4",
+  "generated_at": "2026-05-06T18:29:22.312748+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Core practice dials for charter stability, actor count, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Practice artifact-to-page mapping across Kernos documentation",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Starter canvas files and common extensions for a practice or team workspace",
+      "line_start": 31,
+      "line_end": 88
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Rules for flagging project, team, financial, client, compliance, and strategy review triggers.",
+      "line_start": 89,
+      "line_end": 158
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member requests mapped to Kernos settings, routing rules, and generated views",
+      "line_start": 159,
+      "line_end": 176
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Scope rules for practice canvases: confidentiality, aggregation, succession, and multi-branch structure",
+      "line_start": 177,
+      "line_end": 235
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "How practice and project canvases compose across industries and what belongs at each level",
+      "line_start": 236,
+      "line_end": 249
+    }
+  ]
+}

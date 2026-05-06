@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/kernos-introduction.md",
+  "source_hash": "95003901e022a6b0309f28fbeee713d3c093e76774dc49c6bc2ca507a78eb99c",
+  "generated_at": "2026-05-06T18:12:11.055626+00:00",
+  "sections": [
+    {
+      "section_title": "Position",
+      "one_line": "Kernos architecture for persistent state, routed context, memory, and kernel-enforced behavior",
+      "line_start": 13,
+      "line_end": 37
+    },
+    {
+      "section_title": "Architectural innovations",
+      "one_line": "Kernel-level design choices for Kernos's agent architecture, memory, safety, context, and tools",
+      "line_start": 38,
+      "line_end": 182
+    },
+    {
+      "section_title": "What you can do with it",
+      "one_line": "What Kernos can do across conversations, tools, rules, sharing, and learning over time",
+      "line_start": 183,
+      "line_end": 208
+    },
+    {
+      "section_title": "Operating principles",
+      "one_line": "Core rules and values that guide the agent’s behavior",
+      "line_start": 209,
+      "line_end": 230
+    },
+    {
+      "section_title": "Documentation map",
+      "one_line": "Topic map for Kernos docs and the key references in each area",
+      "line_start": 231,
+      "line_end": 311
+    },
+    {
+      "section_title": "Origin",
+      "one_line": "Kernos's origin as a one-person first-principles project to build a second brain",
+      "line_start": 312,
+      "line_end": 319
+    }
+  ]
+}

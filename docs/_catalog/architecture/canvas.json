@@ -1,0 +1,85 @@
+{
+  "file_path": "docs/architecture/canvas.md",
+  "source_hash": "739204edf684288d12d7e3c6a5edb74f298a3c3a73d42aa85370ff9b16765b5f",
+  "generated_at": "2026-05-06T17:36:09.659234+00:00",
+  "sections": [
+    {
+      "section_title": "The gap this fills",
+      "one_line": "Why Kernos needs canvases for durable, growing shared content beyond chat, facts, and procedures",
+      "line_start": 5,
+      "line_end": 10
+    },
+    {
+      "section_title": "Scope model",
+      "one_line": "Canvas visibility tiers and who can access each scope",
+      "line_start": 11,
+      "line_end": 22
+    },
+    {
+      "section_title": "On-disk layout",
+      "one_line": "Filesystem structure and page metadata for Kernos canvas pages",
+      "line_start": 23,
+      "line_end": 42
+    },
+    {
+      "section_title": "Page types — advisory only",
+      "one_line": "Advisory page types, their state flows, and how Kernos seeds defaults and routes",
+      "line_start": 43,
+      "line_end": 54
+    },
+    {
+      "section_title": "Registry — repurposed shared_spaces",
+      "one_line": "Canvas registry and member storage in repurposed shared_spaces",
+      "line_start": 55,
+      "line_end": 60
+    },
+    {
+      "section_title": "The dispatch gate + consent",
+      "one_line": "Canvas tool access levels and consent checks for reads, writes, and shared canvases",
+      "line_start": 61,
+      "line_end": 75
+    },
+    {
+      "section_title": "Routes-lite",
+      "one_line": "Page state-change routes and operator consultation precedence",
+      "line_start": 76,
+      "line_end": 102
+    },
+    {
+      "section_title": "Notifications",
+      "one_line": "Canvas offer and watch notifications for members and watchers",
+      "line_start": 103,
+      "line_end": 111
+    },
+    {
+      "section_title": "Event stream",
+      "one_line": "CanvasService event types and firing conditions in the unified event stream",
+      "line_start": 112,
+      "line_end": 123
+    },
+    {
+      "section_title": "Context surface",
+      "one_line": "Rules for which canvases appear in the Available Canvases context surface",
+      "line_start": 124,
+      "line_end": 134
+    },
+    {
+      "section_title": "Relationship to other primitives",
+      "one_line": "Canvas differences from conversation logs, covenants, and parcels",
+      "line_start": 135,
+      "line_end": 140
+    },
+    {
+      "section_title": "Section markers and the Gardener",
+      "one_line": "Section markers for navigable page outlines and the Gardener for canvas lifecycle shaping",
+      "line_start": 141,
+      "line_end": 147
+    },
+    {
+      "section_title": "Scope deliberately deferred",
+      "one_line": "Deferred v1 features and later-release scope not included in this version",
+      "line_start": 148,
+      "line_end": 153
+    }
+  ]
+}

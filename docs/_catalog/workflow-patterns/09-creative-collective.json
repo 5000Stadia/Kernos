@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/09-creative-collective.md",
+  "source_hash": "644a168b05df671056371a204ff82aacf064d5d1de93f2d799195e4d98e665f1",
+  "generated_at": "2026-05-06T18:25:37.043019+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Settings for collective volatility, size, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Kernos map from collective concepts to docs and folders",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default workspace pages and domain-specific starting structure for a new collective",
+      "line_start": 31,
+      "line_end": 82
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristics for prompting collective updates from lifecycle, membership, drift, and decision signals",
+      "line_start": 83,
+      "line_end": 123
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Mappings from member requests to project settings, proposals, and workflow actions",
+      "line_start": 124,
+      "line_end": 138
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Special-case handling for identity, ownership, credit, privacy, and conflict in collectives",
+      "line_start": 139,
+      "line_end": 160
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Composition rules for creative collective canvases, including client work, events, causes, and member solo work",
+      "line_start": 161,
+      "line_end": 171
+    }
+  ]
+}

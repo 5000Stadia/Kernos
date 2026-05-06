@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/10-client-project.md",
+  "source_hash": "74bfb2d5ddd3bad637ff4850cb057da4d0b076a6c3dba9efe65d096dfa198c41",
+  "generated_at": "2026-05-06T18:26:40.400535+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Consulting engagement dials for charter volatility, actor count, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Correspondences between Kernos concepts and project documents/files for client work",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default project folder and page structure for a Kernos client project",
+      "line_start": 31,
+      "line_end": 79
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Project health and risk heuristics for scope, approvals, timelines, and closeout",
+      "line_start": 80,
+      "line_end": 137
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Natural language triggers for member preferences, scope decisions, approvals, and client workflow actions",
+      "line_start": 138,
+      "line_end": 152
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Handling client access, scope disputes, multi-client work, subcontractors, post-project, and ethics",
+      "line_start": 153,
+      "line_end": 187
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Client project canvas composition with agency, event, and software-development canvases",
+      "line_start": 188,
+      "line_end": 198
+    }
+  ]
+}

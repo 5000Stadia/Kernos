@@ -1,0 +1,31 @@
+{
+  "file_path": "docs/behaviors/instruction-types.md",
+  "source_hash": "03d82692c81911517a848990abb9b7a6c03930948a06df7596f7754fa339277e",
+  "generated_at": "2026-05-06T18:00:05.947230+00:00",
+  "sections": [
+    {
+      "section_title": "Behavioral Constraints → Covenant Rules",
+      "one_line": "Converts behavioral instructions into CovenantRule records for dispatch-time enforcement",
+      "line_start": 5,
+      "line_end": 15
+    },
+    {
+      "section_title": "Automation Rules → Standing Orders",
+      "one_line": "Saving recurring automation instructions as standing orders for later recall",
+      "line_start": 16,
+      "line_end": 27
+    },
+    {
+      "section_title": "Classification",
+      "one_line": "Classification of contract instructions into behavioral constraints or automation rules",
+      "line_start": 28,
+      "line_end": 33
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "Key file locations for Kernos kernel components",
+      "line_start": 34,
+      "line_end": 40
+    }
+  ]
+}

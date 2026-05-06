@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/presence-decoupling.md",
+  "source_hash": "1684350b150257934696d8de5486f639bab0d6ad1f7f1ee034d150b8c2bd2e87",
+  "generated_at": "2026-05-06T17:51:55.224892+00:00",
+  "sections": [
+    {
+      "section_title": "The three services",
+      "one_line": "Core architecture for TurnRunner, IntegrationService, and EnactmentService and how they hand off work",
+      "line_start": 24,
+      "line_end": 134
+    },
+    {
+      "section_title": "Explicit ActionEnvelope contract",
+      "one_line": "Rules for Briefing ActionEnvelope inclusion and tier-by-tier validation",
+      "line_start": 135,
+      "line_end": 168
+    },
+    {
+      "section_title": "Operation resolver pattern",
+      "one_line": "Tool operation resolution and safety rules for surfacing ambiguous tools in the catalog",
+      "line_start": 169,
+      "line_end": 191
+    },
+    {
+      "section_title": "No same-turn integration re-entry",
+      "one_line": "Preventing same-turn integration re-entry and carrying capped reintegration state to the next turn",
+      "line_start": 192,
+      "line_end": 217
+    },
+    {
+      "section_title": "Friction observer",
+      "one_line": "Write-only sink for recording tier-1/2 friction tickets and audit events",
+      "line_start": 218,
+      "line_end": 237
+    },
+    {
+      "section_title": "Audit family",
+      "one_line": "Audit event types, required fields, and ID-only reference rules for enactment tracking",
+      "line_start": 238,
+      "line_end": 273
+    },
+    {
+      "section_title": "Feature flag",
+      "one_line": "Toggle for routing ReasoningService.reason() to the decoupled turn runner when wired",
+      "line_start": 274,
+      "line_end": 285
+    },
+    {
+      "section_title": "Equivalence testing",
+      "one_line": "Testing that two Kernos paths behave equivalently across outcomes, tools, side effects, audit, and latency",
+      "line_start": 286,
+      "line_end": 308
+    },
+    {
+      "section_title": "Rollout plan",
+      "one_line": "Phased rollout of the decoupled Kernos path from feature-flagged PDI to full activation",
+      "line_start": 309,
+      "line_end": 322
+    },
+    {
+      "section_title": "Architectural pins (load-bearing tests)",
+      "one_line": "Load-bearing tests pinning Kernos architectural invariants, audit ordering, and event shapes",
+      "line_start": 323,
+      "line_end": 340
+    },
+    {
+      "section_title": "Files",
+      "one_line": "Core kernel and test files for turn execution, tool safety, enactment, and reintegration",
+      "line_start": 341,
+      "line_end": 375
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/capabilities/overview.md",
+  "source_hash": "9814f813276b89ee208d70eb0a22443df556ad5e809672041b7476ff625d7085",
+  "generated_at": "2026-05-06T18:04:30.315382+00:00",
+  "sections": [
+    {
+      "section_title": "Unified Capability Registry",
+      "one_line": "Single registry for all capabilities with unified install, enable, disable, and remove management",
+      "line_start": 7,
+      "line_end": 14
+    },
+    {
+      "section_title": "Pre-Installed Capabilities",
+      "one_line": "Pre-installed capabilities and their availability across context spaces",
+      "line_start": 15,
+      "line_end": 27
+    },
+    {
+      "section_title": "Capability Status",
+      "one_line": "Capability states and their meanings",
+      "line_start": 28,
+      "line_end": 37
+    },
+    {
+      "section_title": "Managing Capabilities",
+      "one_line": "Listing, enabling, disabling, installing, and removing capabilities",
+      "line_start": 38,
+      "line_end": 47
+    },
+    {
+      "section_title": "How Connection Works",
+      "one_line": "Capability registration, MCP connection, tool discovery, and secure credential setup",
+      "line_start": 48,
+      "line_end": 54
+    },
+    {
+      "section_title": "Disable vs Remove",
+      "one_line": "When to disable versus remove MCP servers and what each action does",
+      "line_start": 55,
+      "line_end": 59
+    },
+    {
+      "section_title": "Startup Migration",
+      "one_line": "How newly pre-installed capabilities become available to existing tenants without manual migration",
+      "line_start": 60,
+      "line_end": 63
+    },
+    {
+      "section_title": "Lazy Tool Loading",
+      "one_line": "On-demand tool loading to reduce token usage by keeping most tool schemas unloaded until needed",
+      "line_start": 64,
+      "line_end": 75
+    },
+    {
+      "section_title": "Tool Scoping",
+      "one_line": "How tools are scoped and activated for each context space",
+      "line_start": 76,
+      "line_end": 83
+    },
+    {
+      "section_title": "Effect Classification",
+      "one_line": "Tool call classification by effect level and dispatch gate handling.",
+      "line_start": 84,
+      "line_end": 93
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "Code paths for Kernos capability management, tool scoping, and runtime install flow",
+      "line_start": 94,
+      "line_end": 103
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/TESTING-PATTERN.md",
+  "source_hash": "c239a97719f65608378ade86bf2cae0228f0e6203b8b1c90b29638ee7b433eaf",
+  "generated_at": "2026-05-06T17:35:05.240848+00:00",
+  "sections": [
+    {
+      "section_title": "The pattern",
+      "one_line": "Verification pattern for checking console signals and substrate state together",
+      "line_start": 14,
+      "line_end": 38
+    },
+    {
+      "section_title": "Where this pattern lives in the codebase",
+      "one_line": "Locations of tests and harnesses that exercise this pattern in Kernos",
+      "line_start": 39,
+      "line_end": 60
+    },
+    {
+      "section_title": "When to apply",
+      "one_line": "Rules for adding pin tests, soak scenarios, and checking test fidelity",
+      "line_start": 61,
+      "line_end": 87
+    },
+    {
+      "section_title": "Soak harness usage",
+      "one_line": "Commands for running soak scenarios and reviewing generated artifacts",
+      "line_start": 88,
+      "line_end": 110
+    },
+    {
+      "section_title": "Architectural enforcement",
+      "one_line": "Architectural rules for model-call input fidelity and review invariants",
+      "line_start": 111,
+      "line_end": 122
+    }
+  ]
+}

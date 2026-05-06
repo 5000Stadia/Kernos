@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/architecture/browser.md",
+  "source_hash": "914845a3df6c62d8c88bf6db8c1c3b17a6aae4e58799c195a5bef1b746c81055",
+  "generated_at": "2026-05-06T17:35:22.961417+00:00",
+  "sections": [
+    {
+      "section_title": "Why Playwright (not crawl4ai, not playwright-mcp)",
+      "one_line": "Reasons Kernos chose Playwright over crawl4ai and playwright-mcp",
+      "line_start": 7,
+      "line_end": 17
+    },
+    {
+      "section_title": "Runtime shape",
+      "one_line": "Persistent browser context, page reuse, and extraction behavior for Kernos tool calls",
+      "line_start": 18,
+      "line_end": 39
+    },
+    {
+      "section_title": "Persistent profile",
+      "one_line": "Persistent browser profile storage, login state, and lock handling",
+      "line_start": 40,
+      "line_end": 68
+    },
+    {
+      "section_title": "Failure modes",
+      "one_line": "Failure handling for navigation timeouts, auth-gated pages, JS errors, and slow network waits",
+      "line_start": 69,
+      "line_end": 78
+    },
+    {
+      "section_title": "Install footprint",
+      "one_line": "Disk space and dependency requirements for installing Kernos browser support",
+      "line_start": 79,
+      "line_end": 84
+    },
+    {
+      "section_title": "Known limitations (follow-on specs)",
+      "one_line": "Known gaps and future follow-on specs for tabs, stealth, profiles, downloads, screenshots, and PDFs",
+      "line_start": 85,
+      "line_end": 91
+    }
+  ]
+}

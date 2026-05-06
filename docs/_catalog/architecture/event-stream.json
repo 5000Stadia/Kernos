@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/event-stream.md",
+  "source_hash": "4558b2d2454f33db25d7b42809fb97606063321519cd880be9dc9e43e160845a",
+  "generated_at": "2026-05-06T17:45:10.509886+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why Kernos needs a unified event stream across subsystem records",
+      "line_start": 5,
+      "line_end": 12
+    },
+    {
+      "section_title": "Shape of the primitive",
+      "one_line": "Event store layout, schema, and read/write paths for the Kernos primitive",
+      "line_start": 13,
+      "line_end": 60
+    },
+    {
+      "section_title": "Write API",
+      "one_line": "Async event emission to Kernos with batched SQLite writes",
+      "line_start": 61,
+      "line_end": 76
+    },
+    {
+      "section_title": "Read API",
+      "one_line": "Typed event read functions for fetching instance-scoped events by member, window, or correlation ID",
+      "line_start": 77,
+      "line_end": 98
+    },
+    {
+      "section_title": "Correlation IDs",
+      "one_line": "Turn-level event tracing with correlation IDs for complete event histories",
+      "line_start": 99,
+      "line_end": 102
+    },
+    {
+      "section_title": "Two examples",
+      "one_line": "Examples of querying Kernos event timelines for members and time windows",
+      "line_start": 103,
+      "line_end": 123
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "Event-stream queries, turn replay, and easy instrumentation",
+      "line_start": 124,
+      "line_end": 131
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Architecture non-goals and current limitations",
+      "line_start": 132,
+      "line_end": 138
+    },
+    {
+      "section_title": "Relationship to V1 subsystems",
+      "one_line": "How V1 subsystems emit one-line events without changing their stores",
+      "line_start": 139,
+      "line_end": 150
+    },
+    {
+      "section_title": "Relationship to V2",
+      "one_line": "V1 event stream foundation for V2 reflection, projection, and situation models",
+      "line_start": 151,
+      "line_end": 154
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Kernos event stream APIs, writer lifecycle, and SQLite events table storage",
+      "line_start": 155,
+      "line_end": 162
+    }
+  ]
+}

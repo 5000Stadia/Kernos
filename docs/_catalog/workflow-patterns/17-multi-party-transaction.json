@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/17-multi-party-transaction.md",
+  "source_hash": "18e899506fea5432a3c597408f38024e64e539f1fd0849b8b437f440e74c8d07",
+  "generated_at": "2026-05-06T18:30:21.140525+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Deal transaction dials: stable charter, many actors, and short timelines",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Maps Kernos artifact types to their corresponding transaction documents",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default transaction file structure for deal documents, parties, conditions, and versions",
+      "line_start": 31,
+      "line_end": 86
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristic alert and tracking rules for transaction phases, deadlines, documents, issues, and closing",
+      "line_start": 87,
+      "line_end": 160
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "User phrases that trigger transaction handling preferences, alerts, delegation, and closing workflows",
+      "line_start": 161,
+      "line_end": 176
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Rules for transaction agency, confidentiality, privilege, closing, and deal failure",
+      "line_start": 177,
+      "line_end": 236
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Transaction canvas composition with related legal, client, operations, and personal canvases",
+      "line_start": 237,
+      "line_end": 246
+    }
+  ]
+}

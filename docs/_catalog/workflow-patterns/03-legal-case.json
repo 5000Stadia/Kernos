@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/03-legal-case.md",
+  "source_hash": "2ac062c45b5583a27d59d7ee8efbe74c8c6f089ada0d5434ccb1901d012c212a",
+  "generated_at": "2026-05-06T18:23:06.728698+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Case settings for volatility, team size, and case duration",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Renamed mappings between Kernos artifacts and legal work products",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Initial case workspace structure and required file conventions",
+      "line_start": 31,
+      "line_end": 74
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Case-management rules for motions, discovery, deadlines, privilege, and phase changes",
+      "line_start": 75,
+      "line_end": 117
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Maps member intent phrases to Kernos preference hooks and routing actions",
+      "line_start": 118,
+      "line_end": 131
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Special-case handling for privileged content, multi-plaintiff cases, and transactional canvas renaming",
+      "line_start": 132,
+      "line_end": 152
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Sanitized transfer of case learnings from case canvases to a practice-level knowledge canvas with attorney approval",
+      "line_start": 153,
+      "line_end": 155
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/workshop/external-services.md",
+  "source_hash": "5e2e808de8815bb3819173dec05526a7e369faafd15e8b0362613fca459cefc1",
+  "generated_at": "2026-05-06T18:31:14.893567+00:00",
+  "sections": [
+    {
+      "section_title": "The mental model",
+      "one_line": "Per-invocation tool context for member identity, data storage, and credentials",
+      "line_start": 7,
+      "line_end": 12
+    },
+    {
+      "section_title": "Worked example: read a Notion page",
+      "one_line": "End-to-end example of onboarding, building, registering, and running a Notion page reader",
+      "line_start": 13,
+      "line_end": 104
+    },
+    {
+      "section_title": "When to register with `force=True`",
+      "one_line": "Rare cases for force=True registration when a finding is intentional and unavoidable",
+      "line_start": 105,
+      "line_end": 110
+    },
+    {
+      "section_title": "Cross-member tools",
+      "one_line": "Cross-member tool aggregation is reserved for v2; v1 tools are member-scoped only.",
+      "line_start": 111,
+      "line_end": 114
+    },
+    {
+      "section_title": "What this primitive does not solve",
+      "one_line": "Known limitations and out-of-scope cases for the primitive",
+      "line_start": 115,
+      "line_end": 122
+    }
+  ]
+}

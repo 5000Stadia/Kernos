@@ -1,0 +1,91 @@
+{
+  "file_path": "docs/architecture/gardener.md",
+  "source_hash": "5b203a0b1f7f4483944a4194aed28021e7603a3e5fbfa361f572fe3436d2fae8",
+  "generated_at": "2026-05-06T17:46:08.909613+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why Canvas v1 needs the Gardener to keep shared-state canvases well-shaped",
+      "line_start": 5,
+      "line_end": 12
+    },
+    {
+      "section_title": "The principle",
+      "one_line": "Kernos’ default principle for system-chosen architecture and learned member preferences",
+      "line_start": 13,
+      "line_end": 18
+    },
+    {
+      "section_title": "Asynchrony invariant",
+      "one_line": "Primary-agent latency protection through Gardener fire-and-forget actions, with synchronous retrieval only",
+      "line_start": 19,
+      "line_end": 32
+    },
+    {
+      "section_title": "Bounded judgment",
+      "one_line": "Limits the Gardener to canvas shaping, non-destructive changes, and library-based rules",
+      "line_start": 33,
+      "line_end": 41
+    },
+    {
+      "section_title": "The three judgment kinds",
+      "one_line": "Canvas creation, page change, and section update judgment rules",
+      "line_start": 42,
+      "line_end": 79
+    },
+    {
+      "section_title": "Confidence floor and coalescing",
+      "one_line": "Rules for surfacing only high-confidence proposals and batching them into 24-hour canvas coalescing windows",
+      "line_start": 80,
+      "line_end": 89
+    },
+    {
+      "section_title": "Consent modes",
+      "one_line": "Canvas consent modes and how they control which actions auto-apply or stay proposals",
+      "line_start": 90,
+      "line_end": 102
+    },
+    {
+      "section_title": "Cascade prevention",
+      "one_line": "Preventing the Gardener from reprocessing its own canvas events to avoid cascading reshapes",
+      "line_start": 103,
+      "line_end": 106
+    },
+    {
+      "section_title": "Pattern cache",
+      "one_line": "In-process cache for Workflow Patterns pages, auto-refreshing on edits to speed Gardener judgments.",
+      "line_start": 107,
+      "line_end": 112
+    },
+    {
+      "section_title": "Preferences — persistent member-intent capture",
+      "one_line": "Capturing, confirming, and storing canvas-specific member preferences for heuristic behavior",
+      "line_start": 113,
+      "line_end": 159
+    },
+    {
+      "section_title": "Relationship to other cohorts",
+      "one_line": "How the Gardener cohort relates to Messenger and Friction Observer and how their roles differ",
+      "line_start": 160,
+      "line_end": 169
+    },
+    {
+      "section_title": "What the Gardener is NOT",
+      "one_line": "Gardener limits: only shapes canvas structure, not content, decisions, or data deletion.",
+      "line_start": 170,
+      "line_end": 176
+    },
+    {
+      "section_title": "Deferred to follow-on specs",
+      "one_line": "Features and heuristics deferred to later specifications",
+      "line_start": 177,
+      "line_end": 184
+    },
+    {
+      "section_title": "Code map",
+      "one_line": "Map of Kernos code files for cohorts, kernel services, canvas parsing, and handler integration",
+      "line_start": 185,
+      "line_end": 194
+    }
+  ]
+}

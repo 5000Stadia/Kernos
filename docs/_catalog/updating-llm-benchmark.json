@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/updating-llm-benchmark.md",
+  "source_hash": "ba8c54b36c0a59c64e7d67fde217c66da34378d60a6662c8690f808f034922b7",
+  "generated_at": "2026-05-06T18:19:44.959784+00:00",
+  "sections": [
+    {
+      "section_title": "What the snapshot is",
+      "one_line": "Default model mapping for Kernos setup llm primary and cheap provider suggestions",
+      "line_start": 3,
+      "line_end": 6
+    },
+    {
+      "section_title": "When to update it",
+      "one_line": "When to update the snapshot for new default provider models",
+      "line_start": 7,
+      "line_end": 10
+    },
+    {
+      "section_title": "How to update it",
+      "one_line": "Updating the benchmark snapshot config with new provider model recommendations",
+      "line_start": 11,
+      "line_end": 19
+    },
+    {
+      "section_title": "Who reads the snapshot",
+      "one_line": "Snapshot read path during setup and runtime contract",
+      "line_start": 20,
+      "line_end": 29
+    },
+    {
+      "section_title": "Schema",
+      "one_line": "Kernos schema format for provider model mappings and snapshot metadata",
+      "line_start": 30,
+      "line_end": 47
+    },
+    {
+      "section_title": "What if a recommended model is no longer available?",
+      "one_line": "Fallback when a snapshot’s recommended model is missing from the provider’s model list",
+      "line_start": 48,
+      "line_end": 50
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/capabilities/cross-space-requests.md",
+  "source_hash": "fe4023e2085c29b7c21e0285419eac015cb49be1a006be734972d50d21491afc",
+  "generated_at": "2026-05-06T18:02:16.989152+00:00",
+  "sections": [
+    {
+      "section_title": "What it does",
+      "one_line": "request_space_action's allowed mutations in a target space via covenants and gate",
+      "line_start": 7,
+      "line_end": 21
+    },
+    {
+      "section_title": "How it composes",
+      "one_line": "Cross-space action flow: idempotent dispatch, target-space locking, covenant checks, and receipts",
+      "line_start": 22,
+      "line_end": 33
+    },
+    {
+      "section_title": "When to use it",
+      "one_line": "When to use request_space_action for cross-space actions, and when to use other tools",
+      "line_start": 34,
+      "line_end": 47
+    },
+    {
+      "section_title": "Per-space lock + bounded timeout",
+      "one_line": "Per-space lock for action requests with bounded timeout and target-busy errors",
+      "line_start": 48,
+      "line_end": 51
+    },
+    {
+      "section_title": "Idempotency via request_id",
+      "one_line": "Safe retries using request_id to deduplicate cross-space requests",
+      "line_start": 52,
+      "line_end": 55
+    },
+    {
+      "section_title": "Effect classification",
+      "one_line": "How request_space_action is classified on origin and target sides",
+      "line_start": 56,
+      "line_end": 58
+    }
+  ]
+}

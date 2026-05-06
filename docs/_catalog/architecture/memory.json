@@ -1,0 +1,67 @@
+{
+  "file_path": "docs/architecture/memory.md",
+  "source_hash": "476adfa948c7b87d7c5d3a6e5d0c7996983acdd16e45a6c86ad3135bb1d1fc39",
+  "generated_at": "2026-05-06T17:49:32.219846+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why agent memory needs separate stores for narrative and durable facts",
+      "line_start": 5,
+      "line_end": 17
+    },
+    {
+      "section_title": "Two stores",
+      "one_line": "How Kernos keeps conversational history and durable facts in separate stores",
+      "line_start": 18,
+      "line_end": 54
+    },
+    {
+      "section_title": "Single-call reconciliation",
+      "one_line": "Single-call fact harvesting that reconciles new, updated, and reinforced facts against the current store",
+      "line_start": 55,
+      "line_end": 87
+    },
+    {
+      "section_title": "Boundary-triggered, not turn-triggered",
+      "one_line": "Store refresh happens at compaction or space-switch boundaries, not every turn",
+      "line_start": 88,
+      "line_end": 112
+    },
+    {
+      "section_title": "Member-scoping",
+      "one_line": "Per-member separation of ledgers and facts in multi-member installs",
+      "line_start": 113,
+      "line_end": 123
+    },
+    {
+      "section_title": "The two failure modes, addressed",
+      "one_line": "How the two-store model fixes summary drift, duplicate facts, contradictions, and lost truths",
+      "line_start": 124,
+      "line_end": 132
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "Capabilities this architecture enables for long-term grounding, stable facts, updates, and privacy",
+      "line_start": 133,
+      "line_end": 140
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Architecture non-goals: what Kernos does not model, refresh, or extract from history",
+      "line_start": 141,
+      "line_end": 147
+    },
+    {
+      "section_title": "Related architecture",
+      "one_line": "Related architecture topics for context spaces, disclosure layering, and cohort design",
+      "line_start": 148,
+      "line_end": 153
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Key code entry points for fact harvesting, compaction, and member-scoped state",
+      "line_start": 154,
+      "line_end": 162
+    }
+  ]
+}

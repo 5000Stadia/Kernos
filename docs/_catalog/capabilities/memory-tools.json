@@ -1,0 +1,25 @@
+{
+  "file_path": "docs/capabilities/memory-tools.md",
+  "source_hash": "37665bd2300bb1472f48067c326a4fc415ace63e6d1ab5ca315c4513531ae19b",
+  "generated_at": "2026-05-06T18:03:41.767217+00:00",
+  "sections": [
+    {
+      "section_title": "remember (Kernel Tool)",
+      "one_line": "Stored-knowledge search for users, people, past chats, and facts",
+      "line_start": 5,
+      "line_end": 30
+    },
+    {
+      "section_title": "Automatic Memory",
+      "one_line": "Automatic capture of user facts and style after each response without calling remember",
+      "line_start": 31,
+      "line_end": 39
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "File locations for kernel components and the extraction coordinator",
+      "line_start": 40,
+      "line_end": 45
+    }
+  ]
+}

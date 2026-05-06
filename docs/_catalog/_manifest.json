@@ -1,0 +1,426 @@
+{
+  "version": 1,
+  "generated_at": "2026-05-06T18:31:41.596190+00:00",
+  "entries": {
+    "docs/ADAPTER-GUIDE.md": {
+      "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
+      "artifact_path": "docs/_catalog/ADAPTER-GUIDE.json"
+    },
+    "docs/CROSS-SPACE-REQUESTS.md": {
+      "source_hash": "2ff5eb25b96b91fc6f1a675510170abc453f533f98fba1ad9641d041f45a668c",
+      "artifact_path": "docs/_catalog/CROSS-SPACE-REQUESTS.json"
+    },
+    "docs/EXTERNAL-AGENTS.md": {
+      "source_hash": "997ac161da4064df10320328344284114b8af48aeffb3a691a6bfe755473f962",
+      "artifact_path": "docs/_catalog/EXTERNAL-AGENTS.json"
+    },
+    "docs/TECHNICAL-ARCHITECTURE.md": {
+      "source_hash": "2a7bb5e50531ad05072a5fb7e804250b5f8a6221ab7a74f677eba00e4f7838d0",
+      "artifact_path": "docs/_catalog/TECHNICAL-ARCHITECTURE.json"
+    },
+    "docs/TESTING-PATTERN.md": {
+      "source_hash": "c239a97719f65608378ade86bf2cae0228f0e6203b8b1c90b29638ee7b433eaf",
+      "artifact_path": "docs/_catalog/TESTING-PATTERN.json"
+    },
+    "docs/architecture/browser.md": {
+      "source_hash": "914845a3df6c62d8c88bf6db8c1c3b17a6aae4e58799c195a5bef1b746c81055",
+      "artifact_path": "docs/_catalog/architecture/browser.json"
+    },
+    "docs/architecture/canvas.md": {
+      "source_hash": "739204edf684288d12d7e3c6a5edb74f298a3c3a73d42aa85370ff9b16765b5f",
+      "artifact_path": "docs/_catalog/architecture/canvas.json"
+    },
+    "docs/architecture/cognitive-ui.md": {
+      "source_hash": "83a52f6215cb9c269bdc649967c9fe5f650e876723b6738b07324f1ec7113055",
+      "artifact_path": "docs/_catalog/architecture/cognitive-ui.json"
+    },
+    "docs/architecture/cohort-and-judgment.md": {
+      "source_hash": "9b277c679dd7b2a760b37672aa8fba607df6d0d61df7faf64a7076cd7bf8df73",
+      "artifact_path": "docs/_catalog/architecture/cohort-and-judgment.json"
+    },
+    "docs/architecture/cohort-cataloging.md": {
+      "source_hash": "4fe60fabc8af40bd510c3955e1b4516625a7c3b8d4d1d42a47e4527a1d72ad0d",
+      "artifact_path": "docs/_catalog/architecture/cohort-cataloging.json"
+    },
+    "docs/architecture/cohort-covenant.md": {
+      "source_hash": "7f2cb20806f2834d2652d6225b2f8562da5ac162fb8851442d3b12509d187597",
+      "artifact_path": "docs/_catalog/architecture/cohort-covenant.json"
+    },
+    "docs/architecture/cohort-fan-out.md": {
+      "source_hash": "13bec090ced4ee5b24596bf649aaca2dbd27e0a9024167ddf8028f32df11a7fb",
+      "artifact_path": "docs/_catalog/architecture/cohort-fan-out.json"
+    },
+    "docs/architecture/cohort-gardener.md": {
+      "source_hash": "09c45ae63d7a46d8c3d057d98e2f0442ddbfec06cb90e78086bebaa62a86230a",
+      "artifact_path": "docs/_catalog/architecture/cohort-gardener.json"
+    },
+    "docs/architecture/cohort-memory.md": {
+      "source_hash": "7f37bb21f5db0d7ed0e10c1e656f9284e64ea540387acb501643306d9148ef15",
+      "artifact_path": "docs/_catalog/architecture/cohort-memory.json"
+    },
+    "docs/architecture/context-spaces.md": {
+      "source_hash": "0c38d4408aa16830983b9dae94146c4dc176f8b0c41ae0514c797c20bddb4f56",
+      "artifact_path": "docs/_catalog/architecture/context-spaces.json"
+    },
+    "docs/architecture/crb.md": {
+      "source_hash": "a8f06f8a4686c73596afdbb1cc64d0d5b5c761eb6c8f8b82ef7eed27c2394376",
+      "artifact_path": "docs/_catalog/architecture/crb.json"
+    },
+    "docs/architecture/disclosure-and-messenger.md": {
+      "source_hash": "e4a1203b5c00cde7f1609dd879ea51488c0392176bbae289af80a82348808ffe",
+      "artifact_path": "docs/_catalog/architecture/disclosure-and-messenger.json"
+    },
+    "docs/architecture/event-stream.md": {
+      "source_hash": "4558b2d2454f33db25d7b42809fb97606063321519cd880be9dc9e43e160845a",
+      "artifact_path": "docs/_catalog/architecture/event-stream.json"
+    },
+    "docs/architecture/gardener.md": {
+      "source_hash": "5b203a0b1f7f4483944a4194aed28021e7603a3e5fbfa361f572fe3436d2fae8",
+      "artifact_path": "docs/_catalog/architecture/gardener.json"
+    },
+    "docs/architecture/install.md": {
+      "source_hash": "d9b21e567195064eca34b0d1daf541e24b5c33cce6cb99c168f6cd12f13377e2",
+      "artifact_path": "docs/_catalog/architecture/install.json"
+    },
+    "docs/architecture/integration-layer.md": {
+      "source_hash": "5394811af1ffa54221634f5daa96b4dde6d8c6ee716fbc896d2b24039b79f4a9",
+      "artifact_path": "docs/_catalog/architecture/integration-layer.json"
+    },
+    "docs/architecture/integration-wire-live.md": {
+      "source_hash": "a26f01f3efa98dc46c3c078f461606a22c40cadea9c43eb693e0c1551b1c9555",
+      "artifact_path": "docs/_catalog/architecture/integration-wire-live.json"
+    },
+    "docs/architecture/kernel-tool-registry.md": {
+      "source_hash": "343d30338ab98d5f98eb9346c0d52b388a549ab527ef7adac24801fa5143fa90",
+      "artifact_path": "docs/_catalog/architecture/kernel-tool-registry.json"
+    },
+    "docs/architecture/memory.md": {
+      "source_hash": "476adfa948c7b87d7c5d3a6e5d0c7996983acdd16e45a6c86ad3135bb1d1fc39",
+      "artifact_path": "docs/_catalog/architecture/memory.json"
+    },
+    "docs/architecture/model-registry.md": {
+      "source_hash": "301f80f10b1526ffc59aeb5ff7369157b99daeba4a45ffed91464b50afc274f4",
+      "artifact_path": "docs/_catalog/architecture/model-registry.json"
+    },
+    "docs/architecture/overview.md": {
+      "source_hash": "b614ce92e092535ef5cf034d968aa29b6dd57299a58c65cf8affe6efe820552d",
+      "artifact_path": "docs/_catalog/architecture/overview.json"
+    },
+    "docs/architecture/pipeline-reference.md": {
+      "source_hash": "f49c599896be2e046e3055bd36cddc046e6b36fd2a63d7741a1667d999de2f86",
+      "artifact_path": "docs/_catalog/architecture/pipeline-reference.json"
+    },
+    "docs/architecture/presence-decoupling.md": {
+      "source_hash": "1684350b150257934696d8de5486f639bab0d6ad1f7f1ee034d150b8c2bd2e87",
+      "artifact_path": "docs/_catalog/architecture/presence-decoupling.json"
+    },
+    "docs/architecture/primitives-reference.md": {
+      "source_hash": "d6c3625066da4fa72739b38ad8ad84cbaecc52ec8c9afdd1d86926c209ecb01a",
+      "artifact_path": "docs/_catalog/architecture/primitives-reference.json"
+    },
+    "docs/architecture/reference-primitive.md": {
+      "source_hash": "07949b197a7342a553ce9f2b9d7e91697508adf04f5196e20bd8d0c1c456595d",
+      "artifact_path": "docs/_catalog/architecture/reference-primitive.json"
+    },
+    "docs/architecture/safety-and-gate.md": {
+      "source_hash": "95d8b59a9b27a51a758de6caa7fc0d0ab1eba88d03b315d998e3813df9be448e",
+      "artifact_path": "docs/_catalog/architecture/safety-and-gate.json"
+    },
+    "docs/architecture/soul.md": {
+      "source_hash": "87dba469d8ac43e00bf2fb0ba36561ce3d55bb00f2d17e36915cf322d91c99e6",
+      "artifact_path": "docs/_catalog/architecture/soul.json"
+    },
+    "docs/architecture/stock-connector-pattern.md": {
+      "source_hash": "1e20fa5fd8eef25bf9e143d01acd063c46a44a029197e0016d6f8a20f8147377",
+      "artifact_path": "docs/_catalog/architecture/stock-connector-pattern.json"
+    },
+    "docs/architecture/trigger-runtime.md": {
+      "source_hash": "27520471bc29b0860ba5f1333dc1e47411da5f4fbcb0ab2b4ada48dce21cd0d7",
+      "artifact_path": "docs/_catalog/architecture/trigger-runtime.json"
+    },
+    "docs/architecture/workflow-drafts.md": {
+      "source_hash": "c5669c59af02514f6afe93c503e87826a89c39a15525e9263b3a708caf34fd80",
+      "artifact_path": "docs/_catalog/architecture/workflow-drafts.json"
+    },
+    "docs/architecture/workflow-loops.md": {
+      "source_hash": "fad576de0b860df584da9ea7d46a2a990f7db58778397cdcb8f2b1e4fadf4341",
+      "artifact_path": "docs/_catalog/architecture/workflow-loops.json"
+    },
+    "docs/architecture/workshop-external-services.md": {
+      "source_hash": "a015ea365259009c7a7b15411243ef053a10e7bb949ab69f56c7120b28bddcd7",
+      "artifact_path": "docs/_catalog/architecture/workshop-external-services.json"
+    },
+    "docs/behaviors/covenants.md": {
+      "source_hash": "d0177f2e9fbfd74333366280f8a0a270d892a3f77fb45d817ba03a709e462c1b",
+      "artifact_path": "docs/_catalog/behaviors/covenants.json"
+    },
+    "docs/behaviors/dispatch-gate.md": {
+      "source_hash": "409b18ecc26574320c23f0814fbe6e712aee67f7ebc689bb323751cbb3f4261d",
+      "artifact_path": "docs/_catalog/behaviors/dispatch-gate.json"
+    },
+    "docs/behaviors/instruction-types.md": {
+      "source_hash": "03d82692c81911517a848990abb9b7a6c03930948a06df7596f7754fa339277e",
+      "artifact_path": "docs/_catalog/behaviors/instruction-types.json"
+    },
+    "docs/behaviors/proactive-awareness.md": {
+      "source_hash": "a626c24457c2bae4a102e2d9308bc0fae198c881ba032d21e705f31cb5ac5151",
+      "artifact_path": "docs/_catalog/behaviors/proactive-awareness.json"
+    },
+    "docs/behaviors/scheduler.md": {
+      "source_hash": "67c27009ccf3cfa33f52fa8e8dd7dd8dbd26aa6103171fdc83c62526e22e0f76",
+      "artifact_path": "docs/_catalog/behaviors/scheduler.json"
+    },
+    "docs/capabilities/calendar.md": {
+      "source_hash": "d941d23d4753e67d744b2c81d83c4355d6e7521ac7d56b61ac5ba45f9e0f824f",
+      "artifact_path": "docs/_catalog/capabilities/calendar.json"
+    },
+    "docs/capabilities/channels.md": {
+      "source_hash": "176ea79f568685754bc315dfdecc9ded3956ff98515d83908c26b72f83d0c915",
+      "artifact_path": "docs/_catalog/capabilities/channels.json"
+    },
+    "docs/capabilities/cli.md": {
+      "source_hash": "f7122253e83b92dc83f278769bf8802a6a6f84ec071e02eb036e573ee5f41ca1",
+      "artifact_path": "docs/_catalog/capabilities/cli.json"
+    },
+    "docs/capabilities/cross-space-requests.md": {
+      "source_hash": "fe4023e2085c29b7c21e0285419eac015cb49be1a006be734972d50d21491afc",
+      "artifact_path": "docs/_catalog/capabilities/cross-space-requests.json"
+    },
+    "docs/capabilities/diagnostics.md": {
+      "source_hash": "74d5a7f0a468f1f710792e73b4cb5942a76c40514a0d8d775590b87f6f749f07",
+      "artifact_path": "docs/_catalog/capabilities/diagnostics.json"
+    },
+    "docs/capabilities/external-agents.md": {
+      "source_hash": "71a1aa325414855a6b3df871f23fbc8c915ec22c38e2f5493326953a9577540e",
+      "artifact_path": "docs/_catalog/capabilities/external-agents.json"
+    },
+    "docs/capabilities/file-system.md": {
+      "source_hash": "836116e293ab51e514bc870af8fb9a0506803cdb30ed0330f8a60db7cb041fed",
+      "artifact_path": "docs/_catalog/capabilities/file-system.json"
+    },
+    "docs/capabilities/memory-tools.md": {
+      "source_hash": "37665bd2300bb1472f48067c326a4fc415ace63e6d1ab5ca315c4513531ae19b",
+      "artifact_path": "docs/_catalog/capabilities/memory-tools.json"
+    },
+    "docs/capabilities/overview.md": {
+      "source_hash": "9814f813276b89ee208d70eb0a22443df556ad5e809672041b7476ff625d7085",
+      "artifact_path": "docs/_catalog/capabilities/overview.json"
+    },
+    "docs/capabilities/references.md": {
+      "source_hash": "646a23f81b17b4cb83247bbe1bf90b276544331ca6e4ad4aafc4ba8b45f39078",
+      "artifact_path": "docs/_catalog/capabilities/references.json"
+    },
+    "docs/capabilities/relational-messaging.md": {
+      "source_hash": "32bc76b6fe967d43e38ac03fa7246809fd37d53f260c096341ef1dfe4eafbf86",
+      "artifact_path": "docs/_catalog/capabilities/relational-messaging.json"
+    },
+    "docs/capabilities/sms.md": {
+      "source_hash": "d5d277b4ea94f197f6c02d000d9fe80990aab37eee5ab54ba5fb8efba9e5d25c",
+      "artifact_path": "docs/_catalog/capabilities/sms.json"
+    },
+    "docs/capabilities/tool-surface.md": {
+      "source_hash": "e647f660ceaaa0e86609e86c08a698583a263e24dd5d4d0881cbdae383719aef",
+      "artifact_path": "docs/_catalog/capabilities/tool-surface.json"
+    },
+    "docs/capabilities/web-browsing.md": {
+      "source_hash": "d6bfdace5c28b8ce8f3575e621f4c66603d13c4cd9bbb83ed4f5d0c67e282e89",
+      "artifact_path": "docs/_catalog/capabilities/web-browsing.json"
+    },
+    "docs/design-frames/action-loop.md": {
+      "source_hash": "e6001b143570ea6838855e7e23d797cc30067c96eb491765c3d56ff42aadcb91",
+      "artifact_path": "docs/_catalog/design-frames/action-loop.json"
+    },
+    "docs/design-frames/judgment-vs-plumbing.md": {
+      "source_hash": "01b1fb6556038654faf7f2ceafe3492cb7af086c3dc1388a62c2e33cc25b2891",
+      "artifact_path": "docs/_catalog/design-frames/judgment-vs-plumbing.json"
+    },
+    "docs/design-frames/skill-model-lens.md": {
+      "source_hash": "fdd05b9af12505bd7488b56d412c404f174948921ce1be6b394409ff74c93ddb",
+      "artifact_path": "docs/_catalog/design-frames/skill-model-lens.json"
+    },
+    "docs/env-protection.md": {
+      "source_hash": "82aea3be4f4023b24f17ad3c9c1231415424fae39c1a0ce59e9fc2b3f223b769",
+      "artifact_path": "docs/_catalog/env-protection.json"
+    },
+    "docs/identity/about-kernos.md": {
+      "source_hash": "1f4f32d6fcecdd1f351f3b1513b388cf3d18c161be2a1b31af5d414c4459b330",
+      "artifact_path": "docs/_catalog/identity/about-kernos.json"
+    },
+    "docs/identity/onboarding.md": {
+      "source_hash": "64bdbc5b32c36d77b52e0c11013faafc3a3c22b8bbed39941383608b9b1daa2c",
+      "artifact_path": "docs/_catalog/identity/onboarding.json"
+    },
+    "docs/identity/soul-system.md": {
+      "source_hash": "be189d098520d3bcbf6232bffdaf8233d202ffca13bf879d5f5b8f689a50b7de",
+      "artifact_path": "docs/_catalog/identity/soul-system.json"
+    },
+    "docs/identity/who-you-are.md": {
+      "source_hash": "76170fa928e04c0df563a115d6813a335fc83674e12351b261d2f4664408cac8",
+      "artifact_path": "docs/_catalog/identity/who-you-are.json"
+    },
+    "docs/index.md": {
+      "source_hash": "5fe3d1653948912c0ec0ed5c88323865a0e4df241d2b4b68ebcdcfdad1545e6e",
+      "artifact_path": "docs/_catalog/index.json"
+    },
+    "docs/install.md": {
+      "source_hash": "f6b88813b147cc26712e700d8781651b91563475e408e1fd91b70181eca92ca1",
+      "artifact_path": "docs/_catalog/install.json"
+    },
+    "docs/kernos-introduction.md": {
+      "source_hash": "95003901e022a6b0309f28fbeee713d3c093e76774dc49c6bc2ca507a78eb99c",
+      "artifact_path": "docs/_catalog/kernos-introduction.json"
+    },
+    "docs/operating/reference-catalog-baked.md": {
+      "source_hash": "181ef19625442ea1e0d9bf473b9871f4744c22ed5fc42f0238d509f8ca807bb8",
+      "artifact_path": "docs/_catalog/operating/reference-catalog-baked.json"
+    },
+    "docs/reference/architecture-notebook.md": {
+      "source_hash": "8dd3ae0c65a0d08e733c6be7fae97d0974d95c114b676e577cbbf25588c5cdc2",
+      "artifact_path": "docs/_catalog/reference/architecture-notebook.json"
+    },
+    "docs/reference/blueprint-original-vision.md": {
+      "source_hash": "b40d4a60f051315cc42cf25acda9fffb68831b1accda3cb50de16f3fdf9f5e0d",
+      "artifact_path": "docs/_catalog/reference/blueprint-original-vision.json"
+    },
+    "docs/reference/design-build-the-missing-handle.md": {
+      "source_hash": "8c6fe31a28c0efc28c90ded9722e213473d981a372f801390259ad2b8597c4da",
+      "artifact_path": "docs/_catalog/reference/design-build-the-missing-handle.json"
+    },
+    "docs/reference/design-ledger-vs-facts.md": {
+      "source_hash": "342614ba32aa031fecb4580553d35a1339e146b1e1e37922fc812ba58a5c29c9",
+      "artifact_path": "docs/_catalog/reference/design-ledger-vs-facts.json"
+    },
+    "docs/reference/design-tool-execution-mediation.md": {
+      "source_hash": "bc37d44298aeab4dd6eeff82c574b065295ceacfeecaf6078acbf0dc8e5b2214",
+      "artifact_path": "docs/_catalog/reference/design-tool-execution-mediation.json"
+    },
+    "docs/reference/developer-error-surfacing.md": {
+      "source_hash": "29b043f237e32b58eb05cc4463e98f0d4a801e615340ca49efee9ad26441f67f",
+      "artifact_path": "docs/_catalog/reference/developer-error-surfacing.json"
+    },
+    "docs/reference/external-research/CWA-BRIDGE-ARCHITECTURE.md": {
+      "source_hash": "e2b899bf2d2d0745648d50f569d6c41c220a41735210a43afc8f456afdfb7187",
+      "artifact_path": "docs/_catalog/reference/external-research/CWA-BRIDGE-ARCHITECTURE.json"
+    },
+    "docs/reference/external-research/CWA-STREAMING-TOOL-EXECUTION.md": {
+      "source_hash": "c85f8f89d11bb7aec2d7920a032e1c0767a6310ded799f741ff28550889aa65f",
+      "artifact_path": "docs/_catalog/reference/external-research/CWA-STREAMING-TOOL-EXECUTION.json"
+    },
+    "docs/reference/kernel-architecture-outline.md": {
+      "source_hash": "28d84b4b29a417c0e9dfd980fbfba306e519a065c3da2e16dab2e15bd77582a7",
+      "artifact_path": "docs/_catalog/reference/kernel-architecture-outline.json"
+    },
+    "docs/roadmap.md": {
+      "source_hash": "ca4039894befd95c3e8726f1f011f5183e7878d373558a00546c9b62229549c0",
+      "artifact_path": "docs/_catalog/roadmap.json"
+    },
+    "docs/roadmap/future.md": {
+      "source_hash": "edf93e5cf3f149301f46930e2754b1a8c9a6c0a59c08b1157cefd14fda410661",
+      "artifact_path": "docs/_catalog/roadmap/future.json"
+    },
+    "docs/roadmap/vision.md": {
+      "source_hash": "cb1225f67e7f93d5b5d7090523a50f6cb324c674504cec291f09dbd23ff66132",
+      "artifact_path": "docs/_catalog/roadmap/vision.json"
+    },
+    "docs/roadmap/whats-next.md": {
+      "source_hash": "bae8d592e9b6a958e1a9850bda0b0b10406bd169815bbbec8dbc57dbbdce87b2",
+      "artifact_path": "docs/_catalog/roadmap/whats-next.json"
+    },
+    "docs/updating-llm-benchmark.md": {
+      "source_hash": "ba8c54b36c0a59c64e7d67fde217c66da34378d60a6662c8690f808f034922b7",
+      "artifact_path": "docs/_catalog/updating-llm-benchmark.json"
+    },
+    "docs/v2/alignment-substrate.md": {
+      "source_hash": "d4e468075ce4e5d80554827c2c41bcca1c8fe394f4894fedd8129da28bc1f7b7",
+      "artifact_path": "docs/_catalog/v2/alignment-substrate.json"
+    },
+    "docs/v2/direction.md": {
+      "source_hash": "f7118c8f62650f68fa652a502bc7cc6448418380b0f60a9ccfeca3013c001872",
+      "artifact_path": "docs/_catalog/v2/direction.json"
+    },
+    "docs/workflow-patterns/00-library-meta.md": {
+      "source_hash": "77941e3d81e1fde8cd5ada4ef3d380c349a6a2b365deb8f969cd9dfb9d7d21f5",
+      "artifact_path": "docs/_catalog/workflow-patterns/00-library-meta.json"
+    },
+    "docs/workflow-patterns/01-software-development.md": {
+      "source_hash": "45dd9d9e14f772bde81c500b82d2d860fa58c6b1df8921f4646e1e977eb24166",
+      "artifact_path": "docs/_catalog/workflow-patterns/01-software-development.json"
+    },
+    "docs/workflow-patterns/02-long-form-campaign.md": {
+      "source_hash": "96ae8f5683666ba00563c96793e75e938db58d9a8f012f0e0b5b74a77c90ee15",
+      "artifact_path": "docs/_catalog/workflow-patterns/02-long-form-campaign.json"
+    },
+    "docs/workflow-patterns/03-legal-case.md": {
+      "source_hash": "2ac062c45b5583a27d59d7ee8efbe74c8c6f089ada0d5434ccb1901d012c212a",
+      "artifact_path": "docs/_catalog/workflow-patterns/03-legal-case.json"
+    },
+    "docs/workflow-patterns/04-household-management.md": {
+      "source_hash": "9330649e68f2aa2e4eb08a8d0dba4f809fbb8037387b25202efc433b15ec0e48",
+      "artifact_path": "docs/_catalog/workflow-patterns/04-household-management.json"
+    },
+    "docs/workflow-patterns/05-time-bounded-event.md": {
+      "source_hash": "359be47d876e8cc33264869cb42aa0a5f56bbfad4b0588d5dc3fb7ac7aee2b5c",
+      "artifact_path": "docs/_catalog/workflow-patterns/05-time-bounded-event.json"
+    },
+    "docs/workflow-patterns/06-per-job-trade-work.md": {
+      "source_hash": "eb6af36b56bbb704b754f44c7a73c5b4632d5a7c3603f63b461b9aa86a66693c",
+      "artifact_path": "docs/_catalog/workflow-patterns/06-per-job-trade-work.json"
+    },
+    "docs/workflow-patterns/07-research-lab.md": {
+      "source_hash": "c30b8eeb888b509429ddc7f663c72ddaffe7c7d59d18102fa32795d617cc72f0",
+      "artifact_path": "docs/_catalog/workflow-patterns/07-research-lab.json"
+    },
+    "docs/workflow-patterns/08-creative-solo.md": {
+      "source_hash": "79272f0e68b96de2162ccc11db2d670a87ff5cc29bca450bc4bb7c203575730f",
+      "artifact_path": "docs/_catalog/workflow-patterns/08-creative-solo.json"
+    },
+    "docs/workflow-patterns/09-creative-collective.md": {
+      "source_hash": "644a168b05df671056371a204ff82aacf064d5d1de93f2d799195e4d98e665f1",
+      "artifact_path": "docs/_catalog/workflow-patterns/09-creative-collective.json"
+    },
+    "docs/workflow-patterns/10-client-project.md": {
+      "source_hash": "74bfb2d5ddd3bad637ff4850cb057da4d0b076a6c3dba9efe65d096dfa198c41",
+      "artifact_path": "docs/_catalog/workflow-patterns/10-client-project.json"
+    },
+    "docs/workflow-patterns/11-long-term-client-relationship.md": {
+      "source_hash": "e82798e35c31286d599e277c19e5b3b1fb0a8c1f861ac4be5564851254f247d6",
+      "artifact_path": "docs/_catalog/workflow-patterns/11-long-term-client-relationship.json"
+    },
+    "docs/workflow-patterns/12-course-development.md": {
+      "source_hash": "7fa5600136f34dee061d6ee50011c19f785a105b07c896558218ad179451881e",
+      "artifact_path": "docs/_catalog/workflow-patterns/12-course-development.json"
+    },
+    "docs/workflow-patterns/13-investigative-reporting.md": {
+      "source_hash": "3b810c01b43dc686f5bf152e4e303a81d54825732a266b2d2783b909aca07f14",
+      "artifact_path": "docs/_catalog/workflow-patterns/13-investigative-reporting.json"
+    },
+    "docs/workflow-patterns/14-open-source-maintenance.md": {
+      "source_hash": "e64154da5792846166e997a630a66a0de7fe0fceb4da56d06e780e297cd710f4",
+      "artifact_path": "docs/_catalog/workflow-patterns/14-open-source-maintenance.json"
+    },
+    "docs/workflow-patterns/15-multi-project-operations.md": {
+      "source_hash": "b165820ae8f1e0e8550505caeba26a7108a9c4c3a904c3c4c4d56039269a1ae4",
+      "artifact_path": "docs/_catalog/workflow-patterns/15-multi-project-operations.json"
+    },
+    "docs/workflow-patterns/16-cause-based-organizing.md": {
+      "source_hash": "1fea3b934f5c88a1ee73477e66bd25ecb7e5feaa7ad41f544fed8796accb4d9d",
+      "artifact_path": "docs/_catalog/workflow-patterns/16-cause-based-organizing.json"
+    },
+    "docs/workflow-patterns/17-multi-party-transaction.md": {
+      "source_hash": "18e899506fea5432a3c597408f38024e64e539f1fd0849b8b437f440e74c8d07",
+      "artifact_path": "docs/_catalog/workflow-patterns/17-multi-party-transaction.json"
+    },
+    "docs/workflow-patterns/18-personal-long-horizon.md": {
+      "source_hash": "e40b6e127ddde3035b98bc2ac6d1d7d9d06b2b3b87877f587877b06a0e0fb2bd",
+      "artifact_path": "docs/_catalog/workflow-patterns/18-personal-long-horizon.json"
+    },
+    "docs/workshop/external-services.md": {
+      "source_hash": "5e2e808de8815bb3819173dec05526a7e369faafd15e8b0362613fca459cefc1",
+      "artifact_path": "docs/_catalog/workshop/external-services.json"
+    },
+    "docs/workshop/stock-connector-recipe.md": {
+      "source_hash": "a70a433706df4ad481a8c210749a37d99c6c8a6c31fc48617df75307bf373a56",
+      "artifact_path": "docs/_catalog/workshop/stock-connector-recipe.json"
+    }
+  }
+}

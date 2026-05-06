@@ -1,0 +1,25 @@
+{
+  "file_path": "docs/reference/external-research/CWA-STREAMING-TOOL-EXECUTION.md",
+  "source_hash": "c85f8f89d11bb7aec2d7920a032e1c0767a6310ded799f741ff28550889aa65f",
+  "generated_at": "2026-05-06T18:17:34.951703+00:00",
+  "sections": [
+    {
+      "section_title": "Key Insight",
+      "one_line": "Tool execution begins while the API response is still streaming",
+      "line_start": 8,
+      "line_end": 15
+    },
+    {
+      "section_title": "Architecture",
+      "one_line": "Streaming tool execution architecture, concurrency, input accumulation, and error handling",
+      "line_start": 16,
+      "line_end": 60
+    },
+    {
+      "section_title": "Applicability to Kernos",
+      "one_line": "How streaming tool execution would fit into Kernos",
+      "line_start": 61,
+      "line_end": 94
+    }
+  ]
+}

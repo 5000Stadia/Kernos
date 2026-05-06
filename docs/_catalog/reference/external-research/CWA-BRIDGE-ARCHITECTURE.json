@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/reference/external-research/CWA-BRIDGE-ARCHITECTURE.md",
+  "source_hash": "e2b899bf2d2d0745648d50f569d6c41c220a41735210a43afc8f456afdfb7187",
+  "generated_at": "2026-05-06T18:17:24.287188+00:00",
+  "sections": [
+    {
+      "section_title": "Overview",
+      "one_line": "CWA bridge architecture and protocol versions for connecting claude.ai to a local CLI",
+      "line_start": 8,
+      "line_end": 18
+    },
+    {
+      "section_title": "Protocol Summary (V2 — Recommended)",
+      "one_line": "End-to-end V2 session protocol for creation, event transport, permissions, reconnects, and shutdown",
+      "line_start": 19,
+      "line_end": 70
+    },
+    {
+      "section_title": "Security Layers",
+      "one_line": "Security tokens and lifetimes used for Kernos session auth, worker events, and trusted devices",
+      "line_start": 71,
+      "line_end": 81
+    },
+    {
+      "section_title": "Key Data Structures",
+      "one_line": "Core data structures for message deduplication, history flushing, and crash recovery",
+      "line_start": 82,
+      "line_end": 103
+    },
+    {
+      "section_title": "Phase 5 Design Implications",
+      "one_line": "Kernos web session architecture needs for SSE, permissions, reconnection, and JWT handling",
+      "line_start": 104,
+      "line_end": 140
+    }
+  ]
+}

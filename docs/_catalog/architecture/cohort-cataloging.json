@@ -1,0 +1,61 @@
+{
+  "file_path": "docs/architecture/cohort-cataloging.md",
+  "source_hash": "4fe60fabc8af40bd510c3955e1b4516625a7c3b8d4d1d42a47e4527a1d72ad0d",
+  "generated_at": "2026-05-06T17:38:10.681925+00:00",
+  "sections": [
+    {
+      "section_title": "What the cohort does",
+      "one_line": "Async cataloging of files and collections",
+      "line_start": 5,
+      "line_end": 24
+    },
+    {
+      "section_title": "Why async",
+      "one_line": "Why cataloging runs in the background to avoid blocking and keep most turns free of LLM work",
+      "line_start": 25,
+      "line_end": 30
+    },
+    {
+      "section_title": "File-level rebuild is transactional",
+      "one_line": "Transactional per-file catalog rebuilds with rollback on failure",
+      "line_start": 31,
+      "line_end": 38
+    },
+    {
+      "section_title": "LLM failure handling",
+      "one_line": "Fallback behavior when LLM calls or catalog rebuilds fail",
+      "line_start": 39,
+      "line_end": 44
+    },
+    {
+      "section_title": "Vanished-file handling",
+      "one_line": "Tombstoning files that vanished between enqueue and pickup",
+      "line_start": 45,
+      "line_end": 48
+    },
+    {
+      "section_title": "In-flight tracking",
+      "one_line": "Tracking items currently being processed so tests can wait for async work",
+      "line_start": 49,
+      "line_end": 52
+    },
+    {
+      "section_title": "LLMClient contract",
+      "one_line": "Cataloging LLM client protocol and its production and test wiring",
+      "line_start": 53,
+      "line_end": 64
+    },
+    {
+      "section_title": "Section split heuristic",
+      "one_line": "File section splitting at h2 headings, with fallback titles when no h2 is present",
+      "line_start": 65,
+      "line_end": 75
+    },
+    {
+      "section_title": "Where the cohort runs",
+      "one_line": "Cohort lifecycle and shared process-wide queue during substrate bring-up and tear-down",
+      "line_start": 76,
+      "line_end": 80
+    }
+  ]
+}

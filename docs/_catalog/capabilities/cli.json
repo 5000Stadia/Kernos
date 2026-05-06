@@ -1,0 +1,25 @@
+{
+  "file_path": "docs/capabilities/cli.md",
+  "source_hash": "f7122253e83b92dc83f278769bf8802a6a6f84ec071e02eb036e573ee5f41ca1",
+  "generated_at": "2026-05-06T18:01:58.336335+00:00",
+  "sections": [
+    {
+      "section_title": "Usage",
+      "one_line": "Kernos chat command usage for interactive, tenant, quiet, and scripted message sessions",
+      "line_start": 5,
+      "line_end": 15
+    },
+    {
+      "section_title": "Key Properties",
+      "one_line": "Core CLI behavior for tenant reuse, fresh onboarding, script mode, and interactive-only limits",
+      "line_start": 16,
+      "line_end": 22
+    },
+    {
+      "section_title": "Channel Status",
+      "one_line": "CLI Terminal channel status in manage_channels list showing outbound sending is disabled",
+      "line_start": 23,
+      "line_end": 25
+    }
+  ]
+}

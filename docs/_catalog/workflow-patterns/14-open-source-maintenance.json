@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/14-open-source-maintenance.md",
+  "source_hash": "e64154da5792846166e997a630a66a0de7fe0fceb4da56d06e780e297cd710f4",
+  "generated_at": "2026-05-06T18:28:51.979586+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Key project dials for governance stability, contributor scale, and long-term maintenance",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Kernos doc artifacts and their corresponding files, roles, and governance status",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Initial documentation files and their roles for governance, releases, RFCs, triage, security, and contributors",
+      "line_start": 31,
+      "line_end": 81
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristics for escalating project health signals across triage, releases, governance, security, and community",
+      "line_start": 82,
+      "line_end": 152
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member intent signals that set governance, routing, and workflow preferences",
+      "line_start": 153,
+      "line_end": 168
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Open-source governance edge cases for privacy, burnout, forks, breaking changes, and end-of-life",
+      "line_start": 169,
+      "line_end": 225
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "How the open-source maintenance canvas composes with related canvases",
+      "line_start": 226,
+      "line_end": 235
+    }
+  ]
+}

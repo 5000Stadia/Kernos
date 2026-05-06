@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/01-software-development.md",
+  "source_hash": "45dd9d9e14f772bde81c500b82d2d860fa58c6b1df8921f4646e1e977eb24166",
+  "generated_at": "2026-05-06T18:22:02.606733+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Core project dials: charter stability, actor count, and long-term horizon",
+      "line_start": 12,
+      "line_end": 17
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Maps Kernos artifacts to their roles, update rules, and ownership across the project lifecycle",
+      "line_start": 18,
+      "line_end": 28
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Initial Kernos documentation map and frontmatter rules for specs, logs, notes, and status routing",
+      "line_start": 29,
+      "line_end": 54
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristics for spotting documentation drift, growth, and review triggers across specs, charter, and manifests",
+      "line_start": 55,
+      "line_end": 281
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Natural-language member requests turned into persistent Gardener preferences and routing rules",
+      "line_start": 282,
+      "line_end": 296
+    },
+    {
+      "section_title": "Domain-specific rituals",
+      "one_line": "Rules for spec-session preambles, decision logging, and commit-coupled manifest updates",
+      "line_start": 297,
+      "line_end": 325
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Guidance on combining the software development canvas with related canvases",
+      "line_start": 326,
+      "line_end": 334
+    }
+  ]
+}

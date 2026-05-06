@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/behaviors/proactive-awareness.md",
+  "source_hash": "a626c24457c2bae4a102e2d9308bc0fae198c881ba032d21e705f31cb5ac5151",
+  "generated_at": "2026-05-06T18:00:23.496053+00:00",
+  "sections": [
+    {
+      "section_title": "How It Works",
+      "one_line": "Continuous evaluation and delivery of awareness whispers based on timing and priority",
+      "line_start": 5,
+      "line_end": 44
+    },
+    {
+      "section_title": "dismiss_whisper Tool",
+      "one_line": "Dismissal of a whisper by whisper_id with user_dismissed or already_handled reason",
+      "line_start": 45,
+      "line_end": 52
+    },
+    {
+      "section_title": "What Creates Foresight Signals",
+      "one_line": "Sources of foresight signals from Tier 2 time-anchored knowledge extraction",
+      "line_start": 53,
+      "line_end": 56
+    },
+    {
+      "section_title": "Logging",
+      "one_line": "Whisper interrupt logging for delivery, failure, suppression, history injection, and promotion checks",
+      "line_start": 57,
+      "line_end": 66
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "File locations for awareness evaluator, whisper injection, and evaluator lifecycle code",
+      "line_start": 67,
+      "line_end": 74
+    }
+  ]
+}

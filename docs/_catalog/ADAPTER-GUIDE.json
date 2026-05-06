@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/ADAPTER-GUIDE.md",
+  "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
+  "generated_at": "2026-05-06T17:31:12.566808+00:00",
+  "sections": [
+    {
+      "section_title": "Architecture: Adapters Are Dumb Pipe",
+      "one_line": "Adapter boundary: platform message translation to NormalizedMessage; handlers own all other logic",
+      "line_start": 7,
+      "line_end": 19
+    },
+    {
+      "section_title": "Checklist: What Every Adapter Must Do",
+      "one_line": "Adapter requirements for message handling, chunking, polling, identity discovery, and startup",
+      "line_start": 20,
+      "line_end": 173
+    },
+    {
+      "section_title": "Setup and Invite Instructions",
+      "one_line": "Setup and invite instructions for linking accounts",
+      "line_start": 174,
+      "line_end": 195
+    },
+    {
+      "section_title": "Lessons Learned",
+      "one_line": "Key implementation lessons from Telegram, Discord, SMS, secure API, and invite code handling.",
+      "line_start": 196,
+      "line_end": 226
+    },
+    {
+      "section_title": "Testing",
+      "one_line": "Unit and live tests for Kernos messaging behavior, persistence, and implementation checks",
+      "line_start": 227,
+      "line_end": 254
+    },
+    {
+      "section_title": "File Reference",
+      "one_line": "File locations for Kernos message adapters, pollers, config, and handler logic",
+      "line_start": 255,
+      "line_end": 272
+    }
+  ]
+}

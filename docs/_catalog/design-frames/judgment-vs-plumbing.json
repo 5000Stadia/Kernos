@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/design-frames/judgment-vs-plumbing.md",
+  "source_hash": "01b1fb6556038654faf7f2ceafe3492cb7af086c3dc1388a62c2e33cc25b2891",
+  "generated_at": "2026-05-06T18:08:04.916150+00:00",
+  "sections": [
+    {
+      "section_title": "The pattern in one sentence",
+      "one_line": "Division of labor between LLM semantic judgments and Python lookups, mutations, and routing",
+      "line_start": 5,
+      "line_end": 10
+    },
+    {
+      "section_title": "What counts as judgment",
+      "one_line": "Context-based judgment tasks handled by bounded cohort agents in Kernos",
+      "line_start": 11,
+      "line_end": 22
+    },
+    {
+      "section_title": "What counts as plumbing",
+      "one_line": "Deterministic backend tasks that do not require LLM understanding",
+      "line_start": 23,
+      "line_end": 35
+    },
+    {
+      "section_title": "Why this matters",
+      "one_line": "Why separating plumbing from judgment keeps Kernos fast, deterministic, and adaptive",
+      "line_start": 36,
+      "line_end": 45
+    },
+    {
+      "section_title": "The architectural invariants",
+      "one_line": "Architecture rules that keep the principal agent and cohorts isolated from each other’s reasoning",
+      "line_start": 46,
+      "line_end": 55
+    },
+    {
+      "section_title": "Related",
+      "one_line": "Related links for skill models, action loops, and cohort architecture.",
+      "line_start": 56,
+      "line_end": 60
+    }
+  ]
+}

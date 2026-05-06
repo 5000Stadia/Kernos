@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/architecture/soul.md",
+  "source_hash": "87dba469d8ac43e00bf2fb0ba36561ce3d55bb00f2d17e36915cf322d91c99e6",
+  "generated_at": "2026-05-06T17:55:44.487436+00:00",
+  "sections": [
+    {
+      "section_title": "Two-layer identity",
+      "one_line": "Shared template and per-member profiles that define Kernos identity",
+      "line_start": 7,
+      "line_end": 13
+    },
+    {
+      "section_title": "member_profiles fields",
+      "one_line": "Member profile table fields and meanings for stored member identity and state",
+      "line_start": 14,
+      "line_end": 31
+    },
+    {
+      "section_title": "Per-member hatching arc",
+      "one_line": "Member agent lifecycle from unhatched to graduated through the bootstrap arc",
+      "line_start": 32,
+      "line_end": 42
+    },
+    {
+      "section_title": "Identity tools (kernel-tool surface)",
+      "one_line": "Kernel tools for reading and updating per-member identity profile data",
+      "line_start": 43,
+      "line_end": 51
+    },
+    {
+      "section_title": "Identity vs memory vs canvases",
+      "one_line": "How identity, memory, canvases, and references differ in scope and purpose",
+      "line_start": 52,
+      "line_end": 62
+    },
+    {
+      "section_title": "Code locations",
+      "one_line": "Locations of Kernos identity, bootstrap, and migration code",
+      "line_start": 63,
+      "line_end": 73
+    },
+    {
+      "section_title": "See also",
+      "one_line": "Related docs on identity, onboarding, and disclosure",
+      "line_start": 74,
+      "line_end": 78
+    }
+  ]
+}

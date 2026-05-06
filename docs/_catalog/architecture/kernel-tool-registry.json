@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/architecture/kernel-tool-registry.md",
+  "source_hash": "343d30338ab98d5f98eb9346c0d52b388a549ab527ef7adac24801fa5143fa90",
+  "generated_at": "2026-05-06T17:48:40.148586+00:00",
+  "sections": [
+    {
+      "section_title": "The problem this fixed",
+      "one_line": "Three hardcoded tool registries drifted apart, hiding tools from surfacing paths and dispatch.",
+      "line_start": 5,
+      "line_end": 16
+    },
+    {
+      "section_title": "Implementation discipline",
+      "one_line": "Implementation rules for schema imports, policy facades, and separate CRB parcel handling in Kernos",
+      "line_start": 17,
+      "line_end": 24
+    },
+    {
+      "section_title": "Where it lives",
+      "one_line": "Location of the kernel tool registry and its schema/descriptor entry points",
+      "line_start": 25,
+      "line_end": 35
+    },
+    {
+      "section_title": "KernelToolDescriptor",
+      "one_line": "Kernel tool descriptor contract for tool identity, schema, policy metadata, and dispatch reference",
+      "line_start": 36,
+      "line_end": 50
+    },
+    {
+      "section_title": "Policy source map",
+      "one_line": "Policy field map showing owners, accessors, and parity checks for tool policy access",
+      "line_start": 51,
+      "line_end": 58
+    },
+    {
+      "section_title": "Workshop-tool prep contract",
+      "one_line": "Future contract for workshop tools in the registrar and dispatch system",
+      "line_start": 59,
+      "line_end": 71
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/architecture/cohort-fan-out.md",
+  "source_hash": "13bec090ced4ee5b24596bf649aaca2dbd27e0a9024167ddf8028f32df11a7fb",
+  "generated_at": "2026-05-06T17:40:09.318155+00:00",
+  "sections": [
+    {
+      "section_title": "What the runner does",
+      "one_line": "Parallel fan-out execution, timeout handling, and failure isolation for cohorts",
+      "line_start": 12,
+      "line_end": 35
+    },
+    {
+      "section_title": "Cohort descriptor",
+      "one_line": "CohortDescriptor registration fields, required behavior, timeout, visibility, and execution mode",
+      "line_start": 36,
+      "line_end": 49
+    },
+    {
+      "section_title": "Registry",
+      "one_line": "Boot-time cohort registration rules and validation",
+      "line_start": 50,
+      "line_end": 62
+    },
+    {
+      "section_title": "Failure isolation guarantee (narrowed)",
+      "one_line": "Limits of failure isolation in async cohorts and what the runner can and cannot protect against",
+      "line_start": 63,
+      "line_end": 88
+    },
+    {
+      "section_title": "Fan-out execution model",
+      "one_line": "Parallel cohort execution with per-task and global timeouts, cancellation, and stable output ordering",
+      "line_start": 89,
+      "line_end": 104
+    },
+    {
+      "section_title": "Synthetic outputs (the design review edit #4)",
+      "one_line": "Synthetic CohortOutputs for failure cases so every registered cohort yields one result",
+      "line_start": 105,
+      "line_end": 123
+    },
+    {
+      "section_title": "cohort_run_id minted by runner",
+      "one_line": "Runner-assigned cohort_run_id format and override rules for audit-trail references",
+      "line_start": 124,
+      "line_end": 131
+    },
+    {
+      "section_title": "Redaction policy",
+      "one_line": "Redacting secrets, credentials, tokens, and stack traces from error and synthetic output text",
+      "line_start": 132,
+      "line_end": 149
+    },
+    {
+      "section_title": "Required-cohort failure policy (Section 8)",
+      "one_line": "Policy for handling required cohort failures and downstream response rules",
+      "line_start": 150,
+      "line_end": 167
+    },
+    {
+      "section_title": "Audit log",
+      "one_line": "Audit trail for cohort fan-out attempts and outcomes",
+      "line_start": 168,
+      "line_end": 182
+    },
+    {
+      "section_title": "Architectural placement",
+      "one_line": "Cohort module layout and where V1 schema extensions live",
+      "line_start": 183,
+      "line_end": 198
+    },
+    {
+      "section_title": "Path forward",
+      "one_line": "Planned adapter specs for new cohort outputs and production turn pipeline wiring",
+      "line_start": 199,
+      "line_end": 218
+    }
+  ]
+}

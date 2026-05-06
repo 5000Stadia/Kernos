@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/env-protection.md",
+  "source_hash": "82aea3be4f4023b24f17ad3c9c1231415424fae39c1a0ce59e9fc2b3f223b769",
+  "generated_at": "2026-05-06T18:09:04.567755+00:00",
+  "sections": [
+    {
+      "section_title": "Why not just use `.env`?",
+      "one_line": "Reasons plain .env is risky and when Kernos uses keychain, hardened .env, or plaintext opt-in",
+      "line_start": 7,
+      "line_end": 16
+    },
+    {
+      "section_title": "1. OS keychain (recommended)",
+      "one_line": "Using the OS keychain to store Kernos API keys securely",
+      "line_start": 17,
+      "line_end": 32
+    },
+    {
+      "section_title": "2. Hardened `.env`",
+      "one_line": "Tight .env file permissions for storing Kernos keys locally",
+      "line_start": 33,
+      "line_end": 42
+    },
+    {
+      "section_title": "3. Plaintext `.env` (explicit opt-in)",
+      "one_line": "Opt-in plaintext .env storage when hardened storage is inconvenient or unnecessary",
+      "line_start": 43,
+      "line_end": 48
+    },
+    {
+      "section_title": "Switching backends later",
+      "one_line": "Safely changing Kernos secret storage backends after setup",
+      "line_start": 49,
+      "line_end": 60
+    },
+    {
+      "section_title": "Reading stored keys at runtime",
+      "one_line": "Startup loading of stored chain keys into environment variables",
+      "line_start": 61,
+      "line_end": 64
+    },
+    {
+      "section_title": "Changing the default",
+      "one_line": "Default storage backend selection for new installs and platform-specific secret stores",
+      "line_start": 65,
+      "line_end": 67
+    }
+  ]
+}

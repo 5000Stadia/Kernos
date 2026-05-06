@@ -1,0 +1,103 @@
+{
+  "file_path": "docs/architecture/reference-primitive.md",
+  "source_hash": "07949b197a7342a553ce9f2b9d7e91697508adf04f5196e20bd8d0c1c456595d",
+  "generated_at": "2026-05-06T17:54:33.083551+00:00",
+  "sections": [
+    {
+      "section_title": "Why it exists",
+      "one_line": "Kernos’s rationale for making docs reachable through multiple surfacing paths",
+      "line_start": 7,
+      "line_end": 12
+    },
+    {
+      "section_title": "Architectural shape",
+      "one_line": "Catalog architecture and reference retrieval from disk into the agent",
+      "line_start": 13,
+      "line_end": 24
+    },
+    {
+      "section_title": "Module layout",
+      "one_line": "Overview of the kernel reference primitive modules and their roles",
+      "line_start": 25,
+      "line_end": 39
+    },
+    {
+      "section_title": "Catalog entry shape",
+      "one_line": "Metadata schema for catalog entries, including file and collection fields, scope, and lifecycle data",
+      "line_start": 40,
+      "line_end": 68
+    },
+    {
+      "section_title": "Trust tiers",
+      "one_line": "Trust levels for sources and when Kernos can auto-induce from them",
+      "line_start": 69,
+      "line_end": 79
+    },
+    {
+      "section_title": "Scope and visibility rule",
+      "one_line": "Visibility rules for catalog entries across instance and domain scopes during retrieval",
+      "line_start": 80,
+      "line_end": 100
+    },
+    {
+      "section_title": "Storage layout on disk",
+      "one_line": "Disk layout for shipped docs and persistent reference data",
+      "line_start": 101,
+      "line_end": 120
+    },
+    {
+      "section_title": "Tool surface",
+      "one_line": "Agent-facing ReferenceService tools for reading, writing, and recovering reference entries",
+      "line_start": 121,
+      "line_end": 136
+    },
+    {
+      "section_title": "Algorithmic injection (with hash validation)",
+      "one_line": "Serving cataloged content only when file hashes match, otherwise fail closed and recatalog",
+      "line_start": 137,
+      "line_end": 148
+    },
+    {
+      "section_title": "Auto-induction",
+      "one_line": "Rules for automatically surfacing matching sections and collections from catalog metadata",
+      "line_start": 149,
+      "line_end": 161
+    },
+    {
+      "section_title": "Cataloging cohort",
+      "one_line": "Cheap-tier async LLM cohort that creates catalog entries from source files",
+      "line_start": 162,
+      "line_end": 165
+    },
+    {
+      "section_title": "Per-turn ingestion check (trigger-driven, not per-turn)",
+      "one_line": "Trigger-based docs change detection and cataloging instead of per-turn scans in Kernos",
+      "line_start": 166,
+      "line_end": 178
+    },
+    {
+      "section_title": "Event shapes",
+      "one_line": "Reference event types and when they emit through the event_stream substrate",
+      "line_start": 179,
+      "line_end": 199
+    },
+    {
+      "section_title": "What this primitive is NOT for",
+      "one_line": "Reference exclusions: mutable content, learned facts, private notes, and live shared sources",
+      "line_start": 200,
+      "line_end": 206
+    },
+    {
+      "section_title": "Out of scope for v1",
+      "one_line": "Features excluded from v1 and deferred to later releases",
+      "line_start": 207,
+      "line_end": 213
+    },
+    {
+      "section_title": "How to use it as the agent",
+      "one_line": "Agent guidance for requesting and storing Kernos references",
+      "line_start": 214,
+      "line_end": 216
+    }
+  ]
+}

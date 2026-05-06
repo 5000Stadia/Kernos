@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/06-per-job-trade-work.md",
+  "source_hash": "eb6af36b56bbb704b754f44c7a73c5b4632d5a7c3603f63b461b9aa86a66693c",
+  "generated_at": "2026-05-06T18:24:23.449373+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Job classification by charter volatility, actor count, and short time horizon",
+      "line_start": 16,
+      "line_end": 21
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Maps job documentation to the required artifacts, centered on the Manifest.",
+      "line_start": 22,
+      "line_end": 32
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default job folder structure and required files",
+      "line_start": 33,
+      "line_end": 80
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Rules for escalating trade jobs when scope, timing, billing, or status outgrow the job pattern",
+      "line_start": 81,
+      "line_end": 124
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Mapping member phrases to Kernos settings and actions",
+      "line_start": 125,
+      "line_end": 139
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Special cases for warranties, suppliers, subcontractors, emergencies, and license/insurance checks",
+      "line_start": 140,
+      "line_end": 171
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Practice-level canvas structure for aggregating job history while keeping per-job work isolated",
+      "line_start": 172,
+      "line_end": 185
+    }
+  ]
+}

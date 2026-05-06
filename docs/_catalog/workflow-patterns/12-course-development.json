@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/12-course-development.md",
+  "source_hash": "7fa5600136f34dee061d6ee50011c19f785a105b07c896558218ad179451881e",
+  "generated_at": "2026-05-06T18:27:44.663219+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Core course canvas dials: volatility, actor count, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Crosswalk from Kernos course and delivery artifacts to the docs they belong in",
+      "line_start": 20,
+      "line_end": 39
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Course and delivery folder structure and metadata for Kernos documentation",
+      "line_start": 40,
+      "line_end": 101
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristics for flagging course changes, maintenance, and end-of-delivery review",
+      "line_start": 102,
+      "line_end": 173
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Mappings from instructor intents to Kernos preferences, access, reminders, and workflow actions",
+      "line_start": 174,
+      "line_end": 188
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Edge-case rules for course/delivery boundaries, privacy, compliance, and course formats",
+      "line_start": 189,
+      "line_end": 223
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "How course development canvases combine with related canvases and persist over time",
+      "line_start": 224,
+      "line_end": 233
+    }
+  ]
+}

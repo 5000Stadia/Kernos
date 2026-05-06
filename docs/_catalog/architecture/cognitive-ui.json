@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/cognitive-ui.md",
+  "source_hash": "83a52f6215cb9c269bdc649967c9fe5f650e876723b6738b07324f1ec7113055",
+  "generated_at": "2026-05-06T17:36:54.110517+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Problems with flat system prompts: no caching, no provenance, no selective updates",
+      "line_start": 5,
+      "line_end": 18
+    },
+    {
+      "section_title": "The zones",
+      "one_line": "Eight message zones in Kernos and what each zone is used for",
+      "line_start": 19,
+      "line_end": 52
+    },
+    {
+      "section_title": "The static/dynamic split",
+      "one_line": "How Kernos separates stable prompt zones from per-turn dynamic context for caching and updates",
+      "line_start": 53,
+      "line_end": 84
+    },
+    {
+      "section_title": "Provenance on knowledge fragments",
+      "one_line": "Provenance cues on STATE knowledge fragments for sensitivity and source-aware handling",
+      "line_start": 85,
+      "line_end": 103
+    },
+    {
+      "section_title": "The disclosure gate: a final filter",
+      "one_line": "Final read-time privacy filter that redacts cross-member facts before they reach STATE",
+      "line_start": 104,
+      "line_end": 114
+    },
+    {
+      "section_title": "Selective zone refresh",
+      "one_line": "How Kernos refreshes only the context zones affected by whispers, space switches, and compaction",
+      "line_start": 115,
+      "line_end": 124
+    },
+    {
+      "section_title": "Why this isn't just \"sectioned prompts\"",
+      "one_line": "Why Kernos uses typed zones instead of simple prompt sections",
+      "line_start": 125,
+      "line_end": 138
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "Benefits of the architecture: cheaper long conversations, traceable context, per-turn updates, and gated disclosure",
+      "line_start": 139,
+      "line_end": 146
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Architecture non-goals and limits, including what the zone system does not guarantee",
+      "line_start": 147,
+      "line_end": 153
+    },
+    {
+      "section_title": "Related architecture",
+      "one_line": "Architecture links for memory, context boundaries, and disclosure gating",
+      "line_start": 154,
+      "line_end": 159
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Key handler locations for block assembly, prompt composition, and disclosure checks",
+      "line_start": 160,
+      "line_end": 173
+    }
+  ]
+}

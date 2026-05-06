@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/07-research-lab.md",
+  "source_hash": "c30b8eeb888b509429ddc7f663c72ddaffe7c7d59d18102fa32795d617cc72f0",
+  "generated_at": "2026-05-06T18:24:46.558717+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Settings for evaluating a research lab’s stability, team size, and time horizon",
+      "line_start": 12,
+      "line_end": 17
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Kernos documentation artifact mapping to file locations and roles",
+      "line_start": 18,
+      "line_end": 28
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Kernos research project file and folder structure with required document roles",
+      "line_start": 29,
+      "line_end": 81
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Rules for when Kernos should prompt, flag, or update documentation across the lab lifecycle",
+      "line_start": 82,
+      "line_end": 130
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "How member intents trigger Kernos preferences and workflow actions",
+      "line_start": 131,
+      "line_end": 145
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Rules for version stability, negative results, data links, collaborator scope, and authorship decisions",
+      "line_start": 146,
+      "line_end": 167
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "How lab canvases combine with project, course, publication, and client canvases",
+      "line_start": 168,
+      "line_end": 177
+    }
+  ]
+}

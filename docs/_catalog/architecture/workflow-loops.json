@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/architecture/workflow-loops.md",
+  "source_hash": "fad576de0b860df584da9ea7d46a2a990f7db58778397cdcb8f2b1e4fadf4341",
+  "generated_at": "2026-05-06T17:58:21.668448+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why reactive turn loops are not enough for event-driven workflows with approvals and audit trails",
+      "line_start": 7,
+      "line_end": 12
+    },
+    {
+      "section_title": "Shape of the primitive",
+      "one_line": "Workflow execution shape, action sequencing, and state continuity across runs and agents",
+      "line_start": 13,
+      "line_end": 42
+    },
+    {
+      "section_title": "Trigger registry",
+      "one_line": "Registry for matching events to workflow executions",
+      "line_start": 43,
+      "line_end": 60
+    },
+    {
+      "section_title": "Workflow registry and descriptor",
+      "one_line": "Workflow registry schema and file format for triggers, bounds, verifiers, and action sequences",
+      "line_start": 61,
+      "line_end": 129
+    },
+    {
+      "section_title": "Action library",
+      "one_line": "Kernos action verbs, wrappers, and verification rules",
+      "line_start": 130,
+      "line_end": 152
+    },
+    {
+      "section_title": "Execution engine",
+      "one_line": "Workflow queue processing with safety checks, tracing, persistence, and restart recovery",
+      "line_start": 153,
+      "line_end": 172
+    },
+    {
+      "section_title": "Approval gates",
+      "one_line": "Human approval checkpoints that pause workflows, validate responses, and control timeout behavior",
+      "line_start": 173,
+      "line_end": 203
+    },
+    {
+      "section_title": "AgentInbox Protocol",
+      "one_line": "Provider-agnostic inbox protocol for routing agent handoffs and approval responses",
+      "line_start": 204,
+      "line_end": 242
+    },
+    {
+      "section_title": "Workflow ledger",
+      "one_line": "Append-only human-readable workflow log for step results, kickbacks, and artifact references within an instance",
+      "line_start": 243,
+      "line_end": 250
+    },
+    {
+      "section_title": "Composition with covenant + cohorts + integration",
+      "one_line": "Workflow composition with covenant-gated verbs, redaction, and read-only cohort visibility",
+      "line_start": 251,
+      "line_end": 258
+    },
+    {
+      "section_title": "Source modules",
+      "one_line": "Kernos workflow and webhook source modules reference",
+      "line_start": 259,
+      "line_end": 274
+    },
+    {
+      "section_title": "See also",
+      "one_line": "Related Kernos workflow, event stream, and safety references",
+      "line_start": 275,
+      "line_end": 280
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "file_path": "docs/architecture/safety-and-gate.md",
+  "source_hash": "95d8b59a9b27a51a758de6caa7fc0d0ab1eba88d03b315d998e3813df9be448e",
+  "generated_at": "2026-05-06T17:55:21.007460+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why allow-list access control fails for context-sensitive agent actions",
+      "line_start": 5,
+      "line_end": 20
+    },
+    {
+      "section_title": "The axes",
+      "one_line": "Tool-call evaluation axes for producing dispatch verdicts",
+      "line_start": 21,
+      "line_end": 30
+    },
+    {
+      "section_title": "Effect classification",
+      "one_line": "Tool classification by whether actions read data, make reversible changes, or make irreversible changes",
+      "line_start": 31,
+      "line_end": 47
+    },
+    {
+      "section_title": "Initiator context: reactive vs. proactive",
+      "one_line": "How initiator context changes gate behavior for reactive and proactive actions",
+      "line_start": 48,
+      "line_end": 70
+    },
+    {
+      "section_title": "Covenants: user-declared behavioral contracts",
+      "one_line": "User-defined contracts for rules the agent must honor during dispatch",
+      "line_start": 71,
+      "line_end": 86
+    },
+    {
+      "section_title": "The verdict enum",
+      "one_line": "Gate verdicts and their downstream actions for approve, confirm, conflict, and clarify",
+      "line_start": 87,
+      "line_end": 108
+    },
+    {
+      "section_title": "The exclusion: Messenger delegation",
+      "one_line": "Why send_relational_message bypasses the gate and is handed off to Messenger",
+      "line_start": 109,
+      "line_end": 125
+    },
+    {
+      "section_title": "The full evaluation order",
+      "one_line": "Kernos gate evaluation order for deciding whether a tool call passes",
+      "line_start": 126,
+      "line_end": 140
+    },
+    {
+      "section_title": "Why this isn't just capability-level permissions",
+      "one_line": "Kernos dispatch gate model beyond capability-level permissions",
+      "line_start": 141,
+      "line_end": 156
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "How the architecture enforces user rules, cautious actions, safe autonomy, auditing, and rule changes",
+      "line_start": 157,
+      "line_end": 164
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Limits of the architecture and the safety guarantees it does not claim",
+      "line_start": 165,
+      "line_end": 171
+    },
+    {
+      "section_title": "Related architecture",
+      "one_line": "Architecture links for disclosure layering, cohorts, and context-space scoping",
+      "line_start": 172,
+      "line_end": 177
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Kernel gate and state entry points for evaluation, verdict parsing, and covenant persistence",
+      "line_start": 178,
+      "line_end": 185
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "file_path": "docs/architecture/cohort-memory.md",
+  "source_hash": "7f37bb21f5db0d7ed0e10c1e656f9284e64ea540387acb501643306d9148ef15",
+  "generated_at": "2026-05-06T17:41:50.787054+00:00",
+  "sections": [
+    {
+      "section_title": "What the adapter does",
+      "one_line": "Memory cohort adapter flow for pushing user messages into structured retrieval and CohortOutput",
+      "line_start": 8,
+      "line_end": 36
+    },
+    {
+      "section_title": "Query strategy: Option A (raw message)",
+      "one_line": "Raw user message as the embedding query for cohort retrieval",
+      "line_start": 37,
+      "line_end": 47
+    },
+    {
+      "section_title": "search_structured: collect + policy + rank + budget-shape",
+      "one_line": "Structured search pipeline for collecting, gating, ranking, and shaping retrieval results",
+      "line_start": 48,
+      "line_end": 62
+    },
+    {
+      "section_title": "Output payload",
+      "one_line": "Schema for cohort output fields and summary payload contents",
+      "line_start": 63,
+      "line_end": 103
+    },
+    {
+      "section_title": "Visibility model",
+      "one_line": "Rules for filtering invisible entries from payloads and avoiding payload-level visibility overrides",
+      "line_start": 104,
+      "line_end": 114
+    },
+    {
+      "section_title": "Uniform disclosure gate",
+      "one_line": "Member-aware visibility filtering across all structured search sources",
+      "line_start": 115,
+      "line_end": 133
+    },
+    {
+      "section_title": "Archives excluded from cohort path",
+      "one_line": "Why the cohort path excludes archive search to avoid per-turn LLM cost",
+      "line_start": 134,
+      "line_end": 154
+    },
+    {
+      "section_title": "Empty / error distinction",
+      "one_line": "Distinguishing empty retrievals from internal errors in search results",
+      "line_start": 155,
+      "line_end": 171
+    },
+    {
+      "section_title": "State intercept short-circuit",
+      "one_line": "State intercept handling for preference queries without semantic search",
+      "line_start": 172,
+      "line_end": 188
+    },
+    {
+      "section_title": "Cohort descriptor",
+      "one_line": "Memory cohort configuration and defaults",
+      "line_start": 189,
+      "line_end": 199
+    },
+    {
+      "section_title": "What this adapter does NOT change",
+      "one_line": "Unchanged APIs, remember-tool dispatch, and CohortOutput schema",
+      "line_start": 200,
+      "line_end": 210
+    },
+    {
+      "section_title": "Architectural placement",
+      "one_line": "Placement of memory_cohort.py within the retrieval architecture",
+      "line_start": 211,
+      "line_end": 222
+    },
+    {
+      "section_title": "Path forward",
+      "one_line": "Future Kernos work on pattern heuristics, covenant decoupling, pipeline wiring, and cheaper query options",
+      "line_start": 223,
+      "line_end": 234
+    }
+  ]
+}

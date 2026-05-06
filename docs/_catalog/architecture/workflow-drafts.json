@@ -1,0 +1,55 @@
+{
+  "file_path": "docs/architecture/workflow-drafts.md",
+  "source_hash": "c5669c59af02514f6afe93c503e87826a89c39a15525e9263b3a708caf34fd80",
+  "generated_at": "2026-05-06T17:57:38.566337+00:00",
+  "sections": [
+    {
+      "section_title": "Where WDP sits",
+      "one_line": "Where WDP fits as the durable middle between conversation, draft compilation, and workflow registration",
+      "line_start": 7,
+      "line_end": 30
+    },
+    {
+      "section_title": "What a draft carries",
+      "one_line": "WorkflowDraft fields for identity, lifecycle, provenance, and partial spec content",
+      "line_start": 31,
+      "line_end": 48
+    },
+    {
+      "section_title": "State machine",
+      "one_line": "Draft lifecycle states, transitions, and concurrency rules",
+      "line_start": 49,
+      "line_end": 69
+    },
+    {
+      "section_title": "Composite primary key",
+      "one_line": "Composite primary key for multi-instance draft records using (instance_id, draft_id) to avoid collisions",
+      "line_start": 70,
+      "line_end": 73
+    },
+    {
+      "section_title": "Substrate-neutral by invariant",
+      "one_line": "WDP independence from other subsystems via stable draft invariants",
+      "line_start": 74,
+      "line_end": 81
+    },
+    {
+      "section_title": "Event shapes",
+      "one_line": "Draft event types and when they emit through the event_stream substrate",
+      "line_start": 82,
+      "line_end": 95
+    },
+    {
+      "section_title": "Where it lives",
+      "one_line": "Registry file path and instance.db storage for the schema",
+      "line_start": 96,
+      "line_end": 99
+    },
+    {
+      "section_title": "Composes with",
+      "one_line": "Parts involved in draft translation, approval, registration, and cleanup",
+      "line_start": 100,
+      "line_end": 106
+    }
+  ]
+}

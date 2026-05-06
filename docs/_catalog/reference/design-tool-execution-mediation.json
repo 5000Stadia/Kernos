@@ -1,0 +1,61 @@
+{
+  "file_path": "docs/reference/design-tool-execution-mediation.md",
+  "source_hash": "bc37d44298aeab4dd6eeff82c574b065295ceacfeecaf6078acbf0dc8e5b2214",
+  "generated_at": "2026-05-06T18:16:49.045599+00:00",
+  "sections": [
+    {
+      "section_title": "The insight",
+      "one_line": "Tool exposure and result handling as the same contextual packaging problem",
+      "line_start": 9,
+      "line_end": 25
+    },
+    {
+      "section_title": "The surgeon's assistant model",
+      "one_line": "How Kernos uses an assistant to mediate tools and package results for the main agent",
+      "line_start": 26,
+      "line_end": 43
+    },
+    {
+      "section_title": "Three decisions after every tool execution",
+      "one_line": "How to package, store, and clean tool results after each execution",
+      "line_start": 44,
+      "line_end": 93
+    },
+    {
+      "section_title": "The full architecture (future)",
+      "one_line": "Future plan for the full agent architecture across facts, tools, and result mediation",
+      "line_start": 94,
+      "line_end": 138
+    },
+    {
+      "section_title": "How V1 spec fits",
+      "one_line": "V1 result budgeting as the first step in the broader result mediation plan",
+      "line_start": 139,
+      "line_end": 181
+    },
+    {
+      "section_title": "The term: \"cohort agent\" vs alternatives",
+      "one_line": "Naming options for the mediation layer that filters, cleans, and routes tool results into context",
+      "line_start": 182,
+      "line_end": 207
+    },
+    {
+      "section_title": "Implementation staging",
+      "one_line": "Phased plan for tool-result handling from containment to cleaning, classification, storage, and mediation",
+      "line_start": 208,
+      "line_end": 244
+    },
+    {
+      "section_title": "Relationship to existing architecture",
+      "one_line": "How Kernos maps to existing architecture and identifies result mediation as the remaining gap",
+      "line_start": 245,
+      "line_end": 260
+    },
+    {
+      "section_title": "The principle (from the owner + the design review)",
+      "one_line": "Guiding principle for when tool results stay inline, become artifacts, or get extracted context",
+      "line_start": 261,
+      "line_end": 270
+    }
+  ]
+}

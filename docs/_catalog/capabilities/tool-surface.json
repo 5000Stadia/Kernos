@@ -1,0 +1,67 @@
+{
+  "file_path": "docs/capabilities/tool-surface.md",
+  "source_hash": "e647f660ceaaa0e86609e86c08a698583a263e24dd5d4d0881cbdae383719aef",
+  "generated_at": "2026-05-06T18:06:42.914327+00:00",
+  "sections": [
+    {
+      "section_title": "Always-pinned tools",
+      "one_line": "Tools always available in every turn",
+      "line_start": 7,
+      "line_end": 28
+    },
+    {
+      "section_title": "Reference primitive (REFERENCE-PRIMITIVE-V1)",
+      "one_line": "Tools for retrieving, storing, organizing, and recovering project-deep reference content",
+      "line_start": 29,
+      "line_end": 42
+    },
+    {
+      "section_title": "Identity + soul",
+      "one_line": "Identity and soul tools for reading self data, updating soul, and inspecting source",
+      "line_start": 43,
+      "line_end": 52
+    },
+    {
+      "section_title": "Canvas (CANVAS-V1)",
+      "one_line": "Canvas and page tools for reading, writing, listing, searching, and preference handling",
+      "line_start": 53,
+      "line_end": 65
+    },
+    {
+      "section_title": "Covenants + behavior",
+      "one_line": "Tools for covenant management and whisper dismissal behavior",
+      "line_start": 66,
+      "line_end": 72
+    },
+    {
+      "section_title": "Channels + scheduling",
+      "one_line": "Channel management, sending messages, and scheduling controls",
+      "line_start": 73,
+      "line_end": 80
+    },
+    {
+      "section_title": "Cross-space + external agents",
+      "one_line": "Tools for cross-space requests and consulting external agents",
+      "line_start": 81,
+      "line_end": 87
+    },
+    {
+      "section_title": "Diagnostics",
+      "one_line": "Tools for diagnosing runtime issues, LLM chains, and messenger problems",
+      "line_start": 88,
+      "line_end": 99
+    },
+    {
+      "section_title": "Capabilities (manage external services)",
+      "one_line": "Manage external service capabilities",
+      "line_start": 100,
+      "line_end": 105
+    },
+    {
+      "section_title": "Effect classification (the gate)",
+      "one_line": "Kernel tool effect classification for dispatch-gate approval rules",
+      "line_start": 106,
+      "line_end": 116
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/11-long-term-client-relationship.md",
+  "source_hash": "e82798e35c31286d599e277c19e5b3b1fb0a8c1f861ac4be5564851254f247d6",
+  "generated_at": "2026-05-06T18:27:14.526849+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Key operating settings for volatility, participants, and time horizon in therapy and coaching work",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Kernos content types mapped to documentation artifacts and files",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default folder structure and sharing scope for a case’s initial documentation canvas",
+      "line_start": 31,
+      "line_end": 76
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Rules for flagging changes in session rhythm, frame, risk, phase, confidentiality, and records",
+      "line_start": 77,
+      "line_end": 127
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Natural-language member intents mapped to privacy, routing, scheduling, and session workflow settings",
+      "line_start": 128,
+      "line_end": 142
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Privacy, consent, and boundary rules for client records and special-case clinical handling",
+      "line_start": 143,
+      "line_end": 178
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "How client relationship canvases compose with practice, research, and referral canvases",
+      "line_start": 179,
+      "line_end": 189
+    }
+  ]
+}

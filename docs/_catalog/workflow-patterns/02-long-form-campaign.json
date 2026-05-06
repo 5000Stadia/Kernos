@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/02-long-form-campaign.md",
+  "source_hash": "96ae8f5683666ba00563c96793e75e938db58d9a8f012f0e0b5b74a77c90ee15",
+  "generated_at": "2026-05-06T18:22:37.135952+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Campaign operating ranges for canon volatility, actor count, and long-term horizon.",
+      "line_start": 12,
+      "line_end": 17
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Legacy Kernos artifacts and their current document equivalents",
+      "line_start": 18,
+      "line_end": 28
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Campaign documentation structure for setting, arc, canon, sessions, NPCs, locations, factions, and archives",
+      "line_start": 29,
+      "line_end": 63
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristics for promoting, archiving, and updating campaign lore entities and continuity",
+      "line_start": 64,
+      "line_end": 194
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member phrases that map to campaign preferences and automated handling behaviors",
+      "line_start": 195,
+      "line_end": 210
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Handling player knowledge, character knowledge, and split-session timelines",
+      "line_start": 211,
+      "line_end": 226
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Guidance on separating campaign canvases from creative-project and household-logistics canvases",
+      "line_start": 227,
+      "line_end": 235
+    }
+  ]
+}

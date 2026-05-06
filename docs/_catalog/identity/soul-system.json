@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/identity/soul-system.md",
+  "source_hash": "be189d098520d3bcbf6232bffdaf8233d202ffca13bf879d5f5b8f689a50b7de",
+  "generated_at": "2026-05-06T18:10:02.656867+00:00",
+  "sections": [
+    {
+      "section_title": "What your identity contains (per-member)",
+      "one_line": "Per-member identity fields and relationship-specific agent data",
+      "line_start": 7,
+      "line_end": 20
+    },
+    {
+      "section_title": "How identity evolves (the hatching arc)",
+      "one_line": "How a Kernos identity starts from a shared template and grows into a member-specific profile",
+      "line_start": 21,
+      "line_end": 36
+    },
+    {
+      "section_title": "Tools",
+      "one_line": "Identity and profile tools for reading and updating a member's soul settings",
+      "line_start": 37,
+      "line_end": 43
+    },
+    {
+      "section_title": "Identity vs memory",
+      "one_line": "Separation of persistent identity from knowledge memory across context spaces",
+      "line_start": 44,
+      "line_end": 49
+    },
+    {
+      "section_title": "Identity vs reference primitive",
+      "one_line": "Difference between member identity and reference material",
+      "line_start": 50,
+      "line_end": 53
+    },
+    {
+      "section_title": "Code locations",
+      "one_line": "Locations of key Kernos code components and their file paths",
+      "line_start": 54,
+      "line_end": 62
+    }
+  ]
+}

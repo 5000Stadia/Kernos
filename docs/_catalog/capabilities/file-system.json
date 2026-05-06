@@ -1,0 +1,31 @@
+{
+  "file_path": "docs/capabilities/file-system.md",
+  "source_hash": "836116e293ab51e514bc870af8fb9a0506803cdb30ed0330f8a60db7cb041fed",
+  "generated_at": "2026-05-06T18:03:31.528654+00:00",
+  "sections": [
+    {
+      "section_title": "Available Tools",
+      "one_line": "File management tools for creating, reading, listing, and soft-deleting files",
+      "line_start": 5,
+      "line_end": 13
+    },
+    {
+      "section_title": "How It Works",
+      "one_line": "File storage, naming rules, and manifest tracking for space files",
+      "line_start": 14,
+      "line_end": 21
+    },
+    {
+      "section_title": "Shadow Archive",
+      "one_line": "Soft-deleted files moved to .deleted/ and removed from the manifest instead of being permanently deleted",
+      "line_start": 22,
+      "line_end": 25
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "FileService and FILE_TOOLS source location in kernos/kernel/files.py",
+      "line_start": 26,
+      "line_end": 30
+    }
+  ]
+}

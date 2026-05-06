@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/trigger-runtime.md",
+  "source_hash": "27520471bc29b0860ba5f1333dc1e47411da5f4fbcb0ab2b4ada48dce21cd0d7",
+  "generated_at": "2026-05-06T17:57:00.715316+00:00",
+  "sections": [
+    {
+      "section_title": "Where WTC v1 sits",
+      "one_line": "WTC v1’s position in the event-trigger and workflow execution pipeline",
+      "line_start": 7,
+      "line_end": 31
+    },
+    {
+      "section_title": "Module layout",
+      "one_line": "WTC v1 trigger package modules and their responsibilities",
+      "line_start": 32,
+      "line_end": 46
+    },
+    {
+      "section_title": "Three-part predicate model",
+      "one_line": "TriggerPredicate structure for event matching, temporal rules, and dispatch policy",
+      "line_start": 47,
+      "line_end": 58
+    },
+    {
+      "section_title": "Fire ID idempotency (the critical invariant)",
+      "one_line": "Deterministic fire IDs that prevent duplicate trigger fires for the same predicate and window",
+      "line_start": 59,
+      "line_end": 72
+    },
+    {
+      "section_title": "FireOutbox CAS state machine",
+      "one_line": "FireOutbox CAS state machine for dispatch, failure, and startup recovery",
+      "line_start": 73,
+      "line_end": 87
+    },
+    {
+      "section_title": "EventSource protocol + post-flush adapter",
+      "one_line": "EventSource protocol and production adapters for routing flushed events into runtime observation",
+      "line_start": 88,
+      "line_end": 111
+    },
+    {
+      "section_title": "Missed-window semantics",
+      "one_line": "Policy for handling multiple missed cron fires: skip, or emit one catch-up fire",
+      "line_start": 112,
+      "line_end": 138
+    },
+    {
+      "section_title": "STS atomic registration (C5b)",
+      "one_line": "Atomic workflow and trigger registration so workflows and triggers are installed together",
+      "line_start": 139,
+      "line_end": 144
+    },
+    {
+      "section_title": "Heartbeat consolidation (C5c-1)",
+      "one_line": "Unified runtime heartbeat with one-time recovery sweep and tick failure isolation",
+      "line_start": 145,
+      "line_end": 148
+    },
+    {
+      "section_title": "What composes against this",
+      "one_line": "Consumers and adapters that register workflows and triggers into the unified runtime",
+      "line_start": 149,
+      "line_end": 156
+    },
+    {
+      "section_title": "What WTC v1 replaced",
+      "one_line": "Legacy WTC v1 components replaced by the unified runtime and heartbeat model",
+      "line_start": 157,
+      "line_end": 164
+    }
+  ]
+}

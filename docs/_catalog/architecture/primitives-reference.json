@@ -1,0 +1,103 @@
+{
+  "file_path": "docs/architecture/primitives-reference.md",
+  "source_hash": "d6c3625066da4fa72739b38ad8ad84cbaecc52ec8c9afdd1d86926c209ecb01a",
+  "generated_at": "2026-05-06T17:53:00.324208+00:00",
+  "sections": [
+    {
+      "section_title": "Event Stream",
+      "one_line": "Append-only audit log for kernel runtime events and typed transitions",
+      "line_start": 11,
+      "line_end": 42
+    },
+    {
+      "section_title": "State Store",
+      "one_line": "Runtime query surface for persistent kernel state, profiles, knowledge, covenants, and triggers",
+      "line_start": 43,
+      "line_end": 77
+    },
+    {
+      "section_title": "Reasoning Service",
+      "one_line": "Runs LLM reasoning chains with tool loops, retries, fallback, and cost tracking.",
+      "line_start": 78,
+      "line_end": 118
+    },
+    {
+      "section_title": "Dispatch Gate",
+      "one_line": "Per-tool-call authorization and safety verdicts for tool dispatch",
+      "line_start": 119,
+      "line_end": 145
+    },
+    {
+      "section_title": "Relational Dispatcher",
+      "one_line": "Cross-member message routing with permission checks, messenger judgment, and delivery scheduling",
+      "line_start": 146,
+      "line_end": 177
+    },
+    {
+      "section_title": "Router",
+      "one_line": "Inbound turn routing for space, focus, and mode before the agent sees it.",
+      "line_start": 178,
+      "line_end": 207
+    },
+    {
+      "section_title": "Fact Harvester",
+      "one_line": "Boundary-triggered durable fact extraction with reconciliation and stewardship insight capture",
+      "line_start": 208,
+      "line_end": 237
+    },
+    {
+      "section_title": "Compaction Service",
+      "one_line": "Boundary-triggered per-space compaction that rewrites Living State and archives compressed spans",
+      "line_start": 238,
+      "line_end": 274
+    },
+    {
+      "section_title": "Awareness Evaluator",
+      "one_line": "Periodic awareness scans that surface actionable whispers and resume interrupted self-directed plans",
+      "line_start": 275,
+      "line_end": 307
+    },
+    {
+      "section_title": "Friction Observer",
+      "one_line": "Post-turn detection of friction signals and correction suggestions from turn traces",
+      "line_start": 308,
+      "line_end": 332
+    },
+    {
+      "section_title": "Plan Execution",
+      "one_line": "Self-directed plan execution, persistence, retries, and restart recovery",
+      "line_start": 333,
+      "line_end": 370
+    },
+    {
+      "section_title": "Capability Registry",
+      "one_line": "Unified catalog for kernel, MCP, and workspace tools with effect classification",
+      "line_start": 371,
+      "line_end": 400
+    },
+    {
+      "section_title": "Workspace",
+      "one_line": "Workspace for building, testing, validating, and registering agent-made tools",
+      "line_start": 401,
+      "line_end": 429
+    },
+    {
+      "section_title": "Scheduler",
+      "one_line": "Persistent schedules that fire tasks and dispatch synthetic inbound messages",
+      "line_start": 430,
+      "line_end": 445
+    },
+    {
+      "section_title": "Disclosure Gate",
+      "one_line": "Last read-time filter that blocks facts outside a member's disclosure context",
+      "line_start": 446,
+      "line_end": 464
+    },
+    {
+      "section_title": "Code entry summary",
+      "one_line": "Key code entry points for Kernos primitives",
+      "line_start": 465,
+      "line_end": 483
+    }
+  ]
+}

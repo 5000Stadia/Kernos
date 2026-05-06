@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/04-household-management.md",
+  "source_hash": "9330649e68f2aa2e4eb08a8d0dba4f809fbb8037387b25202efc433b15ec0e48",
+  "generated_at": "2026-05-06T18:23:28.610230+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Key household canvas dimensions: volatility, actor count, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Maps household concepts to Kernos artifacts and shows which ones apply",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default household documentation layout with core files and optional expansions",
+      "line_start": 31,
+      "line_end": 78
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Rules for when to reorganize household docs as topics grow, recur, go stale, or life stages change",
+      "line_start": 79,
+      "line_end": 121
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member phrases for setting scope, routing, reminders, suppression, and logging preferences",
+      "line_start": 122,
+      "line_end": 136
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Rules for sensitive household content, privacy, kid maturation, and departed-member archives",
+      "line_start": 137,
+      "line_end": 156
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Household canvas content boundaries and links to related canvases",
+      "line_start": 157,
+      "line_end": 165
+    }
+  ]
+}

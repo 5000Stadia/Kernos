@@ -1,0 +1,67 @@
+{
+  "file_path": "docs/architecture/cohort-and-judgment.md",
+  "source_hash": "9b277c679dd7b2a760b37672aa8fba607df6d0d61df7faf64a7076cd7bf8df73",
+  "generated_at": "2026-05-06T17:37:39.766877+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why a single-loop agent framework breaks down as system concerns grow",
+      "line_start": 5,
+      "line_end": 14
+    },
+    {
+      "section_title": "The discipline: Judgment vs. Plumbing",
+      "one_line": "Rules for dividing LLM judgment work from Python plumbing in Kernos",
+      "line_start": 15,
+      "line_end": 25
+    },
+    {
+      "section_title": "The cohorts",
+      "one_line": "Kernos cohort roles and when they run in the turn pipeline",
+      "line_start": 26,
+      "line_end": 40
+    },
+    {
+      "section_title": "The three invariants",
+      "one_line": "Rules for agent isolation, cohort separation, and graceful failure in the cohort architecture",
+      "line_start": 41,
+      "line_end": 76
+    },
+    {
+      "section_title": "Why this isn't just \"microservices for LLMs\"",
+      "one_line": "Why cohorts are kernel-internal plumbing, not orchestration or user-facing microservices for LLMs",
+      "line_start": 77,
+      "line_end": 88
+    },
+    {
+      "section_title": "What a cohort's prompt-iteration cycle looks like",
+      "one_line": "Refining a cohort prompt with eval scenarios, tight fixes, and no fallback to the primary chain.",
+      "line_start": 89,
+      "line_end": 98
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "Benefits of the architecture for adding cohorts, swapping implementations, debugging judgments, and controlling cost.",
+      "line_start": 99,
+      "line_end": 105
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Architectural non-goals: no cohort autonomy, no smaller agent, no perfect cohorts",
+      "line_start": 106,
+      "line_end": 111
+    },
+    {
+      "section_title": "Related architecture",
+      "one_line": "Related architecture topics for the Messenger, dispatch gate, and router cohorts",
+      "line_start": 112,
+      "line_end": 117
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Key source files for Kernos runtime entry points and cohort-related hooks",
+      "line_start": 118,
+      "line_end": 126
+    }
+  ]
+}

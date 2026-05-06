@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/identity/onboarding.md",
+  "source_hash": "64bdbc5b32c36d77b52e0c11013faafc3a3c22b8bbed39941383608b9b1daa2c",
+  "generated_at": "2026-05-06T18:09:42.173719+00:00",
+  "sections": [
+    {
+      "section_title": "The Hatching Phase",
+      "one_line": "How new members’ agents hatch, get named, and either stay unique or inherit a shared identity",
+      "line_start": 5,
+      "line_end": 19
+    },
+    {
+      "section_title": "During Hatching (~first 15 interactions)",
+      "one_line": "Early hatching phase for learning the person, getting named, showing competence, and building trust",
+      "line_start": 20,
+      "line_end": 29
+    },
+    {
+      "section_title": "Graduation",
+      "one_line": "Graduation of an agent relationship after naming and enough interactions, and the profile updates it triggers",
+      "line_start": 30,
+      "line_end": 40
+    },
+    {
+      "section_title": "What Persists After Hatching",
+      "one_line": "Member profile data and knowledge retained after hatching",
+      "line_start": 41,
+      "line_end": 50
+    },
+    {
+      "section_title": "Design Philosophy",
+      "one_line": "Kernos's competence-first philosophy for a warm, human agent presence",
+      "line_start": 51,
+      "line_end": 53
+    }
+  ]
+}

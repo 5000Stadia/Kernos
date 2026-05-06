@@ -1,0 +1,91 @@
+{
+  "file_path": "docs/CROSS-SPACE-REQUESTS.md",
+  "source_hash": "2ff5eb25b96b91fc6f1a675510170abc453f533f98fba1ad9641d041f45a668c",
+  "generated_at": "2026-05-06T17:32:17.976906+00:00",
+  "sections": [
+    {
+      "section_title": "When to use which shape",
+      "one_line": "Selecting the right action shape for cross-space, query, tool, and message actions",
+      "line_start": 11,
+      "line_end": 26
+    },
+    {
+      "section_title": "Action kind whitelist (v1)",
+      "one_line": "Allowed action kinds and out-of-scope operations in Kernos v1",
+      "line_start": 27,
+      "line_end": 39
+    },
+    {
+      "section_title": "Tool surface",
+      "one_line": "Interface for requesting cross-space actions and getting CrossSpaceReceipt results",
+      "line_start": 40,
+      "line_end": 58
+    },
+    {
+      "section_title": "What appears where",
+      "one_line": "Where cross-space actions are stored, logged, and surfaced in origin and target spaces",
+      "line_start": 59,
+      "line_end": 70
+    },
+    {
+      "section_title": "Same-space short-circuit",
+      "one_line": "Local dispatch shortcut when target and origin spaces match, avoiding a new lock and audit entry",
+      "line_start": 71,
+      "line_end": 79
+    },
+    {
+      "section_title": "Per-space lock + bounded timeout",
+      "one_line": "Per-space locking and timeout handling for cross-space mutations",
+      "line_start": 80,
+      "line_end": 93
+    },
+    {
+      "section_title": "Reentrancy",
+      "one_line": "Cross-space reentrancy limits and recursion rules",
+      "line_start": 94,
+      "line_end": 107
+    },
+    {
+      "section_title": "Target covenants",
+      "one_line": "Target-space covenant checks before mutations and their approval, refusal, or confirmation outcomes",
+      "line_start": 108,
+      "line_end": 122
+    },
+    {
+      "section_title": "Target re-entry awareness",
+      "one_line": "Target-side provenance context for recent cross-space mutations on re-entry",
+      "line_start": 123,
+      "line_end": 132
+    },
+    {
+      "section_title": "Idempotency",
+      "one_line": "Preventing duplicate action dispatches by reusing request_id",
+      "line_start": 133,
+      "line_end": 139
+    },
+    {
+      "section_title": "Out of scope for v1",
+      "one_line": "Features and behaviors excluded from Kernos v1",
+      "line_start": 140,
+      "line_end": 149
+    },
+    {
+      "section_title": "Composition with future arcs",
+      "one_line": "Stable envelope and receipt shapes for future consumers to compose without contract changes",
+      "line_start": 150,
+      "line_end": 163
+    },
+    {
+      "section_title": "Operator queries",
+      "one_line": "SQL queries for monitoring cross-space actions, target-space requests, and failures",
+      "line_start": 164,
+      "line_end": 184
+    },
+    {
+      "section_title": "References",
+      "one_line": "Pointers to the cross-space requests spec, implementation, tooling, and tests",
+      "line_start": 185,
+      "line_end": 190
+    }
+  ]
+}

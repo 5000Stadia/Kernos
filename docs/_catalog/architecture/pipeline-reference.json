@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/pipeline-reference.md",
+  "source_hash": "f49c599896be2e046e3055bd36cddc046e6b36fd2a63d7741a1667d999de2f86",
+  "generated_at": "2026-05-06T17:51:15.207432+00:00",
+  "sections": [
+    {
+      "section_title": "Entry point",
+      "one_line": "Message handling entry point and phase pipeline for normalized turns",
+      "line_start": 7,
+      "line_end": 30
+    },
+    {
+      "section_title": "The TurnContext",
+      "one_line": "Shared per-turn state object that passes data between phases and defines their contract",
+      "line_start": 31,
+      "line_end": 75
+    },
+    {
+      "section_title": "Phase 1 — Provision",
+      "one_line": "Initial message handling to resolve instance and member IDs and create missing member state",
+      "line_start": 76,
+      "line_end": 107
+    },
+    {
+      "section_title": "Phase 2 — Route",
+      "one_line": "Selects the active space and routing mode for each turn",
+      "line_start": 108,
+      "line_end": 140
+    },
+    {
+      "section_title": "Phase 3 — Assemble",
+      "one_line": "Turn assembly of the prompt, scoped tools, memory, and pending messages",
+      "line_start": 141,
+      "line_end": 182
+    },
+    {
+      "section_title": "Phase 4 — Reason",
+      "one_line": "Principal agent reasoning and gated tool-use loop for producing the final response",
+      "line_start": 183,
+      "line_end": 219
+    },
+    {
+      "section_title": "Phase 5 — Consequence",
+      "one_line": "Post-response delivery, relational message transitions, and consequence event emission",
+      "line_start": 220,
+      "line_end": 247
+    },
+    {
+      "section_title": "Phase 6 — Persist",
+      "one_line": "Persist the turn, emit events, update counters, and trigger compaction and harvest when needed",
+      "line_start": 248,
+      "line_end": 289
+    },
+    {
+      "section_title": "Concurrency model",
+      "one_line": "Per-space runner serialization and message merging to prevent race conditions in turn processing",
+      "line_start": 290,
+      "line_end": 310
+    },
+    {
+      "section_title": "Self-directed turns",
+      "one_line": "How Kernos processes self-directed plan steps and evaluates them with the highest gate bar",
+      "line_start": 311,
+      "line_end": 324
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Key code entry points for turn processing, phase routing, and per-turn state handling",
+      "line_start": 325,
+      "line_end": 337
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "file_path": "docs/capabilities/web-browsing.md",
+  "source_hash": "d6bfdace5c28b8ce8f3575e621f4c66603d13c4cd9bbb83ed4f5d0c67e282e89",
+  "generated_at": "2026-05-06T18:06:49.597901+00:00",
+  "sections": [
+    {
+      "section_title": "Web Browser (Playwright, in-tree)",
+      "one_line": "Built-in browser for web search, page reading, and current information lookup in any context space",
+      "line_start": 5,
+      "line_end": 45
+    },
+    {
+      "section_title": "Web Search (Brave Search)",
+      "one_line": "Structured web and local search with Brave Search API for titles, URLs, and snippets",
+      "line_start": 46,
+      "line_end": 59
+    }
+  ]
+}

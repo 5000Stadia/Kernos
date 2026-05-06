@@ -1,0 +1,61 @@
+{
+  "file_path": "docs/workshop/stock-connector-recipe.md",
+  "source_hash": "a70a433706df4ad481a8c210749a37d99c6c8a6c31fc48617df75307bf373a56",
+  "generated_at": "2026-05-06T18:31:41.582492+00:00",
+  "sections": [
+    {
+      "section_title": "What you're producing",
+      "one_line": "The artifacts involved in delivering a new Kernos service integration",
+      "line_start": 7,
+      "line_end": 19
+    },
+    {
+      "section_title": "Step 1 — Author the service descriptor",
+      "one_line": "Notion service descriptor specification for auth type, operations, and notes",
+      "line_start": 20,
+      "line_end": 48
+    },
+    {
+      "section_title": "Step 2 — Author the tool descriptor",
+      "one_line": "Tool descriptor for a Notion read-page integration, including schema, authority, and classifications",
+      "line_start": 49,
+      "line_end": 81
+    },
+    {
+      "section_title": "Step 3 — Author the tool implementation",
+      "one_line": "Implementing the Notion tool function with the required context, paths, and return format",
+      "line_start": 82,
+      "line_end": 104
+    },
+    {
+      "section_title": "Step 4 — Add a registration test",
+      "one_line": "Tests for registering service tools and unit-testing pure-logic helpers",
+      "line_start": 105,
+      "line_end": 127
+    },
+    {
+      "section_title": "Step 5 — Onboard a credential",
+      "one_line": "Service credential onboarding for a Kernos instance",
+      "line_start": 128,
+      "line_end": 142
+    },
+    {
+      "section_title": "Step 6 — Invoke and verify",
+      "one_line": "Tool invocation and verification, including runtime checks, audit logging, and result validation",
+      "line_start": 143,
+      "line_end": 165
+    },
+    {
+      "section_title": "Substitutions for other services",
+      "one_line": "Service-specific connector substitutions for Slack, GitHub, Drive/Docs, and Gmail",
+      "line_start": 166,
+      "line_end": 180
+    },
+    {
+      "section_title": "When you hit a snag",
+      "one_line": "Troubleshooting parse errors, tool loading failures, dispatcher rejections, and kick-back signals",
+      "line_start": 181,
+      "line_end": 185
+    }
+  ]
+}

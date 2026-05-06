@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/architecture/cohort-covenant.md",
+  "source_hash": "7f2cb20806f2834d2652d6225b2f8562da5ac162fb8851442d3b12509d187597",
+  "generated_at": "2026-05-06T17:39:12.434029+00:00",
+  "sections": [
+    {
+      "section_title": "What the adapter does",
+      "one_line": "Per-turn read-only surfacing of active covenant rules, with safety-first ranking and failure handling",
+      "line_start": 9,
+      "line_end": 42
+    },
+    {
+      "section_title": "Visibility model: whole-output Restricted",
+      "one_line": "Whole-output Restricted visibility rules for redaction and directive handling of covenant content",
+      "line_start": 43,
+      "line_end": 63
+    },
+    {
+      "section_title": "required + safety_class — the canonical safety anchor",
+      "one_line": "Canonical safety anchor for required cohort failures and fail-soft defer handling",
+      "line_start": 64,
+      "line_end": 92
+    },
+    {
+      "section_title": "Output payload schema",
+      "one_line": "Cohort output structure for rule summaries, scope info, and truncation flags",
+      "line_start": 93,
+      "line_end": 135
+    },
+    {
+      "section_title": "Truncation",
+      "one_line": "Safety-preserving truncation of descriptions and rules",
+      "line_start": 136,
+      "line_end": 166
+    },
+    {
+      "section_title": "Member filtering — Python-side, not SQL",
+      "one_line": "Python-side member filtering of covenant rules after query, avoiding store-specific SQL",
+      "line_start": 167,
+      "line_end": 183
+    },
+    {
+      "section_title": "Audit log redaction",
+      "one_line": "Rules for redacting sensitive fields from audit logs",
+      "line_start": 184,
+      "line_end": 191
+    },
+    {
+      "section_title": "Empty + error cases",
+      "one_line": "Empty active sets and query failure behavior for required safety cohorts",
+      "line_start": 192,
+      "line_end": 208
+    },
+    {
+      "section_title": "Cohort descriptor",
+      "one_line": "Cohort identity, execution mode, visibility, and safety settings",
+      "line_start": 209,
+      "line_end": 219
+    },
+    {
+      "section_title": "What this adapter does NOT change",
+      "one_line": "Unchanged covenant manager, state query surface, and CohortOutput schema",
+      "line_start": 220,
+      "line_end": 228
+    },
+    {
+      "section_title": "Architectural placement",
+      "one_line": "Where the covenant cohort adapter sits and how safety failures flow into integration inputs",
+      "line_start": 229,
+      "line_end": 245
+    },
+    {
+      "section_title": "Path forward",
+      "one_line": "Roadmap for upcoming Kernos work: presence decoupling, live integration, and future schema or consent cohorts",
+      "line_start": 246,
+      "line_end": 258
+    }
+  ]
+}

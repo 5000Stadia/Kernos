@@ -1,0 +1,55 @@
+{
+  "file_path": "docs/design-frames/action-loop.md",
+  "source_hash": "e6001b143570ea6838855e7e23d797cc30067c96eb491765c3d56ff42aadcb91",
+  "generated_at": "2026-05-06T18:07:33.634759+00:00",
+  "sections": [
+    {
+      "section_title": "The five steps",
+      "one_line": "Kernos agent workflow from intent through verification and next-step decisions",
+      "line_start": 5,
+      "line_end": 16
+    },
+    {
+      "section_title": "Why verify is load-bearing",
+      "one_line": "Why agents must verify outcomes instead of trusting tool success",
+      "line_start": 17,
+      "line_end": 28
+    },
+    {
+      "section_title": "Three shapes of verification",
+      "one_line": "How Kernos verifies actions: direct evidence, follow-up reads, or waiting for later results",
+      "line_start": 29,
+      "line_end": 38
+    },
+    {
+      "section_title": "A small-business example",
+      "one_line": "Small-business agent example of replying to client email, proposing meeting times, and verifying actions",
+      "line_start": 39,
+      "line_end": 50
+    },
+    {
+      "section_title": "A household example",
+      "one_line": "Example of a household agent handling calendar updates and partner notifications with verification",
+      "line_start": 51,
+      "line_end": 62
+    },
+    {
+      "section_title": "The loop composes across turns",
+      "one_line": "How the action loop spans turns and multi-phase plans",
+      "line_start": 63,
+      "line_end": 72
+    },
+    {
+      "section_title": "The operative norm",
+      "one_line": "Why the Action Loop treats verification as separate from action success",
+      "line_start": 73,
+      "line_end": 82
+    },
+    {
+      "section_title": "Related",
+      "one_line": "Links to related Kernos docs on skill model, judgment-vs-plumbing, and the turn pipeline",
+      "line_start": 83,
+      "line_end": 87
+    }
+  ]
+}

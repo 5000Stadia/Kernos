@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/capabilities/diagnostics.md",
+  "source_hash": "74d5a7f0a468f1f710792e73b4cb5942a76c40514a0d8d775590b87f6f749f07",
+  "generated_at": "2026-05-06T18:02:50.781388+00:00",
+  "sections": [
+    {
+      "section_title": "Tools",
+      "one_line": "Runtime inspection, issue diagnosis, fixes, specs, and LLM/messenger chain management tools",
+      "line_start": 5,
+      "line_end": 16
+    },
+    {
+      "section_title": "Runtime trace + diagnose_issue",
+      "one_line": "Runtime trace inspection and issue recording with diagnose_issue",
+      "line_start": 17,
+      "line_end": 28
+    },
+    {
+      "section_title": "propose_fix → submit_spec escalation path",
+      "one_line": "Choosing between propose_fix and submit_spec for actionable changes",
+      "line_start": 29,
+      "line_end": 37
+    },
+    {
+      "section_title": "Provider chain diagnostics",
+      "one_line": "Inspect LLM provider chains, fallback order, and model pinning for troubleshooting",
+      "line_start": 38,
+      "line_end": 57
+    },
+    {
+      "section_title": "Messenger diagnostics",
+      "one_line": "Messenger troubleshooting for disclosure gates, message leaks, and escalation tiers",
+      "line_start": 58,
+      "line_end": 63
+    },
+    {
+      "section_title": "When to reach for these tools",
+      "one_line": "When to use diagnostics tools for unexpected behavior, load-bearing friction, or tool errors",
+      "line_start": 64,
+      "line_end": 72
+    },
+    {
+      "section_title": "Effect classification",
+      "one_line": "Read and soft_write classification for Kernos actions",
+      "line_start": 73,
+      "line_end": 76
+    }
+  ]
+}

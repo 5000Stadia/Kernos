@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/08-creative-solo.md",
+  "source_hash": "79272f0e68b96de2162ccc11db2d670a87ff5cc29bca450bc4bb7c203575730f",
+  "generated_at": "2026-05-06T18:25:09.708632+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Core dials for artistic projects: charter stability, collaborators, and long time horizons.",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Mapping creative work concepts to Kernos artifacts and which ones apply",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Default folder layout and optional canvases for a Kernos artist workspace",
+      "line_start": 31,
+      "line_end": 77
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Heuristics for prompting, linking, and release actions as works and research evolve",
+      "line_start": 78,
+      "line_end": 119
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member phrases mapped to Gardener preferences, access settings, and work-state actions",
+      "line_start": 120,
+      "line_end": 135
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Rules for silence, draft privacy, collaborator access, and commission boundaries",
+      "line_start": 136,
+      "line_end": 159
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "When to combine creative solo canvases with client, event, collective, course, and operations canvases",
+      "line_start": 160,
+      "line_end": 170
+    }
+  ]
+}

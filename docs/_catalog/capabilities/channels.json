@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/capabilities/channels.md",
+  "source_hash": "176ea79f568685754bc315dfdecc9ded3956ff98515d83908c26b72f83d0c915",
+  "generated_at": "2026-05-06T18:01:47.647907+00:00",
+  "sections": [
+    {
+      "section_title": "Channel Registry",
+      "one_line": "Tracking available channels and their status in Kernos",
+      "line_start": 5,
+      "line_end": 8
+    },
+    {
+      "section_title": "Current Channels",
+      "one_line": "Available messaging channels and their connection, push, and target behavior",
+      "line_start": 9,
+      "line_end": 22
+    },
+    {
+      "section_title": "manage_channels Tool",
+      "one_line": "Channel listing and status management, including enabling and disabling channels",
+      "line_start": 23,
+      "line_end": 31
+    },
+    {
+      "section_title": "Outbound Messaging",
+      "one_line": "Sending unprompted messages through connected channels",
+      "line_start": 32,
+      "line_end": 47
+    },
+    {
+      "section_title": "Instance Identity",
+      "one_line": "Using KERNOS_INSTANCE_ID to make all channels share the same instance",
+      "line_start": 48,
+      "line_end": 51
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "Locations of Kernos channel, message, and SMS component code",
+      "line_start": 52,
+      "line_end": 62
+    }
+  ]
+}

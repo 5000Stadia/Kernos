@@ -1,0 +1,31 @@
+{
+  "file_path": "docs/roadmap/whats-next.md",
+  "source_hash": "bae8d592e9b6a958e1a9850bda0b0b10406bd169815bbbec8dbc57dbbdce87b2",
+  "generated_at": "2026-05-06T18:19:01.613237+00:00",
+  "sections": [
+    {
+      "section_title": "Outbound Messaging — SHIPPED (3E-A)",
+      "one_line": "Outbound message delivery, channel registry, and multi-channel identity for Discord and SMS",
+      "line_start": 5,
+      "line_end": 7
+    },
+    {
+      "section_title": "Time-Triggered Scheduler — SHIPPED (3E-B)",
+      "one_line": "Time-triggered scheduling for manage_schedule, reminders, cron recurrence, and retrying outbound deliveries",
+      "line_start": 8,
+      "line_end": 10
+    },
+    {
+      "section_title": "Whisper Delivery Spectrum",
+      "one_line": "Three whisper delivery classes for background, conversation, and urgent outbound notifications",
+      "line_start": 11,
+      "line_end": 13
+    },
+    {
+      "section_title": "Event-Triggered Actions",
+      "one_line": "Automating actions when monitored events occur",
+      "line_start": 14,
+      "line_end": 15
+    }
+  ]
+}

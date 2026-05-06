@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/13-investigative-reporting.md",
+  "source_hash": "3b810c01b43dc686f5bf152e4e303a81d54825732a266b2d2783b909aca07f14",
+  "generated_at": "2026-05-06T18:28:18.967256+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Criteria for judging story volatility, team size, and timeline",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Kernos artifact mapping to documentation equivalents for thesis, evidence, phases, drafts, decisions, and sources",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Project file layout and source confidentiality rules for reporting and publication",
+      "line_start": 31,
+      "line_end": 89
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Rules for evolving stories, evidence, leads, drafts, fact-checks, legal review, and publication safely",
+      "line_start": 90,
+      "line_end": 154
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member intent hooks for turning user phrases into workflow actions and safeguards",
+      "line_start": 155,
+      "line_end": 171
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Rules for provenance, source protection, legal demands, and other special investigation cases",
+      "line_start": 172,
+      "line_end": 212
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Parent-child canvas structure for investigative reporting workflows",
+      "line_start": 213,
+      "line_end": 222
+    }
+  ]
+}

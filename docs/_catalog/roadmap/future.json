@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/roadmap/future.md",
+  "source_hash": "edf93e5cf3f149301f46930e2754b1a8c9a6c0a59c08b1157cefd14fda410661",
+  "generated_at": "2026-05-06T18:18:38.186472+00:00",
+  "sections": [
+    {
+      "section_title": "Multi-User Instances",
+      "one_line": "Shared Kernos instances with user trust tiers and access boundaries",
+      "line_start": 5,
+      "line_end": 7
+    },
+    {
+      "section_title": "Web Interface",
+      "one_line": "User-facing web UI for chat, settings, capability management, covenant editing, and space navigation",
+      "line_start": 8,
+      "line_end": 10
+    },
+    {
+      "section_title": "PIE Expansion (Proactive Intelligence Engine)",
+      "one_line": "Collision, anomaly, opportunity, and pattern detection beyond foresight signals",
+      "line_start": 11,
+      "line_end": 13
+    },
+    {
+      "section_title": "Multi-LLM Routing and Cost Optimization",
+      "one_line": "Routing tasks to different LLMs by complexity and cost",
+      "line_start": 14,
+      "line_end": 16
+    },
+    {
+      "section_title": "Customer-Facing Spaces",
+      "one_line": "Guidance for agent spaces that interact with customers or clients, with disclosure and boundary management.",
+      "line_start": 17,
+      "line_end": 19
+    },
+    {
+      "section_title": "Standing Orders and Event-Triggered Automation",
+      "one_line": "Stored automations that run on schedules or trigger from events",
+      "line_start": 20,
+      "line_end": 22
+    },
+    {
+      "section_title": "Unified Capability Registry",
+      "one_line": "Single registry for built-in and user-added capabilities",
+      "line_start": 23,
+      "line_end": 24
+    }
+  ]
+}

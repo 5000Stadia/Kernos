@@ -1,0 +1,67 @@
+{
+  "file_path": "docs/capabilities/references.md",
+  "source_hash": "646a23f81b17b4cb83247bbe1bf90b276544331ca6e4ad4aafc4ba8b45f39078",
+  "generated_at": "2026-05-06T18:05:19.124183+00:00",
+  "sections": [
+    {
+      "section_title": "Tools at a glance",
+      "one_line": "Overview of Kernos tools and when to use each one",
+      "line_start": 5,
+      "line_end": 18
+    },
+    {
+      "section_title": "When to use `request_reference`",
+      "one_line": "Canonical use cases for request_reference on Kernos capabilities, behavior, architecture, identity, install, roadmap",
+      "line_start": 19,
+      "line_end": 37
+    },
+    {
+      "section_title": "When to use `store_reference`",
+      "one_line": "Choosing store_reference for durable material you'll want later outside canvas or memory",
+      "line_start": 38,
+      "line_end": 57
+    },
+    {
+      "section_title": "When to create a collection first",
+      "one_line": "Deciding when to create a collection for related files versus a single note",
+      "line_start": 58,
+      "line_end": 73
+    },
+    {
+      "section_title": "Trust tiers — choosing one",
+      "one_line": "Trust tier selection for stored references",
+      "line_start": 74,
+      "line_end": 81
+    },
+    {
+      "section_title": "Scope — references are domain-owned",
+      "one_line": "Domain-scoped visibility and enforcement for references across spaces",
+      "line_start": 82,
+      "line_end": 89
+    },
+    {
+      "section_title": "Recovery primitives — when to reach for them",
+      "one_line": "Guidance on using recovery primitives to quarantine, restore, supersede, or move references",
+      "line_start": 90,
+      "line_end": 98
+    },
+    {
+      "section_title": "What references are NOT for",
+      "one_line": "Forbidden uses of references: mutable content, user facts, private notes, and live external data",
+      "line_start": 99,
+      "line_end": 107
+    },
+    {
+      "section_title": "How retrieval flows under the hood",
+      "one_line": "Kernos retrieval request path from catalog filtering to source hash validation and return",
+      "line_start": 108,
+      "line_end": 119
+    },
+    {
+      "section_title": "Auto-induction (passive surfacing)",
+      "one_line": "Automatic surfacing of relevant catalog entries in a briefing based on token overlap",
+      "line_start": 120,
+      "line_end": 124
+    }
+  ]
+}

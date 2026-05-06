@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/18-personal-long-horizon.md",
+  "source_hash": "e40b6e127ddde3035b98bc2ac6d1d7d9d06b2b3b87877f587877b06a0e0fb2bd",
+  "generated_at": "2026-05-06T18:31:01.886295+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Profile of volatility, actors, and long-term horizon for personal finance and genealogy dials",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Artifact selection for personal finance, estate planning, and legacy records",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Initial documentation structure for estate, asset, beneficiary, and genealogy records",
+      "line_start": 31,
+      "line_end": 96
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Triggers and review rules for updating personal canvases after time, life events, or document changes",
+      "line_start": 97,
+      "line_end": 161
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member request phrases that trigger preference settings, lookups, and review workflows",
+      "line_start": 162,
+      "line_end": 180
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "How to manage sensitive document access, estate planning, incapacity, and privacy in the canvas",
+      "line_start": 181,
+      "line_end": 254
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "How personal long-horizon canvases connect with related canvases and when to keep them separate",
+      "line_start": 255,
+      "line_end": 267
+    }
+  ]
+}

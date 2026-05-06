@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/workflow-patterns/16-cause-based-organizing.md",
+  "source_hash": "1fea3b934f5c88a1ee73477e66bd25ecb7e5feaa7ad41f544fed8796accb4d9d",
+  "generated_at": "2026-05-06T18:29:52.696147+00:00",
+  "sections": [
+    {
+      "section_title": "Dials",
+      "one_line": "Core organizational dials: charter stability, participant scale, and time horizon",
+      "line_start": 14,
+      "line_end": 19
+    },
+    {
+      "section_title": "Artifact mapping",
+      "one_line": "Crosswalk from Kernos artifacts to the corresponding organizational documents",
+      "line_start": 20,
+      "line_end": 30
+    },
+    {
+      "section_title": "Initial canvas shape",
+      "one_line": "Core document layout for an organization’s mission, governance, people, finances, and campaigns",
+      "line_start": 31,
+      "line_end": 93
+    },
+    {
+      "section_title": "Evolution heuristics",
+      "one_line": "Trigger rules for mission, volunteer, fundraising, governance, compliance, and strategy changes",
+      "line_start": 94,
+      "line_end": 181
+    },
+    {
+      "section_title": "Member intent hooks",
+      "one_line": "Member intent hooks for mapping organizational needs to recommended Kernos preferences and workflows",
+      "line_start": 182,
+      "line_end": 199
+    },
+    {
+      "section_title": "Special handling",
+      "one_line": "Context-specific handling for missions, volunteers, donors, sensitive work, and organizational sunset",
+      "line_start": 200,
+      "line_end": 273
+    },
+    {
+      "section_title": "Composition notes",
+      "one_line": "Ways cause-based organizing canvases combine with event, project, research, and operations canvases",
+      "line_start": 274,
+      "line_end": 285
+    }
+  ]
+}

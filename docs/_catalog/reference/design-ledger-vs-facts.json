@@ -1,0 +1,31 @@
+{
+  "file_path": "docs/reference/design-ledger-vs-facts.md",
+  "source_hash": "342614ba32aa031fecb4580553d35a1339e146b1e1e37922fc812ba58a5c29c9",
+  "generated_at": "2026-05-06T18:16:15.652563+00:00",
+  "sections": [
+    {
+      "section_title": "The exhaustive case for two separate systems",
+      "one_line": "Why Kernos separates chronological ledger memory from cross-space facts",
+      "line_start": 11,
+      "line_end": 176
+    },
+    {
+      "section_title": "The extraction redesign: checkpointed boundary-driven harvest",
+      "one_line": "Checkpointed fact harvesting at conversation boundaries instead of per-turn extraction and deduplication",
+      "line_start": 177,
+      "line_end": 336
+    },
+    {
+      "section_title": "What the spec should look like",
+      "one_line": "Updated fact-harvesting spec with checkpointed reconciliation and unchanged knowledge architecture",
+      "line_start": 337,
+      "line_end": 362
+    },
+    {
+      "section_title": "The dividing line, stated as a principle",
+      "one_line": "Ledger memory and facts as separate but complementary layers of evidence and conclusions",
+      "line_start": 363,
+      "line_end": 383
+    }
+  ]
+}

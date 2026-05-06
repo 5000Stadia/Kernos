@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/reference/blueprint-original-vision.md",
+  "source_hash": "b40d4a60f051315cc42cf25acda9fffb68831b1accda3cb50de16f3fdf9f5e0d",
+  "generated_at": "2026-05-06T18:15:15.640346+00:00",
+  "sections": [
+    {
+      "section_title": "⚠️ HISTORICAL — Last updated 2026-02-27",
+      "one_line": "Archived original vision for Kernos",
+      "line_start": 1,
+      "line_end": 7
+    },
+    {
+      "section_title": "Master Project Blueprint v0.1",
+      "one_line": "Single source of truth for Kernos project vision, architecture, implementation plan, and status",
+      "line_start": 8,
+      "line_end": 17
+    },
+    {
+      "section_title": "PART 1: VISION & PHILOSOPHY",
+      "one_line": "Kernos’s vision and design principles for a cloud personal operating system",
+      "line_start": 18,
+      "line_end": 54
+    },
+    {
+      "section_title": "PART 2: THE SIX PILLARS",
+      "one_line": "Defines the six core pillars required for an agentic OS",
+      "line_start": 55,
+      "line_end": 84
+    },
+    {
+      "section_title": "PART 3: ARCHITECTURAL DECISIONS",
+      "one_line": "Kernel design decisions for memory, security, trust, messaging, tenancy, and deployment.",
+      "line_start": 85,
+      "line_end": 435
+    },
+    {
+      "section_title": "PART 4: IMPLEMENTATION PHASES",
+      "one_line": "Roadmap for building Kernos from first SMS prototype to full ecosystem",
+      "line_start": 436,
+      "line_end": 638
+    },
+    {
+      "section_title": "PART 5: WORKING PROTOCOL",
+      "one_line": "Project workflow and session protocol for spec-driven work with Claude and Claude Code.",
+      "line_start": 639,
+      "line_end": 712
+    },
+    {
+      "section_title": "PART 6: TECHNICAL PREREQUISITES",
+      "one_line": "Required infrastructure, development tools, and reference projects for building Kernos",
+      "line_start": 713,
+      "line_end": 744
+    },
+    {
+      "section_title": "PART 7: RISK REGISTER",
+      "one_line": "Project risks and mitigations for Kernos development and rollout",
+      "line_start": 745,
+      "line_end": 758
+    },
+    {
+      "section_title": "PART 8: FIRST STEPS (Do This Week)",
+      "one_line": "Immediate setup tasks to create the repo, SMS bot, and first usable calendar capability this week",
+      "line_start": 759,
+      "line_end": 780
+    },
+    {
+      "section_title": "APPENDIX A: Existing Protocol Landscape",
+      "one_line": "Current agent communication, interface, identity, memory, and governance protocols",
+      "line_start": 781,
+      "line_end": 821
+    },
+    {
+      "section_title": "APPENDIX B: Pillar-to-Implementation Mapping",
+      "one_line": "Mapping Kernos pillars to implementation components, protocols, and phases",
+      "line_start": 822,
+      "line_end": 837
+    }
+  ]
+}

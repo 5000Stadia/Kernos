@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/architecture/model-registry.md",
+  "source_hash": "301f80f10b1526ffc59aeb5ff7369157b99daeba4a45ffed91464b50afc274f4",
+  "generated_at": "2026-05-06T17:50:07.698488+00:00",
+  "sections": [
+    {
+      "section_title": "File layout",
+      "one_line": "Model snapshot and overlay file locations for Kernos",
+      "line_start": 11,
+      "line_end": 20
+    },
+    {
+      "section_title": "Refresh path",
+      "one_line": "Ways to refresh the Kernos model catalog from upstream and handle refresh failures",
+      "line_start": 21,
+      "line_end": 32
+    },
+    {
+      "section_title": "ModelCard contract",
+      "one_line": "Model metadata contract for model capabilities, limits, costs, and Kernos overrides",
+      "line_start": 33,
+      "line_end": 56
+    },
+    {
+      "section_title": "Overlay use cases",
+      "one_line": "Reasons to add overlay entries for real limits, missing models, and local deprecation",
+      "line_start": 57,
+      "line_end": 66
+    },
+    {
+      "section_title": "What's intentionally out",
+      "one_line": "Deliberately excluded model catalog, pricing, and deprecation behaviors",
+      "line_start": 67,
+      "line_end": 72
+    },
+    {
+      "section_title": "Future hooks",
+      "one_line": "Planned catalog support for dispatch checks, startup deprecation warnings, and accurate cost logging.",
+      "line_start": 73,
+      "line_end": 79
+    }
+  ]
+}

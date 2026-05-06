@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/roadmap.md",
+  "source_hash": "ca4039894befd95c3e8726f1f011f5183e7878d373558a00546c9b62229549c0",
+  "generated_at": "2026-05-06T18:19:26.600168+00:00",
+  "sections": [
+    {
+      "section_title": "In flight",
+      "one_line": "Ongoing Messenger prompt tuning and Kernos architecture documentation work",
+      "line_start": 5,
+      "line_end": 9
+    },
+    {
+      "section_title": "Near-term — V1 completion",
+      "one_line": "Production-readiness work to complete V1 of the personal agent runtime",
+      "line_start": 10,
+      "line_end": 22
+    },
+    {
+      "section_title": "Longer horizon — V2 begins",
+      "one_line": "Early V2 foundation specs and pipeline pieces",
+      "line_start": 23,
+      "line_end": 34
+    },
+    {
+      "section_title": "Farther still",
+      "one_line": "Future architectural ideas for voice, tools, plan changes, and cross-instance coordination",
+      "line_start": 35,
+      "line_end": 43
+    },
+    {
+      "section_title": "What we're not building",
+      "one_line": "Out-of-scope features and product boundaries for Kernos",
+      "line_start": 44,
+      "line_end": 52
+    },
+    {
+      "section_title": "How this roadmap changes",
+      "one_line": "Roadmap update policy and why priorities shift over time",
+      "line_start": 53,
+      "line_end": 56
+    },
+    {
+      "section_title": "Related",
+      "one_line": "Related links for the project overview and V2 architectural direction",
+      "line_start": 57,
+      "line_end": 61
+    }
+  ]
+}

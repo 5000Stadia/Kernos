@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/architecture/integration-wire-live.md",
+  "source_hash": "a26f01f3efa98dc46c3c078f461606a22c40cadea9c43eb693e0c1551b1c9555",
+  "generated_at": "2026-05-06T17:48:22.314756+00:00",
+  "sections": [
+    {
+      "section_title": "Composition with PDI",
+      "one_line": "How IWL composes with PDI while preserving all structural invariants",
+      "line_start": 14,
+      "line_end": 33
+    },
+    {
+      "section_title": "The four concrete hooks",
+      "one_line": "Core enactment interfaces for planning, dispatching, divergence handling, and presence rendering",
+      "line_start": 34,
+      "line_end": 138
+    },
+    {
+      "section_title": "Translation seam",
+      "one_line": "Enactment outcome to ReasoningResult translation, telemetry, and tool iteration counting",
+      "line_start": 139,
+      "line_end": 171
+    },
+    {
+      "section_title": "Audit emission compatibility",
+      "one_line": "Ensuring reasoning audit events stay compatible and emitted once per turn",
+      "line_start": 172,
+      "line_end": 191
+    },
+    {
+      "section_title": "`reasoning.py` minimal additive change",
+      "one_line": "Minimal reasoning.py update for shared tool traces via injected trace_sink",
+      "line_start": 192,
+      "line_end": 206
+    },
+    {
+      "section_title": "`server.py` production wiring",
+      "one_line": "Production server wiring for per-turn reasoning turns, telemetry, and event delivery",
+      "line_start": 207,
+      "line_end": 279
+    },
+    {
+      "section_title": "Feature flag semantics",
+      "one_line": "Semantics for a feature flag that routes reasoning to the decoupled turn runner",
+      "line_start": 280,
+      "line_end": 288
+    },
+    {
+      "section_title": "Equivalence telemetry",
+      "one_line": "Telemetry for comparing decoupled and legacy turn paths by origin and per-turn latency",
+      "line_start": 289,
+      "line_end": 300
+    },
+    {
+      "section_title": "Architectural pins (load-bearing tests)",
+      "one_line": "Load-bearing tests that pin Kernos architectural invariants and production wiring",
+      "line_start": 301,
+      "line_end": 339
+    },
+    {
+      "section_title": "Files",
+      "one_line": "Core enactment, response delivery, and integration test files for Kernos",
+      "line_start": 340,
+      "line_end": 358
+    },
+    {
+      "section_title": "Rollout",
+      "one_line": "Deployment stages for enabling and validating the decoupled turn runner",
+      "line_start": 359,
+      "line_end": 378
+    },
+    {
+      "section_title": "Push-approval constraint (design review, IWL v3 review)",
+      "one_line": "Push approval gate for thin-path soak; full-machinery audit partitioning waits on instance_id fix.",
+      "line_start": 379,
+      "line_end": 403
+    }
+  ]
+}

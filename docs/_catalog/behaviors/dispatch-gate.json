@@ -1,0 +1,43 @@
+{
+  "file_path": "docs/behaviors/dispatch-gate.md",
+  "source_hash": "409b18ecc26574320c23f0814fbe6e712aee67f7ebc689bb323751cbb3f4261d",
+  "generated_at": "2026-05-06T17:59:48.748124+00:00",
+  "sections": [
+    {
+      "section_title": "How it works",
+      "one_line": "Approval flow for write tool calls: token checks, overrides, and model verdicts",
+      "line_start": 7,
+      "line_end": 38
+    },
+    {
+      "section_title": "What happens when the gate doesn't approve",
+      "one_line": "Pending action flow when gate returns CONFIRM, CONFLICT, or CLARIFY",
+      "line_start": 39,
+      "line_end": 47
+    },
+    {
+      "section_title": "Effect classification",
+      "one_line": "Kernel tool effect categories and gate behavior for read, soft_write, and hard_write actions",
+      "line_start": 48,
+      "line_end": 61
+    },
+    {
+      "section_title": "Hallucination detection + retry",
+      "one_line": "False tool-use claim detection and retry for agent responses",
+      "line_start": 62,
+      "line_end": 65
+    },
+    {
+      "section_title": "Per-tool denial limit",
+      "one_line": "Per-tool cap on consecutive denials to prevent retry loops on CONFLICT",
+      "line_start": 66,
+      "line_end": 69
+    },
+    {
+      "section_title": "Code locations",
+      "one_line": "File paths for core Kernos gate, reasoning, messaging, and permission code",
+      "line_start": 70,
+      "line_end": 80
+    }
+  ]
+}

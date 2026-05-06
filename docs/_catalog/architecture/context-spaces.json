@@ -1,0 +1,73 @@
+{
+  "file_path": "docs/architecture/context-spaces.md",
+  "source_hash": "0c38d4408aa16830983b9dae94146c4dc176f8b0c41ae0514c797c20bddb4f56",
+  "generated_at": "2026-05-06T17:42:37.833034+00:00",
+  "sections": [
+    {
+      "section_title": "The problem",
+      "one_line": "Why single chat threads break across mixed tasks and why Kernos uses context spaces",
+      "line_start": 5,
+      "line_end": 14
+    },
+    {
+      "section_title": "One conversation, many domains",
+      "one_line": "Isolated per-member conversation spaces with separate memory, tools, and procedures for each domain",
+      "line_start": 15,
+      "line_end": 52
+    },
+    {
+      "section_title": "The router does the routing",
+      "one_line": "How Kernos routes messages to the right space and scopes the agent’s context",
+      "line_start": 53,
+      "line_end": 71
+    },
+    {
+      "section_title": "Hierarchy: root, domain, subdomain",
+      "one_line": "Space hierarchy and routing rules for root, domain, and subdomain spaces",
+      "line_start": 72,
+      "line_end": 85
+    },
+    {
+      "section_title": "Query mode, work mode, continuation",
+      "one_line": "Router decisions for when to stay in space, switch domains, or continue the current conversation.",
+      "line_start": 86,
+      "line_end": 97
+    },
+    {
+      "section_title": "Per-space tool promotion",
+      "one_line": "How tools are promoted and surfaced separately in each space",
+      "line_start": 98,
+      "line_end": 112
+    },
+    {
+      "section_title": "Why \"100 domains > 100 chat threads\"",
+      "one_line": "Why context spaces beat separate chat threads for continuity and routing",
+      "line_start": 113,
+      "line_end": 128
+    },
+    {
+      "section_title": "What this architecture makes easy",
+      "one_line": "How the architecture handles new domains, shared work, and context switching",
+      "line_start": 129,
+      "line_end": 135
+    },
+    {
+      "section_title": "What this architecture explicitly does not try to do",
+      "one_line": "Non-goals and limits of the Kernos space architecture",
+      "line_start": 136,
+      "line_end": 142
+    },
+    {
+      "section_title": "Related architecture",
+      "one_line": "Related topics on routing, per-space memory, and disclosure layering",
+      "line_start": 143,
+      "line_end": 148
+    },
+    {
+      "section_title": "Code entry points",
+      "one_line": "Main source locations for context spaces, router logic, logs, and turn pipeline entry points",
+      "line_start": 149,
+      "line_end": 155
+    }
+  ]
+}
