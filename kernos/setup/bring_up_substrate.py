@@ -355,7 +355,75 @@ async def bring_up_substrate(
             reference_ingestion_scanner.add_source(
                 _docs_source_root(_docs_root_path)
             )
+
+            # REFERENCE-CATALOG-BAKED-V1: prefer the baked artifact path
+            # over the live scan. Hydration from baked is the architect-
+            # locked default (Path B+, 2026-05-06): the canonical docs
+            # tree's catalog is derived content that ships with the repo,
+            # built by ``scripts/regenerate_reference_catalog.py`` at
+            # contribution time. Hash validation per file is the trust
+            # mechanism — runtime always re-validates source-hash before
+            # injection regardless of hydration source. Stale or missing
+            # baked entries surface loud per-file diagnostics; the
+            # live-scan path picks them up via hash-mismatch-on-retrieval.
             import os as _os
+            from kernos.kernel.reference.baked import (
+                load_baked_catalog as _load_baked,
+            )
+            from kernos.kernel.reference.catalog import (
+                SCOPE_INSTANCE as _SCOPE_INSTANCE,
+                TRUST_CANONICAL as _TRUST_CANONICAL,
+            )
+            _baked_catalog_root = _docs_root_path / "_catalog"
+            _baked_summary = await _load_baked(
+                docs_root=_docs_root_path,
+                catalog_root=_baked_catalog_root,
+                instance_id=_substrate_instance_id,
+                catalog_store=reference_catalog,
+                scope=_SCOPE_INSTANCE,
+                trust_tier=_TRUST_CANONICAL,
+                owner_domain_id="",
+            )
+            if not _baked_summary.manifest_present:
+                logger.info(
+                    "REFERENCE_BAKED_HYDRATION: no manifest at %s — catalog "
+                    "starts empty. Run "
+                    "`python scripts/regenerate_reference_catalog.py` to "
+                    "seed the baked artifacts, or set "
+                    "KERNOS_REFERENCE_FIRST_BOOT_SCAN=1 to live-scan once.",
+                    _baked_catalog_root,
+                )
+            else:
+                _level = (
+                    logger.warning
+                    if (
+                        _baked_summary.files_stale
+                        or _baked_summary.files_missing_artifact
+                        or _baked_summary.files_artifact_invalid
+                        or _baked_summary.files_uncatalogued
+                    )
+                    else logger.info
+                )
+                _level(
+                    "REFERENCE_BAKED_HYDRATION: loaded=%d sections=%d "
+                    "stale=%d missing_artifact=%d artifact_invalid=%d "
+                    "uncatalogued=%d",
+                    _baked_summary.files_loaded,
+                    _baked_summary.sections_imported,
+                    _baked_summary.files_stale,
+                    _baked_summary.files_missing_artifact,
+                    _baked_summary.files_artifact_invalid,
+                    _baked_summary.files_uncatalogued,
+                )
+
+            # The legacy first-boot scan stays available as the explicit
+            # opt-in / dev-loop hatch. With the baked artifact in place,
+            # this is rarely needed: the catalog is already hydrated
+            # before the agent's first turn, and live cataloging only
+            # fires on hash mismatch or on store_reference writes. With
+            # the artifact missing or stale and no baked override, this
+            # is the way to populate the catalog without running the
+            # contributor regen script.
             if _os.environ.get("KERNOS_REFERENCE_FIRST_BOOT_SCAN", "0") == "1":
                 import asyncio as _asyncio
                 _asyncio.create_task(
@@ -370,9 +438,9 @@ async def bring_up_substrate(
                 )
             else:
                 logger.info(
-                    "REFERENCE_FIRST_BOOT_SCAN: skipped (default; set "
-                    "KERNOS_REFERENCE_FIRST_BOOT_SCAN=1 to opt in). Catalog "
-                    "hydrates lazily on hash-mismatch and store_reference."
+                    "REFERENCE_FIRST_BOOT_SCAN: skipped (default). Baked "
+                    "hydration handled the canonical docs tree; live-scan "
+                    "remains opt-in via KERNOS_REFERENCE_FIRST_BOOT_SCAN=1."
                 )
     except Exception:  # pragma: no cover
         logger.exception(
