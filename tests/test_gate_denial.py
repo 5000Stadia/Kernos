@@ -74,3 +74,25 @@ class TestDenialCounting:
     def test_default_limit_is_3(self):
         gate = _make_gate()
         assert gate._denial_limit == 3
+
+    async def test_denial_limit_surfaces_agent_facing_message(self):
+        """DOCS-AUDIT-RECOVERY #6: when the gate short-circuits on the
+        per-tool denial limit, the result's ``proposed_action`` carries
+        an agent-readable message explaining WHY the call failed so the
+        agent can pivot rather than loop."""
+        gate = _make_gate()
+        # Pre-load the counter so the next evaluate hits the limit.
+        gate._denial_counts["create-event"] = 3
+        result = await gate.evaluate(
+            "create-event", {"summary": "X"}, "hard_write", "", "t1", "s1",
+            is_reactive=False,
+        )
+        assert result.reason == "denial_limit"
+        assert "denial limit" in result.proposed_action.lower()
+        assert "create-event" in result.proposed_action
+        # The message tells the agent what to do next.
+        assert (
+            "different approach" in result.proposed_action
+            or "surface the friction" in result.proposed_action
+            or "next turn" in result.proposed_action
+        )

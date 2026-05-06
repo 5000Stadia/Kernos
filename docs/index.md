@@ -4,6 +4,14 @@ Kernos is a personal agentic operating system. It runs as a persistent agent tha
 
 > **Start here:** [`kernos-introduction.md`](kernos-introduction.md) — the canonical introduction. Innovation overview plus a navigable map of every architecture, behavior, capability, identity, and roadmap surface in this docs tree. The running agent also reaches this document when asked what Kernos is.
 
+## Kernos documentation map
+
+This page is the navigation map for Kernos's canonical documentation. Every architecture page, capability page, behavior page, identity page, and roadmap page in `docs/` is reachable from here. Use this section as the starting point when you don't know what to ask for.
+
+The agent reaches this map by calling `request_reference("kernos documentation map")` (or any close variant). The reference primitive's catalog routes the brief here; from there the agent can navigate to a specific section by following a more focused brief.
+
+The five top-level sections below are how the documentation tree is organized; each section's row in the table links to that section's overview page. The "Recent additions" table further down lists pages that shipped after the Multi-Member V1 era.
+
 ## How It Works
 
 Kernos has three layers:

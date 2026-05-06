@@ -56,6 +56,8 @@ Page types are a vocabulary suggestion, not an enforcement axis:
 
 The `shared_spaces` table in `instance.db` was declared for V2 shared spaces but never used. CANVAS-V1 repurposes it as the canvas registry — each canvas has one row (`canvas_id` aliases `space_id`) plus the canvas-specific columns (`scope`, `owner_member_id`, `pinned_to_spaces`, `canvas_yaml_path`). A companion table `canvas_members(canvas_id, member_id, added_at, active)` holds explicit memberships for `personal` + `specific` scopes. Team scope is served by scope checks alone — no per-member row is required.
 
+`InstanceDB.add_canvas_member(canvas_id, member_id)` writes the per-member row at canvas-creation time (called four times in `canvas.py` — for the creator, the explicit specific-scope members, optionally the inherits target, and any post-creation team-scope adjustment that internal code performs). **It is not currently agent-exposed as a kernel tool.** Post-creation membership management (adding or removing a member from an existing canvas after `canvas_create`) is a deferred follow-on — the substrate exists, the agent-callable surface does not. Tracked as a parked follow-up; will land if real friction surfaces.
+
 ## The dispatch gate + consent
 
 Canvas tools classify through the standard `DispatchGate`:

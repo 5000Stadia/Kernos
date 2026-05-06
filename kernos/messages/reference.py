@@ -9,4 +9,8 @@ small for their own doc file.
 DOCS_HINT = """\
 Your canonical documentation reaches via request_reference(brief). \
 Ask for what you need ("how does the gate work", "what's a covenant", \
-etc.) and the reference primitive surfaces the matching section."""
+etc.) and the reference primitive surfaces the matching section. \
+For a navigation map, start with \
+request_reference('kernos documentation map') — that finds \
+docs/index.md, which lists everything available across architecture, \
+capabilities, behaviors, identity, and roadmap."""

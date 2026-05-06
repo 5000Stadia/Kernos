@@ -281,17 +281,29 @@ class DispatchGate:
                 method="messenger_handoff",
             )
 
-        # Step 0: Denial limit — stop runaway retry loops
+        # Step 0: Denial limit — stop runaway retry loops.
+        # DOCS-AUDIT-RECOVERY #6: surface an agent-readable message
+        # in proposed_action so the agent sees WHY the call failed and
+        # can pivot rather than retry. Without this, the agent gets a
+        # generic block and may loop on the same approach.
         if self._denial_counts.get(tool_name, 0) >= self._denial_limit:
             logger.warning(
                 "GATE_DENIAL_LIMIT: tool=%s attempts=%d action=deny",
                 tool_name, self._denial_counts[tool_name],
             )
+            describe = self._describe_action(tool_name, tool_input)
+            limit_message = (
+                f"You've hit the per-tool denial limit "
+                f"({self._denial_limit} consecutive denials) for "
+                f"{tool_name!r} this turn. Pick a different approach, "
+                f"surface the friction to the user, or wait for the next "
+                f"turn (counters reset). Proposed action: {describe}"
+            )
             return GateResult(
                 allowed=False,
                 reason="denial_limit",
                 method="denial_tracking",
-                proposed_action=self._describe_action(tool_name, tool_input),
+                proposed_action=limit_message,
             )
 
         # Step 1: Approval token

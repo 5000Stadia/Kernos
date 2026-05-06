@@ -58,6 +58,8 @@ Adding a new policy field: pick the natural owner module, add a read-through acc
 
 ## Workshop-tool prep contract
 
+> **Status:** This contract specifies the shape for a future capability. **No production tools currently use it**; the contract is preserved as design intent for when workshop tools land. Reading this section in 2026-05 means looking at a forward-looking spec, not at code that's running.
+
 The future workshop-tool spec (out of scope here; design-only) plugs into the same registrar / provider interface. Minimum future contract:
 
 - **Descriptor fields:** `name`, `description`, `input_schema`, `schema`, `policy_metadata`, `dispatch_reference`. Workshop tools provide the same six fields kernel tools provide today; the registrar treats both the same way at the read seam.

@@ -395,7 +395,11 @@ async def test_populate_bootstrap_prompt_when_not_graduated():
     ctx = PopulationContext(member_profile={"bootstrap_graduated": False})
     out = await populate_field("rules.bootstrap_prompt", ctx)
     assert isinstance(out, str)
-    assert "FIRST CONVERSATION" in out
+    # The bootstrap_prompt was rewritten 2026-05-05; "FIRST
+    # CONVERSATION" was the old marker. Anchor on the new prompt's
+    # substrate-awareness lines, which are unique to the bootstrap.
+    assert "request_reference" in out
+    assert "store_reference" in out
 
 
 async def test_populate_bootstrap_prompt_None_when_graduated():

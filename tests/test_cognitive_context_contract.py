@@ -705,13 +705,17 @@ async def test_bootstrap_prompt_present_when_not_graduated(
         agent_name="",  # hatching not yet named
     )
     system, _tools, _messages = await _run_capture(handler, mock_provider)
-    # A canonical excerpt from PRIMARY_TEMPLATE.bootstrap_prompt that
-    # is unique enough to anchor the assertion.
-    excerpt = "FIRST CONVERSATION"
-    assert excerpt in system, (
-        f"Bootstrap prompt expected in system but not found. "
-        f"system head: {system[:300]!r}"
+    # The bootstrap_prompt was rewritten 2026-05-05 to a presence-
+    # first + substrate-aware shape; "FIRST CONVERSATION" was the
+    # old marker. The new prompt's load-bearing markers are the
+    # substrate-awareness lines (request_reference / store_reference)
+    # which are unique enough to anchor the assertion that the
+    # bootstrap layer made it into the system prompt.
+    assert "request_reference" in system, (
+        f"Bootstrap prompt's substrate-awareness lines expected in "
+        f"system but not found. system head: {system[:300]!r}"
     )
+    assert "store_reference" in system
 
 
 # ---------------------------------------------------------------------------

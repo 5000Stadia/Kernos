@@ -118,7 +118,19 @@ External sources (`email`, `notion`) have payload-shape stubs in `external_sourc
 | `skip` (default) | Emit `workflow.missed_fire` event; dispatch nothing. |
 | `catch_up` | Emit `workflow.missed_fire` for the missed windows; dispatch the **single most recent** as one catch-up fire. No fan-out for long downtime. |
 
-(A `fan_out_within_window` policy was contemplated during design but is not implemented — `_MISSED_WINDOW_VALUES` only accepts `skip` and `catch_up`.)
+### Why no `fan_out_within_window` policy
+
+A third policy was contemplated during design — `fan_out_within_window` — that would dispatch one workflow per missed window in the lookback range. Eight hours of process downtime on an `every 1h` predicate would fire eight workflows, one per hour gap.
+
+This was **deliberately scoped out**. Long-downtime fan-out is a bug magnet:
+
+- A reminder workflow that fires "you have a meeting in 30 minutes" would dispatch eight times after eight hours of downtime — by which point all eight reminders are stale and most are about meetings that have already happened.
+- An aggregation workflow that processes hourly batches would re-process the same eight hours that some other recovery path already handled, producing duplicate side-effects.
+- A notification workflow that pings the user on schedule would deliver eight rapid-fire pings the moment the system comes back, which is uniformly worse than `catch_up`'s single catch-up fire.
+
+The fan-out shape only earns its keep when the workflow's side-effects are genuinely per-window distinct AND idempotent under repeated dispatch — a narrow case. `_MISSED_WINDOW_VALUES = frozenset({"skip", "catch_up"})` is the hard cap.
+
+If a future use case needs per-missed-window dispatch, it'll be added explicitly with idempotency requirements named in the spec — never as a default. The substrate's CAS-based `fire_id` deduplication closes part of the safety gap (re-dispatching the same `(predicate, window)` is idempotent), but the broader "do you actually want N fires?" question is deliberately surfaced to the workflow author rather than absorbed into a default.
 
 The substrate-emitted `workflow.missed_fire` event records the missed window so audit/diagnostics show what the runtime chose not to fire (skip) or collapsed into the catch-up fire (catch_up).
 

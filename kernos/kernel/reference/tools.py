@@ -43,6 +43,8 @@ from typing import Any, Protocol
 from kernos.kernel.reference.catalog import (
     CatalogEntry,
     CatalogStore,
+    ENTRY_TYPE_COLLECTION,
+    ENTRY_TYPE_FILE,
     SCOPE_INSTANCE,
     TRUST_AGENT_AUTHORED,
     TRUST_CANONICAL,
@@ -55,6 +57,7 @@ from kernos.kernel.reference.catalog import (
 )
 from kernos.kernel.reference.cohort import CatalogingCohort
 from kernos.kernel.reference.events import ReferenceEventEmitter
+from kernos.kernel.reference.induction import score_overlap, tokenize
 from kernos.kernel.reference.injection import (
     REFERENCE_UNAVAILABLE_MESSAGE,
     inject_entry,
@@ -420,10 +423,21 @@ class ReferenceService:
             }
         match = _ENTRY_ID_RE.search(raw or "")
         if not match:
+            # Discoverability fallback (DOCS-AUDIT-RECOVERY #1):
+            # navigator returned NONE — surface up to N candidate
+            # rows from the visible catalog scored by mechanical
+            # token-overlap against the brief. Recovers the
+            # "list-available" affordance the retired read_doc
+            # carried for unknown paths.
             return {
                 "status": "no_match",
-                "message": "No catalog entry matches the brief.",
+                "message": (
+                    "No catalog entry matched the brief. "
+                    "Closest candidates listed below — refine your "
+                    "brief and call request_reference again."
+                ),
                 "navigator_response": (raw or "").strip(),
+                "candidates": _candidate_list(brief_request, rows),
             }
         entry_id = match.group(0)
         # Visibility re-check: the cohort can only return entry_ids
@@ -435,8 +449,10 @@ class ReferenceService:
             return {
                 "status": "no_match",
                 "message": (
-                    "Navigator chose an entry not in the visible catalog."
+                    "Navigator chose an entry not in the visible "
+                    "catalog. Closest candidates listed below."
                 ),
+                "candidates": _candidate_list(brief_request, rows),
             }
         # Collection-level entries surface as a map (purpose +
         # member-file count), NOT injected file content. The
@@ -844,6 +860,63 @@ class ReferenceService:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+_CANDIDATE_LIST_LIMIT = 8
+"""Number of fallback candidates surfaced when navigator returns NONE.
+Conservative — the agent uses these to refine its brief, not as a
+content payload."""
+
+
+def _candidate_list(
+    brief: str,
+    rows: list[CatalogEntry],
+) -> list[dict[str, str]]:
+    """Score visible-catalog rows by token-overlap against the brief
+    and return the top N as ``{category, section_title, one_line,
+    entry_id}`` triples. Tombstoned entries are already excluded by
+    the caller's ``list_visible``; this helper just ranks.
+
+    Token-overlap uses the same tokenizer + plural-s normalization
+    as the auto-induction layer so the matcher behaves
+    consistently across surfaces.
+    """
+    signal_tokens = set(tokenize(brief))
+    if not signal_tokens or not rows:
+        return []
+    scored: list[tuple[int, CatalogEntry]] = []
+    for row in rows:
+        overlap = score_overlap(signal_tokens=signal_tokens, entry=row)
+        if overlap > 0:
+            scored.append((overlap, row))
+    if not scored:
+        # No overlap at all — surface a small representative slice
+        # of the catalog so the agent has SOMETHING to anchor on.
+        # Prefer instance-scope (canonical) rows; fall back to
+        # whatever's available.
+        instance_rows = [r for r in rows if r.scope == SCOPE_INSTANCE]
+        slice_rows = (instance_rows or rows)[:_CANDIDATE_LIST_LIMIT]
+        return [_candidate_row(r) for r in slice_rows]
+    scored.sort(key=lambda t: -t[0])
+    return [_candidate_row(r) for (_, r) in scored[:_CANDIDATE_LIST_LIMIT]]
+
+
+def _candidate_row(entry: CatalogEntry) -> dict[str, str]:
+    if entry.entry_type == ENTRY_TYPE_COLLECTION:
+        return {
+            "entry_id": entry.entry_id,
+            "kind": "collection",
+            "category": entry.collection_name or entry.category,
+            "section_title": f"[collection] {entry.collection_name}",
+            "one_line": entry.purpose or "",
+        }
+    return {
+        "entry_id": entry.entry_id,
+        "kind": "file",
+        "category": entry.category,
+        "section_title": entry.section_title,
+        "one_line": entry.one_line,
+    }
 
 
 _SAFE_SLUG_RE = re.compile(r"[^a-zA-Z0-9_-]+")

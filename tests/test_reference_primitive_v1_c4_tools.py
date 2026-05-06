@@ -169,6 +169,108 @@ async def test_request_reference_no_match_returns_no_match(service_setup):
     assert result["status"] == "no_catalog"
 
 
+async def test_request_reference_no_match_surfaces_candidates(service_setup):
+    """DOCS-AUDIT-RECOVERY #1: when the navigator returns NONE, the
+    response carries a candidate list scored by token-overlap so the
+    agent has something concrete to refine against. Recovers the
+    discoverability affordance the retired read_doc had."""
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+
+    # Seed three real catalog entries under different categories.
+    for i, (cat, title, oneline) in enumerate([
+        ("architecture", "Gate classification",
+         "How the gate decides destructive writes"),
+        ("architecture", "Memory ledger architecture",
+         "Two-store dual-memory design"),
+        ("primitives", "Canvas primitive overview",
+         "Scoped markdown directories"),
+    ]):
+        fp = tmp_path / f"docs/{cat}/{i}.md"
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(f"## {title}\n\n{oneline}\n", encoding="utf-8")
+        e = CatalogEntry(
+            entry_id=f"ref_seed_{i}",
+            instance_id="inst1",
+            entry_type=ENTRY_TYPE_FILE,
+            scope=SCOPE_INSTANCE,
+            category=cat,
+            indexed_at="2026-05-04T00:00:00+00:00",
+            trust_tier=TRUST_CANONICAL,
+            file_path=str(fp),
+            section_title=title,
+            one_line=oneline,
+            line_start=1,
+            line_end=3,
+            source_hash=compute_source_hash(fp.read_bytes()),
+        )
+        await catalog.replace_file_entries(
+            instance_id="inst1", file_path=str(fp), new_entries=[e],
+        )
+
+    # Force the navigator to return NONE so the fallback fires.
+    nav.next_response = "NONE"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    result = await service.handle_request_reference(
+        ctx=ctx, brief_request="how does the gate classification work",
+    )
+    assert result["status"] == "no_match"
+    assert "candidates" in result
+    candidates = result["candidates"]
+    assert isinstance(candidates, list)
+    assert len(candidates) > 0
+    # Highest-overlap candidate should be the gate-classification entry.
+    top = candidates[0]
+    assert top["section_title"] == "Gate classification"
+    assert top["category"] == "architecture"
+    assert "destructive writes" in top["one_line"]
+    # Each candidate carries entry_id so the agent can cite it.
+    for c in candidates:
+        assert "entry_id" in c
+        assert "kind" in c
+
+
+async def test_request_reference_no_match_no_overlap_falls_back_to_slice(
+    service_setup,
+):
+    """When the brief shares zero tokens with any catalog entry, the
+    candidate list falls back to a representative instance-scope slice
+    so the agent always has SOMETHING to anchor against."""
+    service, catalog, _, nav, _, tmp_path = service_setup
+    fp = tmp_path / "docs/x.md"
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    fp.write_text("## Topic\n\nbody\n", encoding="utf-8")
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp),
+        new_entries=[CatalogEntry(
+            entry_id="ref_x",
+            instance_id="inst1",
+            entry_type=ENTRY_TYPE_FILE,
+            scope=SCOPE_INSTANCE,
+            category="architecture",
+            indexed_at="2026-05-04T00:00:00+00:00",
+            trust_tier=TRUST_CANONICAL,
+            file_path=str(fp),
+            section_title="Topic",
+            one_line="aaa bbb ccc",
+            line_start=1, line_end=3,
+            source_hash=compute_source_hash(fp.read_bytes()),
+        )],
+    )
+    nav.next_response = "NONE"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    result = await service.handle_request_reference(
+        ctx=ctx, brief_request="zzzzzzz unrelated brief xyzzy",
+    )
+    assert result["status"] == "no_match"
+    # No-overlap path still surfaces something (representative slice)
+    # so the agent isn't left empty-handed.
+    assert len(result["candidates"]) >= 1
+
+
 async def test_request_reference_navigator_picks_invisible_entry(service_setup):
     """Defense-in-depth: even if the navigator returns an entry_id
     that's outside the visible catalog, the service rejects it
