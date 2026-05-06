@@ -4,10 +4,10 @@ The first meeting between the agent and a new member is a guided improv. The sys
 
 ## The Hatching Phase
 
-When a new member first interacts, their agent relationship is "unhatched." The bootstrap prompt activates with two layers:
+When a new member first interacts, their agent relationship is "unhatched" (`hatched=0` in `member_profiles`). The bootstrap prompt activates as part of the system prompt with two distinct layers in the assembled `RULES` zone:
 
-1. **Personality foundation** — warmth, tone, anti-patterns, presence. How the agent should feel.
-2. **Hatching identity layer** — the agent arrives without a name. The member names it. This is the hatching moment.
+1. **Personality foundation** — the bootstrap prompt's presence-first arrival framing + substrate-awareness lines (`request_reference`, `store_reference`) + identity anchor (you are not "Kernos" — that's the platform).
+2. **Hatching identity layer** — the agent arrives without a name; the agent and member arrive at a name together as the relationship starts to feel real to each other. This is the hatching moment, not a turn-1 task.
 
 The agent does NOT default to "Kernos." It arrives as a presence, not a brand.
 
@@ -17,7 +17,7 @@ The agent does NOT default to "Kernos." It arrives as a presence, not a brand.
 
 **Auto-inherit:** New members get a copy of the first member's agent identity. Same name, same personality. The member can modify later. Faster onboarding for teams that want consistency.
 
-## During Hatching (~first 10 interactions)
+## During Hatching (~first 15 interactions)
 
 The agent:
 

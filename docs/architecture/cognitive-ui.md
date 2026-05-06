@@ -18,38 +18,35 @@ Kernos does the structural fix. The agent's context is assembled from seven name
 
 ## The zones
 
-Seven zones, in fixed composition order:
+Eight zones in the production compose, in fixed order:
 
 ```
-RULES       operating principles, stewardship, behavioral contracts, bootstrap
-ACTIONS     capabilities, outbound channels, docs reference
-NOW         turn-local situation: time, platform, auth, space, member
-STATE       current truth the agent should act from
-RESULTS     receipts, system events, awareness whispers, cross-domain notices
-PROCEDURES  domain-specific workflows from _procedures.md
-MEMORY      compaction context: Living State, archived history index
+RULES               operating principles, instance stewardship, covenants, bootstrap
+ACTIONS             capabilities, outbound channels, references hint
+NOW                 turn-local situation: time, platform, auth, space, member
+STATE               current truth the agent should act from
+RESULTS             receipts, system events, awareness whispers, cross-domain notices
+PROCEDURES          domain-specific workflows loaded from _procedures.md
+AVAILABLE CANVASES  CANVAS-V1 — passive awareness of canvases the member can see
+MEMORY              compaction context: Living State, archived history index
 ```
 
-Each zone is built by a dedicated Python function that produces one well-formed string:
+Each zone is built by a dedicated Python function that produces one well-formed string. Builders live in `kernos/messages/handler.py`:
 
 | Zone | Builder | What it contains |
 |---|---|---|
-| `RULES` | `_build_rules_block` (`handler.py:511`) | Operating principles, instance stewardship purpose, active covenants, pre-graduation bootstrap prompt |
-| `ACTIONS` | `_build_actions_block` (`handler.py:708`) | Active capability prompt, outbound channel inventory, docs hint |
-| `NOW` | `_build_now_block` (`handler.py:772` in compat / earlier at `:548`) | Current time (in user TZ + UTC), platform context, auth level, member identity |
-| `STATE` | `_build_state_block` (`handler.py:634`) | Member identity, active space, relationships, knowledge fragments |
-| `RESULTS` | `_build_results_block` (`handler.py:695`) | Tool receipts, system events, whispers, cross-domain notices |
-| `PROCEDURES` | `_build_procedures_block` (`handler.py:744`) | Domain-specific workflows loaded from the active space's `_procedures.md` |
-| `MEMORY` | `_build_memory_block` (`handler.py:734`) | The space's Living State + archived history index |
+| `RULES` | `_build_rules_block` | Operating principles, instance stewardship purpose, active covenants, pre-graduation bootstrap prompt |
+| `ACTIONS` | `_build_actions_block` | Active capability prompt, outbound channel inventory, references hint pointing at `request_reference` |
+| `NOW` | `_build_now_block` | Current time (in user TZ + UTC), platform context, auth level, member identity |
+| `STATE` | `_build_state_block` | Member identity, active space, relationships, knowledge fragments |
+| `RESULTS` | `_build_results_block` | Tool receipts, system events, whispers, cross-domain notices |
+| `PROCEDURES` | `_build_procedures_block` | Domain-specific workflows loaded from the active space's `_procedures.md` plus team-canvas pages |
+| `AVAILABLE CANVASES` | `_build_canvases_block` | CANVAS-V1 member-scoped canvas index — names + scopes + recent-update hints |
+| `MEMORY` | `_build_memory_block` | The space's Living State + archived history index |
 
-The composition itself is a one-liner:
+The production compose is in `MessageHandler._phase_assemble` — it threads through all eight blocks plus a `_compose_blocks(*blocks)` helper that joins non-empty blocks with double newlines.
 
-```python
-# kernos/messages/handler.py:778
-return _compose_blocks(rules, actions, now_block, state_block, results, memory)
-```
-
-(`_compose_blocks` joins non-empty zones with double newlines — empty zones simply don't appear.)
+There's also a `_build_system_prompt(...)` compatibility wrapper at module scope used by tests; it composes a six-block subset (RULES, ACTIONS, NOW, STATE, RESULTS, MEMORY) and is intentionally narrower than the production path. Production code uses the phase-based block builders; the wrapper exists so older direct-call tests still pass.
 
 The discipline: **no zone contains content that belongs in another zone.** The Living State lives in `MEMORY`, not spread through `RULES`. The active covenants live in `RULES`, not in `STATE`. The agent reads a zone and knows what kind of information it's looking at.
 

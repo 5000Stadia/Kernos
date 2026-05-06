@@ -1,6 +1,6 @@
 # Architecture Overview
 
-> Three layers, one principal agent, six cohorts, six-phase turn pipeline. The rest of the architecture documentation fans out from here.
+> Three layers, one principal agent, judgment cohorts surrounding it, six-phase turn pipeline. The rest of the architecture documentation fans out from here.
 
 ## The three layers
 
@@ -56,22 +56,32 @@ See [Pipeline reference](pipeline-reference.md) for a per-phase breakdown with i
 
 ## The principal and the cohorts
 
-One LLM handles the conversation. Six LLM cohorts run around it:
+One LLM handles the conversation. **Judgment cohorts** — bounded specialist LLM workers with narrow prompts and narrow input scopes — run around it. Six core judgment cohorts mediate the principal's turn directly:
 
 | Cohort | Where it runs | What it does |
 |---|---|---|
 | Router | Phase 2, before ASSEMBLE | Picks the focus space; tags the turn |
-| Gate | Phase 4, per tool call | Approves, confirms, conflicts, or clarifies |
+| Gate | Phase 4, per tool call | Returns APPROVE / CONFIRM / CONFLICT / CLARIFY |
 | Messenger | Phase 4 or 5, per cross-member exchange | Judges whether the response serves the disclosing member's welfare |
 | Fact harvester | Phase 6, at compaction boundaries | Extracts durable facts with single-call reconciliation |
 | Compaction | Phase 6, at compaction boundaries | Rewrites Living State; appends archive block |
 | Friction observer | Phase 6, post-turn | Detects patterns where the system works against the user |
 
-Cohorts never appear in the principal agent's context. Their outputs are consumed by the kernel, not injected into the next prompt. See [Cohort architecture](cohort-and-judgment.md) for the full discipline and [Primitives reference](primitives-reference.md) for each cohort's entry point.
+These six are the cohorts the [cohort-and-judgment.md](cohort-and-judgment.md) page covers in depth.
 
-## The five architectural contributions
+Additional cohorts run on different cycles outside the per-turn-judgment pipeline — they live in `kernos/kernel/cohorts/` and are invoked when their substrate fires:
 
-The README lists five load-bearing architectural choices. Each gets its own page:
+- **Gardener** — bounded canvas-shape authority (initial-pattern selection, continuous-evolution heuristics, reshape proposals). See [`gardener.md`](gardener.md) and [`cohort-gardener.md`](cohort-gardener.md).
+- **Memory cohort** — per-turn memory-shaping; see [`cohort-memory.md`](cohort-memory.md).
+- **Covenant cohort** — covenant evaluation as a structured surface; see [`cohort-covenant.md`](cohort-covenant.md).
+- **Cataloging cohort** — async cheap-tier worker that produces catalog rows for the [reference primitive](reference-primitive.md). See [`cohort-cataloging.md`](cohort-cataloging.md).
+- **Drafter cohort** — conversational shaper of [workflow drafts](workflow-drafts.md).
+
+Cohorts (in either sense) never appear in the principal agent's context. Their outputs are consumed by the kernel, not injected into the next prompt. See [`cohort-and-judgment.md`](cohort-and-judgment.md) for the discipline and [`primitives-reference.md`](primitives-reference.md) for each cohort's entry point.
+
+## Load-bearing architectural choices
+
+Each gets its own page:
 
 ### [Cohort architecture →](cohort-and-judgment.md)
 
@@ -103,9 +113,15 @@ Scoped directories of markdown pages — personal / specific-members / team — 
 
 ### [The Gardener →](gardener.md)
 
-The third cohort — bounded canvas-shape authority. Picks the initial pattern at `canvas_create` time by consulting the Workflow Patterns library; runs continuous-evolution heuristics on page events; surfaces reshape proposals with confidence-floor + 24-hour coalescing discipline so members see proposals at most once or twice a week per canvas. **Every Gardener action except retrieval is fire-and-forget** — the primary agent never waits on Gardener work in the turn path.
+Bounded canvas-shape authority. Picks the initial pattern at `canvas_create` time by consulting the Workflow Patterns library; runs continuous-evolution heuristics on page events; surfaces reshape proposals with confidence-floor + 24-hour coalescing discipline so members see proposals at most once or twice a week per canvas. **Every Gardener action except retrieval is fire-and-forget** — the primary agent never waits on Gardener work in the turn path.
 
-*(This is six, not five. The sixth — Cognitive UI grammar — is the structural companion to the other five; it's how the cohort-produced context actually lands in the agent's prompt.)*
+### [Reference primitive →](reference-primitive.md)
+
+The reach mechanism agents use to find canonical Kernos documentation + agent-stored project-deep reference material. Catalog over `docs/` (instance-scoped) + `data/references/<space_id>/` (domain-owned). Three surfacing paths replace single-tool-call gating: explicit retrieval via `request_reference`, mechanical auto-induction by signal-matching, hatching-time substrate awareness baked into the bootstrap.
+
+### [Trigger runtime + workflow loops →](trigger-runtime.md)
+
+Unified time + event trigger substrate (WORKFLOW-TRIGGERS-CONSOLIDATION v1). Three-part predicate model (event_selector + temporal_relation + dispatch_policy), `FireOutbox` CAS state machine, fail-closed `fire_id` idempotency, atomic STS registration. The substrate the [workflow-loop primitive](workflow-loops.md) and [CRB](crb.md) compose against.
 
 ## Hard invariants
 

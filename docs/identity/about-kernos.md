@@ -22,7 +22,7 @@ Kernos is a personal AI agent operating system. It lives in the cloud, works 24/
 - **Behavioral contracts:** Covenants captured from user instructions, enforced at infrastructure level. Space-scoped for domain-specific rules. The agent thinks; the kernel enforces.
 - **Procedural knowledge:** Domain-specific workflows stored as `_procedures.md` files, inherited through the space tree. Covenants define behavior; procedures define processes.
 - **Agentic workspace:** The agent can write code, test it, register tools, and track artifacts. Workspace-built tools become permanently available across all spaces.
-- **Provider-neutral:** Works with any LLM backend (currently OpenAI Codex, designed for Anthropic Claude). No load-bearing features on any specific provider's capabilities.
+- **Provider-neutral:** Works with any LLM backend through three named provider chains (`primary`, `simple`, `cheap`), each an ordered list of `(provider, model)` entries with automatic fallback on transient failure. No load-bearing features on any specific provider's capabilities.
 
 ## What Makes It Different
 
@@ -42,4 +42,4 @@ Every AI agent framework faces the same set of hard problems. Kernos solves them
 
 ## Who Built It
 
-Built by the design review, sole design review and developer. Designed and constructed from first principles over 6 weeks. 1,600+ automated tests. Every mechanism — from the compaction system to the hierarchical context spaces to the tool-building workspace — designed, specified, implemented, and tested by one person with one vision: a second brain that works while you sleep.
+Designed and constructed from first principles over several months. 5,400+ automated tests as of REFERENCE-PRIMITIVE-V1 (2026-05-05). Every mechanism — from the compaction system to the hierarchical context spaces to the tool-building workspace to the reference primitive — designed, specified, implemented, and tested as part of one continuous design arc with one vision: a second brain that works while you sleep.
