@@ -115,9 +115,10 @@ External sources (`email`, `notion`) have payload-shape stubs in `external_sourc
 
 | Policy | Behavior |
 |---|---|
-| `skip` | Emit `workflow.missed_fire` event; dispatch nothing. |
+| `skip` (default) | Emit `workflow.missed_fire` event; dispatch nothing. |
 | `catch_up` | Emit `workflow.missed_fire` for the missed windows; dispatch the **single most recent** as one catch-up fire. No fan-out for long downtime. |
-| `fan_out_within_window` | (reserved) |
+
+(A `fan_out_within_window` policy was contemplated during design but is not implemented — `_MISSED_WINDOW_VALUES` only accepts `skip` and `catch_up`.)
 
 The substrate-emitted `workflow.missed_fire` event records the missed window so audit/diagnostics show what the runtime chose not to fire (skip) or collapsed into the catch-up fire (catch_up).
 
