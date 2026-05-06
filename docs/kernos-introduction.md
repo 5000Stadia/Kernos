@@ -239,8 +239,10 @@ For depth on any surface, follow the link.
 | [`architecture/overview.md`](architecture/overview.md) | High-level map: kernel, handler, adapters, cohorts, spaces, memory, events |
 | [`architecture/cohort-and-judgment.md`](architecture/cohort-and-judgment.md) | The cohort pattern — what it solves, what it costs, what it enables |
 | [`architecture/cohort-fan-out.md`](architecture/cohort-fan-out.md) | Cohort runtime fan-out mechanism |
+| [`architecture/cohort-cataloging.md`](architecture/cohort-cataloging.md) | The cataloging cohort that turns reference source files into catalog rows |
 | [`architecture/context-spaces.md`](architecture/context-spaces.md) | Hierarchical spaces, scope chain, routing, isolation |
 | [`architecture/memory.md`](architecture/memory.md) | Compaction, Ledger, Living State, retrieval |
+| [`architecture/reference-primitive.md`](architecture/reference-primitive.md) | Reference primitive — catalog, cohort, hash validation, scope visibility, the seven tools |
 | [`architecture/safety-and-gate.md`](architecture/safety-and-gate.md) | Dispatch gate, covenant enforcement, effect classification |
 | [`architecture/disclosure-and-messenger.md`](architecture/disclosure-and-messenger.md) | Multi-member disclosure, relationship matrix, Messenger cohort |
 | [`architecture/cognitive-ui.md`](architecture/cognitive-ui.md) | The system-prompt grammar — zones, caching, provenance |
@@ -251,6 +253,11 @@ For depth on any surface, follow the link.
 | [`architecture/canvas.md`](architecture/canvas.md) | Canvas — shared markdown spaces for collaborative work |
 | [`architecture/gardener.md`](architecture/gardener.md) | The improvement-loop primitive |
 | [`architecture/event-stream.md`](architecture/event-stream.md) | Append-only event log: append, replay, audit |
+| [`architecture/trigger-runtime.md`](architecture/trigger-runtime.md) | Unified time + event trigger runtime (WTC v1) |
+| [`architecture/workflow-loops.md`](architecture/workflow-loops.md) | Workflow descriptors, action verbs, approval gates |
+| [`architecture/workflow-drafts.md`](architecture/workflow-drafts.md) | Workflow Draft Primitive (WDP) — persistent conversational drafts |
+| [`architecture/crb.md`](architecture/crb.md) | Conversational Routine Builder — proposal authoring + approval flow |
+| [`architecture/kernel-tool-registry.md`](architecture/kernel-tool-registry.md) | The canonical kernel-tool registry |
 | [`architecture/model-registry.md`](architecture/model-registry.md) | Provider/chain configuration and resolution |
 
 ### Behaviors
@@ -268,11 +275,17 @@ For depth on any surface, follow the link.
 | Document | What it covers |
 |----------|----------------|
 | [`capabilities/overview.md`](capabilities/overview.md) | Catalog of connected services |
+| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | The full kernel-tool catalog (~48 tools) — effect classifications, per-tool documentation links |
+| [`capabilities/references.md`](capabilities/references.md) | Reference primitive tools — `request_reference`, `store_reference`, recovery primitives |
 | [`capabilities/calendar.md`](capabilities/calendar.md) | Calendar management |
 | [`capabilities/web-browsing.md`](capabilities/web-browsing.md) | Web search and page browsing |
 | [`capabilities/file-system.md`](capabilities/file-system.md) | File reads and writes |
 | [`capabilities/memory-tools.md`](capabilities/memory-tools.md) | Memory query and recall surfaces |
 | [`capabilities/channels.md`](capabilities/channels.md) | Inbound/outbound messaging |
+| [`capabilities/cross-space-requests.md`](capabilities/cross-space-requests.md) | `request_space_action` — typed cross-space mutation |
+| [`capabilities/external-agents.md`](capabilities/external-agents.md) | `consult` — bounded delegation to an external agent |
+| [`capabilities/relational-messaging.md`](capabilities/relational-messaging.md) | Member-to-member messaging + `manage_members` |
+| [`capabilities/diagnostics.md`](capabilities/diagnostics.md) | Runtime trace, friction observation, spec submission, chain inspection |
 
 ### Identity
 

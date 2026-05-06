@@ -2,7 +2,16 @@
 
 > **What this is:** A map of what exists today — components, data structures, data flows, and interfaces. The agent reaches this via `request_reference` (REFERENCE-PRIMITIVE-V1; the legacy direct-path `read_doc` was retired). If the code and this document disagree, fix this document.
 >
-> **Last updated:** 2026-04-12 (reflects: through Telegram Adapter, Platform-Locked Codes, Member Identity, SQLite Migration, Bjork Activation, Improvement Loop T1+T2)
+> **Last updated:** 2026-05-05 (reflects: through Multi-Member V1, EXTERNAL-AGENT-CONSULTATION, CROSS_SPACE_REQUESTS, AUTO-UPDATE, WORKFLOW-TRIGGERS-CONSOLIDATION v1, KERNEL-TOOL-REGISTRY-V1, CRB bring-up, REFERENCE-PRIMITIVE-V1, `read_doc` retirement)
+>
+> **For depth on recent substrate:**
+>
+> - Reference primitive (catalog + cohort + scope visibility + the seven tools): [`architecture/reference-primitive.md`](architecture/reference-primitive.md)
+> - Cataloging cohort: [`architecture/cohort-cataloging.md`](architecture/cohort-cataloging.md)
+> - Trigger runtime (WTC v1): [`architecture/trigger-runtime.md`](architecture/trigger-runtime.md)
+> - CRB (Conversational Routine Builder): [`architecture/crb.md`](architecture/crb.md)
+> - Kernel-tool registry: [`architecture/kernel-tool-registry.md`](architecture/kernel-tool-registry.md)
+> - Full tool catalog: [`capabilities/tool-surface.md`](capabilities/tool-surface.md)
 
 ---
 
