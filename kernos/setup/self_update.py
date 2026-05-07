@@ -59,6 +59,28 @@ def _auto_update_enabled() -> bool:
     return val == "on"
 
 
+def _ignore_dirty_enabled() -> bool:
+    """``KERNOS_AUTO_UPDATE_IGNORE_DIRTY=on`` bypasses the working-tree
+    cleanliness check.
+
+    The dirty check exists as a belt-and-suspenders guard, but
+    ``git pull --ff-only`` already aborts safely if local changes
+    would conflict. The check turns out to be over-cautious in two
+    common cases:
+
+    1. Tracked files physically removed from disk (``D`` in
+       ``git status``) — the pull would resolve them.
+    2. Local clones used for ad-hoc inspection where uncommitted
+       changes exist but the operator still wants the update.
+
+    Off by default. When on, the dirty status is logged at INFO and
+    the update sequence continues; ``--ff-only`` provides the real
+    safety boundary.
+    """
+    val = (os.getenv("KERNOS_AUTO_UPDATE_IGNORE_DIRTY", "") or "off").strip().lower()
+    return val == "on"
+
+
 def _verbose_enabled() -> bool:
     """``KERNOS_AUTO_UPDATE_VERBOSE`` is the operator-level master
     toggle for update notifications. Default ``on`` — the substrate
@@ -333,12 +355,21 @@ def enforce_or_continue(
 
     clean, status = _working_tree_clean(source_dir)
     if not clean:
-        logger.warning(
-            "%s_DIRTY: working tree has uncommitted changes or untracked "
-            "files — skipping update:\n%s",
-            _LOG_PREFIX, status[:500],
-        )
-        return
+        if _ignore_dirty_enabled():
+            logger.info(
+                "%s_DIRTY_OVERRIDE: KERNOS_AUTO_UPDATE_IGNORE_DIRTY=on — "
+                "proceeding despite uncommitted changes (--ff-only will "
+                "still abort on real conflicts):\n%s",
+                _LOG_PREFIX, status[:500],
+            )
+        else:
+            logger.warning(
+                "%s_DIRTY: working tree has uncommitted changes or untracked "
+                "files — skipping update (set KERNOS_AUTO_UPDATE_IGNORE_DIRTY=on "
+                "to override):\n%s",
+                _LOG_PREFIX, status[:500],
+            )
+            return
 
     ok, reason = _fetch(source_dir, branch)
     if not ok:
@@ -472,12 +503,20 @@ def _pull_only(*, data_dir: str | None = None) -> bool:
 
     clean, status = _working_tree_clean(source_dir)
     if not clean:
-        logger.warning(
-            "%s_CRON_DIRTY: working tree has uncommitted changes — "
-            "skipping scheduled pull:\n%s",
-            _LOG_PREFIX, status[:500],
-        )
-        return False
+        if _ignore_dirty_enabled():
+            logger.info(
+                "%s_CRON_DIRTY_OVERRIDE: KERNOS_AUTO_UPDATE_IGNORE_DIRTY=on — "
+                "proceeding despite uncommitted changes:\n%s",
+                _LOG_PREFIX, status[:500],
+            )
+        else:
+            logger.warning(
+                "%s_CRON_DIRTY: working tree has uncommitted changes — "
+                "skipping scheduled pull (set "
+                "KERNOS_AUTO_UPDATE_IGNORE_DIRTY=on to override):\n%s",
+                _LOG_PREFIX, status[:500],
+            )
+            return False
 
     ok, reason = _fetch(source_dir, branch)
     if not ok:

@@ -34,7 +34,12 @@ def _completed(
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for name in ("KERNOS_AUTO_UPDATE", "KERNOS_UPDATE_BRANCH", "KERNOS_DATA_DIR"):
+    for name in (
+        "KERNOS_AUTO_UPDATE",
+        "KERNOS_UPDATE_BRANCH",
+        "KERNOS_DATA_DIR",
+        "KERNOS_AUTO_UPDATE_IGNORE_DIRTY",
+    ):
         monkeypatch.delenv(name, raising=False)
     yield
 
@@ -123,6 +128,39 @@ class TestDirtyTree:
     def test_dirty_tree_skips_update(self, fake_repo, data_dir, monkeypatch):
         _install_run_chain(monkeypatch, [
             _completed(stdout=" M some_file.py\n"),  # git status --porcelain
+        ])
+        execv_mock = MagicMock()
+        enforce_or_continue(_execv=execv_mock, _argv=["server.py"])
+        execv_mock.assert_not_called()
+
+    def test_ignore_dirty_proceeds_through_pull(
+        self, fake_repo, data_dir, monkeypatch,
+    ):
+        """KERNOS_AUTO_UPDATE_IGNORE_DIRTY=on bypasses the dirty check
+        and proceeds through fetch + pull + reinstall + execv."""
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_IGNORE_DIRTY", "on")
+        _install_run_chain(monkeypatch, [
+            _completed(stdout=" D data/diagnostics/foo.md\n"),    # dirty status
+            _completed(),                                          # fetch
+            _completed(stdout="aaaaaaaaaaaa\n"),                   # local head
+            _completed(stdout="bbbbbbbbbbbb\n"),                   # remote head
+            _completed(returncode=0),                              # ancestor check
+            _completed(stdout="Fast-forward\n"),                   # pull
+            _completed(returncode=0),                              # pip install
+            _completed(stdout="bbbbbbbbbbbb cleanup\n"),           # log range
+        ])
+        execv_mock = MagicMock()
+        enforce_or_continue(_execv=execv_mock, _argv=["server.py"])
+        execv_mock.assert_called_once()
+        assert (data_dir / LOG_FILENAME).is_file()
+
+    def test_ignore_dirty_off_still_skips(
+        self, fake_repo, data_dir, monkeypatch,
+    ):
+        """Override is opt-in: anything other than 'on' keeps the guard."""
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_IGNORE_DIRTY", "off")
+        _install_run_chain(monkeypatch, [
+            _completed(stdout=" M some_file.py\n"),
         ])
         execv_mock = MagicMock()
         enforce_or_continue(_execv=execv_mock, _argv=["server.py"])
@@ -246,6 +284,31 @@ class TestReinstallFailure:
         execv_mock = MagicMock()
         enforce_or_continue(_execv=execv_mock, _argv=["server.py"])
         execv_mock.assert_called_once()
+
+
+class TestPullOnlyDirtyOverride:
+    """Cron-path mirror of the IGNORE_DIRTY override."""
+
+    def test_cron_dirty_skips_by_default(self, fake_repo, data_dir, monkeypatch):
+        _install_run_chain(monkeypatch, [
+            _completed(stdout=" M some_file.py\n"),  # status
+        ])
+        assert self_update._pull_only(data_dir=str(data_dir)) is False
+
+    def test_cron_ignore_dirty_proceeds(self, fake_repo, data_dir, monkeypatch):
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_IGNORE_DIRTY", "on")
+        _install_run_chain(monkeypatch, [
+            _completed(stdout=" D data/diagnostics/foo.md\n"),
+            _completed(),                                          # fetch
+            _completed(stdout="aaaaaaaaaaaa\n"),                   # local
+            _completed(stdout="bbbbbbbbbbbb\n"),                   # remote
+            _completed(returncode=0),                              # ancestor
+            _completed(stdout="Fast-forward\n"),                   # pull
+            _completed(returncode=0),                              # pip install
+            _completed(stdout="bbbbbbbbbbbb cleanup\n"),           # log
+        ])
+        assert self_update._pull_only(data_dir=str(data_dir)) is True
+        assert (data_dir / LOG_FILENAME).is_file()
 
 
 class TestBranchOverride:
