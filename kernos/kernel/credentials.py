@@ -176,6 +176,143 @@ _CODEX_CREDS_PATH = ".credentials/openai-codex.json"
 _CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 _CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
+# The Codex CLI (`codex login`) writes its tokens to ~/.codex/auth.json
+# with a different schema than Kernos's .credentials/openai-codex.json.
+# These are NOT auto-synced by either side, so when the user runs
+# `codex login` to refresh auth, OpenAI rotates the refresh token and
+# Kernos's stale creds become invalid (HTTP 401 on every API call).
+# The resync helpers below bridge the two: at startup, prefer the
+# CLI auth if it's newer; on refresh-401, retry through the CLI auth
+# tokens before raising. Self-heals the friction without requiring
+# the operator to manually regenerate creds after every login.
+_CODEX_CLI_AUTH_PATH = "~/.codex/auth.json"
+
+
+def _codex_cli_auth_path() -> str:
+    """Path to the Codex CLI's auth.json. Overridable via the
+    ``KERNOS_CODEX_CLI_AUTH_PATH`` env var (used in tests to isolate
+    from the host's real ~/.codex/auth.json)."""
+    return os.path.expanduser(
+        os.getenv("KERNOS_CODEX_CLI_AUTH_PATH", _CODEX_CLI_AUTH_PATH),
+    )
+
+
+def _kernos_creds_path() -> str:
+    return os.getenv("OPENAI_CODEX_CREDS_PATH", _CODEX_CREDS_PATH)
+
+
+def _decode_jwt_expiry_ms(token: str) -> int:
+    """Extract the JWT `exp` claim and return ms since epoch.
+
+    Returns 0 if the token isn't a valid JWT or carries no exp claim;
+    callers fall back to a near-future default in that case.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return 0
+        payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        exp = payload.get("exp", 0)
+        return int(exp) * 1000 if exp else 0
+    except Exception:
+        return 0
+
+
+def _read_codex_cli_auth() -> "OpenAICodexCredential | None":
+    """Read ~/.codex/auth.json and map it to Kernos's credential shape.
+
+    The CLI schema is::
+
+        {"auth_mode": "chatgpt",
+         "tokens": {"access_token": "...", "refresh_token": "...",
+                    "account_id": "..."},
+         "last_refresh": "..."}
+
+    Returns None if the file is missing, malformed, or lacks tokens.
+    """
+    try:
+        with open(_codex_cli_auth_path()) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    tokens = data.get("tokens") or {}
+    access = tokens.get("access_token", "")
+    refresh = tokens.get("refresh_token", "")
+    if not access or not refresh:
+        return None
+    expires = _decode_jwt_expiry_ms(access)
+    if not expires:
+        # If JWT lacks exp, default to one hour from now — refresh
+        # logic will treat it as expiring soon and refresh on first
+        # use rather than silently letting it never expire.
+        expires = int((time.time() + 3600) * 1000)
+    account_id = tokens.get("account_id", "")
+    if not account_id:
+        try:
+            account_id = _decode_jwt_account_id(access)
+        except ValueError:
+            account_id = ""
+    return OpenAICodexCredential(
+        access=access,
+        refresh=refresh,
+        expires=expires,
+        accountId=account_id,
+    )
+
+
+def _persist_codex_credential(creds: "OpenAICodexCredential") -> None:
+    """Write creds to .credentials/openai-codex.json (best-effort)."""
+    creds_path = _kernos_creds_path()
+    try:
+        os.makedirs(os.path.dirname(creds_path) or ".", exist_ok=True)
+        with open(creds_path, "w") as f:
+            json.dump(dict(creds), f, indent=2)
+    except OSError as exc:
+        logger.warning("Could not persist Codex credentials: %s", exc)
+
+
+def _maybe_resync_from_codex_cli() -> bool:
+    """If ~/.codex/auth.json is newer than Kernos's creds file AND
+    carries different tokens, copy the CLI tokens into Kernos's creds.
+
+    Best-effort + silent on any failure — the regular resolve path
+    handles missing/stale. Returns True iff a resync was applied.
+
+    Called at startup (resolve) and as a fallback on refresh-401.
+    """
+    creds_path = _kernos_creds_path()
+    cli_path = _codex_cli_auth_path()
+    try:
+        cli_mtime = os.path.getmtime(cli_path)
+    except OSError:
+        return False
+    try:
+        creds_mtime = os.path.getmtime(creds_path)
+    except OSError:
+        creds_mtime = 0.0
+    if cli_mtime <= creds_mtime:
+        return False  # Kernos's creds are at least as fresh
+    cli_creds = _read_codex_cli_auth()
+    if cli_creds is None:
+        return False
+    # Compare existing tokens — skip the write if access tokens already
+    # match (e.g. someone manually copied the file earlier).
+    try:
+        with open(creds_path) as f:
+            existing = json.load(f)
+        if existing.get("access") == cli_creds["access"]:
+            return False
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass  # No existing creds, or unreadable — proceed with sync.
+    _persist_codex_credential(cli_creds)
+    logger.info(
+        "Codex credentials auto-resynced from %s into %s "
+        "(rotated by `codex login`)",
+        cli_path, creds_path,
+    )
+    return True
+
 
 def _decode_jwt_account_id(token: str) -> str:
     """Extract chatgpt_account_id from a ChatGPT OAuth JWT access token.
@@ -208,6 +345,12 @@ def resolve_openai_codex_credential() -> OpenAICodexCredential:
     Priority:
     1. Environment variables (OPENAI_CODEX_ACCESS_TOKEN, etc.)
     2. Local credential file (.credentials/openai-codex.json)
+
+    Before reading the local credential file, this resolver checks
+    whether ~/.codex/auth.json (the Codex CLI's auth) is newer and
+    carries different tokens — if so, the CLI tokens are auto-synced
+    into Kernos's creds file. This lets `codex login` propagate to
+    Kernos at next boot without manual intervention.
     """
     # Priority 1: Environment variables
     access = os.getenv("OPENAI_CODEX_ACCESS_TOKEN", "")
@@ -224,7 +367,9 @@ def resolve_openai_codex_credential() -> OpenAICodexCredential:
             access=access, refresh=refresh, expires=expires, accountId=account_id,
         )
 
-    # Priority 2: Local credential file
+    # Priority 2: Local credential file. Resync first so a fresh
+    # `codex login` surfaces here automatically.
+    _maybe_resync_from_codex_cli()
     creds_path = os.getenv("OPENAI_CODEX_CREDS_PATH", _CODEX_CREDS_PATH)
     try:
         with open(creds_path) as f:
@@ -244,9 +389,22 @@ def resolve_openai_codex_credential() -> OpenAICodexCredential:
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
         logger.warning("OpenAI Codex credential file malformed: %s", exc)
 
+    # Last-resort: if the file is missing entirely but the Codex CLI
+    # is logged in, hydrate from there. Keeps "codex login then run
+    # Kernos" working without manually creating the creds file.
+    cli_creds = _read_codex_cli_auth()
+    if cli_creds is not None:
+        _persist_codex_credential(cli_creds)
+        logger.info(
+            "OpenAI Codex credential hydrated from %s (no Kernos "
+            "creds file existed)", _codex_cli_auth_path(),
+        )
+        return cli_creds
+
     raise ValueError(
         "No OpenAI Codex credentials found. Set OPENAI_CODEX_ACCESS_TOKEN + "
-        "OPENAI_CODEX_REFRESH_TOKEN env vars, or create .credentials/openai-codex.json"
+        "OPENAI_CODEX_REFRESH_TOKEN env vars, or create .credentials/openai-codex.json, "
+        "or run `codex login`."
     )
 
 
@@ -279,6 +437,29 @@ async def refresh_openai_codex_credential(
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
     except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        # 401 typically means the user re-ran `codex login` and the
+        # OAuth provider invalidated our cached refresh token. Try
+        # ~/.codex/auth.json for fresher tokens before giving up —
+        # if those exist and differ from ours, persist them and
+        # return without going through OAuth (the CLI auth's access
+        # token is itself fresh from a recent login).
+        is_401 = (
+            isinstance(exc, urllib.error.HTTPError)
+            and exc.code == 401
+        )
+        if is_401:
+            cli_creds = _read_codex_cli_auth()
+            if (
+                cli_creds is not None
+                and cli_creds["access"] != creds["access"]
+            ):
+                _persist_codex_credential(cli_creds)
+                logger.info(
+                    "Codex refresh got 401; recovered via %s "
+                    "(rotated by `codex login`)",
+                    _codex_cli_auth_path(),
+                )
+                return cli_creds
         raise ReasoningConnectionError(f"Codex token refresh failed: {exc}") from exc
 
     new_access = result.get("access_token", "")

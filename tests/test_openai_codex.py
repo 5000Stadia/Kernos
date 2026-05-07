@@ -108,6 +108,12 @@ class TestCodexCredentialFromFile:
         monkeypatch.delenv("OPENAI_CODEX_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("OPENAI_CODEX_REFRESH_TOKEN", raising=False)
         monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(tmp_path / "nonexistent.json"))
+        # Isolate from any real ~/.codex/auth.json on the host so the
+        # CLI-auth fallback can't satisfy the resolver.
+        monkeypatch.setenv(
+            "KERNOS_CODEX_CLI_AUTH_PATH",
+            str(tmp_path / "no-cli-auth.json"),
+        )
 
         with pytest.raises(ValueError, match="No OpenAI Codex credentials"):
             resolve_openai_codex_credential()
@@ -552,3 +558,230 @@ class TestCodexWireShape:
         # Schema mode wins; verbosity is not set when constrained decoding is on.
         assert captured["body"]["text"]["format"]["type"] == "json_schema"
         assert "verbosity" not in captured["body"]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Auto-resync from Codex CLI auth (`codex login` bridge)
+# ---------------------------------------------------------------------------
+
+
+class TestCodexCliAutoResync:
+    """When the user runs `codex login`, OpenAI rotates the refresh
+    token and writes the new tokens to ~/.codex/auth.json. Kernos
+    keeps a separate creds file at .credentials/openai-codex.json
+    that does NOT auto-sync. Result pre-fix: every Codex call returned
+    HTTP 401 until the operator manually regenerated the file. These
+    tests pin the auto-resync path that bridges the two."""
+
+    def _write_cli_auth(self, path, *, access_jwt: str, refresh: str,
+                        account_id: str = "acct_cli") -> None:
+        """Write a ~/.codex/auth.json-shaped file."""
+        path.write_text(json.dumps({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": access_jwt,
+                "refresh_token": refresh,
+                "account_id": account_id,
+            },
+            "last_refresh": "2026-05-07T00:00:00.000000Z",
+        }))
+
+    def test_resolve_picks_up_fresh_cli_auth_on_boot(
+        self, tmp_path, monkeypatch,
+    ):
+        """When ~/.codex/auth.json is newer than Kernos's creds AND
+        carries different tokens, resolve auto-syncs the new tokens
+        into Kernos's creds file before reading."""
+        monkeypatch.delenv("OPENAI_CODEX_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("OPENAI_CODEX_REFRESH_TOKEN", raising=False)
+
+        # Stale Kernos creds (older mtime, old tokens).
+        stale_jwt = _make_jwt("acct_stale")
+        creds_file = tmp_path / "openai-codex.json"
+        creds_file.write_text(json.dumps({
+            "access": stale_jwt,
+            "refresh": "stale_refresh",
+            "expires": int(time.time() * 1000) + 86400000,
+            "accountId": "acct_stale",
+        }))
+        # Make Kernos creds noticeably old.
+        import os as _os
+        old_time = time.time() - 86400
+        _os.utime(str(creds_file), (old_time, old_time))
+
+        # Fresh CLI auth (newer mtime, new tokens).
+        fresh_jwt = _make_jwt("acct_fresh")
+        cli_auth = tmp_path / "auth.json"
+        self._write_cli_auth(
+            cli_auth, access_jwt=fresh_jwt, refresh="fresh_refresh",
+            account_id="acct_fresh",
+        )
+
+        monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(creds_file))
+        monkeypatch.setenv("KERNOS_CODEX_CLI_AUTH_PATH", str(cli_auth))
+
+        creds = resolve_openai_codex_credential()
+        # Resolved credentials are the fresh ones from the CLI auth.
+        assert creds["access"] == fresh_jwt
+        assert creds["refresh"] == "fresh_refresh"
+        assert creds["accountId"] == "acct_fresh"
+        # And the Kernos creds file was rewritten so subsequent boots
+        # don't repeat the resync work.
+        persisted = json.loads(creds_file.read_text())
+        assert persisted["access"] == fresh_jwt
+
+    def test_resolve_keeps_kernos_creds_when_cli_auth_is_older(
+        self, tmp_path, monkeypatch,
+    ):
+        """If Kernos's creds are at least as fresh as the CLI auth,
+        no resync happens — avoids overwriting newer tokens with
+        older ones (e.g. if Kernos refreshed via OAuth recently)."""
+        monkeypatch.delenv("OPENAI_CODEX_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("OPENAI_CODEX_REFRESH_TOKEN", raising=False)
+
+        kernos_jwt = _make_jwt("acct_kernos")
+        creds_file = tmp_path / "openai-codex.json"
+        creds_file.write_text(json.dumps({
+            "access": kernos_jwt,
+            "refresh": "kernos_refresh",
+            "expires": int(time.time() * 1000) + 86400000,
+            "accountId": "acct_kernos",
+        }))
+
+        # Older CLI auth.
+        old_jwt = _make_jwt("acct_old")
+        cli_auth = tmp_path / "auth.json"
+        self._write_cli_auth(
+            cli_auth, access_jwt=old_jwt, refresh="old_refresh",
+            account_id="acct_old",
+        )
+        import os as _os
+        old_time = time.time() - 86400
+        _os.utime(str(cli_auth), (old_time, old_time))
+
+        monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(creds_file))
+        monkeypatch.setenv("KERNOS_CODEX_CLI_AUTH_PATH", str(cli_auth))
+
+        creds = resolve_openai_codex_credential()
+        assert creds["access"] == kernos_jwt
+        # Kernos creds file is unchanged.
+        persisted = json.loads(creds_file.read_text())
+        assert persisted["access"] == kernos_jwt
+
+    def test_resolve_hydrates_from_cli_auth_when_creds_missing(
+        self, tmp_path, monkeypatch,
+    ):
+        """Last-resort path: Kernos creds file doesn't exist yet,
+        but ~/.codex/auth.json does. Resolve hydrates from the CLI
+        auth and writes the creds file (so next boot is fast)."""
+        monkeypatch.delenv("OPENAI_CODEX_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("OPENAI_CODEX_REFRESH_TOKEN", raising=False)
+
+        fresh_jwt = _make_jwt("acct_hydrate")
+        cli_auth = tmp_path / "auth.json"
+        self._write_cli_auth(
+            cli_auth, access_jwt=fresh_jwt, refresh="hydrate_refresh",
+            account_id="acct_hydrate",
+        )
+
+        creds_file = tmp_path / "openai-codex.json"
+        # Note: NO creds_file.write_text — file does not exist.
+        monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(creds_file))
+        monkeypatch.setenv("KERNOS_CODEX_CLI_AUTH_PATH", str(cli_auth))
+
+        creds = resolve_openai_codex_credential()
+        assert creds["access"] == fresh_jwt
+        # Hydration persisted creds for next boot.
+        assert creds_file.exists()
+
+    def test_refresh_recovers_from_401_via_cli_auth(
+        self, tmp_path, monkeypatch,
+    ):
+        """When the OAuth refresh returns 401 (rotated refresh token),
+        the refresh path reads ~/.codex/auth.json. If it carries
+        different tokens, those are persisted and returned without
+        re-running OAuth — the CLI auth's access token is fresh from
+        the recent login."""
+        import urllib.error
+        from kernos.kernel.credentials import refresh_openai_codex_credential
+
+        # Stale Kernos creds carrying the rotated-out refresh token.
+        stale_jwt = _make_jwt("acct_stale")
+        stale_creds = OpenAICodexCredential(
+            access=stale_jwt,
+            refresh="stale_refresh_rotated_out",
+            expires=int(time.time() * 1000) - 1000,  # expired
+            accountId="acct_stale",
+        )
+
+        # Fresh CLI auth.
+        fresh_jwt = _make_jwt("acct_fresh")
+        cli_auth = tmp_path / "auth.json"
+        self._write_cli_auth(
+            cli_auth, access_jwt=fresh_jwt,
+            refresh="fresh_cli_refresh", account_id="acct_fresh",
+        )
+
+        creds_file = tmp_path / "openai-codex.json"
+        monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(creds_file))
+        monkeypatch.setenv("KERNOS_CODEX_CLI_AUTH_PATH", str(cli_auth))
+
+        # Mock urlopen to raise 401 — exactly what OpenAI returns when
+        # the refresh token is no longer valid.
+        def _raise_401(*_a, **_kw):
+            raise urllib.error.HTTPError(
+                url="", code=401, msg="Unauthorized", hdrs={}, fp=None,
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_raise_401):
+            recovered = pytest.run(
+                refresh_openai_codex_credential(stale_creds),
+            ) if False else None  # placeholder; real call below
+        # The above pattern isn't async-friendly; do it directly:
+        import asyncio
+        with patch("urllib.request.urlopen", side_effect=_raise_401):
+            recovered = asyncio.get_event_loop().run_until_complete(
+                refresh_openai_codex_credential(stale_creds),
+            ) if False else asyncio.run(
+                refresh_openai_codex_credential(stale_creds),
+            )
+
+        assert recovered["access"] == fresh_jwt
+        assert recovered["refresh"] == "fresh_cli_refresh"
+        # Kernos creds file was updated by the recovery path.
+        persisted = json.loads(creds_file.read_text())
+        assert persisted["access"] == fresh_jwt
+
+    def test_refresh_raises_when_401_and_no_cli_auth(
+        self, tmp_path, monkeypatch,
+    ):
+        """If OAuth returns 401 AND no usable CLI auth exists, the
+        refresh path raises ReasoningConnectionError — preserves the
+        original loud-fail behavior so the operator sees the issue."""
+        import urllib.error
+        from kernos.kernel.credentials import refresh_openai_codex_credential
+        from kernos.kernel.reasoning import ReasoningConnectionError
+
+        creds = OpenAICodexCredential(
+            access=_make_jwt("acct"),
+            refresh="any",
+            expires=int(time.time() * 1000) - 1000,
+            accountId="acct",
+        )
+
+        creds_file = tmp_path / "openai-codex.json"
+        monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(creds_file))
+        monkeypatch.setenv(
+            "KERNOS_CODEX_CLI_AUTH_PATH",
+            str(tmp_path / "no-cli-auth.json"),
+        )
+
+        def _raise_401(*_a, **_kw):
+            raise urllib.error.HTTPError(
+                url="", code=401, msg="Unauthorized", hdrs={}, fp=None,
+            )
+
+        import asyncio
+        with patch("urllib.request.urlopen", side_effect=_raise_401):
+            with pytest.raises(ReasoningConnectionError, match="refresh failed"):
+                asyncio.run(refresh_openai_codex_credential(creds))
