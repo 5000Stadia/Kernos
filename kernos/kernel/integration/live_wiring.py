@@ -22,15 +22,21 @@ Components:
    arguments — the canonical safety boundary per Fold 3
    ("Gate at dispatch, hint at surfacing").
 3. ``LiveIntegrationDispatcher`` — positional ``(tool_id, args, inputs)``
-   callable that integration's runner uses for read-only dispatch
-   during briefing assembly. Per Fold 4: STRICT — rejects anything
-   that doesn't classify as ``"read"`` at dispatch time. The contract
-   name is read-only; honor it strictly. Covenant/permission policy
-   (full ``DispatchGate.evaluate``) belongs at the live executor seam
-   where full-machinery dispatch requires it. Per Fold 8: emits
-   ``tool.called`` and ``tool.result`` events on every dispatch +
-   logs an audit entry, matching the per-call event shape the legacy
-   path used to emit via the legacy ``_execute_single_tool`` wrapper (removed in CCV1 C7 strike 2026-05-03).
+   callable that integration's runner uses during briefing assembly.
+   Per ESCALATE-ON-WRITE-V1 (2026-05-07): writes are NOT refused
+   outright — non-read classifications dispatch through the same
+   ``execute_tool`` path full-machinery's ``LiveExecutor`` uses, with
+   the seam label switched to ``live_integration_dispatcher_escalated``
+   so audit/event consumers can distinguish escalations from native
+   read traffic. Refusal is reserved for ``unknown`` / unclassified
+   calls (matching ``LiveExecutor`` posture). Covenant/permission
+   policy (full ``DispatchGate.evaluate``) is a Batch 3 follow-up at
+   both seams; until that lands, both seams enforce only the gate's
+   effect classifier. Per Fold 8: emits ``tool.called`` and
+   ``tool.result`` events on every dispatch + logs an audit entry,
+   matching the per-call event shape the legacy path used to emit via
+   the legacy ``_execute_single_tool`` wrapper (removed in CCV1 C7
+   strike 2026-05-03).
 4. ``build_renderer_to_integration_adapter`` — Fold 1 verdict: the
    adapter shim that bridges PresenceRenderer's keyword-style
    dispatcher contract to the integration runner's positional
@@ -283,22 +289,39 @@ class LiveExecutor:
 
 
 class LiveIntegrationDispatcher:
-    """Production read-only dispatcher for integration's briefing
-    assembly. Positional ``(tool_id, args, inputs)`` shape that the
-    integration runner expects.
+    """Production dispatcher for integration's briefing assembly.
+    Positional ``(tool_id, args, inputs)`` shape that the integration
+    runner expects.
 
-    Fold 4 — STRICT read classification: rejects anything that doesn't
-    classify as ``"read"`` at dispatch time. Soft_write, hard_write,
-    and unknown all reject with error result; the call never reaches
-    the legacy execute_tool path. The seam's contract name is
-    read-only — honor it strictly. Covenant and permission policy
-    (full ``DispatchGate.evaluate``) belongs at the live executor
-    seam, not here.
+    ESCALATE-ON-WRITE-V1 (2026-05-07) — non-read classifications
+    escalate through the same ``execute_tool`` path full-machinery's
+    ``LiveExecutor`` uses rather than refusing. Background: the
+    original Fold 4 contract was strict read-only on the assumption
+    that writes would always be routed through full-machinery's
+    EXECUTE_TOOL kind. In practice the agent reaches the integration
+    seam mid-turn and tries to call write tools (e.g. ``write_file``
+    to take a note); refusing those calls stranded the agent because
+    no escalation path existed — the model just got back an error
+    string saying "writes route through full-machinery" with no way
+    to actually trigger that route. Now the dispatcher escalates such
+    calls itself.
+
+    Audit/event seam labels:
+      * ``live_integration_dispatcher`` — native read traffic.
+      * ``live_integration_dispatcher_escalated`` — write classifications
+        dispatched through this seam. The ``escalated: True`` field on
+        audit entries is the same signal in structured form so consumers
+        can filter without label parsing.
+
+    Refusal is now reserved for ``unknown`` / unclassified calls,
+    matching the posture ``LiveExecutor`` takes at the full-machinery
+    seam.
 
     Fold 8 — emits ``tool.called`` and ``tool.result`` events plus
     an audit entry on every dispatch, matching the per-call event
-    shape the legacy path used to emit via ``_execute_single_tool`` (removed in CCV1 C7 strike 2026-05-03). Audit and trace
-    parity is required for Batch 3 equivalence soak.
+    shape the legacy path used to emit via ``_execute_single_tool``
+    (removed in CCV1 C7 strike 2026-05-03). Audit and trace parity is
+    required for Batch 3 equivalence soak.
     """
 
     def __init__(
@@ -335,20 +358,31 @@ class LiveIntegrationDispatcher:
                 ),
                 "is_error": True,
             }
-        # FOLD 4 — STRICT read enforcement. Anything that isn't read
-        # is refused on the integration runner's read-only seam.
-        if classification != "read":
+        # ESCALATE-ON-WRITE-V1 — refusal is reserved for unclassified
+        # calls. Writes dispatch through the same execute_tool path as
+        # reads, with seam label flipped so audits can tell escalations
+        # apart from native read traffic.
+        if not classification or classification == "unknown":
             return {
                 "error": (
-                    f"Dispatch refused: tool {tool_id!r} classified "
-                    f"as {classification!r} on the read-only "
-                    f"integration dispatcher seam. Only "
-                    f"read-classified tools dispatch here; "
-                    f"write-classified tools route through "
-                    f"full-machinery EXECUTE_TOOL kind."
+                    f"Dispatch refused: tool {tool_id!r} not classified "
+                    f"by the dispatch gate "
+                    f"(classification={classification!r})."
                 ),
                 "is_error": True,
             }
+
+        is_escalated = classification != "read"
+        seam_label = (
+            "live_integration_dispatcher_escalated"
+            if is_escalated
+            else "live_integration_dispatcher"
+        )
+        if is_escalated:
+            logger.info(
+                "DISPATCHER_ESCALATE_WRITE: tool=%s classification=%s",
+                tool_id, classification,
+            )
 
         instance_id = (
             getattr(inputs, "instance_id", "")
@@ -362,7 +396,8 @@ class LiveIntegrationDispatcher:
             "tool_id": tool_id,
             "tool_input": dict(args or {}),
             "classification": classification,
-            "seam": "live_integration_dispatcher",
+            "seam": seam_label,
+            "escalated": is_escalated,
         })
 
         request = self._request_factory(tool_id, args, inputs)
@@ -380,13 +415,15 @@ class LiveIntegrationDispatcher:
                 "tool_id": tool_id,
                 "is_error": True,
                 "error": str(exc),
-                "seam": "live_integration_dispatcher",
+                "seam": seam_label,
+                "escalated": is_escalated,
             })
             await self._emit_audit({
                 "type": "tool_call_failed",
                 "instance_id": instance_id,
                 "tool_id": tool_id,
                 "error": str(exc),
+                "escalated": is_escalated,
             })
             return {"error": str(exc), "is_error": True}
 
@@ -403,13 +440,15 @@ class LiveIntegrationDispatcher:
             "instance_id": instance_id,
             "tool_id": tool_id,
             "is_error": False,
-            "seam": "live_integration_dispatcher",
+            "seam": seam_label,
+            "escalated": is_escalated,
         })
         await self._emit_audit({
             "type": "tool_call_succeeded",
             "instance_id": instance_id,
             "tool_id": tool_id,
             "classification": classification,
+            "escalated": is_escalated,
         })
         return result_dict
 

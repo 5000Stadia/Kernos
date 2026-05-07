@@ -1007,7 +1007,9 @@ def _format_checklist() -> str:
     lines.append("")
     lines.append("## Path-specific notes")
     lines.append("* Thin path: tool dispatch with `seam=live_integration_dispatcher` "
-                 "is read-only; full machinery dispatches use the executor seam")
+                 "is the read fast-path; non-read calls escalate through the same "
+                 "execute_tool path full machinery uses, tagged "
+                 "`seam=live_integration_dispatcher_escalated`")
     lines.append("* Legacy path: same checklist applies; differences vs thin "
                  "are surfaced by the diff-report classifier, not this checklist")
     lines.append("* Known-and-deferred tool surface gaps (4 asymmetric + 11 "

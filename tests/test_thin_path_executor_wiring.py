@@ -238,10 +238,11 @@ async def test_integration_dispatcher_positional_call_succeeds_for_classified_to
 
 
 @pytest.mark.asyncio
-async def test_integration_dispatcher_refuses_unknown_classification():
-    """Pin (Fold 4): unknown-classified tools rejected with error dict.
-    Strict read enforcement applies on the integration runner's
-    read-only seam: anything not classified as read refuses."""
+async def test_integration_dispatcher_refuses_unknown_classification_legacy():
+    """Pin (ESCALATE-ON-WRITE-V1): unclassified calls refuse with an
+    error dict — refusal is reserved for the gate's 'unknown' verdict
+    after the read-only contract was relaxed. Matches LiveExecutor's
+    posture at the full-machinery seam."""
     gate = MagicMock()
     gate.classify_tool_effect.return_value = "unknown"
     execute_tool = AsyncMock()
@@ -253,39 +254,64 @@ async def test_integration_dispatcher_refuses_unknown_classification():
     )
     result = await dispatcher("manage_members", {}, MagicMock())
     assert result.get("is_error") is True
-    # Fold 4 error text mentions classification on the read-only seam
-    assert "read-only" in result.get("error", "").lower() or "classif" in result.get("error", "").lower()
+    assert "classif" in result.get("error", "").lower()
     execute_tool.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_integration_dispatcher_refuses_soft_write_classification():
-    """Pin (Fold 4 STRICT): soft_write classification refuses on
-    the read-only integration seam. Without this enforcement the
-    integration runner could execute mutating tools through what
-    is structurally meant to be a read-only seam."""
+async def test_integration_dispatcher_escalates_soft_write_to_execute_tool():
+    """Pin (ESCALATE-ON-WRITE-V1): soft_write classifications dispatch
+    through execute_tool rather than refusing. The original strict
+    read-only contract stranded the agent when it tried to take a
+    note mid-turn (incident 2026-05-07: write_file refused, no
+    escalation path existed). Escalations are observable via the
+    `live_integration_dispatcher_escalated` seam label and an
+    `escalated: True` flag on emitted events/audit entries."""
+    events: list[dict] = []
+    audits: list[dict] = []
+
+    async def event_emitter(p):
+        events.append(p)
+
+    async def audit_emitter(e):
+        audits.append(e)
+
     gate = MagicMock()
     gate.classify_tool_effect.return_value = "soft_write"
-    execute_tool = AsyncMock()
+    execute_tool = AsyncMock(return_value="note saved")
 
     dispatcher = LiveIntegrationDispatcher(
         execute_tool=execute_tool,
         gate=gate,
         request_factory=lambda tid, args, inp: MagicMock(),
+        event_emitter=event_emitter,
+        audit_emitter=audit_emitter,
     )
-    result = await dispatcher("create-event", {}, MagicMock())
-    assert result.get("is_error") is True
-    execute_tool.assert_not_called()
+    result = await dispatcher("write_file", {"name": "n.md"}, MagicMock())
+
+    assert result.get("is_error") is not True
+    assert result.get("text") == "note saved"
+    execute_tool.assert_called_once()
+
+    seams = {e.get("seam") for e in events}
+    assert "live_integration_dispatcher_escalated" in seams
+    assert "live_integration_dispatcher" not in seams
+    assert all(e.get("escalated") is True for e in events)
+    assert any(
+        a.get("type") == "tool_call_succeeded" and a.get("escalated") is True
+        for a in audits
+    )
 
 
 @pytest.mark.asyncio
-async def test_integration_dispatcher_refuses_hard_write_classification():
-    """Pin (Fold 4 STRICT): hard_write classification refuses too.
-    The contract name is read-only — write-classified tools route
-    through full-machinery EXECUTE_TOOL kind, not this seam."""
+async def test_integration_dispatcher_escalates_hard_write_to_execute_tool():
+    """Pin (ESCALATE-ON-WRITE-V1): hard_write also escalates rather
+    than refusing. The seam-label + escalated flag still mark it as
+    an escalation; consumers filtering on those signals see all
+    non-read traffic uniformly."""
     gate = MagicMock()
     gate.classify_tool_effect.return_value = "hard_write"
-    execute_tool = AsyncMock()
+    execute_tool = AsyncMock(return_value="deleted")
 
     dispatcher = LiveIntegrationDispatcher(
         execute_tool=execute_tool,
@@ -293,8 +319,9 @@ async def test_integration_dispatcher_refuses_hard_write_classification():
         request_factory=lambda tid, args, inp: MagicMock(),
     )
     result = await dispatcher("delete-event", {"id": "x"}, MagicMock())
-    assert result.get("is_error") is True
-    execute_tool.assert_not_called()
+    assert result.get("is_error") is not True
+    assert result.get("text") == "deleted"
+    execute_tool.assert_called_once()
 
 
 @pytest.mark.asyncio
