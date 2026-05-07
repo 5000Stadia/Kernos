@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -191,6 +192,12 @@ class IntegrationConfig:
     chain_name: str = "lightweight"
     max_retries: int = 3
     retry_backoff_seconds: float = 0.0
+    # When set, the runner writes a friction-style markdown report to
+    # ``{data_dir}/diagnostics/friction/`` on retry exhaustion so the
+    # operator sees the timeout/exhaustion at session start (mirrors
+    # FrictionObserver's surfacing convention). When None, friction
+    # writing is skipped — appropriate for tests and library-only use.
+    data_dir: str | None = None
 
     def __post_init__(self) -> None:
         # max_retries < 1 would skip the retry loop entirely and trip
@@ -207,6 +214,82 @@ class IntegrationConfig:
                 f"IntegrationConfig.retry_backoff_seconds must be >= 0, "
                 f"got {self.retry_backoff_seconds}"
             )
+        # NaN/inf would silently disable the timeout guardrail because
+        # `current_clock - start > timeout` is False for non-finite
+        # comparisons. Must be a finite positive float. Same defensive
+        # posture for max_iterations.
+        import math
+        if (
+            not math.isfinite(self.integration_timeout_seconds)
+            or self.integration_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                f"IntegrationConfig.integration_timeout_seconds must be "
+                f"a finite positive number, got "
+                f"{self.integration_timeout_seconds}"
+            )
+        if self.max_iterations < 1:
+            raise ValueError(
+                f"IntegrationConfig.max_iterations must be >= 1, "
+                f"got {self.max_iterations}"
+            )
+
+    @classmethod
+    def from_env(cls, **overrides: Any) -> "IntegrationConfig":
+        """Build a config with env-var overrides applied on top of the
+        defaults. Recognised env vars (all optional):
+
+          - ``KERNOS_INTEGRATION_TIMEOUT_SECONDS`` — extend the wall-
+            clock budget for one synthesis attempt. Slow-but-correct
+            cohort/docs questions need a roomier budget than the 30s
+            default.
+          - ``KERNOS_INTEGRATION_MAX_RETRIES`` — number of attempts
+            before the runner surfaces a hard system-error.
+          - ``KERNOS_INTEGRATION_MAX_ITERATIONS`` — per-attempt
+            iteration cap.
+          - ``KERNOS_DATA_DIR`` — root for the friction report drop;
+            mirrors REPL/server convention.
+
+        Programmatic ``**overrides`` win over env vars (lets callers
+        pin a specific value while still picking up the data_dir).
+        """
+        env_values: dict[str, Any] = {}
+        timeout = os.getenv("KERNOS_INTEGRATION_TIMEOUT_SECONDS")
+        if timeout:
+            try:
+                env_values["integration_timeout_seconds"] = float(timeout)
+            except ValueError:
+                logger.warning(
+                    "KERNOS_INTEGRATION_TIMEOUT_SECONDS=%r is not a "
+                    "float; ignoring", timeout,
+                )
+        retries = os.getenv("KERNOS_INTEGRATION_MAX_RETRIES")
+        if retries:
+            try:
+                env_values["max_retries"] = int(retries)
+            except ValueError:
+                logger.warning(
+                    "KERNOS_INTEGRATION_MAX_RETRIES=%r is not an int; "
+                    "ignoring", retries,
+                )
+        max_iters = os.getenv("KERNOS_INTEGRATION_MAX_ITERATIONS")
+        if max_iters:
+            try:
+                env_values["max_iterations"] = int(max_iters)
+            except ValueError:
+                logger.warning(
+                    "KERNOS_INTEGRATION_MAX_ITERATIONS=%r is not an "
+                    "int; ignoring", max_iters,
+                )
+        # Mirror server.py / FrictionObserver convention: when
+        # KERNOS_DATA_DIR is unset, default to "./data" so the
+        # integration runner's friction reports land in the same
+        # directory the architect and operator already check.
+        # Programmatic callers can still pass `data_dir=None` to
+        # opt out (used in tests).
+        env_values["data_dir"] = os.getenv("KERNOS_DATA_DIR", "./data")
+        env_values.update(overrides)
+        return cls(**env_values)
 
 
 class ReadOnlyToolViolation(Exception):
@@ -234,6 +317,7 @@ class IntegrationAttemptFailed(Exception):
         tools_called: list[str],
         budget_state: "BudgetState",
         chained_error: Exception | None = None,
+        iteration_metrics: list[dict] | None = None,
     ) -> None:
         super().__init__(f"{component}: {reason}")
         self.component = component
@@ -243,6 +327,13 @@ class IntegrationAttemptFailed(Exception):
         self.tools_called = list(tools_called)
         self.budget_state = budget_state
         self.chained_error = chained_error
+        # Per-iteration breakdown — used by the friction report writer
+        # to attribute time across model latency vs tool dispatch vs
+        # tool result size. Each entry:
+        #   {"iter": N, "model_ms": int, "dispatch_ms": int|None,
+        #    "tool_name": str, "tool_result_chars": int|None,
+        #    "input_tokens": int, "output_tokens": int}
+        self.iteration_metrics = list(iteration_metrics or [])
 
 
 # Callback protocols. Defined as Callable aliases rather than
@@ -315,6 +406,10 @@ class IntegrationRunner:
         # contract (tested in test_integration_safety_policy.py) where
         # the prompt guides the model on safety-degraded turns.
         last_failure: IntegrationAttemptFailed | None = None
+        # Full attempt history — passed to the friction report writer so
+        # operators can see whether attempts got progressively faster/
+        # slower, or hit the same bottleneck repeatedly.
+        attempts_history: list[IntegrationAttemptFailed] = []
         for attempt in range(1, self._config.max_retries + 1):
             try:
                 return await self._attempt_synthesis(
@@ -324,6 +419,7 @@ class IntegrationRunner:
                 )
             except IntegrationAttemptFailed as exc:
                 last_failure = exc
+                attempts_history.append(exc)
                 logger.warning(
                     "INTEGRATION_ATTEMPT_FAILED: attempt=%d/%d "
                     "component=%s reason=%s iterations=%d "
@@ -382,6 +478,22 @@ class IntegrationRunner:
             last_failure.component,
             last_failure.reason,
         )
+        # Friction report — operator surfacing per founder directive
+        # 2026-05-07: timeouts/exhaustion drop a self-contained markdown
+        # report into data/diagnostics/friction/, mirroring the existing
+        # FrictionObserver pattern, so the architect sees the failure
+        # at session start.
+        try:
+            self._write_integration_friction_report(
+                inputs=inputs,
+                attempts_history=attempts_history,
+                last_failure=last_failure,
+            )
+        except Exception:
+            # Friction-report writing is best-effort — never let it
+            # mask the actual system-error briefing the user needs.
+            logger.exception("integration-friction report write failed")
+
         return await self._emit_system_error(
             inputs=inputs,
             cohort_refs=cohort_refs,
@@ -403,6 +515,11 @@ class IntegrationRunner:
         start = self._clock()
         tools_called: list[str] = []
         phase_durations_ms: dict[str, int] = {}
+        # Per-iteration metric records — one entry per iteration, even
+        # if the iteration didn't reach the dispatch phase. Used to
+        # attribute time across model latency, tool dispatch, and tool
+        # result size in the post-exhaustion friction report.
+        iteration_metrics: list[dict] = []
 
         # Section 4a: Collect phase.
         collect_started = self._clock()
@@ -428,6 +545,7 @@ class IntegrationRunner:
                         phase_durations_ms=phase_durations_ms,
                         tools_called=tools_called,
                         budget_state=BudgetState(iterations_hit_limit=True),
+                        iteration_metrics=iteration_metrics,
                     )
 
                 # Section 4c: integration_timeout guardrail.
@@ -445,6 +563,7 @@ class IntegrationRunner:
                         phase_durations_ms=phase_durations_ms,
                         tools_called=tools_called,
                         budget_state=BudgetState(timeout_hit_limit=True),
+                        iteration_metrics=iteration_metrics,
                     )
 
                 # Sections 4a (Integrate / Decide).
@@ -455,9 +574,25 @@ class IntegrationRunner:
                     integration_tools,
                     self._config.max_integration_tokens,
                 )
-                phase_durations_ms[f"integrate_iter_{iterations}"] = (
-                    _ms_since(iter_started, self._clock)
-                )
+                model_ms = _ms_since(iter_started, self._clock)
+                phase_durations_ms[f"integrate_iter_{iterations}"] = model_ms
+
+                # Capture token counts where the provider response
+                # exposes them — used by the friction report to compare
+                # input-token bloat vs model latency.
+                input_tokens = getattr(response, "input_tokens", 0) or 0
+                output_tokens = getattr(response, "output_tokens", 0) or 0
+
+                iter_record: dict = {
+                    "iter": iterations,
+                    "model_ms": model_ms,
+                    "dispatch_ms": None,
+                    "tool_name": "",
+                    "tool_result_chars": None,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                }
+                iteration_metrics.append(iter_record)
 
                 tool_uses = [
                     b for b in response.content if b.type == "tool_use"
@@ -473,6 +608,7 @@ class IntegrationRunner:
                         phase_durations_ms=phase_durations_ms,
                         tools_called=tools_called,
                         budget_state=BudgetState(),
+                        iteration_metrics=iteration_metrics,
                     )
 
                 tool_use = tool_uses[0]
@@ -505,9 +641,18 @@ class IntegrationRunner:
                 tool_result = await self._dispatcher(
                     tool_use.name, dict(tool_use.input or {}), inputs
                 )
-                phase_durations_ms[f"dispatch_iter_{iterations}"] = (
-                    _ms_since(dispatch_started, self._clock)
-                )
+                dispatch_ms = _ms_since(dispatch_started, self._clock)
+                phase_durations_ms[f"dispatch_iter_{iterations}"] = dispatch_ms
+
+                # Stamp the per-iteration record now that dispatch has
+                # landed. tool_result_chars measures the serialised
+                # payload size that flows back into the next iteration's
+                # context — useful for spotting payload-bloat-driven
+                # timeouts.
+                serialised_result = _serialise_tool_result(tool_result)
+                iter_record["dispatch_ms"] = dispatch_ms
+                iter_record["tool_name"] = str(tool_use.name)
+                iter_record["tool_result_chars"] = len(serialised_result)
 
                 invocation_ref = (
                     tool_result.get("invocation_id")
@@ -540,7 +685,7 @@ class IntegrationRunner:
                             {
                                 "type": "tool_result",
                                 "tool_use_id": tool_use.id or "",
-                                "content": _serialise_tool_result(tool_result),
+                                "content": serialised_result,
                             }
                         ],
                     }
@@ -556,6 +701,7 @@ class IntegrationRunner:
                 tools_called=tools_called,
                 budget_state=BudgetState(),
                 chained_error=exc,
+                iteration_metrics=iteration_metrics,
             )
         except BriefingValidationError as exc:
             raise IntegrationAttemptFailed(
@@ -566,6 +712,7 @@ class IntegrationRunner:
                 tools_called=tools_called,
                 budget_state=BudgetState(),
                 chained_error=exc,
+                iteration_metrics=iteration_metrics,
             )
         except Exception as exc:  # pragma: no cover - guard rail
             logger.exception("Integration runner unexpected error")
@@ -577,6 +724,7 @@ class IntegrationRunner:
                 tools_called=tools_called,
                 budget_state=BudgetState(),
                 chained_error=exc,
+                iteration_metrics=iteration_metrics,
             )
 
     # ----- prompt + tool list assembly -----
@@ -998,6 +1146,187 @@ class IntegrationRunner:
             # convention. Never fail the user's turn on an audit
             # write.
             logger.exception("integration.briefing audit emit failed")
+
+    def _write_integration_friction_report(
+        self,
+        *,
+        inputs: IntegrationInputs,
+        attempts_history: list[IntegrationAttemptFailed],
+        last_failure: IntegrationAttemptFailed,
+    ) -> None:
+        """Drop a markdown friction report when retries exhaust.
+
+        Mirrors the FrictionObserver convention (filename pattern,
+        directory, structure) so existing surfacing tooling (the
+        ``/debug friction`` slash command, session-start friction
+        scan) picks the report up automatically. No-op when no
+        ``data_dir`` is configured.
+        """
+        if not self._config.data_dir:
+            return
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        # Short uniqueness suffix prevents filename collisions when two
+        # exhausted runs land in the same second with the same
+        # component (which can happen during incident bursts and is
+        # exactly when the diagnostic value matters most).
+        unique = uuid.uuid4().hex[:8]
+        friction_dir = Path(self._config.data_dir) / "diagnostics" / "friction"
+        friction_dir.mkdir(parents=True, exist_ok=True)
+
+        # Component label is constrained — same reasoning as
+        # _safe_component in briefing.py: keep raw exception text out
+        # of file paths (which may end up in shared environments).
+        from kernos.kernel.integration.briefing import _safe_component
+        safe_component = _safe_component(last_failure.component)
+        filename = (
+            f"FRICTION_{ts}_{unique}_INTEGRATION_"
+            f"{safe_component.upper()}.md"
+        )
+        filepath = friction_dir / filename
+
+        # Truncate user message to a sane preview; full text lives in
+        # the conversation log if needed for forensics.
+        user_msg = (inputs.user_message or "")[:500]
+        if len(inputs.user_message or "") > 500:
+            user_msg += "…"
+
+        lines: list[str] = []
+        lines.append(f"# Friction Report: INTEGRATION_{safe_component.upper()}")
+        lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}")
+        lines.append("")
+        lines.append("## Description")
+        lines.append(
+            f"Integration synthesis failed after "
+            f"{len(attempts_history)} retry attempts. Final attempt's "
+            f"component was `{safe_component}`. The retry harness "
+            f"surfaced a hard system-error to the user; this report "
+            f"captures per-iteration timing so the bottleneck "
+            f"(model latency / tool dispatch / payload size) can be "
+            f"attributed."
+        )
+        lines.append("")
+        lines.append("## Recommendation: INVESTIGATE")
+        lines.append(
+            "Review per-iteration metrics below. Likely levers, in "
+            "rough order of cost: (1) extend "
+            "`KERNOS_INTEGRATION_TIMEOUT_SECONDS` if model+dispatch "
+            "wall-time consistently overruns the budget by a small "
+            "margin; (2) shrink tool-result payloads if "
+            "`tool_result_chars` dominates; (3) parallelize multi-"
+            "target retrieval if the model issues several "
+            "`request_reference` calls sequentially; (4) swap the "
+            "`lightweight` chain to a faster provider if model_ms "
+            "dominates and payloads are small."
+        )
+        lines.append("")
+        lines.append("## Context")
+        lines.append(f"- instance_id: `{inputs.instance_id}`")
+        lines.append(f"- member_id: `{inputs.member_id}`")
+        lines.append(f"- space_id: `{inputs.space_id}`")
+        lines.append(f"- turn_id: `{inputs.turn_id}`")
+        lines.append(f"- integration_run_id: `{inputs.integration_run_id}`")
+        lines.append(
+            f"- integration_timeout_seconds: "
+            f"`{self._config.integration_timeout_seconds}`"
+        )
+        lines.append(f"- max_iterations: `{self._config.max_iterations}`")
+        lines.append(f"- max_retries: `{self._config.max_retries}`")
+        lines.append("")
+        lines.append("## User message (preview)")
+        lines.append("")
+        lines.append("```")
+        lines.append(user_msg or "(empty)")
+        lines.append("```")
+        lines.append("")
+        lines.append("## Per-attempt breakdown")
+        lines.append("")
+        for idx, failure in enumerate(attempts_history, start=1):
+            lines.append(
+                f"### Attempt {idx}/{len(attempts_history)} — "
+                f"`{failure.component}`"
+            )
+            lines.append(f"- iterations: {failure.iterations}")
+            lines.append(f"- tools_called: {failure.tools_called}")
+            lines.append(
+                f"- phase_durations_ms: {failure.phase_durations_ms}"
+            )
+            if failure.iteration_metrics:
+                lines.append("- per-iteration metrics:")
+                for m in failure.iteration_metrics:
+                    lines.append(
+                        f"  - iter {m.get('iter')}: "
+                        f"model_ms={m.get('model_ms')}, "
+                        f"dispatch_ms={m.get('dispatch_ms')}, "
+                        f"tool=`{m.get('tool_name', '')}`, "
+                        f"tool_result_chars={m.get('tool_result_chars')}, "
+                        f"input_tokens={m.get('input_tokens')}, "
+                        f"output_tokens={m.get('output_tokens')}"
+                    )
+            else:
+                lines.append("- per-iteration metrics: (none captured)")
+            lines.append("")
+        # Aggregate diagnostic — the question the operator needs
+        # answered first.
+        total_attempts = len(attempts_history)
+        all_metrics = [
+            m for f in attempts_history for m in f.iteration_metrics
+        ]
+        if all_metrics:
+            sum_model = sum((m.get("model_ms") or 0) for m in all_metrics)
+            sum_dispatch = sum(
+                (m.get("dispatch_ms") or 0) for m in all_metrics
+            )
+            max_payload = max(
+                (m.get("tool_result_chars") or 0) for m in all_metrics
+            )
+            tools_observed = sorted({
+                m.get("tool_name", "") for m in all_metrics
+                if m.get("tool_name")
+            })
+            lines.append("## Aggregate signals")
+            lines.append("")
+            lines.append(
+                f"- total iterations across all attempts: "
+                f"{len(all_metrics)}"
+            )
+            lines.append(f"- sum model_ms: {sum_model}")
+            lines.append(f"- sum dispatch_ms: {sum_dispatch}")
+            lines.append(f"- max tool_result_chars: {max_payload}")
+            lines.append(f"- tools observed: {tools_observed}")
+            if sum_model > sum_dispatch * 2:
+                lines.append(
+                    "- **Hypothesis:** model latency dominates "
+                    "(sum_model >> sum_dispatch). Lever: faster chain "
+                    "or smaller input."
+                )
+            elif sum_dispatch > sum_model * 2:
+                lines.append(
+                    "- **Hypothesis:** tool dispatch dominates "
+                    "(sum_dispatch >> sum_model). Lever: shrink "
+                    "results or parallelize."
+                )
+            else:
+                lines.append(
+                    "- **Hypothesis:** model and dispatch contribute "
+                    "comparably. Lever: extend timeout if both are "
+                    "necessary, or bound iteration count."
+                )
+
+        try:
+            filepath.write_text("\n".join(lines), encoding="utf-8")
+            logger.info(
+                "INTEGRATION_FRICTION_REPORT: written %s "
+                "(component=%s attempts=%d)",
+                filepath, safe_component, total_attempts,
+            )
+        except OSError:
+            logger.exception(
+                "INTEGRATION_FRICTION_REPORT: write failed for %s",
+                filepath,
+            )
 
 
 # ---------------------------------------------------------------------------

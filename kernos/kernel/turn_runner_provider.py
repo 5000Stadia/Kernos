@@ -454,10 +454,17 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
                 inputs_factory=_renderer_inputs_factory,
             ),
         )
+        # Production-wired config: pulls in env-var overrides
+        # (KERNOS_INTEGRATION_TIMEOUT_SECONDS, _MAX_RETRIES,
+        # _MAX_ITERATIONS, KERNOS_DATA_DIR for friction report
+        # surfacing). Overriding callers can still build a config
+        # by hand and wire IntegrationService(config=...) directly.
+        from kernos.kernel.integration.runner import IntegrationConfig
         integration = IntegrationService(
             chain_caller=wrapped_chain,
             read_only_dispatcher=ctx.integration_dispatcher,
             audit_emitter=ctx.integration_audit_emitter,
+            config=IntegrationConfig.from_env(),
         )
         enactment = EnactmentService(
             presence_renderer=presence,

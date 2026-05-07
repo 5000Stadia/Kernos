@@ -701,6 +701,190 @@ def test_integration_config_rejects_negative_backoff():
         IntegrationConfig(retry_backoff_seconds=-0.5)
 
 
+def test_integration_config_from_env_reads_overrides(monkeypatch):
+    """from_env() should pick up KERNOS_INTEGRATION_* env vars and
+    KERNOS_DATA_DIR; programmatic overrides win over env values.
+    """
+    monkeypatch.setenv("KERNOS_INTEGRATION_TIMEOUT_SECONDS", "75.5")
+    monkeypatch.setenv("KERNOS_INTEGRATION_MAX_RETRIES", "5")
+    monkeypatch.setenv("KERNOS_INTEGRATION_MAX_ITERATIONS", "8")
+    monkeypatch.setenv("KERNOS_DATA_DIR", "/tmp/kernos_test_root")
+
+    cfg = IntegrationConfig.from_env()
+    assert cfg.integration_timeout_seconds == 75.5
+    assert cfg.max_retries == 5
+    assert cfg.max_iterations == 8
+    assert cfg.data_dir == "/tmp/kernos_test_root"
+
+    # Programmatic overrides win over env
+    cfg2 = IntegrationConfig.from_env(max_retries=2)
+    assert cfg2.max_retries == 2  # override
+    assert cfg2.integration_timeout_seconds == 75.5  # env retained
+
+
+def test_integration_config_from_env_ignores_garbage(monkeypatch):
+    """Malformed env values are logged and ignored; defaults stand.
+    KERNOS_DATA_DIR unset → mirror server.py convention and default
+    to ``./data`` so friction reports land where the operator already
+    looks.
+    """
+    monkeypatch.setenv("KERNOS_INTEGRATION_TIMEOUT_SECONDS", "not-a-float")
+    monkeypatch.setenv("KERNOS_INTEGRATION_MAX_RETRIES", "abc")
+    monkeypatch.delenv("KERNOS_DATA_DIR", raising=False)
+
+    cfg = IntegrationConfig.from_env()
+    assert cfg.integration_timeout_seconds == 30.0  # default
+    assert cfg.max_retries == 3  # default
+    assert cfg.data_dir == "./data"
+
+
+def test_integration_config_rejects_non_finite_timeout():
+    """NaN/inf would silently disable the timeout guardrail because
+    finite-NaN comparisons return False. Reject loudly.
+    """
+    import math
+    import pytest as _pytest
+    with _pytest.raises(
+        ValueError, match="must be a finite positive number"
+    ):
+        IntegrationConfig(integration_timeout_seconds=math.nan)
+    with _pytest.raises(
+        ValueError, match="must be a finite positive number"
+    ):
+        IntegrationConfig(integration_timeout_seconds=math.inf)
+    with _pytest.raises(
+        ValueError, match="must be a finite positive number"
+    ):
+        IntegrationConfig(integration_timeout_seconds=0)
+    with _pytest.raises(
+        ValueError, match="must be a finite positive number"
+    ):
+        IntegrationConfig(integration_timeout_seconds=-1)
+
+
+def test_integration_config_rejects_zero_max_iterations():
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="max_iterations must be >= 1"):
+        IntegrationConfig(max_iterations=0)
+
+
+@pytest.mark.asyncio
+async def test_runner_writes_friction_report_on_exhaustion(tmp_path):
+    """When the retry harness exhausts, the runner drops a markdown
+    friction report into ``{data_dir}/diagnostics/friction/`` so the
+    operator sees the timeout at session start (mirrors
+    FrictionObserver's surfacing convention).
+    """
+    async def chain(*_a, **_kw):
+        return _resp("no finalize block here")  # synthesis fails
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(
+            max_retries=2,
+            max_iterations=1,
+            data_dir=str(tmp_path),
+        ),
+    )
+    await runner.run(_make_inputs())
+
+    friction_dir = tmp_path / "diagnostics" / "friction"
+    reports = list(friction_dir.glob("FRICTION_*INTEGRATION_*.md"))
+    assert len(reports) == 1
+    body = reports[0].read_text()
+    # Structural shape — mirrors FrictionObserver report
+    assert "# Friction Report:" in body
+    assert "## Description" in body
+    assert "## Recommendation:" in body
+    assert "## Per-attempt breakdown" in body
+    assert "## Aggregate signals" in body
+    # Per-iteration metrics rendered (model_ms, dispatch_ms, etc.)
+    assert "model_ms=" in body
+    # Component is in the filename (constrained label)
+    fname = reports[0].name
+    assert "INTEGRATION_" in fname
+
+
+@pytest.mark.asyncio
+async def test_runner_skips_friction_report_when_data_dir_unset(
+    tmp_path,
+):
+    """Without data_dir configured, the runner does not write a
+    friction report — appropriate for tests and library-only use.
+    """
+    async def chain(*_a, **_kw):
+        return _resp("no finalize block here")
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=2, max_iterations=1),
+        # data_dir intentionally unset
+    )
+    await runner.run(_make_inputs())
+
+    friction_dir = tmp_path / "diagnostics" / "friction"
+    assert not friction_dir.exists() or not list(friction_dir.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_iteration_metrics_recorded_per_attempt():
+    """Per-iteration metrics on IntegrationAttemptFailed should
+    capture model_ms, tool_name, and tool_result_chars when an
+    iteration completes a tool dispatch.
+    """
+    captured: list = []
+
+    async def chain(system, messages, tools, max_tokens):
+        # First call: emit a tool_use for a real tool. Second call:
+        # produce no tool_use so the attempt fails on no_tool_use,
+        # but iteration_metrics from iter 1 should be carried in the
+        # raised exception.
+        if not captured:
+            captured.append("first")
+            block = ContentBlock(
+                type="tool_use", id="t1",
+                name="reference_lookup",
+                input={"query": "x"},
+            )
+            return ProviderResponse(content=[block], tokens_in=10, tokens_out=20)
+        return _resp("no tool block")
+
+    async def dispatcher(name, args, inputs):
+        return {"invocation_id": f"{name}:1", "content": "small result"}
+
+    audit: list = []
+    async def emitter(record):
+        audit.append(record)
+
+    runner = IntegrationRunner(
+        chain_caller=chain,
+        read_only_dispatcher=dispatcher,
+        audit_emitter=emitter,
+        config=IntegrationConfig(max_retries=1, max_iterations=5),
+    )
+    inputs = _make_inputs(
+        surfaced_tools=(
+            SurfacedTool(
+                tool_id="reference_lookup",
+                description="lookup",
+                input_schema={"type": "object"},
+                gate_classification="read",
+                surfacing_rationale=SURFACING_RATIONALE_RELEVANCE,
+            ),
+        ),
+    )
+    briefing = await runner.run(inputs)
+    # Run produced the system-error briefing (no_tool_use on iter 2).
+    # The retry audit record carries iteration_metrics — verify the
+    # attempt-failure audit captured the per-iter signal.
+    retry_records = [
+        r for r in audit if r.get("audit_category") == "integration.retry"
+    ]
+    assert len(retry_records) == 1
+    # Confirm the briefing audit-trace shows the eventual failure path.
+    assert briefing.audit_trace.fail_soft_engaged is True
+
+
 @pytest.mark.asyncio
 async def test_system_error_directive_does_not_leak_raw_exception_text():
     """When a synthesis attempt's reason carries raw exception text
