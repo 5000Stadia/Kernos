@@ -157,6 +157,85 @@ async def test_request_reference_returns_content_for_match(service_setup):
     assert nav.calls, "navigator should have been called"
 
 
+async def test_request_reference_navigator_input_bounded(service_setup):
+    """REFERENCE-INJECTION-FIX (2026-05-07): pre-fix, the navigator's
+    catalog listing scaled with the entire visible catalog (~35K tokens
+    at 863 baked-catalog rows). Two-stage navigation now bounds the
+    listing: cheap mechanical token-overlap pre-filter selects up to
+    _NAVIGATOR_PREFILTER_LIMIT rows, then the navigator picks top-1.
+
+    This test seeds ~120 rows with one obvious match for the brief and
+    asserts the navigator's prompt contains AT MOST the prefilter
+    limit's worth of catalog entries — not all 120.
+    """
+    from kernos.kernel.reference.tools import _NAVIGATOR_PREFILTER_LIMIT
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+
+    # Seed one realistic on-disk match plus 119 distractor rows.
+    target_path = tmp_path / "docs/architecture/cohorts.md"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    body = "## Cohorts and domains\n\nCohorts run during a turn.\n"
+    target_path.write_text(body, encoding="utf-8")
+    target_entry = CatalogEntry(
+        entry_id="ref_cohorts_target",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=SCOPE_INSTANCE,
+        category="architecture",
+        indexed_at="2026-05-07T00:00:00+00:00",
+        trust_tier=TRUST_CANONICAL,
+        file_path=str(target_path),
+        section_title="Cohorts and domains",
+        one_line="How cohorts run during a turn and relate to domains",
+        line_start=1,
+        line_end=3,
+        source_hash=compute_source_hash(target_path.read_bytes()),
+    )
+    distractors: list[CatalogEntry] = [target_entry]
+    for i in range(119):
+        distractors.append(
+            CatalogEntry(
+                entry_id=f"ref_distractor_{i:03d}",
+                instance_id="inst1",
+                entry_type=ENTRY_TYPE_FILE,
+                scope=SCOPE_INSTANCE,
+                category="other",
+                indexed_at="2026-05-07T00:00:00+00:00",
+                trust_tier=TRUST_CANONICAL,
+                file_path=str(target_path),  # safe — same hash, irrelevant titles
+                section_title=f"Distractor {i:03d}",
+                one_line=f"Unrelated topic placeholder {i:03d} about widgets",
+                line_start=1,
+                line_end=3,
+                source_hash=target_entry.source_hash,
+            ),
+        )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(target_path),
+        new_entries=distractors,
+    )
+    nav.next_response = "ref_cohorts_target"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    await service.handle_request_reference(
+        ctx=ctx, brief_request="how do cohorts relate to domains",
+    )
+    assert nav.calls, "navigator should have been called"
+    listing_in_prompt = nav.calls[-1]
+    # Each row in the listing renders on its own line; count entry-id
+    # occurrences as a proxy for catalog-row count in the prompt.
+    listed_ids = [tok for tok in listing_in_prompt.split() if tok.startswith("ref_")]
+    assert len(listed_ids) <= _NAVIGATOR_PREFILTER_LIMIT, (
+        f"navigator prompt contained {len(listed_ids)} catalog rows; "
+        f"prefilter limit is {_NAVIGATOR_PREFILTER_LIMIT}. "
+        f"Pre-fix the prompt would have carried all 120 rows."
+    )
+    # The target row's overlap with the brief is high; it should be
+    # in the prefiltered listing.
+    assert "ref_cohorts_target" in listed_ids
+
+
 async def test_request_reference_no_match_returns_no_match(service_setup):
     service, catalog, cohort, nav, refs_root, tmp_path = service_setup
     # Empty catalog — no_catalog status.

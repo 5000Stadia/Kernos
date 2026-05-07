@@ -335,6 +335,25 @@ Reply with one line: either an entry_id (e.g. ref_abc123) or NONE."""
 _ENTRY_ID_RE = re.compile(r"\bref_[A-Za-z0-9_]+\b")
 
 
+# REFERENCE-INJECTION-FIX (2026-05-07): bound the navigator's catalog
+# scan. Pre-bake, the catalog was sparse and the navigator's listing
+# input was small; post-bake (105 docs, 863 sections), the listing
+# weighs ~35K tokens per call and inverts the "scan cheaply, pick
+# narrowly" architectural promise.
+#
+# Two-stage navigation: cheap mechanical pre-filter (token-overlap +
+# plural-s normalization, same machinery that powers the no-match
+# fallback's candidate list) selects up to N rows, then the navigator
+# LLM picks top-1 from the focused listing.
+#
+# 50 is generous: at ~163 chars/row that's ~8K chars = ~2K tokens of
+# listing reaching the navigator, well within budget. Drops navigator
+# input by ~17x at current catalog size, scales sub-linearly as the
+# catalog grows. The abstract shape (token-overlap prefilter → focused
+# LLM scan) composes with future canvas/Gardener navigation surfaces.
+_NAVIGATOR_PREFILTER_LIMIT = 50
+
+
 # ---------------------------------------------------------------------------
 # ReferenceService
 # ---------------------------------------------------------------------------
@@ -409,7 +428,11 @@ class ReferenceService:
                     "Use store_reference to add material."
                 ),
             }
-        listing = self._render_catalog_listing(rows)
+        # Mechanical pre-filter before the navigator's LLM scan. See
+        # _NAVIGATOR_PREFILTER_LIMIT comment for the rationale; this
+        # is the load-bearing fix from REFERENCE-INJECTION-FIX.
+        navigator_rows = _prefilter_for_navigator(brief_request, rows)
+        listing = self._render_catalog_listing(navigator_rows)
         prompt = _NAVIGATOR_PROMPT_TEMPLATE.format(
             brief=brief_request.strip(), catalog_listing=listing,
         )
@@ -866,6 +889,48 @@ _CANDIDATE_LIST_LIMIT = 8
 """Number of fallback candidates surfaced when navigator returns NONE.
 Conservative — the agent uses these to refine its brief, not as a
 content payload."""
+
+
+def _prefilter_for_navigator(
+    brief: str,
+    rows: list[CatalogEntry],
+) -> list[CatalogEntry]:
+    """Mechanical token-overlap pre-filter on the navigator's input.
+
+    Returns up to :data:`_NAVIGATOR_PREFILTER_LIMIT` rows ordered by
+    overlap score (descending). When no row has any overlap with the
+    brief, falls back to a representative slice — instance-scope
+    (canonical) rows first, then any rows — so the navigator isn't
+    completely starved.
+
+    Two-stage navigation: this helper is the cheap mechanical scan,
+    the navigator's LLM call is the precise top-1 selection from the
+    focused list. Drops navigator input by an order of magnitude at
+    current catalog sizes; scales sub-linearly as the catalog grows.
+
+    Trade-off: if the prefilter misses the right row (no overlap),
+    the navigator can't recover within this call. The no-match
+    fallback path then surfaces the same kind of candidate suggestions
+    to the agent so it can refine its brief.
+
+    Same scoring + tokenizer that powers :func:`_candidate_list`,
+    just with a higher limit (the navigator-side scan is broader by
+    design; the no-match candidate list is the user-facing tighter
+    surface).
+    """
+    signal_tokens = set(tokenize(brief))
+    if not signal_tokens or not rows:
+        return rows[:_NAVIGATOR_PREFILTER_LIMIT]
+    scored: list[tuple[int, CatalogEntry]] = []
+    for row in rows:
+        overlap = score_overlap(signal_tokens=signal_tokens, entry=row)
+        if overlap > 0:
+            scored.append((overlap, row))
+    if not scored:
+        instance_rows = [r for r in rows if r.scope == SCOPE_INSTANCE]
+        return (instance_rows or rows)[:_NAVIGATOR_PREFILTER_LIMIT]
+    scored.sort(key=lambda t: -t[0])
+    return [r for (_, r) in scored[:_NAVIGATOR_PREFILTER_LIMIT]]
 
 
 def _candidate_list(
