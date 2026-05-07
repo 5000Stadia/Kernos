@@ -64,6 +64,13 @@ DEFAULT_PAGE_TYPE = "note"
 #: Instance default for operator-in-loop preferences (see Pillar 5).
 DEFAULT_CONSULT_OPERATOR_AT = ("shipped", "on_conflict")
 
+#: Whole-phrase bonus for page_search ranking. A page containing the
+#: full query string scores ``_PHRASE_BONUS * count`` from the phrase
+#: alone, dominating any per-token noise — preserves the prior
+#: substring-rank behavior while letting token-overlap surface
+#: near-misses that strict substring would have dropped.
+_PHRASE_BONUS = 100
+
 
 # ---------------------------------------------------------------------------
 # Section markers (SECTION-MARKERS-AND-GARDENER Pillar 1)
@@ -1490,13 +1497,32 @@ class CanvasService:
         query: str,
         limit: int = 20,
     ) -> list[dict]:
-        """Return pages whose body or title matches ``query`` (case-insensitive).
+        """Return pages whose body or title matches ``query``.
 
-        Naive text match in v1. Ranking by match-count, not semantic.
+        Token-overlap ranked search (PAGE-SEARCH-TOKEN-OVERLAP-V1,
+        2026-05-07). Original v1 was strict whole-string substring,
+        which produced surprising zero-result misses — e.g. searching
+        ``"Canvas docs"`` against pages titled ``concepts/canvas.md``
+        returned no hits because the literal phrase wasn't present,
+        while ``"canvas"`` did find the page (agent self-identified
+        2026-05-07).
+
+        Ranking now combines:
+          * Whole-phrase matches (heavily weighted via
+            ``_PHRASE_BONUS``) — preserves the prior behavior that
+            an exact-phrase match always outranks scattered
+            token matches.
+          * Per-token substring matches summed — surfaces pages
+            that overlap the query semantically even when the
+            literal phrase is absent.
+
+        Score breakdown is exposed in the returned ``matches`` field
+        for callers that want to introspect ranking.
         """
         q = (query or "").strip().lower()
         if not q:
             return []
+        tokens = [t for t in re.split(r"\W+", q) if t]
         hits: list[dict] = []
         for canvas_id in canvas_ids:
             root = canvas_dir(self._data_dir, instance_id, canvas_id)
@@ -1507,15 +1533,18 @@ class CanvasService:
                     continue
                 fm, body = self._read_page_cached(md_path)
                 haystack = (fm.get("title", "") + "\n" + body).lower()
-                count = haystack.count(q)
-                if count:
-                    rel = md_path.relative_to(root)
-                    hits.append({
-                        "canvas_id": canvas_id,
-                        "path": str(rel).replace(os.sep, "/"),
-                        "title": fm.get("title", str(rel)),
-                        "matches": count,
-                    })
+                phrase_count = haystack.count(q) if q else 0
+                token_sum = sum(haystack.count(t) for t in tokens)
+                score = phrase_count * _PHRASE_BONUS + token_sum
+                if score == 0:
+                    continue
+                rel = md_path.relative_to(root)
+                hits.append({
+                    "canvas_id": canvas_id,
+                    "path": str(rel).replace(os.sep, "/"),
+                    "title": fm.get("title", str(rel)),
+                    "matches": score,
+                })
         hits.sort(key=lambda h: h["matches"], reverse=True)
         return hits[:limit]
 

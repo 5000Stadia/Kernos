@@ -197,6 +197,40 @@ async def test_page_search_ranks_by_match_count(env):
     assert hits[0]["matches"] >= hits[-1]["matches"]
 
 
+async def test_page_search_finds_pages_via_token_overlap(env):
+    """PAGE-SEARCH-TOKEN-OVERLAP-V1 (2026-05-07): the agent observed
+    that ``"Canvas docs"`` returned zero hits against pages that
+    clearly mention canvas — the old implementation was strict
+    substring match. Now token-overlap finds near-misses while
+    whole-phrase matches still win on rank."""
+    svc, _, _ = env
+    c = await svc.create(
+        instance_id=INSTANCE, creator_member_id="alice",
+        name="n", scope="personal",
+    )
+    # Page A: scattered tokens, no exact phrase.
+    await svc.page_write(
+        instance_id=INSTANCE, canvas_id=c.canvas_id, page_slug="scattered",
+        body="The canvas system documentation lives here.",
+        writer_member_id="alice",
+    )
+    # Page B: contains the exact phrase.
+    await svc.page_write(
+        instance_id=INSTANCE, canvas_id=c.canvas_id, page_slug="exact",
+        body="See the canvas docs for full details.",
+        writer_member_id="alice",
+    )
+    hits = await svc.page_search(
+        instance_id=INSTANCE, canvas_ids=[c.canvas_id], query="canvas docs",
+    )
+    paths = {h["path"] for h in hits}
+    # Both pages are returned (strict substring would have dropped A).
+    assert "scattered.md" in paths
+    assert "exact.md" in paths
+    # Whole-phrase match still wins ranking.
+    assert hits[0]["path"] == "exact.md"
+
+
 async def test_frontmatter_parse_and_serialize_roundtrip():
     original = {"title": "Valencia", "type": "note", "watchers": ["alice"]}
     body = "Body text.\n"
