@@ -646,7 +646,15 @@ async def test_redaction_invariant_includes_forwarded_tool_results():
         CohortOutput, Restricted,
     )
 
-    secret = "contents-of-restricted-cohort-payload"
+    # 60+ char threshold for tool_result scanning (vs 12 for
+    # directive scanning) — short strings like filenames overlap
+    # restricted references incidentally rather than as leaks, so
+    # the substring guard ignores them. This snippet is well past
+    # the threshold so it still triggers as a real content leak.
+    secret = (
+        "contents-of-restricted-cohort-payload-"
+        "this-is-substantial-content-not-just-a-filename"
+    )
 
     async def chain(*_a, **_kw):
         # Dispatch read tool whose result contains the secret, then

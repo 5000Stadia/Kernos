@@ -4169,9 +4169,34 @@ class MessageHandler:
                         runner.space_id, len(merged_messages),
                     )
 
-                # Process as one turn using the first message's context
+                # Process as one turn using the first message's context.
+                # MERGED-CONTENT-COHERENCE (2026-05-07): when multiple
+                # messages arrive within the merge window, concatenate
+                # their content into the primary message rather than
+                # logging extras separately. The prior shape (extras
+                # appended to conv_log, primary used as "current input")
+                # produced inverted ordering for the model — msg2
+                # appeared in conv history BEFORE msg1, with msg1 as
+                # the current input. Concatenation gives the model one
+                # coherent input it can address natively.
+                #
+                # Messages arriving AFTER the merge-window closes go
+                # back into the asyncio.Queue mailbox and are picked
+                # up on the next iteration of run_loop — that path is
+                # unchanged and still safely queues message-2-while-
+                # processing-message-1.
                 primary_msg, primary_ctx, primary_future = merged_messages[0]
                 primary_ctx.merged_count = len(merged_messages)
+                if len(merged_messages) > 1:
+                    extra_bodies = [
+                        em.content
+                        for em, _ec, _ef in merged_messages[1:]
+                        if em.content
+                    ]
+                    if extra_bodies:
+                        primary_msg.content = "\n\n---\n\n".join(
+                            [primary_msg.content or ""] + extra_bodies
+                        )
                 # Detect self-directed turns
                 if (primary_msg.context and isinstance(primary_msg.context, dict)
                         and primary_msg.context.get("execution_envelope", {}).get("source") == "self_directed"):
@@ -4189,19 +4214,6 @@ class MessageHandler:
                 )
                 await _space_lock.acquire()
                 _lock_acquired = True
-
-                # Log merged messages to conversation log so agent sees them
-                for extra_msg, extra_ctx, extra_future in merged_messages[1:]:
-                    try:
-                        await self.conv_logger.append(
-                            runner.instance_id, runner.space_id,
-                            speaker="user",
-                            channel=extra_msg.platform,
-                            content=extra_msg.content,
-                            member_id=primary_ctx.member_id,
-                        )
-                    except Exception as exc:
-                        logger.warning("Failed to log merged message: %s", exc)
 
                 # Execute the full turn (assemble → reason → persist).
                 # HANDLER-PIPELINE-DECOMPOSE: calls go through the
