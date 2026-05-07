@@ -733,7 +733,7 @@ def test_integration_config_from_env_ignores_garbage(monkeypatch):
     monkeypatch.delenv("KERNOS_DATA_DIR", raising=False)
 
     cfg = IntegrationConfig.from_env()
-    assert cfg.integration_timeout_seconds == 30.0  # default
+    assert cfg.integration_timeout_seconds == 600.0  # default
     assert cfg.max_retries == 3  # default
     assert cfg.data_dir == "./data"
 
@@ -741,25 +741,78 @@ def test_integration_config_from_env_ignores_garbage(monkeypatch):
 def test_integration_config_rejects_non_finite_timeout():
     """NaN/inf would silently disable the timeout guardrail because
     finite-NaN comparisons return False. Reject loudly.
+    Negative is nonsense. 0 is the explicit disable sentinel — accepted.
     """
     import math
     import pytest as _pytest
     with _pytest.raises(
-        ValueError, match="must be a finite positive number"
+        ValueError, match="finite non-negative number"
     ):
         IntegrationConfig(integration_timeout_seconds=math.nan)
     with _pytest.raises(
-        ValueError, match="must be a finite positive number"
+        ValueError, match="finite non-negative number"
     ):
         IntegrationConfig(integration_timeout_seconds=math.inf)
     with _pytest.raises(
-        ValueError, match="must be a finite positive number"
-    ):
-        IntegrationConfig(integration_timeout_seconds=0)
-    with _pytest.raises(
-        ValueError, match="must be a finite positive number"
+        ValueError, match="finite non-negative number"
     ):
         IntegrationConfig(integration_timeout_seconds=-1)
+    # 0 is accepted: opt-in disable of the wall-clock ceiling.
+    cfg = IntegrationConfig(integration_timeout_seconds=0)
+    assert cfg.integration_timeout_seconds == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_skips_timeout_check_when_disabled():
+    """When integration_timeout_seconds=0, the wall-clock guardrail is
+    disabled — meaningful work can run as long as it needs. Verified by
+    advancing a fake clock far past any reasonable wall-time and
+    confirming no integration_timeout failure fires.
+    """
+    # Simulate a clock that advances by 1000s per call so any
+    # wall-clock check would trip immediately.
+    state = {"now": 0.0}
+    def fake_clock() -> float:
+        state["now"] += 1000.0
+        return state["now"]
+
+    captured: list = []
+    async def chain(*_a, **_kw):
+        # Always emit __finalize_briefing__ so the loop completes
+        # synthesis on the first iteration after timeout check.
+        if not captured:
+            captured.append("first")
+            block = ContentBlock(
+                type="tool_use", id="t1",
+                name="__finalize_briefing__",
+                input=_DEFAULT_BRIEFING_PAYLOAD,
+            )
+            return ProviderResponse(content=[block], tokens_in=10, tokens_out=20)
+        return _resp("unused")
+
+    async def dispatcher(*_a, **_kw):
+        return {"content": "result"}
+
+    async def emitter(_record):
+        pass
+
+    runner = IntegrationRunner(
+        chain_caller=chain,
+        read_only_dispatcher=dispatcher,
+        audit_emitter=emitter,
+        config=IntegrationConfig(
+            max_retries=1,
+            max_iterations=5,
+            integration_timeout_seconds=0,  # disable
+        ),
+        clock=fake_clock,
+    )
+    # Should NOT raise integration_timeout; should return a successful
+    # briefing (or any non-timeout outcome).
+    briefing = await runner.run(_make_inputs())
+    # If the disable worked, we don't see the integration_timeout
+    # component in audit_trace.notes.
+    assert "integration_timeout" not in (briefing.audit_trace.notes or "")
 
 
 def test_integration_config_rejects_zero_max_iterations():

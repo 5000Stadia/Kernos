@@ -186,7 +186,13 @@ class IntegrationConfig:
 
     max_iterations: int = 5
     max_integration_tokens: int = 2048
-    integration_timeout_seconds: float = 30.0
+    # Generous default: meaningful work (multi-step navigation, slow
+    # tool dispatches) is allowed to take its time. The retry harness
+    # already ensures a stuck attempt eventually surfaces a hard
+    # error; the absolute wall-clock ceiling exists only to prevent a
+    # truly hung attempt from running forever. Set to 0 to disable
+    # the wall-clock check entirely (env: KERNOS_INTEGRATION_TIMEOUT_SECONDS=0).
+    integration_timeout_seconds: float = 600.0
     max_summarized_cohort_entries: int = 20
     max_filtered_entries: int = 50
     chain_name: str = "lightweight"
@@ -216,17 +222,21 @@ class IntegrationConfig:
             )
         # NaN/inf would silently disable the timeout guardrail because
         # `current_clock - start > timeout` is False for non-finite
-        # comparisons. Must be a finite positive float. Same defensive
-        # posture for max_iterations.
+        # comparisons — that's a footgun, not an opt-in. Reject those.
+        # 0 is the explicit opt-in sentinel for "no wall-clock ceiling"
+        # (the runtime check skips the comparison when timeout == 0)
+        # so that operators who want truly unbounded synthesis time
+        # can ask for it without us silently allowing it via NaN.
+        # Negative values are nonsense.
         import math
         if (
             not math.isfinite(self.integration_timeout_seconds)
-            or self.integration_timeout_seconds <= 0
+            or self.integration_timeout_seconds < 0
         ):
             raise ValueError(
                 f"IntegrationConfig.integration_timeout_seconds must be "
-                f"a finite positive number, got "
-                f"{self.integration_timeout_seconds}"
+                f"a finite non-negative number (0 disables the wall-"
+                f"clock ceiling), got {self.integration_timeout_seconds}"
             )
         if self.max_iterations < 1:
             raise ValueError(
@@ -549,8 +559,12 @@ class IntegrationRunner:
                     )
 
                 # Section 4c: integration_timeout guardrail.
+                # `integration_timeout_seconds == 0` is the explicit
+                # opt-in disable sentinel; skip the wall-clock check
+                # so meaningful work can run as long as it needs.
                 if (
-                    self._clock() - start
+                    self._config.integration_timeout_seconds > 0
+                    and self._clock() - start
                     > self._config.integration_timeout_seconds
                 ):
                     raise IntegrationAttemptFailed(
