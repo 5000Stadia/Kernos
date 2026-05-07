@@ -842,6 +842,20 @@ class PresenceRenderer:
             system_parts.append(f"## Directive\n{directive_text}")
         system = "\n\n".join(system_parts)
         user_message = _user_message_for_briefing(briefing)
+        # INTEGRATION-RENDERER-RESULT-FORWARD-V1 (2026-05-07): if the
+        # integration runner already dispatched read tools to fetch
+        # content for this turn, prepend those results so the model
+        # already has the content and doesn't re-dispatch the same
+        # reads. Eliminates the redundant read_file the renderer
+        # otherwise issues to fetch content the integration model
+        # already fetched (observed kernos-main 2026-05-07: integration
+        # read kernos-architecture-audit.md, then renderer re-read it
+        # 6s later through the same seam).
+        forwarded = _format_forwarded_tool_results(
+            getattr(briefing.audit_trace, "tool_results_during_prep", ()),
+        )
+        if forwarded:
+            user_message = f"{forwarded}\n\n{user_message}"
         # C5: thin-path tool surface. PresenceRenderer's chain_caller
         # used to receive an empty tools list — the load-bearing bug
         # CCV1 C5 closes. The packet's tool_surface.all_tools()
@@ -1047,6 +1061,35 @@ class PresenceRenderer:
             ),
             streamed=False,
         )
+
+
+def _format_forwarded_tool_results(
+    tool_results: tuple[dict[str, str], ...] | list[dict[str, str]],
+) -> str:
+    """Render the integration runner's per-call tool results into a
+    block the renderer's chain prompt prepends to the user message.
+
+    Empty input → ``""``. Each entry is rendered with its tool name
+    and the serialized result; the model treats this as authoritative
+    content already fetched, so it doesn't redundantly call the same
+    read tool to render content back to the user.
+
+    Per-result content is included verbatim — caps belong upstream
+    (the integration runner's iteration_metrics already track
+    tool_result_chars and would surface payload-bloat through the
+    friction report). Truncating here would silently strip content
+    the integration model used to ground its directive.
+    """
+    if not tool_results:
+        return ""
+    sections = ["### Prior tool results (already fetched this turn)"]
+    for entry in tool_results:
+        name = entry.get("tool_name", "")
+        result = entry.get("result", "")
+        if not name and not result:
+            continue
+        sections.append(f"#### {name}\n{result}")
+    return "\n\n".join(sections)
 
 
 def _user_message_for_briefing(briefing: Briefing) -> str:

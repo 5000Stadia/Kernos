@@ -1117,6 +1117,13 @@ class AuditTrace:
 
     cohort_outputs: tuple[str, ...] = ()
     tools_called_during_prep: tuple[str, ...] = ()
+    # INTEGRATION-RENDERER-RESULT-FORWARD-V1 (2026-05-07): per-call
+    # tool results captured during integration synthesis, forwarded to
+    # the renderer so it doesn't re-dispatch the same read tool to
+    # fetch content the integration model already fetched. Each entry:
+    # ``{"tool_name": str, "result": str}`` (serialized result). Empty
+    # tuple when no successful tool dispatches happened.
+    tool_results_during_prep: tuple[dict[str, str], ...] = ()
     iterations_used: int = 0
     budget_state: BudgetState = field(default_factory=BudgetState)
     fail_soft_engaged: bool = False
@@ -1135,6 +1142,22 @@ class AuditTrace:
                 raise BriefingValidationError(
                     "AuditTrace.tools_called_during_prep entries must be "
                     "non-empty strings"
+                )
+        for entry in self.tool_results_during_prep:
+            if not isinstance(entry, dict):
+                raise BriefingValidationError(
+                    "AuditTrace.tool_results_during_prep entries must be "
+                    "dicts with tool_name + result keys"
+                )
+            if not isinstance(entry.get("tool_name"), str):
+                raise BriefingValidationError(
+                    "AuditTrace.tool_results_during_prep entries must "
+                    "carry a string tool_name"
+                )
+            if not isinstance(entry.get("result"), str):
+                raise BriefingValidationError(
+                    "AuditTrace.tool_results_during_prep entries must "
+                    "carry a string result"
                 )
         if (
             not isinstance(self.iterations_used, int)
@@ -1174,6 +1197,9 @@ class AuditTrace:
         return {
             "cohort_outputs": list(self.cohort_outputs),
             "tools_called_during_prep": list(self.tools_called_during_prep),
+            "tool_results_during_prep": [
+                dict(e) for e in self.tool_results_during_prep
+            ],
             "iterations_used": self.iterations_used,
             "budget_state": self.budget_state.to_dict(),
             "fail_soft_engaged": self.fail_soft_engaged,
@@ -1192,6 +1218,11 @@ class AuditTrace:
             cohort_outputs=tuple(data.get("cohort_outputs", []) or []),
             tools_called_during_prep=tuple(
                 data.get("tools_called_during_prep", []) or []
+            ),
+            tool_results_during_prep=tuple(
+                dict(e) for e in (
+                    data.get("tool_results_during_prep", []) or []
+                )
             ),
             iterations_used=int(data.get("iterations_used", 0)),
             budget_state=BudgetState.from_dict(

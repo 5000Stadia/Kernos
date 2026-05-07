@@ -285,6 +285,13 @@ async def test_runner_iterates_with_read_only_tool_call():
     assert dispatch_calls == [("drive_read_doc", {"file_id": "abc-123"})]
     assert briefing.relevant_context[0].source_type == "tool.read.drive_read_doc"
     assert audit[0]["success"] is True
+    # INTEGRATION-RENDERER-RESULT-FORWARD-V1: tool result is captured
+    # alongside tool name so the renderer can use it without
+    # re-dispatching the same read.
+    assert len(briefing.audit_trace.tool_results_during_prep) == 1
+    forwarded = briefing.audit_trace.tool_results_during_prep[0]
+    assert forwarded["tool_name"] == "drive_read_doc"
+    assert "Launch on time." in forwarded["result"]
 
 
 # ---------------------------------------------------------------------------

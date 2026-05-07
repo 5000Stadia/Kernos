@@ -536,6 +536,12 @@ class IntegrationRunner:
         """
         start = self._clock()
         tools_called: list[str] = []
+        # INTEGRATION-RENDERER-RESULT-FORWARD-V1: capture per-call
+        # tool_name + serialized result alongside tools_called so the
+        # renderer can consume the integration model's tool results
+        # without re-dispatching the same reads. Empty if no successful
+        # dispatches happened this attempt.
+        tool_results: list[dict[str, str]] = []
         phase_durations_ms: dict[str, int] = {}
         # Per-iteration metric records — one entry per iteration, even
         # if the iteration didn't reach the dispatch phase. Used to
@@ -651,6 +657,7 @@ class IntegrationRunner:
                         tool_input=dict(tool_use.input or {}),
                         cohort_refs=cohort_refs,
                         tools_called=tools_called,
+                        tool_results=tool_results,
                         iterations=iterations,
                         phase_durations_ms=phase_durations_ms,
                         cohort_entries_capped=cohort_entries_capped,
@@ -686,6 +693,16 @@ class IntegrationRunner:
                     else None
                 ) or f"{tool_use.name}:iter{iterations}"
                 tools_called.append(str(invocation_ref))
+                # INTEGRATION-RENDERER-RESULT-FORWARD-V1: capture for
+                # forwarding to the renderer. Tool name + serialized
+                # result; renderer consumes via AuditTrace.tool_results
+                # _during_prep so the model already has the content
+                # the integration model fetched and doesn't re-call
+                # the read tool just to render it back to the user.
+                tool_results.append({
+                    "tool_name": str(tool_use.name),
+                    "result": serialised_result,
+                })
 
                 # See full original comment above; orphan tool_use
                 # filter prevents Codex's Responses API from rejecting
@@ -838,6 +855,7 @@ class IntegrationRunner:
         tool_input: dict[str, Any],
         cohort_refs: tuple[str, ...],
         tools_called: list[str],
+        tool_results: list[dict[str, str]],
         iterations: int,
         phase_durations_ms: dict[str, int],
         cohort_entries_capped: bool,
@@ -921,6 +939,7 @@ class IntegrationRunner:
         audit_trace = AuditTrace(
             cohort_outputs=cohort_refs,
             tools_called_during_prep=tuple(tools_called),
+            tool_results_during_prep=tuple(tool_results),
             iterations_used=iterations,
             budget_state=BudgetState(
                 cohort_entries_hit_limit=cohort_entries_capped,

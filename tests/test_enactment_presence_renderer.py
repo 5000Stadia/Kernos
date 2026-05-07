@@ -138,6 +138,56 @@ async def test_render_returns_awaited_presence_render_result():
 
 
 @pytest.mark.asyncio
+async def test_render_prepends_forwarded_tool_results():
+    """INTEGRATION-RENDERER-RESULT-FORWARD-V1 (2026-05-07): when the
+    integration runner has captured tool results during synthesis,
+    the renderer prepends them to the user message so the model
+    already has the content and doesn't re-dispatch the same read.
+    """
+    captured: dict = {}
+    renderer = PresenceRenderer(
+        chain_caller=_capture_chain(captured=captured),
+    )
+    audit = AuditTrace(
+        tool_results_during_prep=(
+            {
+                "tool_name": "read_file",
+                "result": "audit content body here",
+            },
+        ),
+    )
+    briefing = Briefing(
+        relevant_context=(),
+        filtered_context=(),
+        decided_action=RespondOnly(),
+        presence_directive="render the audit",
+        audit_trace=audit,
+        turn_id="turn-x",
+        integration_run_id="run-x",
+    )
+    await renderer.render(briefing)
+
+    user_msg = captured["messages"][0]["content"]
+    assert "Prior tool results (already fetched this turn)" in user_msg
+    assert "read_file" in user_msg
+    assert "audit content body here" in user_msg
+
+
+@pytest.mark.asyncio
+async def test_render_omits_forward_block_when_no_tool_results():
+    """When the integration runner didn't dispatch any tools, no
+    forward block is added — the user message is unchanged from
+    the pre-spec shape."""
+    captured: dict = {}
+    renderer = PresenceRenderer(
+        chain_caller=_capture_chain(captured=captured),
+    )
+    await renderer.render(_briefing(RespondOnly()))
+    user_msg = captured["messages"][0]["content"]
+    assert "Prior tool results" not in user_msg
+
+
+@pytest.mark.asyncio
 async def test_respond_only_uses_respond_only_prompt():
     captured = {}
     renderer = PresenceRenderer(chain_caller=_capture_chain(captured=captured))
