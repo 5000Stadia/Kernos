@@ -184,7 +184,18 @@ class IntegrationConfig:
     "limited context". Loud, identifiable, attributable.
     """
 
-    max_iterations: int = 5
+    # Notably high — when the runner hits this ceiling, the assumption
+    # is "we're probably stuck in a loop or doing something pathological."
+    # The wall-clock timeout (integration_timeout_seconds) is the real
+    # safety; this cap exists so a fast-iterating loop with small
+    # payloads doesn't burn the timeout silently. ITERATION-CAP-PROMPT
+    # (2026-05-07) replaced the prior cap=5 (sized for legacy briefing-
+    # assembly) after CCV1 C7 strike turned the integration runner into
+    # the primary tool-dispatch seam — a 5-iter cap caught legitimate
+    # multi-step work mid-stride. On exhaustion, the runner now surfaces
+    # a three-option choice to the user (continue / always continue /
+    # terminate) instead of failing loudly with no recourse.
+    max_iterations: int = 100
     max_integration_tokens: int = 2048
     # Generous default: meaningful work (multi-step navigation, slow
     # tool dispatches) is allowed to take its time. The retry harness
@@ -1110,32 +1121,64 @@ class IntegrationRunner:
         founder direction): "I want to fix the failure, not just
         improve the shape of the failing." Loud, attributable,
         actionable for the operator.
-        """
-        from kernos.kernel.integration.briefing import system_error_briefing
 
-        briefing = system_error_briefing(
-            turn_id=inputs.turn_id,
-            integration_run_id=inputs.integration_run_id,
-            attempts=attempts,
-            component=last_failure.component,
-            reason=last_failure.reason,
-            cohort_refs=cohort_refs,
-            tools_called=last_failure.tools_called,
-            iterations=last_failure.iterations,
-            phase_durations_ms=last_failure.phase_durations_ms,
-            budget_state=last_failure.budget_state,
-            cognitive_context=inputs.cognitive_context,
-            instance_id=inputs.instance_id,
-            member_id=inputs.member_id,
-            space_id=inputs.space_id,
+        Special case (ITERATION-CAP-PROMPT 2026-05-07): when the
+        final-attempt component is ``max_iterations``, dispatch to
+        :func:`iteration_cap_briefing` instead — that failure mode is
+        recoverable by user choice (continue / always continue /
+        terminate) rather than purely operator-investigable.
+        """
+        from kernos.kernel.integration.briefing import (
+            iteration_cap_briefing,
+            system_error_briefing,
         )
+
+        if last_failure.component == "max_iterations":
+            briefing = iteration_cap_briefing(
+                turn_id=inputs.turn_id,
+                integration_run_id=inputs.integration_run_id,
+                attempts=attempts,
+                cap=self._config.max_iterations,
+                cohort_refs=cohort_refs,
+                tools_called=last_failure.tools_called,
+                iterations=last_failure.iterations,
+                phase_durations_ms=last_failure.phase_durations_ms,
+                budget_state=last_failure.budget_state,
+                cognitive_context=inputs.cognitive_context,
+                instance_id=inputs.instance_id,
+                member_id=inputs.member_id,
+                space_id=inputs.space_id,
+            )
+            audit_error = (
+                f"iteration-cap-prompt after {attempts} attempts; "
+                f"cap={self._config.max_iterations}"
+            )
+        else:
+            briefing = system_error_briefing(
+                turn_id=inputs.turn_id,
+                integration_run_id=inputs.integration_run_id,
+                attempts=attempts,
+                component=last_failure.component,
+                reason=last_failure.reason,
+                cohort_refs=cohort_refs,
+                tools_called=last_failure.tools_called,
+                iterations=last_failure.iterations,
+                phase_durations_ms=last_failure.phase_durations_ms,
+                budget_state=last_failure.budget_state,
+                cognitive_context=inputs.cognitive_context,
+                instance_id=inputs.instance_id,
+                member_id=inputs.member_id,
+                space_id=inputs.space_id,
+            )
+            audit_error = (
+                f"system-error after {attempts} attempts; "
+                f"{last_failure.component}: {last_failure.reason}"
+            )
+
         await self._emit_audit(
             briefing,
             success=False,
-            error=(
-                f"system-error after {attempts} attempts; "
-                f"{last_failure.component}: {last_failure.reason}"
-            ),
+            error=audit_error,
         )
         return briefing
 

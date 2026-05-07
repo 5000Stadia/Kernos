@@ -462,7 +462,12 @@ async def test_runner_rejects_unsurfaced_tool():
 
 
 @pytest.mark.asyncio
-async def test_runner_max_iterations_triggers_fail_soft():
+async def test_runner_max_iterations_triggers_iteration_cap_prompt():
+    """ITERATION-CAP-PROMPT (2026-05-07): when retries exhaust on
+    component=max_iterations, the briefing's directive surfaces a
+    three-option choice (continue / always continue / terminate)
+    rather than the generic system-error directive — that failure
+    mode is recoverable by user choice."""
     async def chain(*_a, **_kw):
         return _resp(
             _tool_use_block(
@@ -481,10 +486,52 @@ async def test_runner_max_iterations_triggers_fail_soft():
     briefing = await runner.run(_make_inputs())
 
     assert briefing.audit_trace.fail_soft_engaged is True
-    assert "max_iterations" in briefing.audit_trace.notes
+    assert "ITERATION CEILING REACHED" in briefing.presence_directive
+    assert "continue" in briefing.presence_directive
+    assert "always continue" in briefing.presence_directive
+    assert "terminate" in briefing.presence_directive
+    assert "KERNOS_INTEGRATION_MAX_ITERATIONS" in briefing.presence_directive
+    assert "iteration-cap-prompt" in briefing.audit_trace.notes
     assert briefing.audit_trace.iterations_used == 3
     assert briefing.audit_trace.budget_state.iterations_hit_limit is True
     assert audit[0]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_runner_iteration_cap_prompt_quotes_configured_cap():
+    """The directive interpolates the actual ``max_iterations`` value
+    so the user sees the budget they hit (the env var line they'd
+    append uses double the cap)."""
+    async def chain(*_a, **_kw):
+        return _resp(
+            _tool_use_block("search_memory", {"q": "x"}, id_="tu_loop")
+        )
+
+    async def dispatcher(*_a, **_kw):
+        return {"hits": []}
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        dispatcher=dispatcher,
+        config=IntegrationConfig(max_iterations=50, max_retries=1),
+    )
+    briefing = await runner.run(_make_inputs())
+
+    assert "50 reasoning iterations" in briefing.presence_directive
+    assert "50-iteration" in briefing.presence_directive
+    # raised_cap = max(cap*2, cap+100) — the +100 floor keeps small
+    # caps from doubling to a still-small number (e.g. 5 → 105 not 10)
+    assert "KERNOS_INTEGRATION_MAX_ITERATIONS=150" in briefing.presence_directive
+
+
+def test_integration_config_default_max_iterations_is_high():
+    """Default cap is notably high — exhaustion implies a stuck loop,
+    not the runner choking on legitimate multi-step work. The 5-iter
+    legacy default was sized for briefing-assembly; after CCV1 C7
+    strike turned the integration runner into the primary tool-
+    dispatch seam, the cap was raised to 100."""
+    cfg = IntegrationConfig()
+    assert cfg.max_iterations == 100
 
 
 @pytest.mark.asyncio

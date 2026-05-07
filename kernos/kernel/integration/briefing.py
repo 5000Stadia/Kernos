@@ -1588,6 +1588,90 @@ _SYSTEM_ERROR_DIRECTIVE_TEMPLATE = (
 )
 
 
+_ITERATION_CAP_DIRECTIVE_TEMPLATE = (
+    "ITERATION CEILING REACHED. The integration runner consumed all "
+    "{cap} reasoning iterations across {attempts} retry attempts on "
+    "this turn. At a notably high ceiling like this, exhaustion "
+    "usually means an infinite loop or pathological repetition — "
+    "rather than fail outright, surface the situation to the user "
+    "and request their call. Keep it short and direct.\n\n"
+    "Tell them plainly: you've hit the {cap}-iteration ceiling, "
+    "which usually signals a stuck loop. Then list these three "
+    "options as exact phrases they can reply with:\n"
+    "  - **continue** — try the same task again with a fresh "
+    "{cap}-iteration budget.\n"
+    "  - **always continue** — make {raised_cap} the new default "
+    "permanently. On their next turn, if they reply with this exact "
+    "phrase, append the line `KERNOS_INTEGRATION_MAX_ITERATIONS="
+    "{raised_cap}` to `.env` using write_file (or update the "
+    "existing line if one is present), then re-attempt the original "
+    "task.\n"
+    "  - **terminate** — stop here and acknowledge.\n\n"
+    "Do NOT pretend to answer their original question. Do NOT "
+    "apologize for limited context. The user's reply on the next "
+    "turn drives what happens next; honor it precisely."
+)
+
+
+def iteration_cap_briefing(
+    *,
+    turn_id: str = "",
+    integration_run_id: str = "",
+    attempts: int,
+    cap: int,
+    cohort_refs: tuple[str, ...] = (),
+    tools_called: list[str] | tuple[str, ...] = (),
+    iterations: int = 0,
+    phase_durations_ms: dict[str, int] | None = None,
+    budget_state: BudgetState | None = None,
+    cognitive_context: Any = None,
+    instance_id: str = "",
+    member_id: str = "",
+    space_id: str = "",
+) -> Briefing:
+    """Construct the briefing the runner returns when retry attempts
+    all fail at ``component='max_iterations'``.
+
+    Distinct from :func:`system_error_briefing` because the failure
+    mode is recoverable by user choice rather than purely operator-
+    investigable. The directive instructs presence to surface a
+    three-option choice (continue / always continue / terminate) with
+    the exact phrases the user can reply with on the next turn. The
+    "always continue" path appends a higher cap to ``.env`` so the
+    user doesn't have to make this choice repeatedly for the same
+    workload.
+    """
+    raised_cap = max(cap * 2, cap + 100)
+    directive = _ITERATION_CAP_DIRECTIVE_TEMPLATE.format(
+        cap=cap, attempts=attempts, raised_cap=raised_cap,
+    )
+    notes = (
+        f"iteration-cap-prompt after {attempts} attempts; "
+        f"cap={cap}; raised_cap={raised_cap}"
+    )
+    return Briefing(
+        relevant_context=(),
+        filtered_context=(),
+        decided_action=RespondOnly(),
+        presence_directive=directive,
+        audit_trace=AuditTrace(
+            cohort_outputs=cohort_refs,
+            tools_called_during_prep=tuple(tools_called),
+            iterations_used=iterations,
+            budget_state=budget_state or BudgetState(),
+            fail_soft_engaged=True,
+            phase_durations_ms=dict(phase_durations_ms or {}),
+            notes=notes,
+        ),
+        turn_id=turn_id,
+        integration_run_id=integration_run_id,
+        cognitive_context=cognitive_context,
+        instance_id=instance_id,
+        member_id=member_id,
+        space_id=space_id,
+    )
+
+
 def system_error_briefing(
     *,
     turn_id: str = "",
