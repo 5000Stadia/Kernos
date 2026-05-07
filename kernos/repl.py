@@ -481,6 +481,27 @@ async def build_dev_handler(
         handler=handler,
     )
 
+    # REFERENCE-CATALOG-BAKED-V1: wire the reference primitive substrate
+    # so request_reference reaches canonical content. The full
+    # bring_up_substrate (server.py's path) builds WLP/runtime/STS plus
+    # the reference primitive together; the dev handler only needs the
+    # reference half. This call constructs the catalog/cohort/scanner/
+    # service, hydrates from the baked artifacts under docs/_catalog/,
+    # and binds the service to handler._reference_service so the
+    # reasoning dispatcher's fallback seam picks it up. PHASE-1-WIPE-
+    # VERIFICATION (2026-05-06) surfaced this as the dev/prod gap that
+    # masked end-to-end audit signal on probes 3, 5, 7.
+    try:
+        from kernos.kernel.reference.baked import wire_reference_substrate
+        await wire_reference_substrate(
+            handler=handler,
+            data_dir=_data_dir,
+        )
+    except Exception as exc:
+        logger.warning(
+            "repl: wire_reference_substrate failed (non-blocking): %s", exc,
+        )
+
     logger.info("repl: handler ready (instance_id=%s, data_dir=%s); workshop binding live", _instance_id, _data_dir)
     return handler
 

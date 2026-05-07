@@ -511,6 +511,177 @@ def check_freshness(
     return fresh, diagnostics
 
 
+async def wire_reference_substrate(
+    *,
+    handler: Any,
+    data_dir: str,
+    substrate_instance_id: str = "default",
+) -> dict[str, Any]:
+    """Build the reference-primitive substrate and bind it to a handler.
+
+    Constructs the CatalogStore, EventEmitter, CatalogingCohort,
+    IngestionScanner, and ReferenceService that REFERENCE-PRIMITIVE-V1
+    composes, runs the REFERENCE-CATALOG-BAKED-V1 baked-loader against
+    the canonical docs tree, and registers source roots so the live-
+    scan path remains available as the env-var-gated recovery hatch.
+
+    Sets ``handler._reference_service`` so the reasoning dispatcher's
+    test-convenience seam picks up the service.
+    (``_handle_reference_tool`` resolves the service from
+    ``handler._wlp_substrate.reference_service`` first, then falls
+    back to ``handler._reference_service`` — production sets the
+    former via the Substrate bundle; lighter-weight callers like the
+    REPL or scripted audits set the latter directly via this helper.)
+
+    Returns a dict of the constructed objects so callers that ALSO
+    need to compose them into a larger bundle (e.g. bring_up_substrate
+    folding into the Substrate dataclass) can pick them up:
+
+    .. code-block:: python
+
+        wired = await wire_reference_substrate(handler=h, data_dir=d)
+        wired["catalog"]            # CatalogStore
+        wired["event_emitter"]      # ReferenceEventEmitter
+        wired["cohort"]             # CatalogingCohort
+        wired["ingestion_scanner"]  # IngestionScanner
+        wired["service"]            # ReferenceService
+        wired["load_summary"]       # LoadSummary from baked hydration
+
+    The function is idempotent within a process (CatalogStore.start
+    is itself idempotent against the same data dir), but should not
+    be called twice with different data dirs without a stop in
+    between.
+    """
+    import os
+    from pathlib import Path
+    from kernos.kernel import event_stream as _event_stream
+    from kernos.kernel.reference.bringup_adapters import ReferenceCheapLLMAdapter
+    from kernos.kernel.reference.catalog import (
+        CatalogStore,
+        SCOPE_INSTANCE,
+        TRUST_CANONICAL,
+    )
+    from kernos.kernel.reference.cohort import CatalogingCohort
+    from kernos.kernel.reference.events import (
+        REFERENCE_SOURCE_MODULE,
+        ReferenceEventEmitter,
+    )
+    from kernos.kernel.reference.ingest import (
+        IngestionScanner,
+        docs_source_root,
+    )
+    from kernos.kernel.reference.tools import ReferenceService
+
+    catalog = CatalogStore()
+    await catalog.start(data_dir)
+
+    registry = _event_stream.emitter_registry()
+    raw_emitter = registry.get(REFERENCE_SOURCE_MODULE) or registry.register(
+        REFERENCE_SOURCE_MODULE,
+    )
+    event_emitter = ReferenceEventEmitter(emitter=raw_emitter)
+
+    reference_llm = ReferenceCheapLLMAdapter(reasoning=handler.reasoning)
+    cohort = CatalogingCohort(
+        catalog=catalog,
+        emitter=event_emitter,
+        llm=reference_llm,
+        instance_id=substrate_instance_id,
+    )
+    await cohort.start()
+
+    ingestion_scanner = IngestionScanner(
+        catalog=catalog,
+        cohort=cohort,
+        emitter=event_emitter,
+        instance_id=substrate_instance_id,
+    )
+
+    references_root = Path(data_dir) / "references"
+    references_root.mkdir(parents=True, exist_ok=True)
+
+    service = ReferenceService(
+        catalog=catalog,
+        cohort=cohort,
+        emitter=event_emitter,
+        navigator_llm=reference_llm,
+        references_root=references_root,
+        instance_id=substrate_instance_id,
+    )
+
+    # Baked-catalog hydration. Always runs; the loader is inert when
+    # the manifest is absent (returns LoadSummary with manifest_present
+    # = False and no other work).
+    docs_root = Path(__file__).resolve().parent.parent.parent.parent / "docs"
+    load_summary = LoadSummary()
+    if docs_root.exists() and docs_root.is_dir():
+        ingestion_scanner.add_source(docs_source_root(docs_root))
+        catalog_root = docs_root / CATALOG_DIRNAME
+        load_summary = await load_baked_catalog(
+            docs_root=docs_root,
+            catalog_root=catalog_root,
+            instance_id=substrate_instance_id,
+            catalog_store=catalog,
+            scope=SCOPE_INSTANCE,
+            trust_tier=TRUST_CANONICAL,
+            owner_domain_id="",
+        )
+        if not load_summary.manifest_present:
+            logger.info(
+                "REFERENCE_BAKED_HYDRATION: no manifest at %s — catalog "
+                "starts empty. Run the regen script to seed, or set "
+                "KERNOS_REFERENCE_FIRST_BOOT_SCAN=1 to live-scan once.",
+                catalog_root,
+            )
+        else:
+            level = (
+                logger.warning
+                if (
+                    load_summary.files_stale
+                    or load_summary.files_missing_artifact
+                    or load_summary.files_artifact_invalid
+                    or load_summary.files_uncatalogued
+                )
+                else logger.info
+            )
+            level(
+                "REFERENCE_BAKED_HYDRATION: loaded=%d sections=%d "
+                "stale=%d missing_artifact=%d artifact_invalid=%d "
+                "uncatalogued=%d",
+                load_summary.files_loaded,
+                load_summary.sections_imported,
+                load_summary.files_stale,
+                load_summary.files_missing_artifact,
+                load_summary.files_artifact_invalid,
+                load_summary.files_uncatalogued,
+            )
+
+        if os.environ.get("KERNOS_REFERENCE_FIRST_BOOT_SCAN", "0") == "1":
+            import asyncio
+            asyncio.create_task(
+                ingestion_scanner.scan(),
+                name="reference_first_boot_scan",
+            )
+            logger.info(
+                "REFERENCE_FIRST_BOOT_SCAN: launched (env opt-in)",
+            )
+
+    # Bind the service to the handler via the test-convenience seam.
+    # Production also stashes it under ``_wlp_substrate.reference_service``;
+    # the dispatcher checks both. This binding is sufficient for any
+    # caller that hasn't built the full Substrate bundle.
+    handler._reference_service = service
+
+    return {
+        "catalog": catalog,
+        "event_emitter": event_emitter,
+        "cohort": cohort,
+        "ingestion_scanner": ingestion_scanner,
+        "service": service,
+        "load_summary": load_summary,
+    }
+
+
 __all__ = [
     "BakedSection",
     "BakedArtifact",
@@ -526,4 +697,5 @@ __all__ = [
     "write_baked_artifact",
     "write_manifest",
     "check_freshness",
+    "wire_reference_substrate",
 ]
