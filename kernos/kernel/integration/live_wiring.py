@@ -120,6 +120,18 @@ class _LiveToolDescriptor:
         )
         return DEFAULT_AMBIGUOUS_SAFETY
 
+    def operation_for(self, name: str) -> Any:
+        """Return the OperationClassification for ``name`` if declared,
+        else None. Mirrors ``ToolDescriptor.operation_for`` so dispatcher
+        consumers (e.g. ``_timeout_ms_for``) can call uniformly without
+        type-checking. Live duck-types carry empty ``operations`` by
+        design, so this returns None and the dispatcher falls back to
+        the default per-call timeout."""
+        for op in self.operations:
+            if getattr(op, "operation", None) == name:
+                return op
+        return None
+
 
 class LiveDescriptorLookup:
     """Descriptor lookup that reads from the live tool catalog.

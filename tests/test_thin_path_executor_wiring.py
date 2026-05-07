@@ -71,6 +71,11 @@ def test_descriptor_lookup_returns_descriptor_for_known_tool():
     assert hasattr(desc, "operations")
     assert hasattr(desc, "operation_resolver")
     assert callable(desc.safety_for)
+    # Required interface for dispatcher._timeout_ms_for — without
+    # this the dispatcher AttributeErrors mid-call (regression seen
+    # 2026-05-07 on the live take-a-note path).
+    assert callable(desc.operation_for)
+    assert desc.operation_for("any-op") is None
 
 
 def test_descriptor_lookup_returns_none_for_unknown_tool():
