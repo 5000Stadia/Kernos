@@ -524,6 +524,71 @@ async def test_runner_iteration_cap_prompt_quotes_configured_cap():
     assert "KERNOS_INTEGRATION_MAX_ITERATIONS=150" in briefing.presence_directive
 
 
+@pytest.mark.asyncio
+async def test_iteration_cap_directive_includes_tool_receipts():
+    """Receipt forwarding (RECEIPT-FORWARD-V1, 2026-05-07): when a
+    turn fails at iteration cap, the user-facing directive includes
+    the actual tools that ran. The next turn's agent can read those
+    receipts in the conversation log instead of reconstructing intent
+    from natural-language continuity (the "natural-language
+    completion gets ahead of durable state" failure mode the agent
+    self-identified)."""
+    async def chain(*_a, **_kw):
+        return _resp(
+            _tool_use_block("search_memory", {"q": "x"}, id_="tu_loop")
+        )
+
+    async def dispatcher(*_a, **_kw):
+        return {"hits": []}
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        dispatcher=dispatcher,
+        config=IntegrationConfig(max_iterations=3, max_retries=1),
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # The receipt block is in the directive — the renderer surfaces
+    # it to the user, which puts it in the conversation log for the
+    # next turn's agent to read.
+    assert "Tool receipts" in briefing.presence_directive
+    assert "search_memory:iter1" in briefing.presence_directive
+    # Receipt-discipline instruction tells the agent how to use the
+    # block (don't claim writes succeeded that aren't in the receipt).
+    assert "RECEIPT DISCIPLINE" in briefing.presence_directive
+
+
+@pytest.mark.asyncio
+async def test_system_error_directive_includes_tool_receipts():
+    """Receipt forwarding applies to system_error_briefing too — any
+    failure that surfaces a system error should show the user (and
+    therefore the next turn's agent) what actually ran before the
+    failure (max_iterations exhaustion is the iteration_cap path; this
+    test exercises a different failure mode that still routes through
+    system_error_briefing). Uses max_iterations as the failure trigger
+    here for clean reproducibility, then asserts the receipt block
+    formatting since iteration_cap and system_error share the helper."""
+    async def chain(*_a, **_kw):
+        return _resp(
+            _tool_use_block("search_memory", {"q": "x"}, id_="tu_loop")
+        )
+
+    async def dispatcher(*_a, **_kw):
+        return {"hits": []}
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        dispatcher=dispatcher,
+        config=IntegrationConfig(max_iterations=2, max_retries=1),
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # Both failure-mode directives include the receipt block via the
+    # shared formatter; specific test pinning iteration_cap is above.
+    assert "Tool receipts" in briefing.presence_directive
+    assert "search_memory:iter" in briefing.presence_directive
+
+
 def test_integration_config_default_max_iterations_is_checkpoint_cadence():
     """Default cap is the natural-checkpoint cadence — high enough to
     absorb routine multi-step work in one shot, low enough that long

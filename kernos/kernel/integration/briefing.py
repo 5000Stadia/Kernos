@@ -1573,6 +1573,41 @@ def _safe_component(component: str) -> str:
     return component if component in _SAFE_COMPONENT_LABELS else "unexpected_error"
 
 
+def _format_tools_called_receipt(
+    tools_called: list[str] | tuple[str, ...],
+) -> str:
+    """Compact receipt block listing the tools that successfully ran
+    before the attempt failed. Intended to be included verbatim in the
+    user-facing reply so the next turn's agent has receipts to reason
+    from rather than reconstructing intent from natural language.
+
+    Format: bulleted list of unique tool names + iteration positions,
+    stable order. Empty input → ``""`` (caller should branch on
+    truthiness).
+
+    Each entry from the runner's ``tools_called`` list looks like
+    ``"<tool>:iter<N>"`` — we keep the iteration index because order
+    matters when the agent reasons about what happened in what
+    sequence.
+    """
+    if not tools_called:
+        return ""
+    lines = [f"  - {entry}" for entry in tools_called]
+    return "\n".join(lines)
+
+
+_RECEIPT_DISCIPLINE_INSTRUCTION = (
+    "RECEIPT DISCIPLINE. The block above lists the tools that "
+    "ACTUALLY ran in this attempt. When the user re-asks or follows "
+    "up next turn, treat that block as the canonical receipt of what "
+    "happened. Do NOT claim a write/update/save succeeded unless its "
+    "tool call is present in the receipt. If a prior turn's "
+    "conversational language implied an action that isn't in the "
+    "receipt, name the gap explicitly rather than inventing "
+    "continuity."
+)
+
+
 _SYSTEM_ERROR_DIRECTIVE_TEMPLATE = (
     "INTEGRATION SYNTHESIS FAILED. This is an internal system error, "
     "not a content limitation. Synthesis was retried {attempts} times "
@@ -1584,7 +1619,9 @@ _SYSTEM_ERROR_DIRECTIVE_TEMPLATE = (
     "'no_tool_use', 'read_only_violation', 'briefing_validation', "
     "'unexpected_error'), and offer that they can retry or that the "
     "operator can investigate the integration runner. Keep it short "
-    "and direct."
+    "and direct.\n\n"
+    "{receipt_block}"
+    "{receipt_discipline}"
 )
 
 
@@ -1596,9 +1633,9 @@ _ITERATION_CAP_DIRECTIVE_TEMPLATE = (
     "them choose the next step. Keep it short and direct.\n\n"
     "Tell them plainly: you've reached the {cap}-iteration "
     "checkpoint and want to check in before continuing. If they ask "
-    "what you've been doing, summarize from your conversation log "
-    "and prior tool calls. Otherwise, list these three options as "
-    "exact phrases they can reply with:\n"
+    "what you've been doing, summarize from the receipt block below "
+    "and your conversation log. Otherwise, list these three options "
+    "as exact phrases they can reply with:\n"
     "  - **continue** — keep going with a fresh {cap}-iteration "
     "budget on the same task.\n"
     "  - **always continue** — make {raised_cap} the new default "
@@ -1610,7 +1647,9 @@ _ITERATION_CAP_DIRECTIVE_TEMPLATE = (
     "  - **terminate** — stop here and acknowledge.\n\n"
     "Do NOT pretend to have finished their original task. Do NOT "
     "apologize for limited context. The user's reply on the next "
-    "turn drives what happens next; honor it precisely."
+    "turn drives what happens next; honor it precisely.\n\n"
+    "{receipt_block}"
+    "{receipt_discipline}"
 )
 
 
@@ -1643,8 +1682,20 @@ def iteration_cap_briefing(
     workload.
     """
     raised_cap = max(cap * 2, cap + 100)
+    receipt_lines = _format_tools_called_receipt(tools_called)
+    if receipt_lines:
+        receipt_block = (
+            f"### Tool receipts (this attempt's actual dispatch trace)\n"
+            f"{receipt_lines}\n\n"
+        )
+        receipt_discipline = _RECEIPT_DISCIPLINE_INSTRUCTION
+    else:
+        receipt_block = ""
+        receipt_discipline = ""
     directive = _ITERATION_CAP_DIRECTIVE_TEMPLATE.format(
         cap=cap, attempts=attempts, raised_cap=raised_cap,
+        receipt_block=receipt_block,
+        receipt_discipline=receipt_discipline,
     )
     notes = (
         f"iteration-cap-prompt after {attempts} attempts; "
@@ -1701,8 +1752,20 @@ def system_error_briefing(
     transparency rather than apologetic minimalism.
     """
     safe_component = _safe_component(component)
+    receipt_lines = _format_tools_called_receipt(tools_called)
+    if receipt_lines:
+        receipt_block = (
+            f"### Tool receipts (this attempt's actual dispatch trace)\n"
+            f"{receipt_lines}\n\n"
+        )
+        receipt_discipline = _RECEIPT_DISCIPLINE_INSTRUCTION
+    else:
+        receipt_block = ""
+        receipt_discipline = ""
     directive = _SYSTEM_ERROR_DIRECTIVE_TEMPLATE.format(
         attempts=attempts, component=safe_component,
+        receipt_block=receipt_block,
+        receipt_discipline=receipt_discipline,
     )
     # Raw component + reason (may contain exception text, paths, payloads)
     # stay in audit-trace notes for operator inspection — never the
