@@ -184,18 +184,19 @@ class IntegrationConfig:
     "limited context". Loud, identifiable, attributable.
     """
 
-    # Notably high — when the runner hits this ceiling, the assumption
-    # is "we're probably stuck in a loop or doing something pathological."
-    # The wall-clock timeout (integration_timeout_seconds) is the real
-    # safety; this cap exists so a fast-iterating loop with small
-    # payloads doesn't burn the timeout silently. ITERATION-CAP-PROMPT
-    # (2026-05-07) replaced the prior cap=5 (sized for legacy briefing-
-    # assembly) after CCV1 C7 strike turned the integration runner into
-    # the primary tool-dispatch seam — a 5-iter cap caught legitimate
-    # multi-step work mid-stride. On exhaustion, the runner now surfaces
-    # a three-option choice to the user (continue / always continue /
-    # terminate) instead of failing loudly with no recourse.
-    max_iterations: int = 100
+    # Natural checkpoint cadence — high enough to absorb routine
+    # multi-step work in one shot, low enough that long-running tasks
+    # surface a check-in to the user partway through rather than
+    # silently consuming budget. ITERATION-CAP-PROMPT (2026-05-07)
+    # replaced the prior cap=5 (sized for legacy briefing-assembly)
+    # after CCV1 C7 strike turned the integration runner into the
+    # primary tool-dispatch seam. The wall-clock timeout
+    # (integration_timeout_seconds) remains the absolute safety; the
+    # iteration cap is a check-in cadence: on exhaustion the runner
+    # surfaces a three-option choice (continue / always continue /
+    # terminate) so the user can keep the work going, raise the cap
+    # permanently, or stop.
+    max_iterations: int = 50
     max_integration_tokens: int = 2048
     # Generous default: meaningful work (multi-step navigation, slow
     # tool dispatches) is allowed to take its time. The retry harness

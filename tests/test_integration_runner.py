@@ -486,7 +486,7 @@ async def test_runner_max_iterations_triggers_iteration_cap_prompt():
     briefing = await runner.run(_make_inputs())
 
     assert briefing.audit_trace.fail_soft_engaged is True
-    assert "ITERATION CEILING REACHED" in briefing.presence_directive
+    assert "ITERATION CHECKPOINT REACHED" in briefing.presence_directive
     assert "continue" in briefing.presence_directive
     assert "always continue" in briefing.presence_directive
     assert "terminate" in briefing.presence_directive
@@ -524,14 +524,15 @@ async def test_runner_iteration_cap_prompt_quotes_configured_cap():
     assert "KERNOS_INTEGRATION_MAX_ITERATIONS=150" in briefing.presence_directive
 
 
-def test_integration_config_default_max_iterations_is_high():
-    """Default cap is notably high — exhaustion implies a stuck loop,
-    not the runner choking on legitimate multi-step work. The 5-iter
+def test_integration_config_default_max_iterations_is_checkpoint_cadence():
+    """Default cap is the natural-checkpoint cadence — high enough to
+    absorb routine multi-step work in one shot, low enough that long
+    work surfaces a check-in to the user partway through. The 5-iter
     legacy default was sized for briefing-assembly; after CCV1 C7
     strike turned the integration runner into the primary tool-
-    dispatch seam, the cap was raised to 100."""
+    dispatch seam, the cap was raised to 50."""
     cfg = IntegrationConfig()
-    assert cfg.max_iterations == 100
+    assert cfg.max_iterations == 50
 
 
 @pytest.mark.asyncio
