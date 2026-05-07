@@ -256,6 +256,12 @@ async def run() -> int:
     data_dir = Path(tempfile.mkdtemp(prefix="kernos_wipe_test_"))
     instance_id = "repl:wipe_verification"
 
+    # Point KERNOS_DATA_DIR at the temp dir so the integration
+    # runner's friction reports (read via IntegrationConfig.from_env())
+    # land alongside the rest of the driver's state instead of in the
+    # repo's ./data directory.
+    os.environ["KERNOS_DATA_DIR"] = str(data_dir)
+
     # Capture log records into a ring buffer so we can slice per-probe.
     ring = _RingHandler()
     root_logger = logging.getLogger()
