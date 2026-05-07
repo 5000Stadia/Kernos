@@ -64,11 +64,12 @@ DEFAULT_PAGE_TYPE = "note"
 #: Instance default for operator-in-loop preferences (see Pillar 5).
 DEFAULT_CONSULT_OPERATOR_AT = ("shipped", "on_conflict")
 
-#: Whole-phrase bonus for page_search ranking. A page containing the
-#: full query string scores ``_PHRASE_BONUS * count`` from the phrase
-#: alone, dominating any per-token noise — preserves the prior
-#: substring-rank behavior while letting token-overlap surface
-#: near-misses that strict substring would have dropped.
+#: Whole-phrase weight for page_search ranking. Used in the
+#: ``matches`` field returned to callers (a single composite scalar
+#: for ergonomic consumption); ranking itself sorts by the
+#: ``(phrase_count, token_sum)`` tuple so an exact-phrase hit
+#: STRICTLY outranks any number of scattered-token hits, regardless
+#: of how high the token sum climbs.
 _PHRASE_BONUS = 100
 
 
@@ -1535,17 +1536,30 @@ class CanvasService:
                 haystack = (fm.get("title", "") + "\n" + body).lower()
                 phrase_count = haystack.count(q) if q else 0
                 token_sum = sum(haystack.count(t) for t in tokens)
-                score = phrase_count * _PHRASE_BONUS + token_sum
-                if score == 0:
+                if phrase_count == 0 and token_sum == 0:
                     continue
                 rel = md_path.relative_to(root)
                 hits.append({
                     "canvas_id": canvas_id,
                     "path": str(rel).replace(os.sep, "/"),
                     "title": fm.get("title", str(rel)),
-                    "matches": score,
+                    # Composite scalar for ergonomic consumption — but
+                    # ranking uses the tuple below for strict phrase
+                    # dominance.
+                    "matches": phrase_count * _PHRASE_BONUS + token_sum,
+                    "_phrase_count": phrase_count,
+                    "_token_sum": token_sum,
                 })
-        hits.sort(key=lambda h: h["matches"], reverse=True)
+        # Strict phrase dominance: any page with a phrase hit always
+        # outranks pages without, regardless of how high the token sum
+        # is on the no-phrase pages.
+        hits.sort(
+            key=lambda h: (h["_phrase_count"], h["_token_sum"]),
+            reverse=True,
+        )
+        for h in hits:
+            h.pop("_phrase_count", None)
+            h.pop("_token_sum", None)
         return hits[:limit]
 
     # ---- Canvas list -----------------------------------------------------

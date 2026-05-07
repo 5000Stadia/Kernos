@@ -340,6 +340,7 @@ class IntegrationAttemptFailed(Exception):
         budget_state: "BudgetState",
         chained_error: Exception | None = None,
         iteration_metrics: list[dict] | None = None,
+        tool_results: list[dict[str, str]] | None = None,
     ) -> None:
         super().__init__(f"{component}: {reason}")
         self.component = component
@@ -356,6 +357,11 @@ class IntegrationAttemptFailed(Exception):
         #    "tool_name": str, "tool_result_chars": int|None,
         #    "input_tokens": int, "output_tokens": int}
         self.iteration_metrics = list(iteration_metrics or [])
+        # tool_name + serialized result per successful dispatch — used
+        # by the system-error / iteration-cap briefings to render a
+        # receipt block in the user-facing reply (substrate-grounded
+        # next-turn context).
+        self.tool_results = list(tool_results or [])
 
 
 # Callback protocols. Defined as Callable aliases rather than
@@ -574,6 +580,7 @@ class IntegrationRunner:
                         tools_called=tools_called,
                         budget_state=BudgetState(iterations_hit_limit=True),
                         iteration_metrics=iteration_metrics,
+                        tool_results=tool_results,
                     )
 
                 # Section 4c: integration_timeout guardrail.
@@ -596,6 +603,7 @@ class IntegrationRunner:
                         tools_called=tools_called,
                         budget_state=BudgetState(timeout_hit_limit=True),
                         iteration_metrics=iteration_metrics,
+                        tool_results=tool_results,
                     )
 
                 # Sections 4a (Integrate / Decide).
@@ -641,6 +649,7 @@ class IntegrationRunner:
                         tools_called=tools_called,
                         budget_state=BudgetState(),
                         iteration_metrics=iteration_metrics,
+                        tool_results=tool_results,
                     )
 
                 tool_use = tool_uses[0]
@@ -745,6 +754,7 @@ class IntegrationRunner:
                 budget_state=BudgetState(),
                 chained_error=exc,
                 iteration_metrics=iteration_metrics,
+                tool_results=tool_results,
             )
         except BriefingValidationError as exc:
             raise IntegrationAttemptFailed(
@@ -756,6 +766,7 @@ class IntegrationRunner:
                 budget_state=BudgetState(),
                 chained_error=exc,
                 iteration_metrics=iteration_metrics,
+                tool_results=tool_results,
             )
         except Exception as exc:  # pragma: no cover - guard rail
             logger.exception("Integration runner unexpected error")
@@ -768,6 +779,7 @@ class IntegrationRunner:
                 budget_state=BudgetState(),
                 chained_error=exc,
                 iteration_metrics=iteration_metrics,
+                tool_results=tool_results,
             )
 
     # ----- prompt + tool list assembly -----
@@ -911,10 +923,16 @@ class IntegrationRunner:
         # CohortOutput. Integration is supposed to translate restricted
         # material into behavioral instruction; if it didn't, fail
         # rather than leak.
+        # INTEGRATION-RENDERER-RESULT-FORWARD hardening (2026-05-07):
+        # tool_results forwarded to the renderer must also pass the
+        # invariant — a read tool that pulled restricted/cross-space
+        # content cannot bypass redaction by riding through the
+        # forwarded-results channel.
         self._check_redaction_invariant(
             relevant=relevant,
             filtered=filtered,
             directive=directive,
+            tool_results=tool_results,
             cohort_outputs=inputs.cohort_outputs,
         )
 
@@ -974,6 +992,7 @@ class IntegrationRunner:
         relevant: tuple[ContextItem, ...],
         filtered: tuple[FilteredItem, ...],
         directive: str,
+        tool_results: list[dict[str, str]],
         cohort_outputs: tuple[CohortOutput, ...],
     ) -> None:
         """Refuse a briefing whose text quotes Restricted output content.
@@ -983,6 +1002,11 @@ class IntegrationRunner:
         a restricted cohort's payload string into a summary or
         directive). Integration is the policy layer; the runner is
         the enforcement layer of last resort.
+
+        Includes ``tool_results`` (forwarded to the renderer via
+        ``AuditTrace.tool_results_during_prep``) — the renderer's
+        prompt embeds these verbatim, so they sit on the same leak
+        surface as the directive itself.
         """
         restricted_payloads: list[str] = []
         for co in cohort_outputs:
@@ -1003,6 +1027,7 @@ class IntegrationRunner:
             [item.summary for item in relevant]
             + [item.reason_filtered for item in filtered]
             + [directive]
+            + [entry.get("result", "") for entry in tool_results]
         )
         for snippet in restricted_payloads:
             if snippet in combined_text:
@@ -1161,6 +1186,7 @@ class IntegrationRunner:
                 cap=self._config.max_iterations,
                 cohort_refs=cohort_refs,
                 tools_called=last_failure.tools_called,
+                tool_results=last_failure.tool_results,
                 iterations=last_failure.iterations,
                 phase_durations_ms=last_failure.phase_durations_ms,
                 budget_state=last_failure.budget_state,
@@ -1182,6 +1208,7 @@ class IntegrationRunner:
                 reason=last_failure.reason,
                 cohort_refs=cohort_refs,
                 tools_called=last_failure.tools_called,
+                tool_results=last_failure.tool_results,
                 iterations=last_failure.iterations,
                 phase_durations_ms=last_failure.phase_durations_ms,
                 budget_state=last_failure.budget_state,

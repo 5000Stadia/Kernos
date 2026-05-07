@@ -1197,8 +1197,16 @@ class AuditTrace:
         return {
             "cohort_outputs": list(self.cohort_outputs),
             "tools_called_during_prep": list(self.tools_called_during_prep),
+            # Audit serialization preserves the existing
+            # "references-not-dumps" contract: store tool_name + result
+            # length + sha256 so operators can verify integrity / size /
+            # ordering without persisting raw payloads. The full result
+            # body remains live in-memory on the in-process AuditTrace
+            # so the renderer can consume it; only the serialized audit
+            # form is references-only.
             "tool_results_during_prep": [
-                dict(e) for e in self.tool_results_during_prep
+                _audit_reference_for_tool_result(e)
+                for e in self.tool_results_during_prep
             ],
             "iterations_used": self.iterations_used,
             "budget_state": self.budget_state.to_dict(),
@@ -1604,26 +1612,55 @@ def _safe_component(component: str) -> str:
     return component if component in _SAFE_COMPONENT_LABELS else "unexpected_error"
 
 
+def _audit_reference_for_tool_result(entry: dict[str, str]) -> dict[str, Any]:
+    """Convert an in-memory tool_result entry to its audit reference
+    shape: tool_name + char count + sha256 + truncated preview.
+
+    Audit emission stores references, not raw dumps — the
+    "references-not-dumps" audit contract pre-dates this field and
+    must hold for it too. The in-memory tuple still carries the full
+    result so the renderer can prepend it; only the serialized audit
+    record is references-only. ``result`` stays as a key with an empty
+    string value so ``AuditTrace.from_dict`` round-trip remains valid
+    (post_init expects ``result`` to be a string).
+    """
+    import hashlib
+    name = entry.get("tool_name", "") if isinstance(entry, dict) else ""
+    result = entry.get("result", "") if isinstance(entry, dict) else ""
+    preview = result[:200]
+    truncated = len(result) > len(preview)
+    return {
+        "tool_name": name,
+        "result": "",
+        "result_chars": len(result),
+        "result_sha256": hashlib.sha256(result.encode("utf-8")).hexdigest(),
+        "result_preview": preview,
+        "truncated": truncated,
+    }
+
+
 def _format_tools_called_receipt(
-    tools_called: list[str] | tuple[str, ...],
+    tool_results: list[dict[str, str]] | tuple[dict[str, str], ...],
 ) -> str:
     """Compact receipt block listing the tools that successfully ran
     before the attempt failed. Intended to be included verbatim in the
     user-facing reply so the next turn's agent has receipts to reason
     from rather than reconstructing intent from natural language.
 
-    Format: bulleted list of unique tool names + iteration positions,
-    stable order. Empty input → ``""`` (caller should branch on
-    truthiness).
-
-    Each entry from the runner's ``tools_called`` list looks like
-    ``"<tool>:iter<N>"`` — we keep the iteration index because order
-    matters when the agent reasons about what happened in what
-    sequence.
+    Synthesizes the user-facing label as ``<tool_name>:iter<N>`` from
+    the entry's tool_name + 1-based position — invocation ids (which
+    can carry provider-specific or opaque text) stay audit-only, never
+    in the user-visible receipt. Empty input → ``""`` (caller should
+    branch on truthiness).
     """
-    if not tools_called:
+    if not tool_results:
         return ""
-    lines = [f"  - {entry}" for entry in tools_called]
+    lines: list[str] = []
+    for i, entry in enumerate(tool_results, start=1):
+        name = entry.get("tool_name", "") if isinstance(entry, dict) else ""
+        if not name:
+            continue
+        lines.append(f"  - {name}:iter{i}")
     return "\n".join(lines)
 
 
@@ -1692,6 +1729,7 @@ def iteration_cap_briefing(
     cap: int,
     cohort_refs: tuple[str, ...] = (),
     tools_called: list[str] | tuple[str, ...] = (),
+    tool_results: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
     iterations: int = 0,
     phase_durations_ms: dict[str, int] | None = None,
     budget_state: BudgetState | None = None,
@@ -1713,7 +1751,7 @@ def iteration_cap_briefing(
     workload.
     """
     raised_cap = max(cap * 2, cap + 100)
-    receipt_lines = _format_tools_called_receipt(tools_called)
+    receipt_lines = _format_tools_called_receipt(tool_results)
     if receipt_lines:
         receipt_block = (
             f"### Tool receipts (this attempt's actual dispatch trace)\n"
@@ -1764,6 +1802,7 @@ def system_error_briefing(
     reason: str,
     cohort_refs: tuple[str, ...] = (),
     tools_called: list[str] | tuple[str, ...] = (),
+    tool_results: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
     iterations: int = 0,
     phase_durations_ms: dict[str, int] | None = None,
     budget_state: BudgetState | None = None,
@@ -1783,7 +1822,7 @@ def system_error_briefing(
     transparency rather than apologetic minimalism.
     """
     safe_component = _safe_component(component)
-    receipt_lines = _format_tools_called_receipt(tools_called)
+    receipt_lines = _format_tools_called_receipt(tool_results)
     if receipt_lines:
         receipt_block = (
             f"### Tool receipts (this attempt's actual dispatch trace)\n"

@@ -1063,6 +1063,10 @@ class PresenceRenderer:
         )
 
 
+_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP = 8000
+_FORWARDED_RESULT_TOTAL_CHAR_CAP = 24000
+
+
 def _format_forwarded_tool_results(
     tool_results: tuple[dict[str, str], ...] | list[dict[str, str]],
 ) -> str:
@@ -1074,21 +1078,45 @@ def _format_forwarded_tool_results(
     content already fetched, so it doesn't redundantly call the same
     read tool to render content back to the user.
 
-    Per-result content is included verbatim — caps belong upstream
-    (the integration runner's iteration_metrics already track
-    tool_result_chars and would surface payload-bloat through the
-    friction report). Truncating here would silently strip content
-    the integration model used to ground its directive.
+    Capped per-entry (``_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP``) and
+    cumulatively (``_FORWARDED_RESULT_TOTAL_CHAR_CAP``) to keep the
+    renderer prompt from ballooning when a tool returned a very large
+    payload. Truncated entries carry an explicit marker so the model
+    knows the result was clipped and can issue a fresh fetch if it
+    truly needs the rest.
     """
     if not tool_results:
         return ""
     sections = ["### Prior tool results (already fetched this turn)"]
+    remaining = _FORWARDED_RESULT_TOTAL_CHAR_CAP
     for entry in tool_results:
         name = entry.get("tool_name", "")
         result = entry.get("result", "")
         if not name and not result:
             continue
-        sections.append(f"#### {name}\n{result}")
+        clipped = result
+        truncated_marker = ""
+        if len(clipped) > _FORWARDED_RESULT_PER_ENTRY_CHAR_CAP:
+            clipped = clipped[:_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP]
+            truncated_marker = (
+                f"\n[TRUNCATED: {len(result) - len(clipped)} more chars; "
+                f"re-call the tool if you need the full content]"
+            )
+        if remaining <= 0:
+            sections.append(
+                f"#### {name}\n[OMITTED: total forward budget "
+                f"({_FORWARDED_RESULT_TOTAL_CHAR_CAP} chars) exhausted "
+                f"by earlier results; re-call the tool if needed]"
+            )
+            continue
+        if len(clipped) > remaining:
+            clipped = clipped[:remaining]
+            truncated_marker = (
+                f"\n[TRUNCATED: total forward budget "
+                f"({_FORWARDED_RESULT_TOTAL_CHAR_CAP} chars) reached]"
+            )
+        remaining -= len(clipped)
+        sections.append(f"#### {name}\n{clipped}{truncated_marker}")
     return "\n\n".join(sections)
 
 

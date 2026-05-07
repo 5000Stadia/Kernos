@@ -567,18 +567,24 @@ async def test_iteration_cap_directive_includes_tool_receipts():
 
 @pytest.mark.asyncio
 async def test_system_error_directive_includes_tool_receipts():
-    """Receipt forwarding applies to system_error_briefing too — any
-    failure that surfaces a system error should show the user (and
-    therefore the next turn's agent) what actually ran before the
-    failure (max_iterations exhaustion is the iteration_cap path; this
-    test exercises a different failure mode that still routes through
-    system_error_briefing). Uses max_iterations as the failure trigger
-    here for clean reproducibility, then asserts the receipt block
-    formatting since iteration_cap and system_error share the helper."""
+    """Receipt forwarding applies to system_error_briefing too — when
+    a non-iteration-cap failure exhausts retries, the user-facing
+    directive includes the actual tools that ran before the failure.
+    This test exercises ``no_finalize_block`` (a system_error path,
+    NOT iteration_cap) by having the chain dispatch a tool then
+    returning text-only with no further tool_use, which the runner
+    treats as ``no_tool_use`` after the dispatch round-trip."""
+    call_count = {"n": 0}
+
     async def chain(*_a, **_kw):
-        return _resp(
-            _tool_use_block("search_memory", {"q": "x"}, id_="tu_loop")
-        )
+        call_count["n"] += 1
+        if call_count["n"] % 2 == 1:
+            return _resp(
+                _tool_use_block("search_memory", {"q": "x"}, id_="tu_x")
+            )
+        # Second call: text-only, no tool_use → no_tool_use failure,
+        # which routes through system_error_briefing (NOT iteration_cap).
+        return _resp(_text_block("done"))
 
     async def dispatcher(*_a, **_kw):
         return {"hits": []}
@@ -586,14 +592,114 @@ async def test_system_error_directive_includes_tool_receipts():
     runner, _audit = _make_runner(
         chain_caller=chain,
         dispatcher=dispatcher,
-        config=IntegrationConfig(max_iterations=2, max_retries=1),
+        config=IntegrationConfig(max_retries=1, max_iterations=10),
     )
     briefing = await runner.run(_make_inputs())
 
-    # Both failure-mode directives include the receipt block via the
-    # shared formatter; specific test pinning iteration_cap is above.
+    # Sanity: this is the system_error path, not iteration_cap.
+    assert "INTEGRATION SYNTHESIS FAILED" in briefing.presence_directive
+    assert "ITERATION CHECKPOINT" not in briefing.presence_directive
+    assert "no_tool_use" in briefing.presence_directive
+    # Tool receipts present from the successful first dispatch.
     assert "Tool receipts" in briefing.presence_directive
-    assert "search_memory:iter" in briefing.presence_directive
+    assert "search_memory:iter1" in briefing.presence_directive
+
+
+def test_audit_trace_serializes_tool_results_as_references_only():
+    """RECEIPT-FORWARD hardening (Codex review 2026-05-07): the audit
+    serialization preserves the existing 'references-not-dumps' audit
+    contract — to_dict() emits tool_name + result_chars + sha256 +
+    truncated preview, NOT the raw result body. The in-memory
+    AuditTrace still carries the full result so the renderer can
+    consume it; only the serialized audit form is references-only."""
+    from kernos.kernel.integration.briefing import AuditTrace
+    secret_payload = "extremely confidential cross-space data"
+    audit = AuditTrace(
+        tool_results_during_prep=(
+            {"tool_name": "read_file", "result": secret_payload + " " * 500},
+        ),
+    )
+    serialized = audit.to_dict()
+    forwarded = serialized["tool_results_during_prep"][0]
+    # References, not dumps. ``result`` is kept as an empty string for
+    # from_dict round-trip compatibility; the full body NEVER lands in
+    # audit serialization.
+    assert forwarded["result"] == ""
+    assert forwarded["tool_name"] == "read_file"
+    assert forwarded["result_chars"] == len(secret_payload + " " * 500)
+    assert "result_sha256" in forwarded
+    assert forwarded["truncated"] is True
+    # Preview stays ≤ 200 chars; secret payload prefix shows up there
+    # (operators auditing a leak need a preview to attribute it),
+    # but the full body never lands in audit.
+    assert len(forwarded["result_preview"]) <= 200
+
+
+@pytest.mark.asyncio
+async def test_redaction_invariant_includes_forwarded_tool_results():
+    """RECEIPT-FORWARD hardening (Codex review 2026-05-07): forwarded
+    tool results must pass the same redaction invariant as the
+    directive — a read tool that pulled restricted-cohort content
+    cannot bypass redaction by riding the forwarded-results channel.
+    """
+    from kernos.kernel.integration.briefing import (
+        CohortOutput, Restricted,
+    )
+
+    secret = "contents-of-restricted-cohort-payload"
+
+    async def chain(*_a, **_kw):
+        # Dispatch read tool whose result contains the secret, then
+        # finalize with a clean directive. Without the redaction
+        # extension, this would ship — directive itself doesn't
+        # quote the secret. With the extension, redaction sees the
+        # secret in tool_results and refuses the briefing.
+        if not chain.calls:
+            chain.calls += 1
+            return _resp(
+                _tool_use_block("search_memory", {"q": "x"}, id_="tu_x")
+            )
+        return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
+
+    chain.calls = 0
+
+    async def dispatcher(*_a, **_kw):
+        # Tool result echoes the restricted payload — the leak surface
+        # the redaction invariant should now catch.
+        return {"text": secret}
+
+    inputs = _make_inputs()
+    inputs = IntegrationInputs(
+        user_message=inputs.user_message,
+        conversation_thread=inputs.conversation_thread,
+        cohort_outputs=(
+            CohortOutput(
+                cohort_id="restricted_cohort",
+                cohort_run_id="cr-x",
+                output={"payload": secret},
+                visibility=Restricted(reason="test"),
+            ),
+        ),
+        surfaced_tools=inputs.surfaced_tools,
+        active_context_spaces=inputs.active_context_spaces,
+        member_id=inputs.member_id,
+        instance_id=inputs.instance_id,
+        space_id=inputs.space_id,
+        turn_id=inputs.turn_id,
+        integration_run_id=inputs.integration_run_id,
+        cognitive_context=inputs.cognitive_context,
+    )
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        dispatcher=dispatcher,
+        config=IntegrationConfig(max_retries=1, max_iterations=5),
+    )
+    briefing = await runner.run(inputs)
+    # Briefing must surface a system error (briefing_validation
+    # failure from the redaction guard), not the clean
+    # _DEFAULT_BRIEFING_PAYLOAD that the model attempted to ship.
+    assert briefing.audit_trace.fail_soft_engaged is True
+    assert "briefing_validation" in briefing.presence_directive
 
 
 def test_integration_config_default_max_iterations_is_checkpoint_cadence():
