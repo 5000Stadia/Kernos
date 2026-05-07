@@ -157,11 +157,15 @@ def _make_runner(
     async def _emit(entry: dict) -> None:
         sink.append(entry)
 
+    # Default single-attempt config for legacy tests that pre-date the
+    # retry harness (PHASE-1-WIPE-VERIFICATION 2026-05-07). Tests that
+    # specifically exercise retry behavior pass an explicit
+    # IntegrationConfig with max_retries > 1.
     runner_kwargs = dict(
         chain_caller=chain_caller or _default_chain,
         read_only_dispatcher=dispatcher or _default_dispatcher,
         audit_emitter=_emit,
-        config=config or IntegrationConfig(),
+        config=config or IntegrationConfig(max_retries=1),
     )
     if clock is not None:
         runner_kwargs["clock"] = clock
@@ -472,7 +476,7 @@ async def test_runner_max_iterations_triggers_fail_soft():
     runner, audit = _make_runner(
         chain_caller=chain,
         dispatcher=dispatcher,
-        config=IntegrationConfig(max_iterations=3),
+        config=IntegrationConfig(max_iterations=3, max_retries=1),
     )
     briefing = await runner.run(_make_inputs())
 
@@ -507,7 +511,8 @@ async def test_runner_timeout_triggers_fail_soft():
         chain_caller=chain,
         dispatcher=dispatcher,
         config=IntegrationConfig(
-            max_iterations=10, integration_timeout_seconds=1.0
+            max_iterations=10, integration_timeout_seconds=1.0,
+            max_retries=1,
         ),
         clock=clock,
     )
@@ -550,6 +555,185 @@ async def test_runner_invalid_briefing_falls_back_soft():
 
     assert briefing.audit_trace.fail_soft_engaged is True
     assert audit[0]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_runner_retries_on_failure_then_succeeds():
+    """PHASE-1-WIPE-VERIFICATION 2026-05-07: synthesis retries on
+    each failed attempt rather than falling back to a generic
+    "limited context" briefing on first failure. This test fails the
+    first attempt (no_tool_use) and succeeds on the second.
+    """
+    call_count = [0]
+
+    async def chain(*_a, **_kw):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # First attempt: no tool_use → IntegrationAttemptFailed
+            return _resp(_text_block("just thinking"))
+        # Second attempt: clean finalize
+        return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
+
+    runner, audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=3),
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # Final briefing is a real success, not the system-error path
+    assert briefing.audit_trace.fail_soft_engaged is False
+    # First entry is the retry audit (the failed first attempt)
+    assert audit[0]["audit_category"] == "integration.retry"
+    assert audit[0]["attempt"] == 1
+    assert audit[0]["component"] == "no_tool_use"
+    # Last entry is the successful briefing
+    assert audit[-1]["audit_category"] == "integration.briefing"
+    assert audit[-1]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_runner_exhausts_retries_then_emits_system_error():
+    """When all retries fail, the runner returns a
+    ``system_error_briefing`` whose directive instructs presence to
+    surface the failure transparently — NOT the old "respond
+    conservatively" apology. The directive is the load-bearing piece
+    of this fix; it changes the agent's response shape from "I'm
+    here, send me what you want" to a transparent error report.
+    """
+    async def chain(*_a, **_kw):
+        return _resp(_text_block("never finalize"))
+
+    runner, audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=3),
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # Hard error: fail_soft_engaged True for backward compat, but
+    # the directive is now the transparent system-error one.
+    assert briefing.audit_trace.fail_soft_engaged is True
+    assert "INTEGRATION SYNTHESIS FAILED" in briefing.presence_directive
+    assert "no_tool_use" in briefing.presence_directive
+    # Notes carry the attempt count + final component for operator triage.
+    assert "system-error after 3 attempts" in briefing.audit_trace.notes
+    assert "no_tool_use" in briefing.audit_trace.notes
+    # Three retry audits + one final integration.briefing audit
+    retry_audits = [a for a in audit if a.get("audit_category") == "integration.retry"]
+    assert len(retry_audits) == 3
+    assert retry_audits[0]["attempt"] == 1
+    assert retry_audits[-1]["attempt"] == 3
+    final_audit = [a for a in audit if a.get("audit_category") == "integration.briefing"]
+    assert len(final_audit) == 1
+    assert final_audit[0]["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_runner_safety_degraded_exhaustion_routes_to_defer():
+    """Safety-degraded turns enter the retry loop with safety preamble
+    (the model is expected to comply via prompt guidance). Only on
+    retry exhaustion does the runner route to a Defer briefing rather
+    than a generic system-error — real safety failures must surface as
+    a Defer, not a respond_only system error.
+    """
+    call_count = {"n": 0}
+
+    async def chain(*_a, **_kw):
+        # All attempts produce malformed output → synthesis failure on
+        # every retry. The retry loop runs to exhaustion.
+        call_count["n"] += 1
+        return _resp("no finalize block here")
+
+    inputs = _make_inputs()
+    inputs = IntegrationInputs(
+        user_message=inputs.user_message,
+        conversation_thread=inputs.conversation_thread,
+        cohort_outputs=inputs.cohort_outputs,
+        surfaced_tools=inputs.surfaced_tools,
+        active_context_spaces=inputs.active_context_spaces,
+        member_id=inputs.member_id,
+        instance_id=inputs.instance_id,
+        space_id=inputs.space_id,
+        turn_id=inputs.turn_id,
+        integration_run_id=inputs.integration_run_id,
+        required_safety_cohort_failures=("safety_cohort_X",),
+        cognitive_context=inputs.cognitive_context,
+    )
+    runner, audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=3, max_iterations=1),
+    )
+    briefing = await runner.run(inputs)
+
+    # Chain WAS called: safety-degraded turns go through synthesis with
+    # the safety preamble in the prompt.
+    assert call_count["n"] >= 1
+    # Retry audits emitted on each failed attempt.
+    retry_audits = [
+        a for a in audit if a.get("audit_category") == "integration.retry"
+    ]
+    assert len(retry_audits) == 3
+    # On exhaustion, the safety branch produces a Defer (not a
+    # system-error briefing).
+    from kernos.kernel.integration.briefing import Defer
+    assert isinstance(briefing.decided_action, Defer)
+    assert (
+        briefing.audit_trace.budget_state.required_safety_cohort_failed
+        is True
+    )
+
+
+def test_integration_config_rejects_zero_max_retries():
+    """max_retries < 1 would skip the retry loop and trip run()'s
+    exhaustion-path assertion. Reject loudly at construction time.
+    """
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="max_retries must be >= 1"):
+        IntegrationConfig(max_retries=0)
+    with _pytest.raises(ValueError, match="max_retries must be >= 1"):
+        IntegrationConfig(max_retries=-2)
+
+
+def test_integration_config_rejects_negative_backoff():
+    import pytest as _pytest
+    with _pytest.raises(
+        ValueError, match="retry_backoff_seconds must be >= 0"
+    ):
+        IntegrationConfig(retry_backoff_seconds=-0.5)
+
+
+@pytest.mark.asyncio
+async def test_system_error_directive_does_not_leak_raw_exception_text():
+    """When a synthesis attempt's reason carries raw exception text
+    (e.g. provider payload bytes, file paths, secrets, adversarial
+    input), that text must NOT cross into the user-facing presence
+    directive. The directive uses a constrained safe-component label
+    only; raw reason stays in audit_trace.notes for operators.
+    """
+    secret_payload = (
+        "Traceback: /home/user/.secrets/api_key=sk-abc123XYZ "
+        "while talking to api.evil.example.com"
+    )
+
+    async def chain(*_a, **_kw):
+        # Raise an unexpected exception whose message contains "secrets".
+        raise RuntimeError(secret_payload)
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=2, max_iterations=1),
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # Component label in directive is constrained — exception text
+    # is NOT in the user-facing directive.
+    assert secret_payload not in briefing.presence_directive
+    assert "sk-abc123XYZ" not in briefing.presence_directive
+    assert "/home/user" not in briefing.presence_directive
+    # Constrained label is used in the directive.
+    assert "component=unexpected_error" in briefing.presence_directive
+    # Audit notes DO carry the raw text — operators need full
+    # diagnostic detail.
+    assert "sk-abc123XYZ" in briefing.audit_trace.notes
 
 
 @pytest.mark.asyncio

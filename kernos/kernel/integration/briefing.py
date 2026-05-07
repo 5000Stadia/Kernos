@@ -1519,13 +1519,20 @@ def minimal_fail_soft_briefing(
     notes: str = "",
     budget_state: BudgetState | None = None,
 ) -> Briefing:
-    """Construct the minimal briefing the runner returns on failure.
+    """DEPRECATED. Original Section 4c minimal fail-soft briefing.
 
-    Per Section 4c of the spec: if integration fails, errors, or
-    exceeds budget, presence receives a minimal `respond_only`
-    briefing acknowledging incomplete prep — never raw cohort
-    inputs. The directive is the spec's literal phrasing so
-    presence can rely on its shape.
+    Replaced by :func:`system_error_briefing` in PHASE-1-WIPE-
+    VERIFICATION (2026-05-07). The original approach softened all
+    integration failures (timeout, max_iterations, validation errors,
+    unexpected exceptions) into a generic "respond conservatively"
+    apology that produced degenerate agent responses on concrete
+    user questions. Founder direction: do not soften failures —
+    surface them loudly so internal errors are identifiable and
+    attributable.
+
+    Kept around for now because some callers and tests still reference
+    it; the integration runner no longer calls it. Removal scheduled
+    once test fixtures are migrated to ``system_error_briefing``.
     """
     return Briefing(
         relevant_context=(),
@@ -1540,4 +1547,103 @@ def minimal_fail_soft_briefing(
         ),
         turn_id=turn_id,
         integration_run_id=integration_run_id,
+    )
+
+
+# Component labels safe to surface to the user. Anything outside this
+# set is rewritten to "unexpected_error" before the directive is built —
+# raw exception text (which may contain provider payloads, file paths,
+# secrets, or adversarial input) must never cross into the presence
+# directive. Full diagnostic detail stays in audit_trace.notes for the
+# operator.
+_SAFE_COMPONENT_LABELS = frozenset({
+    "integration_timeout",
+    "max_iterations",
+    "no_tool_use",
+    "read_only_violation",
+    "briefing_validation",
+    "unexpected_error",
+    "decoded_action_invalid",
+    "no_finalize_block",
+})
+
+
+def _safe_component(component: str) -> str:
+    """Constrain the user-facing component label to a known set."""
+    return component if component in _SAFE_COMPONENT_LABELS else "unexpected_error"
+
+
+_SYSTEM_ERROR_DIRECTIVE_TEMPLATE = (
+    "INTEGRATION SYNTHESIS FAILED. This is an internal system error, "
+    "not a content limitation. Synthesis was retried {attempts} times "
+    "and the final attempt failed at component={component}. Surface "
+    "this transparently to the user. Do NOT attempt to answer their "
+    "original question; do NOT apologize for 'limited context'. Tell "
+    "the user plainly that an internal synthesis error occurred, name "
+    "the component if useful ('integration_timeout', 'max_iterations', "
+    "'no_tool_use', 'read_only_violation', 'briefing_validation', "
+    "'unexpected_error'), and offer that they can retry or that the "
+    "operator can investigate the integration runner. Keep it short "
+    "and direct."
+)
+
+
+def system_error_briefing(
+    *,
+    turn_id: str = "",
+    integration_run_id: str = "",
+    attempts: int,
+    component: str,
+    reason: str,
+    cohort_refs: tuple[str, ...] = (),
+    tools_called: list[str] | tuple[str, ...] = (),
+    iterations: int = 0,
+    phase_durations_ms: dict[str, int] | None = None,
+    budget_state: BudgetState | None = None,
+    cognitive_context: Any = None,
+    instance_id: str = "",
+    member_id: str = "",
+    space_id: str = "",
+) -> Briefing:
+    """Construct the briefing the runner returns when ALL retry
+    attempts have been exhausted.
+
+    The directive instructs presence to surface the failure to the
+    user transparently. The audit_trace carries the full per-attempt
+    diagnostic state so operators can investigate. ``fail_soft_engaged``
+    stays True for backward compat with existing audit consumers, but
+    the directive content is now load-bearing for diagnostic
+    transparency rather than apologetic minimalism.
+    """
+    safe_component = _safe_component(component)
+    directive = _SYSTEM_ERROR_DIRECTIVE_TEMPLATE.format(
+        attempts=attempts, component=safe_component,
+    )
+    # Raw component + reason (may contain exception text, paths, payloads)
+    # stay in audit-trace notes for operator inspection — never the
+    # user-facing directive.
+    notes = (
+        f"system-error after {attempts} attempts; "
+        f"final-component={component}; reason={reason}"
+    )
+    return Briefing(
+        relevant_context=(),
+        filtered_context=(),
+        decided_action=RespondOnly(),
+        presence_directive=directive,
+        audit_trace=AuditTrace(
+            cohort_outputs=cohort_refs,
+            tools_called_during_prep=tuple(tools_called),
+            iterations_used=iterations,
+            budget_state=budget_state or BudgetState(),
+            fail_soft_engaged=True,
+            phase_durations_ms=dict(phase_durations_ms or {}),
+            notes=notes,
+        ),
+        turn_id=turn_id,
+        integration_run_id=integration_run_id,
+        cognitive_context=cognitive_context,
+        instance_id=instance_id,
+        member_id=member_id,
+        space_id=space_id,
     )

@@ -151,6 +151,101 @@ def _filter_trace_signal(records: list[logging.LogRecord]) -> list[str]:
     return out
 
 
+# State for streaming the integration audit JSON across probes. The
+# audit log is appended-to per turn; the helper tracks how many records
+# we've already consumed so each probe surfaces only NEW briefings.
+_AUDIT_CURSOR = {"consumed": 0}
+
+
+def _format_integration_audit_for_probe(data_dir: Path, label: str) -> str:
+    """Read the integration audit JSON, find ``integration.briefing``
+    records appended since the last probe, and format them.
+
+    The dev-handler's audit store writes JSON to
+    ``{data_dir}/_empty_/audit/{date}.json`` (the ``_empty_`` slot is
+    the per-instance audit subdirectory the JSON tenants use). Each
+    turn appends one or more records. We surface the LATEST briefing
+    record per probe — that's the one that fed presence rendering.
+    """
+    import json
+    audit_dir = data_dir / "_empty_" / "audit"
+    if not audit_dir.is_dir():
+        return ""
+    candidates = sorted(audit_dir.glob("*.json"))
+    if not candidates:
+        return ""
+    audit_path = candidates[-1]
+    try:
+        records = json.loads(audit_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"_(audit unreadable: {exc})_\n"
+    if not isinstance(records, list):
+        return ""
+    new_records = records[_AUDIT_CURSOR["consumed"]:]
+    _AUDIT_CURSOR["consumed"] = len(records)
+
+    briefings = [
+        r for r in new_records
+        if isinstance(r, dict) and r.get("audit_category") == "integration.briefing"
+    ]
+    if not briefings:
+        return "_(no integration.briefing record appended for this probe)_\n"
+
+    # Surface the LAST briefing (the one that flowed to presence)
+    last = briefings[-1]
+    briefing = last.get("briefing") or {}
+    directive = briefing.get("presence_directive", "")
+    decided = briefing.get("decided_action", {}) or {}
+    trace = briefing.get("audit_trace", {}) or {}
+    relevant = briefing.get("relevant_context", []) or []
+    filtered = briefing.get("filtered_context", []) or []
+
+    parts: list[str] = []
+    parts.append(f"```text\nDIRECTIVE → presence:\n  {directive}\n```\n")
+    if decided:
+        parts.append(
+            f"- decided_action: `{decided.get('kind', '?')}`\n"
+        )
+    if trace:
+        cohort_outputs = trace.get("cohort_outputs", []) or []
+        tools_called = trace.get("tools_called_during_prep", []) or []
+        iterations = trace.get("iterations_used", -1)
+        budget = trace.get("budget_state", {}) or {}
+        durations = trace.get("phase_durations_ms", {}) or {}
+        fail_soft = trace.get("fail_soft_engaged", False)
+        parts.append(
+            f"- iterations_used: {iterations}\n"
+            f"- fail_soft_engaged: {fail_soft}\n"
+            f"- cohort_outputs: {cohort_outputs}\n"
+            f"- tools_called_during_prep: {tools_called}\n"
+            f"- phase_durations_ms: {durations}\n"
+            f"- budget_state: {budget}\n"
+        )
+    if relevant:
+        parts.append(
+            f"- relevant_context entries ({len(relevant)}):\n"
+        )
+        for entry in relevant:
+            src_type = entry.get("source_type", "?")
+            src_id = entry.get("source_id", "?")
+            summary = entry.get("summary", "")
+            confidence = entry.get("confidence", "")
+            summary_preview = summary[:240] + ("…" if len(summary) > 240 else "")
+            parts.append(
+                f"  - `{src_type}/{src_id}` (conf={confidence}): {summary_preview}\n"
+            )
+    if filtered:
+        parts.append(
+            f"- filtered_context entries ({len(filtered)}):\n"
+        )
+        for entry in filtered:
+            src_type = entry.get("source_type", "?")
+            src_id = entry.get("source_id", "?")
+            reason = entry.get("reason_filtered", "")
+            parts.append(f"  - `{src_type}/{src_id}` filtered: {reason}\n")
+    return "".join(parts)
+
+
 async def run() -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     out_dir = _REPO_ROOT / "data" / "diagnostics" / "live-tests"
@@ -257,6 +352,21 @@ async def run() -> int:
         else:
             transcript_sections.append("_(no markers matched)_\n\n")
 
+        # PHASE-1-WIPE-VERIFICATION run-3 follow-on: dump the integration
+        # audit for THIS turn so the regressed probes' degenerate
+        # presence-directive shape is visible in the transcript. The
+        # audit JSON is appended-to per turn; we read the latest snapshot
+        # after each probe and surface the trailing
+        # ``audit_category=integration.briefing`` records appended since
+        # the prior probe.
+        audit_block = _format_integration_audit_for_probe(data_dir, label)
+        if audit_block:
+            transcript_sections.append(
+                "**Integration audit (briefing → presence directive):**\n\n"
+                + audit_block
+                + "\n"
+            )
+
     # Final summary
     transcript_sections.append("## Driver summary\n\n")
     transcript_sections.append(
@@ -277,11 +387,12 @@ async def run() -> int:
     report_path.write_text("".join(transcript_sections), encoding="utf-8")
     print(f"\n=== TRANSCRIPT: {report_path} ===\n", file=sys.stderr, flush=True)
 
-    # Cleanup the temp data dir
-    try:
-        shutil.rmtree(data_dir)
-    except Exception:
-        pass
+    # Preserve the temp data dir so the integration audit JSON, event
+    # stream, conversation logs, and reasoning traces stay readable for
+    # post-mortem inspection. The dir is small (a few MB) and lands
+    # under the OS temp tree, so it cleans up at next reboot.
+    print(f"\n=== DATA DIR PRESERVED: {data_dir} ===\n",
+          file=sys.stderr, flush=True)
 
     return 0 if not failures else 1
 

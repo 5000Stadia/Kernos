@@ -39,12 +39,14 @@ from kernos.kernel.integration.briefing import (
     VisibilityKind,
     decided_action_from_dict,
     minimal_fail_soft_briefing,
+    system_error_briefing,
     now_iso,
     visibility_from_dict,
 )
 from kernos.kernel.integration.runner import (
     AuditEmitter,
     ChainCaller,
+    IntegrationAttemptFailed,
     IntegrationConfig,
     IntegrationInputs,
     IntegrationRunner,
@@ -80,6 +82,7 @@ __all__ = [
     "FilteredItem",
     "FINALIZE_TOOL_NAME",
     "FINALIZE_TOOL_SCHEMA",
+    "IntegrationAttemptFailed",
     "IntegrationConfig",
     "IntegrationInputs",
     "IntegrationRunner",
@@ -102,6 +105,7 @@ __all__ = [
     "build_system_prompt",
     "decided_action_from_dict",
     "minimal_fail_soft_briefing",
+    "system_error_briefing",
     "now_iso",
     "visibility_from_dict",
 ]

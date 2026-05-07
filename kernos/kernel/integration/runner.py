@@ -162,6 +162,25 @@ class IntegrationConfig:
     each call (per-call, not cumulative — the BudgetState's
     tokens_hit_limit flag is reserved for cumulative tracking when
     that lands).
+
+    Retry semantics (PHASE-1-WIPE-VERIFICATION fix, 2026-05-07):
+    Section 4c originally returned a generic "minimal fail-soft"
+    briefing on the first iteration/timeout/validation failure.
+    That softened internal errors into "respond conservatively"
+    apologies, hiding real failures and producing degenerate agent
+    responses (audit traces showed this directly: timeout fires
+    mid-synthesis → fail-soft engages → presence directive becomes
+    "integration prep was incomplete" → agent says "I'm here, send
+    me what you want" even though the original brief was concrete
+    and tool results had been gathered successfully).
+
+    Architectural correction: synthesis attempts now retry up to
+    ``max_retries`` times before surfacing a hard system error. Each
+    retry resets the iteration loop's chain state so the model gets
+    a clean shot. After exhaustion, the runner emits a hard-error
+    briefing whose directive instructs presence to surface the
+    failure to the user transparently rather than apologize for
+    "limited context". Loud, identifiable, attributable.
     """
 
     max_iterations: int = 5
@@ -170,10 +189,60 @@ class IntegrationConfig:
     max_summarized_cohort_entries: int = 20
     max_filtered_entries: int = 50
     chain_name: str = "lightweight"
+    max_retries: int = 3
+    retry_backoff_seconds: float = 0.0
+
+    def __post_init__(self) -> None:
+        # max_retries < 1 would skip the retry loop entirely and trip
+        # the run() exhaustion-path assertion; reject it loudly at
+        # construction time instead. Same posture for negative
+        # backoffs, which would imply zero-or-negative sleep durations.
+        if self.max_retries < 1:
+            raise ValueError(
+                f"IntegrationConfig.max_retries must be >= 1, "
+                f"got {self.max_retries}"
+            )
+        if self.retry_backoff_seconds < 0:
+            raise ValueError(
+                f"IntegrationConfig.retry_backoff_seconds must be >= 0, "
+                f"got {self.retry_backoff_seconds}"
+            )
 
 
 class ReadOnlyToolViolation(Exception):
     """Integration tried to call a tool whose gate classification is not read."""
+
+
+class IntegrationAttemptFailed(Exception):
+    """Raised by ``_attempt_synthesis`` when one attempt of the
+    integration loop fails. Caught by the public ``run()``'s retry
+    harness, which either retries or surfaces a hard system-error
+    briefing after exhaustion.
+
+    Carries the attempt-local audit state so the retry harness can
+    fold it into either the next attempt's diagnostics or the final
+    system-error briefing.
+    """
+
+    def __init__(
+        self,
+        *,
+        component: str,
+        reason: str,
+        iterations: int,
+        phase_durations_ms: dict[str, int],
+        tools_called: list[str],
+        budget_state: "BudgetState",
+        chained_error: Exception | None = None,
+    ) -> None:
+        super().__init__(f"{component}: {reason}")
+        self.component = component
+        self.reason = reason
+        self.iterations = iterations
+        self.phase_durations_ms = dict(phase_durations_ms)
+        self.tools_called = list(tools_called)
+        self.budget_state = budget_state
+        self.chained_error = chained_error
 
 
 # Callback protocols. Defined as Callable aliases rather than
@@ -224,15 +293,118 @@ class IntegrationRunner:
         self._clock = clock
 
     async def run(self, inputs: IntegrationInputs) -> Briefing:
+        """Public entry. Retries synthesis up to ``max_retries`` times;
+        on exhaustion, surfaces a hard system-error briefing whose
+        directive instructs presence to report the failure transparently
+        rather than apologize for "limited context".
+
+        Safety-degraded turns (any required safety cohort failed) skip
+        the retry harness entirely and Defer immediately — that's a
+        real safety failure, not a synthesis hiccup; retrying would be
+        wrong.
+        """
         run_id = inputs.integration_run_id or _new_run_id()
         inputs = _with_run_id(inputs, run_id)
-        start = self._clock()
         cohort_refs = tuple(co.cohort_run_id for co in inputs.cohort_outputs)
+
+        # Safety-degraded turns: the iteration loop still runs (the
+        # system prompt carries safety-preamble guidance and the model
+        # is expected to produce a Defer or ConstrainedResponse). Only
+        # if synthesis fails entirely do we route to the safety
+        # _safety_degraded_defer fallback. This preserves the prior
+        # contract (tested in test_integration_safety_policy.py) where
+        # the prompt guides the model on safety-degraded turns.
+        last_failure: IntegrationAttemptFailed | None = None
+        for attempt in range(1, self._config.max_retries + 1):
+            try:
+                return await self._attempt_synthesis(
+                    inputs=inputs,
+                    cohort_refs=cohort_refs,
+                    attempt=attempt,
+                )
+            except IntegrationAttemptFailed as exc:
+                last_failure = exc
+                logger.warning(
+                    "INTEGRATION_ATTEMPT_FAILED: attempt=%d/%d "
+                    "component=%s reason=%s iterations=%d "
+                    "tools_called=%s",
+                    attempt, self._config.max_retries,
+                    exc.component, exc.reason,
+                    exc.iterations, exc.tools_called,
+                )
+                await self._emit_attempt_audit(
+                    inputs=inputs,
+                    cohort_refs=cohort_refs,
+                    attempt=attempt,
+                    failure=exc,
+                )
+                if attempt < self._config.max_retries:
+                    if self._config.retry_backoff_seconds > 0:
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(
+                            self._config.retry_backoff_seconds,
+                        )
+                    continue
+
+        # All attempts exhausted.
+        assert last_failure is not None  # max_retries >= 1 by contract
+
+        # Safety-degraded route: if the safety cohorts failed, the
+        # post-exhaustion fallback is a Defer briefing rather than a
+        # generic system-error. Real safety failures must Defer, not
+        # respond_only.
+        if inputs.required_safety_cohort_failures:
+            logger.error(
+                "INTEGRATION_SYNTHESIS_FAILED_SAFETY_DEGRADED: "
+                "%d attempts exhausted with required_safety failures=%s",
+                self._config.max_retries,
+                inputs.required_safety_cohort_failures,
+            )
+            return await self._safety_degraded_defer(
+                inputs=inputs,
+                cohort_refs=cohort_refs,
+                tools_called=last_failure.tools_called,
+                iterations=last_failure.iterations,
+                phase_durations_ms=last_failure.phase_durations_ms,
+                budget_state=last_failure.budget_state,
+                notes=(
+                    f"safety-degraded after {self._config.max_retries} "
+                    f"attempts; final-component={last_failure.component}; "
+                    f"reason={last_failure.reason}"
+                ),
+                error=last_failure.reason,
+            )
+
+        logger.error(
+            "INTEGRATION_SYNTHESIS_FAILED: %d attempts exhausted, "
+            "final_component=%s final_reason=%s",
+            self._config.max_retries,
+            last_failure.component,
+            last_failure.reason,
+        )
+        return await self._emit_system_error(
+            inputs=inputs,
+            cohort_refs=cohort_refs,
+            attempts=self._config.max_retries,
+            last_failure=last_failure,
+        )
+
+    async def _attempt_synthesis(
+        self,
+        *,
+        inputs: IntegrationInputs,
+        cohort_refs: tuple[str, ...],
+        attempt: int,
+    ) -> Briefing:
+        """One synthesis attempt. Returns a successful Briefing or
+        raises :class:`IntegrationAttemptFailed`. Each attempt builds
+        fresh chain state so the model gets a clean shot.
+        """
+        start = self._clock()
         tools_called: list[str] = []
         phase_durations_ms: dict[str, int] = {}
 
-        # Section 4a: Collect phase. System prompt is static (per-install
-        # configurable). User message bundles the inputs.
+        # Section 4a: Collect phase.
         collect_started = self._clock()
         system_prompt = build_system_prompt()
         chain_messages = self._build_initial_messages(inputs)
@@ -246,17 +418,16 @@ class IntegrationRunner:
 
                 # Section 4c: max_iterations guardrail.
                 if iterations > self._config.max_iterations:
-                    return await self._fail_soft(
-                        inputs=inputs,
-                        cohort_refs=cohort_refs,
-                        tools_called=tools_called,
-                        iterations=iterations - 1,
-                        phase_durations_ms=phase_durations_ms,
-                        budget_state=BudgetState(iterations_hit_limit=True),
-                        notes=(
+                    raise IntegrationAttemptFailed(
+                        component="max_iterations",
+                        reason=(
                             f"max_iterations exhausted "
                             f"({self._config.max_iterations})"
                         ),
+                        iterations=iterations - 1,
+                        phase_durations_ms=phase_durations_ms,
+                        tools_called=tools_called,
+                        budget_state=BudgetState(iterations_hit_limit=True),
                     )
 
                 # Section 4c: integration_timeout guardrail.
@@ -264,22 +435,19 @@ class IntegrationRunner:
                     self._clock() - start
                     > self._config.integration_timeout_seconds
                 ):
-                    return await self._fail_soft(
-                        inputs=inputs,
-                        cohort_refs=cohort_refs,
-                        tools_called=tools_called,
-                        iterations=iterations - 1,
-                        phase_durations_ms=phase_durations_ms,
-                        budget_state=BudgetState(timeout_hit_limit=True),
-                        notes=(
+                    raise IntegrationAttemptFailed(
+                        component="integration_timeout",
+                        reason=(
                             f"integration_timeout exceeded "
                             f"({self._config.integration_timeout_seconds}s)"
                         ),
+                        iterations=iterations - 1,
+                        phase_durations_ms=phase_durations_ms,
+                        tools_called=tools_called,
+                        budget_state=BudgetState(timeout_hit_limit=True),
                     )
 
-                # Sections 4a (Integrate / Decide) — one chain call per
-                # iteration. The model either calls a read-only tool
-                # (continue) or __finalize_briefing__ (terminate).
+                # Sections 4a (Integrate / Decide).
                 iter_started = self._clock()
                 response = await self._chain_caller(
                     system_prompt,
@@ -295,16 +463,16 @@ class IntegrationRunner:
                     b for b in response.content if b.type == "tool_use"
                 ]
                 if not tool_uses:
-                    return await self._fail_soft(
-                        inputs=inputs,
-                        cohort_refs=cohort_refs,
-                        tools_called=tools_called,
+                    raise IntegrationAttemptFailed(
+                        component="no_tool_use",
+                        reason=(
+                            "model produced no tool_use block; cannot "
+                            "finalize"
+                        ),
                         iterations=iterations,
                         phase_durations_ms=phase_durations_ms,
+                        tools_called=tools_called,
                         budget_state=BudgetState(),
-                        notes=(
-                            "model produced no tool_use block; cannot finalize"
-                        ),
                     )
 
                 tool_use = tool_uses[0]
@@ -348,23 +516,15 @@ class IntegrationRunner:
                 ) or f"{tool_use.name}:iter{iterations}"
                 tools_called.append(str(invocation_ref))
 
-                # The integration runner dispatches one tool per
-                # iteration (tool_uses[0]). If the model returned
-                # multiple tool_use blocks in the same response, the
-                # extras are dropped here — they'd otherwise produce
-                # a function_call/function_call_output mismatch on
-                # the next provider call (Codex's Responses API
-                # rejects input with unmatched function_call events:
-                # "No tool output found for function call <id>").
-                # Preserve text and the dispatched tool_use; filter
-                # any other tool_use blocks the model emitted.
+                # See full original comment above; orphan tool_use
+                # filter prevents Codex's Responses API from rejecting
+                # the next call with "No tool output found for function
+                # call <id>" when the model emits multiple tool_use
+                # blocks but the runner only dispatches the first.
                 assistant_content: list[dict] = []
                 for b in response.content:
                     btype = getattr(b, "type", None)
                     if btype == "tool_use" and getattr(b, "id", "") != tool_use.id:
-                        # Orphan tool_use — would have no matching
-                        # tool_result. Drop to keep the chain
-                        # balanced.
                         continue
                     assistant_content.append(_block_to_api_dict(b))
                 chain_messages.append(
@@ -385,39 +545,38 @@ class IntegrationRunner:
                         ],
                     }
                 )
+        except IntegrationAttemptFailed:
+            raise
         except ReadOnlyToolViolation as exc:
-            return await self._fail_soft(
-                inputs=inputs,
-                cohort_refs=cohort_refs,
-                tools_called=tools_called,
+            raise IntegrationAttemptFailed(
+                component="read_only_violation",
+                reason=str(exc),
                 iterations=iterations,
                 phase_durations_ms=phase_durations_ms,
+                tools_called=tools_called,
                 budget_state=BudgetState(),
-                notes=f"read-only violation: {exc}",
-                error=str(exc),
+                chained_error=exc,
             )
         except BriefingValidationError as exc:
-            return await self._fail_soft(
-                inputs=inputs,
-                cohort_refs=cohort_refs,
-                tools_called=tools_called,
+            raise IntegrationAttemptFailed(
+                component="briefing_validation",
+                reason=str(exc),
                 iterations=iterations,
                 phase_durations_ms=phase_durations_ms,
+                tools_called=tools_called,
                 budget_state=BudgetState(),
-                notes=f"briefing validation failed: {exc}",
-                error=str(exc),
+                chained_error=exc,
             )
         except Exception as exc:  # pragma: no cover - guard rail
             logger.exception("Integration runner unexpected error")
-            return await self._fail_soft(
-                inputs=inputs,
-                cohort_refs=cohort_refs,
-                tools_called=tools_called,
+            raise IntegrationAttemptFailed(
+                component="unexpected_error",
+                reason=f"{type(exc).__name__}: {exc}",
                 iterations=iterations,
                 phase_durations_ms=phase_durations_ms,
+                tools_called=tools_called,
                 budget_state=BudgetState(),
-                notes=f"unexpected error: {type(exc).__name__}: {exc}",
-                error=str(exc),
+                chained_error=exc,
             )
 
     # ----- prompt + tool list assembly -----
@@ -661,7 +820,7 @@ class IntegrationRunner:
                     "instruction before populating briefing fields."
                 )
 
-    async def _fail_soft(
+    async def _safety_degraded_defer(
         self,
         *,
         inputs: IntegrationInputs,
@@ -673,97 +832,149 @@ class IntegrationRunner:
         notes: str,
         error: str = "",
     ) -> Briefing:
-        # Per the design review's load-bearing input on COHORT-ADAPT-COVENANT:
-        # safety-degraded fail-soft must NEVER be respond_only.
-        # When required + safety_class cohorts failed, the fallback
-        # is a Defer briefing rather than the standard minimal
-        # respond_only fallback. This makes safety_class load-bearing
-        # even on the fail-soft path.
-        if inputs.required_safety_cohort_failures:
-            decided_action = Defer(
-                reason=(
-                    "required safety cohorts failed and integration could "
-                    "not produce a valid briefing; cannot proceed at full "
-                    "strength without safety verification"
-                ),
-                follow_up_signal=(
-                    f"will retry once required safety cohorts recover "
-                    f"({', '.join(inputs.required_safety_cohort_failures)})"
-                ),
-            )
-            presence_directive = (
-                "acknowledge the user briefly; signal that this turn must "
-                "be deferred until safety verification is possible. Do not "
-                "execute or propose tool calls."
-            )
-            safety_budget = BudgetState(
-                iterations_hit_limit=budget_state.iterations_hit_limit,
-                timeout_hit_limit=budget_state.timeout_hit_limit,
-                cohort_entries_hit_limit=budget_state.cohort_entries_hit_limit,
-                filtered_entries_hit_limit=budget_state.filtered_entries_hit_limit,
-                tokens_hit_limit=budget_state.tokens_hit_limit,
-                required_cohort_failed=True,
-                required_safety_cohort_failed=True,
-                cohort_fan_out_global_timeout=budget_state.cohort_fan_out_global_timeout,
-            )
-            briefing = Briefing(
-                relevant_context=(),
-                filtered_context=(),
-                decided_action=decided_action,
-                presence_directive=presence_directive,
-                audit_trace=AuditTrace(
-                    cohort_outputs=cohort_refs,
-                    tools_called_during_prep=tuple(tools_called),
-                    iterations_used=iterations,
-                    budget_state=safety_budget,
-                    fail_soft_engaged=True,
-                    phase_durations_ms=dict(phase_durations_ms),
-                    notes=f"safety-degraded fail-soft: {notes}",
-                ),
-                turn_id=inputs.turn_id,
-                integration_run_id=inputs.integration_run_id,
-                cognitive_context=inputs.cognitive_context,
-                # Fold 6 — turn-context identifiers
-                instance_id=inputs.instance_id,
-                member_id=inputs.member_id,
-                space_id=inputs.space_id,
-            )
-            await self._emit_audit(
-                briefing, success=False, error=error or notes,
-            )
-            return briefing
-
-        briefing = minimal_fail_soft_briefing(
-            turn_id=inputs.turn_id,
-            integration_run_id=inputs.integration_run_id,
-            notes=notes,
-            budget_state=budget_state,
+        """Safety-degraded path. Required + safety-class cohorts failed,
+        so the turn defers immediately rather than retrying. Per the
+        design review's COHORT-ADAPT-COVENANT input: safety-degraded
+        fallback MUST be a Defer, never a respond_only.
+        """
+        decided_action = Defer(
+            reason=(
+                "required safety cohorts failed and integration could "
+                "not produce a valid briefing; cannot proceed at full "
+                "strength without safety verification"
+            ),
+            follow_up_signal=(
+                f"will retry once required safety cohorts recover "
+                f"({', '.join(inputs.required_safety_cohort_failures)})"
+            ),
         )
-        # Carry through whatever we did manage to gather so the audit
-        # trail isn't blank — references only, never raw content.
+        presence_directive = (
+            "acknowledge the user briefly; signal that this turn must "
+            "be deferred until safety verification is possible. Do not "
+            "execute or propose tool calls."
+        )
+        safety_budget = BudgetState(
+            iterations_hit_limit=budget_state.iterations_hit_limit,
+            timeout_hit_limit=budget_state.timeout_hit_limit,
+            cohort_entries_hit_limit=budget_state.cohort_entries_hit_limit,
+            filtered_entries_hit_limit=budget_state.filtered_entries_hit_limit,
+            tokens_hit_limit=budget_state.tokens_hit_limit,
+            required_cohort_failed=True,
+            required_safety_cohort_failed=True,
+            cohort_fan_out_global_timeout=budget_state.cohort_fan_out_global_timeout,
+        )
         briefing = Briefing(
-            relevant_context=briefing.relevant_context,
-            filtered_context=briefing.filtered_context,
-            decided_action=briefing.decided_action,
-            presence_directive=briefing.presence_directive,
+            relevant_context=(),
+            filtered_context=(),
+            decided_action=decided_action,
+            presence_directive=presence_directive,
             audit_trace=AuditTrace(
                 cohort_outputs=cohort_refs,
                 tools_called_during_prep=tuple(tools_called),
                 iterations_used=iterations,
-                budget_state=budget_state,
+                budget_state=safety_budget,
                 fail_soft_engaged=True,
                 phase_durations_ms=dict(phase_durations_ms),
-                notes=notes,
+                notes=f"safety-degraded defer: {notes}",
             ),
-            turn_id=briefing.turn_id,
-            integration_run_id=briefing.integration_run_id,
+            turn_id=inputs.turn_id,
+            integration_run_id=inputs.integration_run_id,
             cognitive_context=inputs.cognitive_context,
-            # Fold 6 — turn-context identifiers
             instance_id=inputs.instance_id,
             member_id=inputs.member_id,
             space_id=inputs.space_id,
         )
-        await self._emit_audit(briefing, success=False, error=error or notes)
+        await self._emit_audit(
+            briefing, success=False, error=error or notes,
+        )
+        return briefing
+
+    async def _emit_attempt_audit(
+        self,
+        *,
+        inputs: IntegrationInputs,
+        cohort_refs: tuple[str, ...],
+        attempt: int,
+        failure: IntegrationAttemptFailed,
+    ) -> None:
+        """Emit an ``integration.retry`` audit record per failed attempt.
+
+        Distinguished from ``integration.briefing`` so operators can
+        scan the audit trail and immediately see retry events. Each
+        retry's component, reason, and per-iteration durations are
+        captured for post-mortem.
+        """
+        try:
+            await self._audit_emitter(
+                {
+                    "audit_category": "integration.retry",
+                    "turn_id": inputs.turn_id,
+                    "integration_run_id": inputs.integration_run_id,
+                    "instance_id": inputs.instance_id,
+                    "member_id": inputs.member_id,
+                    "space_id": inputs.space_id,
+                    "attempt": attempt,
+                    "max_retries": self._config.max_retries,
+                    "component": failure.component,
+                    "reason": failure.reason,
+                    "iterations": failure.iterations,
+                    "tools_called": list(failure.tools_called),
+                    "phase_durations_ms": dict(failure.phase_durations_ms),
+                    "cohort_outputs": list(cohort_refs),
+                    "success": False,
+                    "error": (
+                        f"{failure.component}: {failure.reason}"
+                    ),
+                }
+            )
+        except Exception:  # pragma: no cover
+            logger.exception("integration.retry audit emit failed")
+
+    async def _emit_system_error(
+        self,
+        *,
+        inputs: IntegrationInputs,
+        cohort_refs: tuple[str, ...],
+        attempts: int,
+        last_failure: IntegrationAttemptFailed,
+    ) -> Briefing:
+        """All retry attempts exhausted. Emit a hard system-error
+        briefing whose directive instructs presence to surface the
+        failure transparently — no apology fallback, no pretending to
+        answer the user's question.
+
+        Replaces the prior ``minimal_fail_soft_briefing`` codepath.
+        Architectural shift (PHASE-1-WIPE-VERIFICATION 2026-05-07,
+        founder direction): "I want to fix the failure, not just
+        improve the shape of the failing." Loud, attributable,
+        actionable for the operator.
+        """
+        from kernos.kernel.integration.briefing import system_error_briefing
+
+        briefing = system_error_briefing(
+            turn_id=inputs.turn_id,
+            integration_run_id=inputs.integration_run_id,
+            attempts=attempts,
+            component=last_failure.component,
+            reason=last_failure.reason,
+            cohort_refs=cohort_refs,
+            tools_called=last_failure.tools_called,
+            iterations=last_failure.iterations,
+            phase_durations_ms=last_failure.phase_durations_ms,
+            budget_state=last_failure.budget_state,
+            cognitive_context=inputs.cognitive_context,
+            instance_id=inputs.instance_id,
+            member_id=inputs.member_id,
+            space_id=inputs.space_id,
+        )
+        await self._emit_audit(
+            briefing,
+            success=False,
+            error=(
+                f"system-error after {attempts} attempts; "
+                f"{last_failure.component}: {last_failure.reason}"
+            ),
+        )
         return briefing
 
     async def _emit_audit(
