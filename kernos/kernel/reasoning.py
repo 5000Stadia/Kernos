@@ -1231,10 +1231,17 @@ class ReasoningService:
         )
         try:
             if tool_name == "request_reference":
-                result = await service.handle_request_reference(
-                    ctx=ctx,
-                    brief_request=tool_input.get("brief_request", ""),
-                )
+                # Defaulted on the service side; passing the agent
+                # value through when present so callers can opt into
+                # higher fan-out for multi-topic briefs.
+                _max_targets = tool_input.get("max_targets")
+                _kwargs: dict[str, Any] = {
+                    "ctx": ctx,
+                    "brief_request": tool_input.get("brief_request", ""),
+                }
+                if isinstance(_max_targets, int):
+                    _kwargs["max_targets"] = _max_targets
+                result = await service.handle_request_reference(**_kwargs)
             elif tool_name == "store_reference":
                 result = await service.handle_store_reference(
                     ctx=ctx,

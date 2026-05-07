@@ -788,3 +788,222 @@ async def test_request_reference_collection_returns_map_not_inject(
     assert result["purpose"] == "Vendor X API documentation"
     assert result["member_file_count"] == 3
     assert "content" not in result  # no inject; this is a map.
+
+
+# ---------------------------------------------------------------------------
+# Multi-target retrieval (LEVER 1, 2026-05-07)
+# ---------------------------------------------------------------------------
+
+
+async def test_request_reference_multi_target_returns_k_entries(service_setup):
+    """Lever 1 architectural shift: one navigator LLM call returns up
+    to K entries instead of one. Cuts wall-time on multi-topic briefs
+    by amortizing the navigator's 5-17s call across K picks instead
+    of K sequential calls.
+    """
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+
+    # Three on-disk file entries for distinct sections.
+    fp1 = tmp_path / "doc_a.md"
+    fp1.write_text("## Cohorts\n\nCohorts run.\n", encoding="utf-8")
+    fp2 = tmp_path / "doc_b.md"
+    fp2.write_text("## Domains\n\nDomains scope.\n", encoding="utf-8")
+    fp3 = tmp_path / "doc_c.md"
+    fp3.write_text("## Members\n\nMembers participate.\n", encoding="utf-8")
+
+    entries = []
+    for i, (fp, eid, title, oneline) in enumerate([
+        (fp1, "ref_a", "Cohorts overview", "Cohorts run during a turn"),
+        (fp2, "ref_b", "Domain scoping", "Domains scope visibility"),
+        (fp3, "ref_c", "Members", "Members participate in spaces"),
+    ]):
+        entries.append(CatalogEntry(
+            entry_id=eid,
+            instance_id="inst1",
+            entry_type=ENTRY_TYPE_FILE,
+            scope=SCOPE_INSTANCE,
+            category="architecture",
+            indexed_at="2026-05-07T00:00:00+00:00",
+            trust_tier=TRUST_CANONICAL,
+            file_path=str(fp),
+            section_title=title,
+            one_line=oneline,
+            line_start=1,
+            line_end=3,
+            source_hash=compute_source_hash(fp.read_bytes()),
+        ))
+    for e in entries:
+        await catalog.replace_file_entries(
+            instance_id="inst1", file_path=e.file_path, new_entries=[e],
+        )
+
+    # Navigator returns three entry_ids — one per line, ranked.
+    nav.next_response = "ref_a\nref_b\nref_c"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    result = await service.handle_request_reference(
+        ctx=ctx,
+        brief_request="cohorts and domains and members",
+        max_targets=3,
+    )
+
+    assert result["status"] == "ok"
+    # Multi-target: entries list carries all three picks, ranked.
+    entries_out = result["entries"]
+    assert len(entries_out) == 3
+    assert [e["entry_id"] for e in entries_out] == ["ref_a", "ref_b", "ref_c"]
+    # Each entry has full content (file-level entries are injected).
+    assert all(e["status"] == "ok" for e in entries_out)
+    assert "Cohorts" in entries_out[0]["content"]
+    assert "Domains" in entries_out[1]["content"]
+    assert "Members" in entries_out[2]["content"]
+    # Top-level convenience fields mirror entries[0] for back-compat.
+    assert result["entry_id"] == "ref_a"
+    # Single LLM call regardless of K.
+    assert len(nav.calls) == 1
+
+
+async def test_request_reference_max_targets_clamped(service_setup):
+    """max_targets is clamped to [1, hard_cap]; values outside the
+    range are silently coerced rather than rejecting the call.
+    """
+    from kernos.kernel.reference.tools import (
+        _REQUEST_REFERENCE_MAX_TARGETS_HARD_CAP,
+    )
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+
+    fp = tmp_path / "doc.md"
+    fp.write_text("## Section\n\nbody\n", encoding="utf-8")
+    entry = CatalogEntry(
+        entry_id="ref_one",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=SCOPE_INSTANCE,
+        category="architecture",
+        indexed_at="2026-05-07T00:00:00+00:00",
+        trust_tier=TRUST_CANONICAL,
+        file_path=str(fp),
+        section_title="Section",
+        one_line="oneline",
+        line_start=1,
+        line_end=3,
+        source_hash=compute_source_hash(fp.read_bytes()),
+    )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp), new_entries=[entry],
+    )
+    nav.next_response = "ref_one"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    # max_targets=999 → clamped to hard cap; navigator prompt should
+    # ask for hard-cap targets, not 999.
+    await service.handle_request_reference(
+        ctx=ctx, brief_request="x", max_targets=999,
+    )
+    assert (
+        f"UP TO {_REQUEST_REFERENCE_MAX_TARGETS_HARD_CAP} matching"
+        in nav.calls[-1]
+    )
+
+    # max_targets=0 → clamped to 1; navigator prompt asks for 1.
+    nav.calls.clear()
+    nav.next_response = "ref_one"
+    await service.handle_request_reference(
+        ctx=ctx, brief_request="x", max_targets=0,
+    )
+    assert "UP TO 1 matching" in nav.calls[-1]
+
+
+async def test_request_reference_navigator_dedupes_and_caps(service_setup):
+    """If the navigator over-returns or duplicates entry_ids, the
+    runner dedupes (preserving rank order) and caps at max_targets.
+    """
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+
+    fp = tmp_path / "doc.md"
+    fp.write_text("## A\n\nbody-a\n", encoding="utf-8")
+    fp2 = tmp_path / "doc2.md"
+    fp2.write_text("## B\n\nbody-b\n", encoding="utf-8")
+    e1 = CatalogEntry(
+        entry_id="ref_alpha",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=SCOPE_INSTANCE,
+        category="architecture",
+        indexed_at="2026-05-07T00:00:00+00:00",
+        trust_tier=TRUST_CANONICAL,
+        file_path=str(fp),
+        section_title="A",
+        one_line="alpha line",
+        line_start=1, line_end=3,
+        source_hash=compute_source_hash(fp.read_bytes()),
+    )
+    e2 = CatalogEntry(
+        entry_id="ref_beta",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=SCOPE_INSTANCE,
+        category="architecture",
+        indexed_at="2026-05-07T00:00:00+00:00",
+        trust_tier=TRUST_CANONICAL,
+        file_path=str(fp2),
+        section_title="B",
+        one_line="beta line",
+        line_start=1, line_end=3,
+        source_hash=compute_source_hash(fp2.read_bytes()),
+    )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp), new_entries=[e1],
+    )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp2), new_entries=[e2],
+    )
+
+    # Navigator returns dups and over-returns: alpha twice, then beta,
+    # then would-be third pick (which we'd also dedupe down).
+    nav.next_response = "ref_alpha\nref_alpha\nref_beta\nref_alpha"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    result = await service.handle_request_reference(
+        ctx=ctx, brief_request="anything", max_targets=3,
+    )
+    # Dedup preserves rank order; caps at 2 distinct entries.
+    assert [e["entry_id"] for e in result["entries"]] == [
+        "ref_alpha", "ref_beta",
+    ]
+
+
+async def test_request_reference_default_max_targets_is_three(service_setup):
+    """The default max_targets surfaces in the navigator prompt as
+    'UP TO 3 matching entries'."""
+    service, catalog, cohort, nav, refs_root, tmp_path = service_setup
+    fp = tmp_path / "doc.md"
+    fp.write_text("## X\n\nbody\n", encoding="utf-8")
+    entry = CatalogEntry(
+        entry_id="ref_x",
+        instance_id="inst1",
+        entry_type=ENTRY_TYPE_FILE,
+        scope=SCOPE_INSTANCE,
+        category="architecture",
+        indexed_at="2026-05-07T00:00:00+00:00",
+        trust_tier=TRUST_CANONICAL,
+        file_path=str(fp),
+        section_title="X",
+        one_line="x",
+        line_start=1, line_end=3,
+        source_hash=compute_source_hash(fp.read_bytes()),
+    )
+    await catalog.replace_file_entries(
+        instance_id="inst1", file_path=str(fp), new_entries=[entry],
+    )
+    nav.next_response = "ref_x"
+    ctx = ReferenceServiceContext(
+        instance_id="inst1", domain_id="space-A", member_id="m1",
+    )
+    await service.handle_request_reference(
+        ctx=ctx, brief_request="x",
+    )  # no max_targets — uses default
+    assert "UP TO 3 matching" in nav.calls[-1]

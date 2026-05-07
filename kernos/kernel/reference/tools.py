@@ -77,8 +77,8 @@ REQUEST_REFERENCE_TOOL = {
         "Ask for canonical Kernos documentation or domain-stored reference "
         "material. Provide a brief natural-language description of what you "
         "want to know. The reference cohort navigates the catalog and "
-        "delivers the matching section content. Examples: "
-        "'how does the gate decide what's destructive', "
+        "delivers up to ``max_targets`` matching sections in one call. "
+        "Examples: 'how does the gate decide what's destructive', "
         "'authentication for the test vendor API'."
     ),
     "input_schema": {
@@ -89,6 +89,18 @@ REQUEST_REFERENCE_TOOL = {
                 "description": (
                     "Natural-language description of what you want to know. "
                     "Specific is better than vague."
+                ),
+            },
+            "max_targets": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 3,
+                "description": (
+                    "Maximum number of distinct catalog entries to return "
+                    "in this single call. Default 3 (good balance for most "
+                    "questions). Use higher when the brief spans several "
+                    "related topics; use 1 to force a single best pick."
                 ),
             },
         },
@@ -321,18 +333,29 @@ class ReferenceNavigatorLLM(Protocol):
 
 _NAVIGATOR_PROMPT_TEMPLATE = """\
 You are the reference cohort. The agent asked for reference material.
-Pick the SINGLE BEST matching entry from the catalog. Return ONLY
-the entry_id. If nothing matches well, return NONE.
+Pick UP TO {max_targets} matching entries from the catalog, ranked by
+relevance to the brief (best first). Each entry should add distinct
+value — don't return near-duplicates. Return ONLY the entry_ids, one
+per line. If nothing matches well, return NONE.
 
 Brief: {brief}
 
 Catalog:
 {catalog_listing}
 
-Reply with one line: either an entry_id (e.g. ref_abc123) or NONE."""
+Reply with one entry_id per line (e.g. ref_abc123), most relevant
+first, OR a single line "NONE" if no entries match well."""
 
 
 _ENTRY_ID_RE = re.compile(r"\bref_[A-Za-z0-9_]+\b")
+
+# Cap on how many entries one navigator call can resolve. Higher
+# values stretch the navigator's output budget and risk lower-quality
+# picks crowding out the best match. Lower values defeat the
+# multi-target purpose. 5 leaves headroom while preserving navigator
+# focus.
+_REQUEST_REFERENCE_MAX_TARGETS_HARD_CAP = 5
+_REQUEST_REFERENCE_MAX_TARGETS_DEFAULT = 3
 
 
 # REFERENCE-INJECTION-FIX (2026-05-07): bound the navigator's catalog
@@ -408,12 +431,21 @@ class ReferenceService:
         *,
         ctx: ReferenceServiceContext,
         brief_request: str,
+        max_targets: int = _REQUEST_REFERENCE_MAX_TARGETS_DEFAULT,
     ) -> dict[str, Any]:
         if not brief_request or not brief_request.strip():
             return {
                 "status": "error",
                 "error": "brief_request is required.",
             }
+
+        # Clamp max_targets defensively — agents could send wild
+        # values via the tool schema. Floor at 1 so multi-target
+        # falling to 0 doesn't silently produce empty results.
+        if max_targets < 1:
+            max_targets = 1
+        if max_targets > _REQUEST_REFERENCE_MAX_TARGETS_HARD_CAP:
+            max_targets = _REQUEST_REFERENCE_MAX_TARGETS_HARD_CAP
 
         rows = await self._catalog.list_visible(
             instance_id=self._instance_id,
@@ -434,7 +466,9 @@ class ReferenceService:
         navigator_rows = _prefilter_for_navigator(brief_request, rows)
         listing = self._render_catalog_listing(navigator_rows)
         prompt = _NAVIGATOR_PROMPT_TEMPLATE.format(
-            brief=brief_request.strip(), catalog_listing=listing,
+            brief=brief_request.strip(),
+            catalog_listing=listing,
+            max_targets=max_targets,
         )
         try:
             raw = await self._navigator.complete(prompt)
@@ -444,8 +478,22 @@ class ReferenceService:
                 "status": "error",
                 "error": f"Navigator LLM failed: {type(exc).__name__}: {exc}",
             }
-        match = _ENTRY_ID_RE.search(raw or "")
-        if not match:
+        # Multi-target: extract ALL entry_ids the navigator returned,
+        # preserving order (first = best ranked). De-duplicate while
+        # preserving order so the navigator's ranking holds. Cap at
+        # max_targets in case the navigator over-returns.
+        raw_matches = _ENTRY_ID_RE.findall(raw or "")
+        seen: set[str] = set()
+        ordered_ids: list[str] = []
+        for eid in raw_matches:
+            if eid in seen:
+                continue
+            seen.add(eid)
+            ordered_ids.append(eid)
+            if len(ordered_ids) >= max_targets:
+                break
+
+        if not ordered_ids:
             # Discoverability fallback (DOCS-AUDIT-RECOVERY #1):
             # navigator returned NONE — surface up to N candidate
             # rows from the visible catalog scored by mechanical
@@ -462,65 +510,85 @@ class ReferenceService:
                 "navigator_response": (raw or "").strip(),
                 "candidates": _candidate_list(brief_request, rows),
             }
-        entry_id = match.group(0)
-        # Visibility re-check: the cohort can only return entry_ids
-        # from the listing it was given (which is already domain-
-        # filtered). Defense-in-depth: re-verify visibility before
-        # injecting.
-        chosen = next((r for r in rows if r.entry_id == entry_id), None)
-        if chosen is None:
+
+        # Visibility re-check + entry-type fan-out per pick.
+        # Collections surface as a map (no content injection); file
+        # entries inject content. Build entries list in rank order.
+        rows_by_id = {r.entry_id: r for r in rows}
+        entries_out: list[dict[str, Any]] = []
+        for entry_id in ordered_ids:
+            chosen = rows_by_id.get(entry_id)
+            if chosen is None:
+                # Defense-in-depth: navigator picked an id not in the
+                # visible catalog. Skip rather than fail the whole
+                # call — the other picks may still be valid.
+                continue
+            if chosen.entry_type == "collection":
+                entries_out.append({
+                    "status": "ok_collection",
+                    "entry_id": chosen.entry_id,
+                    "collection_name": chosen.collection_name,
+                    "purpose": chosen.purpose,
+                    "trust_tier": chosen.trust_tier,
+                    "refresh_policy": chosen.refresh_policy,
+                    "member_file_count": chosen.member_file_count,
+                    "member_file_paths": list(chosen.member_file_paths),
+                    "message": (
+                        "Collection map surfaced. Use a more specific "
+                        "brief to target a member file."
+                    ),
+                })
+                continue
+            result = await inject_entry(
+                entry_id=entry_id,
+                catalog=self._catalog,
+                emitter=self._emitter,
+                cohort=self._cohort,
+                instance_id=self._instance_id,
+            )
+            if not result.success:
+                entries_out.append({
+                    "status": "unavailable",
+                    "fail_reason": result.fail_reason,
+                    "message": result.content,
+                    "entry_id": entry_id,
+                })
+                continue
+            entries_out.append({
+                "status": "ok",
+                "entry_id": result.entry_id,
+                "section_title": result.section_title,
+                "file_path": result.file_path,
+                "line_start": result.line_start,
+                "line_end": result.line_end,
+                "trust_tier": result.trust_tier,
+                "provenance_annotation": result.provenance_annotation,
+                "content": result.content,
+            })
+
+        if not entries_out:
+            # Every navigator pick was filtered out (visibility, etc.).
+            # Same fallback as the no-match path so the agent gets
+            # actionable candidates.
             return {
                 "status": "no_match",
                 "message": (
-                    "Navigator chose an entry not in the visible "
-                    "catalog. Closest candidates listed below."
+                    "Navigator picks were not in the visible catalog. "
+                    "Closest candidates listed below."
                 ),
                 "candidates": _candidate_list(brief_request, rows),
             }
-        # Collection-level entries surface as a map (purpose +
-        # member-file count), NOT injected file content. The
-        # injection path operates on file-level entries; collection
-        # entries don't carry a (file_path, line_range) — they are
-        # metadata pointers to a directory of files.
-        if chosen.entry_type == "collection":
-            return {
-                "status": "ok_collection",
-                "entry_id": chosen.entry_id,
-                "collection_name": chosen.collection_name,
-                "purpose": chosen.purpose,
-                "trust_tier": chosen.trust_tier,
-                "refresh_policy": chosen.refresh_policy,
-                "member_file_count": chosen.member_file_count,
-                "member_file_paths": list(chosen.member_file_paths),
-                "message": (
-                    "Collection map surfaced. Use a more specific brief "
-                    "to target a member file."
-                ),
-            }
-        result = await inject_entry(
-            entry_id=entry_id,
-            catalog=self._catalog,
-            emitter=self._emitter,
-            cohort=self._cohort,
-            instance_id=self._instance_id,
-        )
-        if not result.success:
-            return {
-                "status": "unavailable",
-                "fail_reason": result.fail_reason,
-                "message": result.content,
-                "entry_id": entry_id,
-            }
+
+        # Top-level shape: aggregate status + entries list. Top-level
+        # convenience fields mirror entries[0] so existing callers /
+        # tests asserting on the primary pick keep working without
+        # forcing them to navigate the list shape. Multi-target callers
+        # iterate ``entries``.
+        primary = entries_out[0]
         return {
-            "status": "ok",
-            "entry_id": result.entry_id,
-            "section_title": result.section_title,
-            "file_path": result.file_path,
-            "line_start": result.line_start,
-            "line_end": result.line_end,
-            "trust_tier": result.trust_tier,
-            "provenance_annotation": result.provenance_annotation,
-            "content": result.content,
+            "status": primary.get("status", "ok"),
+            "entries": entries_out,
+            **{k: v for k, v in primary.items() if k != "status"},
         }
 
     def _render_catalog_listing(self, rows: list[CatalogEntry]) -> str:
