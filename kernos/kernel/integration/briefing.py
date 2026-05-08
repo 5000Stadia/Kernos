@@ -1093,6 +1093,204 @@ class BudgetState:
 
 
 # ---------------------------------------------------------------------------
+# ActionStateRecord (RESPONSE-FIDELITY-V1 Batch 1)
+# ---------------------------------------------------------------------------
+
+
+# Vocabulary for ActionStateRecord categorical fields. Defined here so
+# validators can check membership; downstream consumers use the same
+# constants instead of stringly-typed literals.
+ACTION_OPERATION_CLASSES: frozenset[str] = frozenset({
+    "read", "propose", "mutate", "delete",
+    "send", "schedule", "register", "manage",
+})
+ACTION_AUTHORIZATION_STATES: frozenset[str] = frozenset({
+    "requested", "confirmed", "denied", "not_required",
+})
+ACTION_EXECUTION_STATES: frozenset[str] = frozenset({
+    "not_attempted", "attempted", "completed",
+    "partial", "blocked", "failed", "unknown",
+})
+ACTION_RISK_LEVELS: frozenset[str] = frozenset({"low", "medium", "high"})
+ACTION_EVIDENCE_CLASSES: frozenset[str] = frozenset({
+    "", "search_hit", "page_read", "memory_entry",
+    "inferred", "missing", "unverified",
+})
+
+
+@dataclass(frozen=True)
+class ActionStateRecord:
+    """Substrate-authoritative record of an action surface event.
+
+    RESPONSE-FIDELITY-V1 Batch 1 (2026-05-08): the structured envelope
+    that bridges substrate truth and renderer language. Replaces the
+    previous shape where the directive was free-form prose all the way
+    down — now the renderer has a machine-readable record per action,
+    and Phase 2 fix-shapes (render rules, fail-closed scope, evidence-
+    class discipline) operate on this record rather than on prose.
+
+    This batch lands the schema. Renderer consumes it but doesn't yet
+    enforce render rules — that's Batch 2's canary work on channel
+    send. Per the no-migration discipline: existing surfaces continue
+    to work as before; new ``note_this`` primitive is the first
+    consumer that exercises the schema.
+
+    Field reference (from RESPONSE-FIDELITY-V1 spec Section "Proposed
+    schema"):
+      * ``action_id`` — unique identifier for this action surface event
+      * ``surface`` — calendar / file / channel / canvas / memory / ...
+      * ``operation`` — specific operation (e.g. ``schedule_event``,
+        ``note_this``)
+      * ``operation_class`` — read / propose / mutate / delete / send /
+        schedule / register / manage
+      * ``authorization_state`` — requested / confirmed / denied /
+        not_required
+      * ``execution_state`` — not_attempted / attempted / completed /
+        partial / blocked / failed / unknown
+      * ``receipt_refs`` — list of tool result references that ground
+        the claim (e.g. ``"<tool_name>:iter<N>"``)
+      * ``affected_objects`` — substrate object IDs this action touched
+        (e.g. ``"know_abc123"``, ``"pref_def456"``)
+      * ``partial_state`` — for partial execution, structured breakdown
+        of what completed / failed / pending; None when not partial
+      * ``user_visible_summary`` — substrate-authoritative summary;
+        renderer translates into natural language without upgrading
+        the underlying state
+      * ``risk_level`` — fail-closed scope flag (Batch 2 consumes this)
+      * ``evidence_class`` — for read paths: search_hit / page_read /
+        memory_entry / inferred / missing / unverified; empty for
+        write/mutate operations
+      * ``missing_metadata`` — True when the substrate couldn't fully
+        populate the record (graceful degradation flag for Batch 2)
+    """
+
+    action_id: str
+    surface: str
+    operation: str
+    operation_class: str
+    authorization_state: str
+    execution_state: str
+    receipt_refs: tuple[str, ...] = ()
+    affected_objects: tuple[str, ...] = ()
+    partial_state: dict | None = None
+    user_visible_summary: str = ""
+    risk_level: str = "low"
+    evidence_class: str = ""
+    missing_metadata: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.action_id, str) or not self.action_id.strip():
+            raise BriefingValidationError(
+                "ActionStateRecord.action_id must be a non-empty string"
+            )
+        if not isinstance(self.surface, str) or not self.surface.strip():
+            raise BriefingValidationError(
+                "ActionStateRecord.surface must be a non-empty string"
+            )
+        if not isinstance(self.operation, str) or not self.operation.strip():
+            raise BriefingValidationError(
+                "ActionStateRecord.operation must be a non-empty string"
+            )
+        if self.operation_class not in ACTION_OPERATION_CLASSES:
+            raise BriefingValidationError(
+                f"ActionStateRecord.operation_class must be one of "
+                f"{sorted(ACTION_OPERATION_CLASSES)}; "
+                f"got {self.operation_class!r}"
+            )
+        if self.authorization_state not in ACTION_AUTHORIZATION_STATES:
+            raise BriefingValidationError(
+                f"ActionStateRecord.authorization_state must be one of "
+                f"{sorted(ACTION_AUTHORIZATION_STATES)}; "
+                f"got {self.authorization_state!r}"
+            )
+        if self.execution_state not in ACTION_EXECUTION_STATES:
+            raise BriefingValidationError(
+                f"ActionStateRecord.execution_state must be one of "
+                f"{sorted(ACTION_EXECUTION_STATES)}; "
+                f"got {self.execution_state!r}"
+            )
+        if self.risk_level not in ACTION_RISK_LEVELS:
+            raise BriefingValidationError(
+                f"ActionStateRecord.risk_level must be one of "
+                f"{sorted(ACTION_RISK_LEVELS)}; got {self.risk_level!r}"
+            )
+        if self.evidence_class not in ACTION_EVIDENCE_CLASSES:
+            raise BriefingValidationError(
+                f"ActionStateRecord.evidence_class must be one of "
+                f"{sorted(c for c in ACTION_EVIDENCE_CLASSES if c)} "
+                f"or empty; got {self.evidence_class!r}"
+            )
+        if self.partial_state is not None and not isinstance(self.partial_state, dict):
+            raise BriefingValidationError(
+                f"ActionStateRecord.partial_state must be None or a "
+                f"dict; got {type(self.partial_state).__name__}"
+            )
+        for ref in self.receipt_refs:
+            if not isinstance(ref, str) or not ref.strip():
+                raise BriefingValidationError(
+                    "ActionStateRecord.receipt_refs entries must be "
+                    "non-empty strings"
+                )
+        for obj in self.affected_objects:
+            if not isinstance(obj, str) or not obj.strip():
+                raise BriefingValidationError(
+                    "ActionStateRecord.affected_objects entries must be "
+                    "non-empty strings"
+                )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action_id": self.action_id,
+            "surface": self.surface,
+            "operation": self.operation,
+            "operation_class": self.operation_class,
+            "authorization_state": self.authorization_state,
+            "execution_state": self.execution_state,
+            "receipt_refs": list(self.receipt_refs),
+            "affected_objects": list(self.affected_objects),
+            "partial_state": (
+                dict(self.partial_state)
+                if self.partial_state is not None
+                else None
+            ),
+            "user_visible_summary": self.user_visible_summary,
+            "risk_level": self.risk_level,
+            "evidence_class": self.evidence_class,
+            "missing_metadata": self.missing_metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ActionStateRecord":
+        if not isinstance(data, dict):
+            raise BriefingValidationError(
+                f"ActionStateRecord must deserialise from a dict; "
+                f"got {type(data).__name__}"
+            )
+        partial_state = data.get("partial_state")
+        return cls(
+            action_id=str(data.get("action_id", "")),
+            surface=str(data.get("surface", "")),
+            operation=str(data.get("operation", "")),
+            operation_class=str(data.get("operation_class", "")),
+            authorization_state=str(data.get("authorization_state", "")),
+            execution_state=str(data.get("execution_state", "")),
+            receipt_refs=tuple(
+                str(r) for r in (data.get("receipt_refs") or [])
+            ),
+            affected_objects=tuple(
+                str(o) for o in (data.get("affected_objects") or [])
+            ),
+            partial_state=(
+                dict(partial_state) if partial_state is not None else None
+            ),
+            user_visible_summary=str(data.get("user_visible_summary", "")),
+            risk_level=str(data.get("risk_level", "low")),
+            evidence_class=str(data.get("evidence_class", "")),
+            missing_metadata=bool(data.get("missing_metadata", False)),
+        )
+
+
+# ---------------------------------------------------------------------------
 # AuditTrace
 # ---------------------------------------------------------------------------
 
@@ -1124,6 +1322,14 @@ class AuditTrace:
     # ``{"tool_name": str, "result": str}`` (serialized result). Empty
     # tuple when no successful tool dispatches happened.
     tool_results_during_prep: tuple[dict[str, str], ...] = ()
+    # RESPONSE-FIDELITY-V1 Batch 1 (2026-05-08): structured per-action
+    # records bridging substrate truth and renderer language. Each
+    # ActionStateRecord captures one action surface event with
+    # explicit execution_state, evidence_class, receipt_refs, and the
+    # other schema fields the renderer (Batch 2 onward) consumes for
+    # render rules and fail-closed scope decisions. Empty tuple when
+    # no action surfaces were touched this turn.
+    action_state_records: tuple[ActionStateRecord, ...] = ()
     iterations_used: int = 0
     budget_state: BudgetState = field(default_factory=BudgetState)
     fail_soft_engaged: bool = False
@@ -1158,6 +1364,13 @@ class AuditTrace:
                 raise BriefingValidationError(
                     "AuditTrace.tool_results_during_prep entries must "
                     "carry a string result"
+                )
+        for record in self.action_state_records:
+            if not isinstance(record, ActionStateRecord):
+                raise BriefingValidationError(
+                    f"AuditTrace.action_state_records entries must be "
+                    f"ActionStateRecord instances; got "
+                    f"{type(record).__name__}"
                 )
         if (
             not isinstance(self.iterations_used, int)
@@ -1208,6 +1421,9 @@ class AuditTrace:
                 _audit_reference_for_tool_result(e)
                 for e in self.tool_results_during_prep
             ],
+            "action_state_records": [
+                r.to_dict() for r in self.action_state_records
+            ],
             "iterations_used": self.iterations_used,
             "budget_state": self.budget_state.to_dict(),
             "fail_soft_engaged": self.fail_soft_engaged,
@@ -1231,6 +1447,10 @@ class AuditTrace:
                 dict(e) for e in (
                     data.get("tool_results_during_prep", []) or []
                 )
+            ),
+            action_state_records=tuple(
+                ActionStateRecord.from_dict(r)
+                for r in (data.get("action_state_records") or [])
             ),
             iterations_used=int(data.get("iterations_used", 0)),
             budget_state=BudgetState.from_dict(
