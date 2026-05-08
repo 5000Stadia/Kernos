@@ -164,6 +164,11 @@ class TurnContext:
 
     # Post-turn trace (for friction observer)
     tool_calls_trace: list[dict] = field(default_factory=list)  # [{name, input, success}]
+    # RESPONSE-FIDELITY-V1 Batch 1.4 (2026-05-08): structured
+    # per-action records drained from ReasoningService at turn end.
+    # Populated alongside tool_calls_trace; consumed by phases/persist
+    # to format the "Action state this turn" conv-log block.
+    action_state_records: list = field(default_factory=list)
     pref_detected: bool = False  # Whether preference parser detected a preference this turn
 
     # Phase timing (ms) — populated by process() and _run_space_loop
@@ -4449,6 +4454,18 @@ class MessageHandler:
                             continue
                         primary_ctx.phase_timings["reason"] = int((time.monotonic() - _t0) * 1000)
 
+                        # RESPONSE-FIDELITY-V1 Batch 1.4 (2026-05-08):
+                        # drain BEFORE persist so the conv-log receipt
+                        # block has data to format. The drain previously
+                        # ran AFTER persist, leaving ctx.tool_calls_trace
+                        # empty during conv-log writes — silent no-op for
+                        # both the legacy "Tool effects" block and the
+                        # newer "Action state this turn" block. action
+                        # records draining co-locates here for the same
+                        # reason.
+                        primary_ctx.tool_calls_trace = self.reasoning.drain_tool_trace()
+                        primary_ctx.action_state_records = self.reasoning.drain_action_records()
+
                         _t0 = time.monotonic()
                         await self._phase_consequence(primary_ctx)
                         primary_ctx.phase_timings["consequence"] = int((time.monotonic() - _t0) * 1000)
@@ -4460,7 +4477,6 @@ class MessageHandler:
                         response = primary_ctx.response_text or ""
 
                         # Friction observer — async, non-blocking
-                        primary_ctx.tool_calls_trace = self.reasoning.drain_tool_trace()
                         asyncio.ensure_future(self._run_friction_observer(
                             primary_ctx, provider_errors=runner.provider_errors))
 

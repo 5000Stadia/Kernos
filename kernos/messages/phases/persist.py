@@ -18,51 +18,92 @@ logger = logging.getLogger(__name__)
 
 def _format_tool_receipts(
     tool_calls_trace: list[dict] | None,
+    action_state_records: list | None = None,
 ) -> str | None:
     """Format the per-turn tool trace into the conv-log receipt block.
 
     Returns the formatted block (string) or None when there's nothing
     worth persisting (no entries with usable name+preview).
 
-    RESPONSE-FIDELITY-V1 Batch 0 (2026-05-08): both successful and
-    failed entries are persisted, distinguished by an explicit status
-    marker (``succeeded`` / ``failed``). The next-turn agent reading
-    this block in conversation history can now reason about
-    attempted-and-failed records — closes cross-surface pattern C.7
-    from the Phase 1 audit ("absence of evidence is not evidence of
-    absence" failure mode the agent self-identified).
+    RESPONSE-FIDELITY-V1 Batch 1.4 (2026-05-08, G.7 shift): block
+    label became "Action state this turn" with structured per-record
+    fields drawn from ActionStateRecord when available. When no
+    ActionStateRecord matches a given tool_calls_trace entry (existing
+    surfaces still pre-migration), falls back to the Batch 0 format:
+    name + status marker + preview.
 
-    Format intentionally kept as plain prose with a per-line status
-    marker; the structured-per-record G.7 shift ("Tool effects this
-    turn" → "Action state this turn" with ActionStateRecord fields)
-    is Batch 1 work — Batch 0 just stops the filter from dropping
-    failures on the floor.
+    Per Batch 0: both successful and failed tool_calls_trace entries
+    persist, distinguished by ``state=completed`` / ``state=failed``
+    in the rendered line. Closes cross-surface pattern C.7 from the
+    Phase 1 audit ("absence of evidence is not evidence of absence"
+    failure mode the agent self-identified).
+
+    Per Batch 1.4: ActionStateRecords (currently only populated by
+    note_this; other surfaces migrate Batch 2+) get their structured
+    fields rendered explicitly: state, evidence_class (when set),
+    affected_objects, user_visible_summary. This gives the next-turn
+    agent receipt-grounded context to reason about, rather than just
+    a binary success flag and a truncated string preview.
     """
-    if not tool_calls_trace:
-        return None
-    receipts: list[str] = []
-    for tc in tool_calls_trace:
+    lines: list[str] = []
+
+    # First: render any tool_calls_trace entries. Match each to a
+    # corresponding ActionStateRecord by operation name; if matched,
+    # render the structured form, else fall back to the trace's
+    # binary success/preview shape.
+    records_by_op: dict[str, object] = {}
+    for rec in (action_state_records or []):
+        op = getattr(rec, "operation", "")
+        if op and op not in records_by_op:
+            records_by_op[op] = rec
+
+    for tc in (tool_calls_trace or []):
         name = tc.get("name", "")
         preview = (tc.get("result_preview") or "")[:150]
         if not name:
             continue
+        rec = records_by_op.pop(name, None)
+        if rec is not None:
+            # Structured render from the ActionStateRecord.
+            lines.append(_render_record_line(name, rec))
+            continue
+        # Fallback: legacy trace-only format.
         succeeded = bool(tc.get("success"))
-        # Successful entries require a preview to be worth persisting
-        # (legacy contract). Failed entries persist even with empty
-        # preview, since the fact of the attempt is itself signal —
-        # "we tried X and got nothing back" is meaningfully different
-        # from "we tried X and never tried." The status marker carries
-        # that distinction explicitly.
         if succeeded and not preview:
             continue
-        status = "succeeded" if succeeded else "failed"
+        status = "completed" if succeeded else "failed"
         if preview:
-            receipts.append(f"[{name}] {status}: {preview}")
+            lines.append(f"[{name}] state={status} | {preview}")
         else:
-            receipts.append(f"[{name}] {status}")
-    if not receipts:
+            lines.append(f"[{name}] state={status}")
+
+    # Second: render any ActionStateRecords that didn't have a
+    # matching tool_calls_trace entry (rare — would mean a record
+    # was populated outside the dispatcher path).
+    for op, rec in records_by_op.items():
+        lines.append(_render_record_line(op, rec))
+
+    if not lines:
         return None
-    return "Tool effects this turn:\n" + "\n".join(receipts)
+    return "Action state this turn:\n" + "\n".join(lines)
+
+
+def _render_record_line(name: str, rec: object) -> str:
+    """Render one ActionStateRecord into the per-line conv-log
+    format. Pulls the structured fields (state, affected_objects,
+    user_visible_summary, evidence_class) into a compact line."""
+    state = getattr(rec, "execution_state", "unknown")
+    summary = getattr(rec, "user_visible_summary", "")
+    affected = getattr(rec, "affected_objects", ())
+    evidence = getattr(rec, "evidence_class", "")
+    parts = [f"[{name}] state={state}"]
+    if affected:
+        parts.append(f"objects={','.join(affected)}")
+    if evidence:
+        parts.append(f"evidence={evidence}")
+    if summary:
+        parts.append(summary[:150])
+    return " | ".join(parts)
 
 
 async def run(ctx: PhaseContext) -> PhaseContext:
@@ -106,15 +147,18 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         speaker="assistant", channel=message.platform, content=ctx.response_text,
         member_id=ctx.member_id)
 
-    # Log tool receipts — effects in the world, not API calls.
-    # RESPONSE-FIDELITY-V1 Batch 0 (2026-05-08): persist failed-attempt
-    # entries alongside successful ones, distinguished by status marker.
-    # Closes cross-surface pattern C.7 from the Phase 1 audit — the
-    # next-turn agent now sees attempted-and-failed records, not just
-    # successes. The G.7 conv-log-shift ("Tool effects" → "Action state"
-    # with structured per-record fields) is Batch 1 work; this batch
-    # just stops dropping failed-attempt data on the floor.
-    receipt_text = _format_tool_receipts(ctx.tool_calls_trace)
+    # Log per-turn action state — effects in the world plus structured
+    # per-record metadata.
+    # RESPONSE-FIDELITY-V1 Batch 0 (2026-05-08): failed-attempt entries
+    # persist alongside successful ones (closes C.7 from the Phase 1
+    # audit). Batch 1.4 (2026-05-08, G.7 shift): block label is now
+    # "Action state this turn" with structured per-record fields drawn
+    # from ActionStateRecord when available; legacy fallback for
+    # surfaces not yet migrated to populate records (Batch 2 onward).
+    receipt_text = _format_tool_receipts(
+        ctx.tool_calls_trace,
+        getattr(ctx, "action_state_records", None),
+    )
     if receipt_text:
         await handler.conv_logger.append(
             instance_id=instance_id, space_id=ctx.active_space_id,
