@@ -636,32 +636,29 @@ def test_audit_trace_serializes_tool_results_as_references_only():
 
 
 @pytest.mark.asyncio
-async def test_redaction_invariant_includes_forwarded_tool_results():
-    """RECEIPT-FORWARD hardening (Codex review 2026-05-07): forwarded
-    tool results must pass the same redaction invariant as the
-    directive — a read tool that pulled restricted-cohort content
-    cannot bypass redaction by riding the forwarded-results channel.
+async def test_redaction_invariant_does_not_scan_forwarded_tool_results():
+    """REDACTION-SCOPE-REVERT (2026-05-08): tool_results forwarded to
+    the renderer are NOT scanned by the redaction invariant. They come
+    from the agent's own dispatched tools, scoped to the agent's
+    permissions, not from cohort content the integration model could
+    choose to quote. The substring guard firing on textual coincidence
+    between (e.g.) inspect_state output and a Restricted cohort's
+    payload was reading legitimate state-overlap as a leak.
+
+    Cross-member tool-result content protection is the tool's
+    dispatch-time responsibility (member-scoping in the tool itself),
+    not the runner's finalize-time substring scan.
     """
     from kernos.kernel.integration.briefing import (
         CohortOutput, Restricted,
     )
 
-    # 60+ char threshold for tool_result scanning (vs 12 for
-    # directive scanning) — short strings like filenames overlap
-    # restricted references incidentally rather than as leaks, so
-    # the substring guard ignores them. This snippet is well past
-    # the threshold so it still triggers as a real content leak.
-    secret = (
-        "contents-of-restricted-cohort-payload-"
-        "this-is-substantial-content-not-just-a-filename"
+    overlap = (
+        "this-substantial-string-appears-in-both-tool-result-"
+        "and-a-restricted-cohort-by-textual-coincidence"
     )
 
     async def chain(*_a, **_kw):
-        # Dispatch read tool whose result contains the secret, then
-        # finalize with a clean directive. Without the redaction
-        # extension, this would ship — directive itself doesn't
-        # quote the secret. With the extension, redaction sees the
-        # secret in tool_results and refuses the briefing.
         if not chain.calls:
             chain.calls += 1
             return _resp(
@@ -672,9 +669,7 @@ async def test_redaction_invariant_includes_forwarded_tool_results():
     chain.calls = 0
 
     async def dispatcher(*_a, **_kw):
-        # Tool result echoes the restricted payload — the leak surface
-        # the redaction invariant should now catch.
-        return {"text": secret}
+        return {"text": overlap}
 
     inputs = _make_inputs()
     inputs = IntegrationInputs(
@@ -684,7 +679,7 @@ async def test_redaction_invariant_includes_forwarded_tool_results():
             CohortOutput(
                 cohort_id="restricted_cohort",
                 cohort_run_id="cr-x",
-                output={"payload": secret},
+                output={"payload": overlap},
                 visibility=Restricted(reason="test"),
             ),
         ),
@@ -703,11 +698,10 @@ async def test_redaction_invariant_includes_forwarded_tool_results():
         config=IntegrationConfig(max_retries=1, max_iterations=5),
     )
     briefing = await runner.run(inputs)
-    # Briefing must surface a system error (briefing_validation
-    # failure from the redaction guard), not the clean
-    # _DEFAULT_BRIEFING_PAYLOAD that the model attempted to ship.
-    assert briefing.audit_trace.fail_soft_engaged is True
-    assert "briefing_validation" in briefing.presence_directive
+    # Briefing should ship cleanly — overlap in the tool result is NOT
+    # a redaction violation. Directive itself doesn't quote restricted
+    # content, so the guard correctly stays silent.
+    assert briefing.audit_trace.fail_soft_engaged is False
 
 
 def test_integration_config_default_max_iterations_is_checkpoint_cadence():

@@ -923,16 +923,22 @@ class IntegrationRunner:
         # CohortOutput. Integration is supposed to translate restricted
         # material into behavioral instruction; if it didn't, fail
         # rather than leak.
-        # INTEGRATION-RENDERER-RESULT-FORWARD hardening (2026-05-07):
-        # tool_results forwarded to the renderer must also pass the
-        # invariant — a read tool that pulled restricted/cross-space
-        # content cannot bypass redaction by riding through the
-        # forwarded-results channel.
+        #
+        # NOTE — earlier attempt (fd1d725 / f4671e6) extended this scan
+        # to forwarded tool_results. Reverted 2026-05-08 after repeated
+        # field false-positives: tool results come from the agent's own
+        # dispatched tools, scoped to the agent's permissions, and are
+        # not borrowed from a Restricted cohort. The substring guard
+        # firing on overlap between (e.g.) inspect_state output and a
+        # Restricted cohort's payload was reading textual coincidence
+        # as a leak. The right defense for "tools shouldn't return
+        # cross-member restricted content" is at the tool's dispatch
+        # boundary (member-scoping in the tool itself), not finalize-
+        # time substring scan.
         self._check_redaction_invariant(
             relevant=relevant,
             filtered=filtered,
             directive=directive,
-            tool_results=tool_results,
             cohort_outputs=inputs.cohort_outputs,
         )
 
@@ -992,75 +998,52 @@ class IntegrationRunner:
         relevant: tuple[ContextItem, ...],
         filtered: tuple[FilteredItem, ...],
         directive: str,
-        tool_results: list[dict[str, str]],
         cohort_outputs: tuple[CohortOutput, ...],
     ) -> None:
         """Refuse a briefing whose text quotes Restricted output content.
 
         The check is a substring scan — coarse but explicit. It guards
-        against the most direct leak path (model accidentally copying
-        a restricted cohort's payload string into a summary or
-        directive). Integration is the policy layer; the runner is
-        the enforcement layer of last resort.
+        against the most direct leak path (integration model
+        accidentally copying a restricted cohort's payload string into
+        a summary or directive). Integration is the policy layer; the
+        runner is the enforcement layer of last resort.
 
-        Includes ``tool_results`` (forwarded to the renderer via
-        ``AuditTrace.tool_results_during_prep``) — the renderer's
-        prompt embeds these verbatim, so they sit on the same leak
-        surface as the directive itself.
+        Scope: only model-authored text fields (relevant.summary,
+        filtered.reason_filtered, directive). Forwarded tool_results
+        are deliberately NOT scanned — they come from the agent's own
+        dispatched tools running in the agent's own scope, not from
+        cohort content the integration model could choose to quote.
+        Cross-member tool-result content protection is the tool's own
+        dispatch-time responsibility (member-scoping at the tool
+        boundary), not a finalize-time substring scan.
         """
-        # Two snippet-length thresholds:
-        #   * directive_payloads (>= 12 chars) — applies to the
-        #     model-authored summary/directive text, where any short
-        #     restricted-content fragment is suspect.
-        #   * tool_result_payloads (>= 60 chars) — applies to forwarded
-        #     tool results, which legitimately contain short structured
-        #     strings (filenames, slugs, ids) that often overlap with
-        #     restricted cohort references INCIDENTALLY rather than as
-        #     content leaks. Without the higher bar, list_files
-        #     returning ``kernos-architecture-audit.md`` would trip the
-        #     guard against any restricted cohort that referenced that
-        #     filename anywhere — a false positive that blocks
-        #     legitimate turns. 60-char content phrases are unmistakable
-        #     leaks; shorter overlaps are incidental.
-        directive_payloads: list[str] = []
-        tool_result_payloads: list[str] = []
+        restricted_payloads: list[str] = []
         for co in cohort_outputs:
             if not isinstance(co.visibility, Restricted):
                 continue
             for value in _flatten_strings(co.output):
                 stripped = value.strip()
+                # Skip very short tokens (false positive risk on
+                # common words). Restricted leak typically is a
+                # phrase from the secret payload, not a 4-letter word.
                 if len(stripped) >= 12:
-                    directive_payloads.append(stripped)
-                if len(stripped) >= 60:
-                    tool_result_payloads.append(stripped)
+                    restricted_payloads.append(stripped)
 
-        if not directive_payloads and not tool_result_payloads:
+        if not restricted_payloads:
             return
 
-        directive_text = " ".join(
+        combined_text = " ".join(
             [item.summary for item in relevant]
             + [item.reason_filtered for item in filtered]
             + [directive]
         )
-        tool_result_text = " ".join(
-            entry.get("result", "") for entry in tool_results
-        )
-
-        for snippet in directive_payloads:
-            if snippet in directive_text:
+        for snippet in restricted_payloads:
+            if snippet in combined_text:
                 raise BriefingValidationError(
                     "redaction invariant violated: briefing text contains "
                     "content from a Restricted CohortOutput. Integration "
                     "must translate restricted material into behavioral "
                     "instruction before populating briefing fields."
-                )
-        for snippet in tool_result_payloads:
-            if snippet in tool_result_text:
-                raise BriefingValidationError(
-                    "redaction invariant violated: forwarded tool result "
-                    "contains content from a Restricted CohortOutput. "
-                    "Integration must filter or translate restricted "
-                    "material before forwarding tool results to the renderer."
                 )
 
     async def _safety_degraded_defer(
