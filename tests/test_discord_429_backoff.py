@@ -17,6 +17,19 @@ from unittest.mock import MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_discord_pause_state():
+    """The cool-off state lives at module level on kernos.server.
+    Reset between tests so one test's 429 doesn't activate the
+    pause for the next test's helper call."""
+    import kernos.server as srv
+    srv._discord_pause_until = 0.0
+    srv._discord_429_streak = 0
+    yield
+    srv._discord_pause_until = 0.0
+    srv._discord_429_streak = 0
+
+
 def test_schedule_uses_exponential_minutes_to_hours():
     """Schedule reflects observed Cloudflare-flag recovery times:
     1m → 5m → 30m → 1h → 4h. Short retries compound the abuse;
@@ -226,6 +239,135 @@ async def test_send_safely_reraises_non_429():
     channel.send = AsyncMock(side_effect=err)
     with pytest.raises(discord.HTTPException):
         await _send_safely(channel, "hello")
+
+
+def test_pause_schedule_escalates():
+    """Cool-off schedule escalates: 5m → 30m → 2h → 6h. Subsequent
+    429 observations extend the pause."""
+    from kernos.server import _DISCORD_PAUSE_SCHEDULE_SEC
+    assert _DISCORD_PAUSE_SCHEDULE_SEC == [300, 1800, 7200, 21600]
+
+
+def test_register_429_activates_pause(monkeypatch):
+    """First _register_discord_429 sets _is_discord_paused True for
+    the schedule's first duration (5 min)."""
+    import kernos.server as srv
+
+    # Reset module state for a clean test.
+    monkeypatch.setattr(srv, "_discord_pause_until", 0.0, raising=False)
+    monkeypatch.setattr(srv, "_discord_429_streak", 0, raising=False)
+
+    assert srv._is_discord_paused() is False
+    srv._register_discord_429("test")
+    assert srv._is_discord_paused() is True
+    # Streak incremented from 0 → 1.
+    assert srv._discord_429_streak == 1
+
+
+def test_register_429_streak_escalates(monkeypatch):
+    """Consecutive 429s escalate through the schedule. After the last
+    entry the duration stays at the maximum (6h)."""
+    import kernos.server as srv
+
+    monkeypatch.setattr(srv, "_discord_pause_until", 0.0, raising=False)
+    monkeypatch.setattr(srv, "_discord_429_streak", 0, raising=False)
+
+    durations: list[int] = []
+    for _ in range(6):
+        srv._register_discord_429("test")
+        durations.append(srv._seconds_until_resume())
+
+    # Each call should pick a duration from the schedule, capped at
+    # the last entry once the streak exceeds schedule length.
+    expected = srv._DISCORD_PAUSE_SCHEDULE_SEC + [
+        srv._DISCORD_PAUSE_SCHEDULE_SEC[-1]
+    ] * 2
+    # Allow ±1s slop from time.time() between observations.
+    for got, exp in zip(durations, expected):
+        assert abs(got - exp) <= 2, f"got {got}, expected ~{exp}"
+
+
+def test_register_call_succeeded_resets_streak(monkeypatch):
+    """A successful Discord call resets the consecutive-429 streak
+    so the next 429 starts at the schedule's first duration again."""
+    import kernos.server as srv
+
+    monkeypatch.setattr(srv, "_discord_pause_until", 0.0, raising=False)
+    monkeypatch.setattr(srv, "_discord_429_streak", 3, raising=False)
+
+    srv._register_discord_call_succeeded()
+    assert srv._discord_429_streak == 0
+
+
+@pytest.mark.asyncio
+async def test_begin_typing_safely_skips_when_paused(monkeypatch):
+    """When the global cool-off is active, _begin_typing_safely
+    returns None WITHOUT calling channel.typing() — preventing
+    discord.py's internal 5x retry from firing."""
+    from unittest.mock import AsyncMock
+    import kernos.server as srv
+
+    # Activate pause state.
+    monkeypatch.setattr(
+        srv, "_discord_pause_until", _time_module.time() + 300.0,
+        raising=False,
+    )
+
+    channel = MagicMock()
+    channel.typing = MagicMock()
+    result = await srv._begin_typing_safely(channel)
+    assert result is None
+    channel.typing.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_safely_skips_when_paused(monkeypatch):
+    """When the global cool-off is active, _send_safely returns False
+    WITHOUT calling channel.send() and logs the response content for
+    operator recovery."""
+    from unittest.mock import AsyncMock
+    import kernos.server as srv
+
+    monkeypatch.setattr(
+        srv, "_discord_pause_until", _time_module.time() + 300.0,
+        raising=False,
+    )
+
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    result = await srv._send_safely(channel, "hello")
+    assert result is False
+    channel.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_typing_429_activates_pause(monkeypatch):
+    """A typing 429 activates the global cool-off so subsequent
+    on_message calls skip the API entirely."""
+    import discord
+    from unittest.mock import AsyncMock
+    import kernos.server as srv
+
+    monkeypatch.setattr(srv, "_discord_pause_until", 0.0, raising=False)
+    monkeypatch.setattr(srv, "_discord_429_streak", 0, raising=False)
+
+    err = discord.HTTPException.__new__(discord.HTTPException)
+    err.status = 429
+    err.code = 40062
+    err.text = "rate limited"
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(side_effect=err)
+    channel = MagicMock()
+    channel.typing = MagicMock(return_value=ctx)
+
+    result = await srv._begin_typing_safely(channel)
+    assert result is None
+    assert srv._is_discord_paused() is True
+    assert srv._discord_429_streak == 1
+
+
+import time as _time_module
 
 
 def test_wrapper_exhausts_schedule_then_raises(monkeypatch):

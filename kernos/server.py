@@ -1012,37 +1012,129 @@ _SEEN_MAX = 200
 # but Cloudflare-flagged tokens 429 on EVERY API call — including
 # typing indicators and message sends. discord.py's internal retry
 # loop hammers the endpoint 5 times at the Retry-After cadence
-# (typically 3s) then raises HTTPException, which previously killed
-# the turn entirely (see server.py:1030 pre-fix: typing's
-# __aenter__ raised, the broad except swallowed handler.process,
-# user got "Something went wrong" with nothing in the trace).
+# (typically 3s) then raises HTTPException.
 #
-# These helpers degrade gracefully:
-#   * _begin_typing_safely: typing is cosmetic. On 429, log + skip.
-#     handler.process still runs and the response is generated.
-#   * _send_safely: log the response_text fully so the operator has
-#     the full content from disk if Discord delivery fails. Returns
-#     False on 429 so the caller can stop chunking subsequent
-#     pieces (further sends to the same channel will also 429).
+# Two layers of defense:
+#
+# (1) Per-call helpers (_begin_typing_safely, _send_safely) catch
+#     HTTPException(429) escaping discord.py's internal retry and
+#     degrade gracefully — typing is cosmetic, send returns False.
+#
+# (2) Global cool-off (_discord_pause_until) prevents COMPOUNDING:
+#     once a 40062 is observed, ALL subsequent typing/send/reaction
+#     calls in the bot skip immediately for an escalating duration.
+#     This stops discord.py's internal 5x retry from firing on every
+#     subsequent user message — that retry loop is what was extending
+#     the abuse flag (~10 hits per inbound user message before the
+#     cool-off shipped).
+#
+# Cool-off escalates per consecutive 429-streak:
+#   1st 429 in session: 5 min pause
+#   2nd: 30 min
+#   3rd: 2 hours
+#   4th+: 6 hours (stays here)
+# A successful API call resets the streak to 0.
+#
+# Substrate (memory, conv-log, LLM calls) keeps working during pause —
+# only Discord delivery is suppressed.
+
+import time as _time_module
+
+_DISCORD_PAUSE_SCHEDULE_SEC: list[int] = [
+    int(os.getenv("KERNOS_DISCORD_PAUSE_1_SEC", "300")),    # 5 minutes
+    int(os.getenv("KERNOS_DISCORD_PAUSE_2_SEC", "1800")),   # 30 minutes
+    int(os.getenv("KERNOS_DISCORD_PAUSE_3_SEC", "7200")),   # 2 hours
+    int(os.getenv("KERNOS_DISCORD_PAUSE_4_SEC", "21600")),  # 6 hours
+]
+
+# Module-level cool-off state. _discord_pause_until is a Unix timestamp
+# (0 = not paused). _discord_429_streak counts consecutive 429
+# observations to escalate the schedule.
+_discord_pause_until: float = 0.0
+_discord_429_streak: int = 0
+
+
+def _is_discord_paused() -> bool:
+    """True when the bot should skip all Discord API calls."""
+    return _time_module.time() < _discord_pause_until
+
+
+def _seconds_until_resume() -> int:
+    return max(0, int(_discord_pause_until - _time_module.time()))
+
+
+def _register_discord_429(reason: str) -> None:
+    """Activate the global cool-off after observing a 429.
+
+    Escalates duration by streak count. Logs operator-readable
+    countdown so the surface matches the auth-path wrapper.
+    """
+    from datetime import datetime, timedelta
+    global _discord_pause_until, _discord_429_streak
+
+    idx = min(_discord_429_streak, len(_DISCORD_PAUSE_SCHEDULE_SEC) - 1)
+    duration = _DISCORD_PAUSE_SCHEDULE_SEC[idx]
+    _discord_pause_until = _time_module.time() + duration
+    _discord_429_streak += 1
+
+    human = _format_429_wait_duration(duration)
+    retry_at = datetime.now() + timedelta(seconds=duration)
+    print(
+        "\n" + "=" * 64 + "\n"
+        f"DISCORD COOL-OFF — pausing all bot Discord traffic for {human}\n"
+        + "=" * 64 + "\n"
+        f"Reason: {reason}\n"
+        f"Streak: {_discord_429_streak} consecutive 429 observation(s).\n"
+        f"Resuming at {retry_at.strftime('%H:%M:%S')}.\n\n"
+        f"Until then: typing / send / reaction calls skip immediately\n"
+        f"WITHOUT hitting Discord — no compounding the rate-limit flag.\n"
+        f"Substrate (memory, conv-log, LLM reasoning) keeps working;\n"
+        f"only Discord delivery is paused.\n\n"
+        f"Conv-log entries persist on disk so all activity is\n"
+        f"recoverable when the cool-off expires.\n",
+        file=sys.stderr, flush=True,
+    )
+    logger.warning(
+        "DISCORD_PAUSE_ACTIVATED: %s duration_s=%d streak=%d "
+        "resume_at=%s",
+        reason, duration, _discord_429_streak, retry_at.isoformat(),
+    )
+
+
+def _register_discord_call_succeeded() -> None:
+    """Reset the 429 streak after a successful Discord API call."""
+    global _discord_429_streak
+    if _discord_429_streak > 0:
+        logger.info(
+            "DISCORD_PAUSE_STREAK_RESET: %d → 0 (successful call)",
+            _discord_429_streak,
+        )
+        _discord_429_streak = 0
 
 
 async def _begin_typing_safely(channel) -> Any:
     """Open a typing indicator best-effort.
 
-    Returns the entered context manager on success. On HTTP 429,
-    logs the rate-limit (with code 40062 surfaced when present) and
-    returns None — the caller proceeds without a typing indicator.
-    Other exceptions re-raise.
+    Layer 1 — global cool-off check: if the bot is currently paused
+    after a recent 429, return None immediately WITHOUT making the
+    typing API call. discord.py's internal 5x retry never fires;
+    no compounding hits to a Cloudflare-flagged endpoint.
 
-    Why a custom context manager: discord.py's
-    ``async with channel.typing()`` enters by sending POST /typing.
-    If the bot is Cloudflare-flagged, that POST 429s and the
-    ``async with`` body never runs. Wrapping the enter call lets us
-    swallow the cosmetic failure without aborting the turn.
+    Layer 2 — per-call: if not paused, open the typing context
+    manager. On 429, register the streak (which activates the cool-
+    off for subsequent calls), log specifically, and return None.
+    Other exceptions re-raise.
     """
+    if _is_discord_paused():
+        logger.debug(
+            "DISCORD_TYPING_SKIPPED_PAUSED: %ds remaining",
+            _seconds_until_resume(),
+        )
+        return None
     try:
         ctx = channel.typing()
         await ctx.__aenter__()
+        _register_discord_call_succeeded()
         return ctx
     except discord.HTTPException as exc:
         if exc.status == 429:
@@ -1059,6 +1151,7 @@ async def _begin_typing_safely(channel) -> Any:
                 "animation is skipped.",
                 label,
             )
+            _register_discord_429(f"typing 429 ({label})")
             return None
         raise
 
@@ -1066,11 +1159,26 @@ async def _begin_typing_safely(channel) -> Any:
 async def _send_safely(channel, content: str) -> bool:
     """Send a message with 429 graceful degradation.
 
-    Returns True on success, False on rate-limit failure. The
-    caller checks the return to decide whether to keep chunking.
+    Returns True on success, False on rate-limit failure (including
+    the case where we're currently in the global cool-off and don't
+    even attempt the call). The caller checks the return to decide
+    whether to keep chunking.
     """
+    if _is_discord_paused():
+        # Skip without hitting Discord. Log the response content so
+        # operators can read it from the live terminal even though
+        # delivery is suppressed.
+        preview = content if len(content) <= 500 else content[:500] + "...(truncated)"
+        logger.warning(
+            "DISCORD_SEND_SKIPPED_PAUSED: %ds remaining — could not "
+            "deliver %d-char response. Conv-log on disk has full "
+            "content; live preview: %r",
+            _seconds_until_resume(), len(content), preview,
+        )
+        return False
     try:
         await channel.send(content)
+        _register_discord_call_succeeded()
         return True
     except discord.HTTPException as exc:
         if exc.status == 429:
@@ -1091,6 +1199,7 @@ async def _send_safely(channel, content: str) -> bool:
                 "disk; live preview: %r",
                 label, len(content), preview,
             )
+            _register_discord_429(f"send 429 ({label})")
             return False
         raise
 
