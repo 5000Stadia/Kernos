@@ -140,6 +140,7 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.external_agents.tool import CONSULT_TOOL
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
+    from kernos.kernel.note_this import NOTE_THIS_TOOL
     from kernos.kernel.relational_tools import (
         SEND_RELATIONAL_MESSAGE_TOOL,
         RESOLVE_RELATIONAL_MESSAGE_TOOL,
@@ -168,6 +169,9 @@ def _import_kernel_schemas() -> list[dict]:
         # Memory + retrieval
         REMEMBER_TOOL,
         REMEMBER_DETAILS_TOOL,
+        # RESPONSE-FIDELITY-V1 Batch 1.2: synchronous receipt-backed
+        # memory path (resolves G.1 from the Phase 1 audit).
+        NOTE_THIS_TOOL,
         # Awareness + capabilities
         DISMISS_WHISPER_TOOL,
         MANAGE_CAPABILITIES_TOOL,

@@ -286,6 +286,12 @@ class ReasoningService:
         self._turn_tool_trace: list[dict] = (
             trace_sink if trace_sink is not None else []
         )
+        # RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): per-turn collector
+        # for ActionStateRecords populated by tool handlers (currently
+        # only note_this; existing surfaces migrate in Batch 2 onward).
+        # Drained by the integration runner at finalize time and
+        # written into Briefing.audit_trace.action_state_records.
+        self._turn_action_records: list = []
         # Hybrid token counting: real input_tokens from last principal reasoning call per-instance
         self._last_real_input_tokens: dict[str, int] = {}  # instance_id → tokens
         # Pre-flight chain-skip support — lazily-loaded model registry
@@ -499,6 +505,21 @@ class ReasoningService:
         self._turn_tool_trace.clear()
         return trace
 
+    def drain_action_records(self) -> list:
+        """Return and clear the accumulated ActionStateRecords for
+        the current turn.
+
+        RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): mirrors
+        drain_tool_trace's contract. Tool handlers (currently only
+        note_this; existing surfaces migrate in Batch 2 onward) append
+        to the per-turn list; the integration runner drains at
+        finalize time and folds the records into
+        Briefing.audit_trace.action_state_records.
+        """
+        records = list(self._turn_action_records)
+        self._turn_action_records.clear()
+        return records
+
     def clear_loaded_tools(self, space_id: str) -> None:
         """Clear loaded tools for a space (session boundary)."""
         count = len(self._loaded_tools.pop(space_id, set()))
@@ -625,7 +646,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -934,6 +955,28 @@ class ReasoningService:
                         requesting_member_id=request.member_id,
                     )
                 return "Relational messaging is not available."
+            elif tool_name == "note_this":
+                # RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): synchronous
+                # receipt-backed memory path. Resolves G.1 ("I'll remember"
+                # without a substrate write). Appends an ActionStateRecord
+                # to the per-turn collector for the integration runner
+                # to fold into the briefing's audit trace at finalize time.
+                from kernos.kernel.note_this import handle_note_this
+                if self._state is None:
+                    return "Memory state store is not available."
+                summary, record = await handle_note_this(
+                    state=self._state,
+                    instance_id=request.instance_id,
+                    member_id=getattr(request, "member_id", "") or "",
+                    active_space_id=request.active_space_id,
+                    turn_id=getattr(request, "conversation_id", "") or "",
+                    kind=str(tool_input.get("kind", "")),
+                    content=str(tool_input.get("content", "")),
+                    subject=str(tool_input.get("subject", "")),
+                    category=str(tool_input.get("category", "")),
+                )
+                self._turn_action_records.append(record)
+                return summary
             elif tool_name == "remember":
                 if self._retrieval:
                     _idb = (
