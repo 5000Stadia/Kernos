@@ -1045,6 +1045,134 @@ async def on_message(message):
         await message.channel.send(chunk)
 
 
+# ---------------------------------------------------------------------------
+# Discord rate-limit smart-backoff wrapper
+# ---------------------------------------------------------------------------
+#
+# DISCORD-429-SMART-BACKOFF (2026-05-08): discord.py's internal 429 handling
+# honors the Retry-After header (typically 3 seconds for per-route limits).
+# For Cloudflare-level rate limits / abuse-flag 429s (Discord error code
+# 40062), the Retry-After is unreliable — the flag persists for
+# minutes-to-hours regardless of what the header says. Repeated 3-second
+# retries compound the abuse flag and extend the ban duration.
+#
+# This wrapper catches HTTPException(429) escaping discord.py's internal
+# retry loop, applies an exponential backoff schedule that reflects observed
+# abuse-flag recovery times, surfaces a specific duration to the operator
+# (not generic "try again later"), and auto-resumes — no manual restart
+# needed.
+#
+# Schedule is env-overridable via KERNOS_DISCORD_429_BACKOFF_*_SEC. After the
+# final attempt, the wrapper exits loud with rotation instructions.
+_DISCORD_429_BACKOFF_SCHEDULE: list[int] = [
+    int(os.getenv("KERNOS_DISCORD_429_BACKOFF_1_SEC", "60")),     # 1 minute
+    int(os.getenv("KERNOS_DISCORD_429_BACKOFF_2_SEC", "300")),    # 5 minutes
+    int(os.getenv("KERNOS_DISCORD_429_BACKOFF_3_SEC", "1800")),   # 30 minutes
+    int(os.getenv("KERNOS_DISCORD_429_BACKOFF_4_SEC", "3600")),   # 1 hour
+    int(os.getenv("KERNOS_DISCORD_429_BACKOFF_5_SEC", "14400")),  # 4 hours
+]
+
+
+def _format_429_wait_duration(seconds: int) -> str:
+    """Render a wait duration as plain English for operator surfacing."""
+    if seconds < 60:
+        return f"{seconds} second{'s' if seconds != 1 else ''}"
+    if seconds < 3600:
+        m = seconds // 60
+        return f"{m} minute{'s' if m != 1 else ''}"
+    h = seconds / 3600
+    if h == int(h):
+        ih = int(h)
+        return f"{ih} hour{'s' if ih != 1 else ''}"
+    return f"{h:.1f} hours"
+
+
+def _run_with_429_smart_backoff(client: "discord.Client", token: str) -> None:
+    """Run the Discord client with smart backoff on 429 rate-limit errors.
+
+    Catches HTTPException(429) escaping discord.py's internal retry,
+    applies the configured exponential schedule, logs the specific wait
+    duration + reason + auto-retry timestamp, and re-invokes ``client.run``.
+    Other HTTPException variants (PrivilegedIntentsRequired, LoginFailure,
+    non-429 status codes) re-raise so the existing friendly remediation
+    handlers in ``__main__`` can produce their messages.
+    """
+    import time as _time
+    from datetime import datetime, timedelta
+
+    attempt = 0
+    schedule_len = len(_DISCORD_429_BACKOFF_SCHEDULE)
+    while True:
+        try:
+            client.run(token)
+            return  # graceful shutdown
+        except discord.HTTPException as exc:
+            if exc.status != 429:
+                raise
+            if attempt >= schedule_len:
+                logger.error(
+                    "DISCORD_429_GIVE_UP: %d retries exhausted. "
+                    "Token likely Cloudflare-flagged. Wait several "
+                    "hours OR rotate the bot token in the Discord "
+                    "Developer Portal (Bot -> Reset Token). "
+                    "status=%d code=%s",
+                    attempt, exc.status, getattr(exc, "code", "?"),
+                )
+                print(
+                    "\n" + "=" * 64 + "\n"
+                    f"DISCORD RATE LIMIT — backoff schedule exhausted "
+                    f"({attempt} retries)\n"
+                    + "=" * 64 + "\n"
+                    "The token is likely Cloudflare-flagged. The flag\n"
+                    "typically persists 4-24+ hours after the abuse stops.\n"
+                    "Either wait longer, OR rotate the bot token:\n"
+                    "  1. https://discord.com/developers/applications\n"
+                    "  2. Open the application this bot belongs to\n"
+                    "  3. Bot tab -> Reset Token\n"
+                    "  4. Update DISCORD_BOT_TOKEN in .env\n"
+                    "  5. Re-run start.sh\n",
+                    file=sys.stderr, flush=True,
+                )
+                raise
+            wait = _DISCORD_429_BACKOFF_SCHEDULE[attempt]
+            attempt += 1
+            code = getattr(exc, "code", None)
+            label = (
+                "Cloudflare-level / abuse flag (error code 40062)"
+                if code == 40062
+                else f"error code {code}"
+                if code
+                else "no error code"
+            )
+            human = _format_429_wait_duration(wait)
+            retry_at = datetime.now() + timedelta(seconds=wait)
+            print(
+                "\n" + "=" * 64 + "\n"
+                f"DISCORD RATE LIMIT — backing off {human} before retry "
+                f"(attempt {attempt}/{schedule_len})\n"
+                + "=" * 64 + "\n"
+                f"Discord returned HTTP 429: {label}.\n"
+                f"discord.py's Retry-After header is unreliable for this\n"
+                f"error class — the flag persists much longer than the\n"
+                f"header says, so we ignore the header and use our own\n"
+                f"backoff schedule (KERNOS_DISCORD_429_BACKOFF_*_SEC).\n\n"
+                f"Auto-retry scheduled at "
+                f"{retry_at.strftime('%H:%M:%S')} ({human} from now).\n"
+                f"No restart needed — the bot will resume on its own.\n\n"
+                f"If retry {schedule_len} (the final 4-hour backoff) "
+                f"still fails,\n"
+                f"rotate the bot token in the Discord Developer Portal.\n",
+                file=sys.stderr, flush=True,
+            )
+            logger.warning(
+                "DISCORD_429_BACKOFF: attempt=%d/%d wait_s=%d "
+                "retry_at=%s code=%s",
+                attempt, schedule_len, wait,
+                retry_at.isoformat(), code,
+            )
+            _time.sleep(wait)
+
+
 if __name__ == "__main__":
     # Startup binary health check — binary config read, no network, no LLM.
     # Exit cleanly with code 1 if any named chain has no providers configured.
@@ -1078,7 +1206,15 @@ if __name__ == "__main__":
         )
         sys.exit(2)
     try:
-        client.run(token)
+        # DISCORD-429-SMART-BACKOFF: wraps client.run with exponential
+        # backoff retry on 429 errors. discord.py's internal Retry-After
+        # handling (typically 3 seconds) is unreliable for Cloudflare-level
+        # rate limits — the flag persists for minutes-to-hours regardless
+        # of what the header says, and short retries compound the abuse.
+        # On 429 the wrapper sleeps per the configured schedule and
+        # auto-resumes; on non-429 errors re-raises so the friendly
+        # remediation handlers below produce their messages.
+        _run_with_429_smart_backoff(client, token)
     except discord.errors.PrivilegedIntentsRequired:
         # Friendly remediation for the most common first-run misconfig:
         # the application this token belongs to doesn't have MESSAGE
