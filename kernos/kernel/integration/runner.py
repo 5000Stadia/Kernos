@@ -404,12 +404,22 @@ class IntegrationRunner:
         audit_emitter: AuditEmitter,
         config: IntegrationConfig | None = None,
         clock: Callable[[], float] = time.monotonic,
+        action_record_drainer: Callable[[], list] | None = None,
     ) -> None:
         self._chain_caller = chain_caller
         self._dispatcher = read_only_dispatcher
         self._audit_emitter = audit_emitter
         self._config = config or IntegrationConfig()
         self._clock = clock
+        # RESPONSE-FIDELITY-V1 Batch 1.3 (2026-05-08): callable that
+        # returns the per-turn ActionStateRecords accumulated by tool
+        # handlers (currently note_this; existing surfaces migrate in
+        # Batch 2 onward). Drained once at finalize time and stored on
+        # Briefing.audit_trace.action_state_records so the renderer can
+        # consume the structured envelope. None when no drainer is
+        # wired (tests / library-only use); production wiring threads
+        # ReasoningService.drain_action_records here.
+        self._action_record_drainer = action_record_drainer
 
     async def run(self, inputs: IntegrationInputs) -> Briefing:
         """Public entry. Retries synthesis up to ``max_retries`` times;
@@ -964,6 +974,7 @@ class IntegrationRunner:
             cohort_outputs=cohort_refs,
             tools_called_during_prep=tuple(tools_called),
             tool_results_during_prep=tuple(tool_results),
+            action_state_records=tuple(self._drain_action_records()),
             iterations_used=iterations,
             budget_state=BudgetState(
                 cohort_entries_hit_limit=cohort_entries_capped,
@@ -991,6 +1002,22 @@ class IntegrationRunner:
             member_id=inputs.member_id,
             space_id=inputs.space_id,
         )
+
+    def _drain_action_records(self) -> list:
+        """Drain accumulated ActionStateRecords from the configured
+        drainer. Returns empty list when no drainer wired or when the
+        drainer raises (defensive — drainer failure shouldn't fail
+        the whole briefing).
+        """
+        if self._action_record_drainer is None:
+            return []
+        try:
+            return list(self._action_record_drainer())
+        except Exception as exc:
+            logger.warning(
+                "INTEGRATION_ACTION_RECORD_DRAIN_FAILED: %s", exc,
+            )
+            return []
 
     def _check_redaction_invariant(
         self,
@@ -1186,6 +1213,13 @@ class IntegrationRunner:
             system_error_briefing,
         )
 
+        # RESPONSE-FIDELITY-V1 Batch 1.3: drain ActionStateRecords on
+        # failure paths too. Writes that succeeded before exhaustion
+        # should still surface in the briefing so the next-turn agent
+        # sees what actually happened, even when the integration loop
+        # itself failed.
+        action_records = tuple(self._drain_action_records())
+
         if last_failure.component == "max_iterations":
             briefing = iteration_cap_briefing(
                 turn_id=inputs.turn_id,
@@ -1195,6 +1229,7 @@ class IntegrationRunner:
                 cohort_refs=cohort_refs,
                 tools_called=last_failure.tools_called,
                 tool_results=last_failure.tool_results,
+                action_state_records=action_records,
                 iterations=last_failure.iterations,
                 phase_durations_ms=last_failure.phase_durations_ms,
                 budget_state=last_failure.budget_state,
@@ -1217,6 +1252,7 @@ class IntegrationRunner:
                 cohort_refs=cohort_refs,
                 tools_called=last_failure.tools_called,
                 tool_results=last_failure.tool_results,
+                action_state_records=action_records,
                 iterations=last_failure.iterations,
                 phase_durations_ms=last_failure.phase_durations_ms,
                 budget_state=last_failure.budget_state,

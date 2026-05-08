@@ -145,6 +145,7 @@ def _make_runner(
     audit_sink: list | None = None,
     config: IntegrationConfig | None = None,
     clock=None,
+    action_record_drainer=None,
 ) -> tuple[IntegrationRunner, list]:
     sink = audit_sink if audit_sink is not None else []
 
@@ -169,6 +170,8 @@ def _make_runner(
     )
     if clock is not None:
         runner_kwargs["clock"] = clock
+    if action_record_drainer is not None:
+        runner_kwargs["action_record_drainer"] = action_record_drainer
     return IntegrationRunner(**runner_kwargs), sink
 
 
@@ -702,6 +705,106 @@ async def test_redaction_invariant_does_not_scan_forwarded_tool_results():
     # a redaction violation. Directive itself doesn't quote restricted
     # content, so the guard correctly stays silent.
     assert briefing.audit_trace.fail_soft_engaged is False
+
+
+@pytest.mark.asyncio
+async def test_runner_drains_action_records_into_audit_trace_on_success():
+    """RESPONSE-FIDELITY-V1 Batch 1.3 (2026-05-08): when an
+    action_record_drainer is wired, the runner drains accumulated
+    ActionStateRecords at finalize time and folds them into
+    Briefing.audit_trace.action_state_records. Production wiring
+    threads ReasoningService.drain_action_records here; tests use
+    a local fake."""
+    from kernos.kernel.integration import ActionStateRecord
+
+    # Pre-populate the "drainer" — simulates note_this having been
+    # called during synthesis and appended a record.
+    drained_record = ActionStateRecord(
+        action_id="act_test",
+        surface="memory",
+        operation="note_this",
+        operation_class="mutate",
+        authorization_state="not_required",
+        execution_state="completed",
+        affected_objects=("know_xyz",),
+    )
+
+    def drainer():
+        return [drained_record]
+
+    async def chain(*_a, **_kw):
+        return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        action_record_drainer=drainer,
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # The drained record landed on the briefing.
+    assert briefing.audit_trace.action_state_records == (drained_record,)
+
+
+@pytest.mark.asyncio
+async def test_runner_drains_action_records_on_failure_paths_too():
+    """RESPONSE-FIDELITY-V1 Batch 1.3: writes that succeeded before
+    integration loop exhausted should still surface in the briefing.
+    The next-turn agent needs to see what actually happened, even on
+    failure paths."""
+    from kernos.kernel.integration import ActionStateRecord
+
+    drained_record = ActionStateRecord(
+        action_id="act_partial",
+        surface="memory",
+        operation="note_this",
+        operation_class="mutate",
+        authorization_state="not_required",
+        execution_state="completed",
+        affected_objects=("pref_abc",),
+    )
+
+    drained = [drained_record]
+
+    def drainer():
+        # Returns the records once, then nothing (mirrors the real
+        # drainer's clear-on-read contract).
+        out = list(drained)
+        drained.clear()
+        return out
+
+    # Force failure: model never finalizes → no_tool_use after retries.
+    async def chain(*_a, **_kw):
+        return _resp(_text_block("never finalize"))
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=2),
+        action_record_drainer=drainer,
+    )
+    briefing = await runner.run(_make_inputs())
+
+    # Failure path: system_error_briefing — but action records still
+    # persisted from before exhaustion.
+    assert briefing.audit_trace.fail_soft_engaged is True
+    assert briefing.audit_trace.action_state_records == (drained_record,)
+
+
+@pytest.mark.asyncio
+async def test_runner_handles_drainer_exception_defensively():
+    """If the drainer raises, the briefing still ships with empty
+    action_state_records — drainer failure is best-effort."""
+    def broken_drainer():
+        raise RuntimeError("drainer broke")
+
+    async def chain(*_a, **_kw):
+        return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
+
+    runner, _audit = _make_runner(
+        chain_caller=chain,
+        action_record_drainer=broken_drainer,
+    )
+    briefing = await runner.run(_make_inputs())
+    assert briefing.audit_trace.action_state_records == ()
 
 
 def test_integration_config_default_max_iterations_is_checkpoint_cadence():

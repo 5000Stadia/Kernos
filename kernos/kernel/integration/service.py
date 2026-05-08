@@ -78,12 +78,14 @@ class IntegrationService:
         read_only_dispatcher: ReadOnlyToolDispatcher,
         audit_emitter: AuditEmitter,
         config: IntegrationConfig | None = None,
+        action_record_drainer: Any = None,
     ) -> None:
         self._runner = IntegrationRunner(
             chain_caller=chain_caller,
             read_only_dispatcher=read_only_dispatcher,
             audit_emitter=audit_emitter,
             config=config,
+            action_record_drainer=action_record_drainer,
         )
 
     async def run(self, inputs: IntegrationInputs) -> Briefing:
@@ -108,6 +110,7 @@ def build_integration_service(
     read_only_dispatcher: ReadOnlyToolDispatcher,
     audit_emitter: AuditEmitter,
     config: IntegrationConfig | None = None,
+    action_record_drainer: Any = None,
 ) -> IntegrationService:
     """Convenience factory mirroring the IntegrationRunner constructor.
 
@@ -120,6 +123,7 @@ def build_integration_service(
         read_only_dispatcher=read_only_dispatcher,
         audit_emitter=audit_emitter,
         config=config,
+        action_record_drainer=action_record_drainer,
     )
 
 

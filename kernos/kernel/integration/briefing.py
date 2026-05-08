@@ -1950,6 +1950,7 @@ def iteration_cap_briefing(
     cohort_refs: tuple[str, ...] = (),
     tools_called: list[str] | tuple[str, ...] = (),
     tool_results: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
+    action_state_records: tuple["ActionStateRecord", ...] = (),
     iterations: int = 0,
     phase_durations_ms: dict[str, int] | None = None,
     budget_state: BudgetState | None = None,
@@ -1998,6 +1999,7 @@ def iteration_cap_briefing(
         audit_trace=AuditTrace(
             cohort_outputs=cohort_refs,
             tools_called_during_prep=tuple(tools_called),
+            action_state_records=tuple(action_state_records),
             iterations_used=iterations,
             budget_state=budget_state or BudgetState(),
             fail_soft_engaged=True,
@@ -2023,6 +2025,7 @@ def system_error_briefing(
     cohort_refs: tuple[str, ...] = (),
     tools_called: list[str] | tuple[str, ...] = (),
     tool_results: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
+    action_state_records: tuple["ActionStateRecord", ...] = (),
     iterations: int = 0,
     phase_durations_ms: dict[str, int] | None = None,
     budget_state: BudgetState | None = None,
@@ -2072,6 +2075,7 @@ def system_error_briefing(
         audit_trace=AuditTrace(
             cohort_outputs=cohort_refs,
             tools_called_during_prep=tuple(tools_called),
+            action_state_records=tuple(action_state_records),
             iterations_used=iterations,
             budget_state=budget_state or BudgetState(),
             fail_soft_engaged=True,

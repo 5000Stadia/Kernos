@@ -460,11 +460,21 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         # surfacing). Overriding callers can still build a config
         # by hand and wire IntegrationService(config=...) directly.
         from kernos.kernel.integration.runner import IntegrationConfig
+        # RESPONSE-FIDELITY-V1 Batch 1.3 (2026-05-08): wire the
+        # ActionStateRecord drainer to ReasoningService.drain_action_records.
+        # When present, the integration runner pulls accumulated
+        # records at finalize time and folds them into
+        # Briefing.audit_trace.action_state_records. Tools currently
+        # appending: note_this. Existing surfaces migrate in Batch 2
+        # onward.
         integration = IntegrationService(
             chain_caller=wrapped_chain,
             read_only_dispatcher=ctx.integration_dispatcher,
             audit_emitter=ctx.integration_audit_emitter,
             config=IntegrationConfig.from_env(),
+            action_record_drainer=getattr(
+                reasoning, "drain_action_records", None,
+            ),
         )
         enactment = EnactmentService(
             presence_renderer=presence,
