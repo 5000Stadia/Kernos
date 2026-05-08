@@ -16,6 +16,55 @@ from kernos.utils import utc_now
 logger = logging.getLogger(__name__)
 
 
+def _format_tool_receipts(
+    tool_calls_trace: list[dict] | None,
+) -> str | None:
+    """Format the per-turn tool trace into the conv-log receipt block.
+
+    Returns the formatted block (string) or None when there's nothing
+    worth persisting (no entries with usable name+preview).
+
+    RESPONSE-FIDELITY-V1 Batch 0 (2026-05-08): both successful and
+    failed entries are persisted, distinguished by an explicit status
+    marker (``succeeded`` / ``failed``). The next-turn agent reading
+    this block in conversation history can now reason about
+    attempted-and-failed records — closes cross-surface pattern C.7
+    from the Phase 1 audit ("absence of evidence is not evidence of
+    absence" failure mode the agent self-identified).
+
+    Format intentionally kept as plain prose with a per-line status
+    marker; the structured-per-record G.7 shift ("Tool effects this
+    turn" → "Action state this turn" with ActionStateRecord fields)
+    is Batch 1 work — Batch 0 just stops the filter from dropping
+    failures on the floor.
+    """
+    if not tool_calls_trace:
+        return None
+    receipts: list[str] = []
+    for tc in tool_calls_trace:
+        name = tc.get("name", "")
+        preview = (tc.get("result_preview") or "")[:150]
+        if not name:
+            continue
+        succeeded = bool(tc.get("success"))
+        # Successful entries require a preview to be worth persisting
+        # (legacy contract). Failed entries persist even with empty
+        # preview, since the fact of the attempt is itself signal —
+        # "we tried X and got nothing back" is meaningfully different
+        # from "we tried X and never tried." The status marker carries
+        # that distinction explicitly.
+        if succeeded and not preview:
+            continue
+        status = "succeeded" if succeeded else "failed"
+        if preview:
+            receipts.append(f"[{name}] {status}: {preview}")
+        else:
+            receipts.append(f"[{name}] {status}")
+    if not receipts:
+        return None
+    return "Tool effects this turn:\n" + "\n".join(receipts)
+
+
 async def run(ctx: PhaseContext) -> PhaseContext:
     """Phase 6: Store messages, write to conv log, compaction, events."""
     handler = ctx.handler
@@ -57,22 +106,21 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         speaker="assistant", channel=message.platform, content=ctx.response_text,
         member_id=ctx.member_id)
 
-    # Log tool receipts — effects in the world, not API calls
-    if ctx.tool_calls_trace:
-        _receipts = []
-        for tc in ctx.tool_calls_trace:
-            if tc.get("success"):
-                _name = tc.get("name", "")
-                _preview = tc.get("result_preview", "")[:150]
-                if _name and _preview:
-                    _receipts.append(f"[{_name}] {_preview}")
-        if _receipts:
-            receipt_text = "Tool effects this turn:\n" + "\n".join(_receipts)
-            await handler.conv_logger.append(
-                instance_id=instance_id, space_id=ctx.active_space_id,
-                speaker="system", channel="receipt",
-                content=receipt_text, member_id=ctx.member_id,
-            )
+    # Log tool receipts — effects in the world, not API calls.
+    # RESPONSE-FIDELITY-V1 Batch 0 (2026-05-08): persist failed-attempt
+    # entries alongside successful ones, distinguished by status marker.
+    # Closes cross-surface pattern C.7 from the Phase 1 audit — the
+    # next-turn agent now sees attempted-and-failed records, not just
+    # successes. The G.7 conv-log-shift ("Tool effects" → "Action state"
+    # with structured per-record fields) is Batch 1 work; this batch
+    # just stops dropping failed-attempt data on the floor.
+    receipt_text = _format_tool_receipts(ctx.tool_calls_trace)
+    if receipt_text:
+        await handler.conv_logger.append(
+            instance_id=instance_id, space_id=ctx.active_space_id,
+            speaker="system", channel="receipt",
+            content=receipt_text, member_id=ctx.member_id,
+        )
 
     # Compaction (with concurrency guard + backoff)
     if ctx.active_space_id in handler._compacting:
