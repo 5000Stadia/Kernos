@@ -129,6 +129,75 @@ class TestCovenants:
         results = await store.query_covenant_rules("t1", context_space_scope=["space_xyz", None])
         assert not any(x.id == "r1" for x in results)
 
+    async def test_member_id_round_trips(self, store):
+        """Regression for codex finding 2 (2026-05-08): SQLite write
+        path was previously routing member_id through the JSON
+        overflow blob, but the read-side merge order made the
+        column default '' override the overflow value, so reloaded
+        rules always lost their member_id and became instance-level.
+        Now member_id is a first-class column and round-trips
+        correctly."""
+        r = CovenantRule(
+            id="r_member_test", instance_id="t1", capability="general",
+            rule_type="must_not", description="Don't ping me on weekends",
+            active=True, source="user_stated",
+            member_id="mem_alice",
+            created_at=_now(), updated_at=_now(),
+        )
+        await store.add_contract_rule(r)
+        loaded = await store.get_contract_rules("t1")
+        match = [x for x in loaded if x.id == "r_member_test"]
+        assert len(match) == 1
+        assert match[0].member_id == "mem_alice", (
+            f"member_id round-trip lost: expected 'mem_alice', "
+            f"got {match[0].member_id!r}"
+        )
+
+    async def test_query_covenant_rules_filters_by_member_id(self, store):
+        """Member-scoped queries return per-member rules + instance-
+        level rules. Cross-member rules don't leak."""
+        # Per-member rule for alice.
+        alice_rule = CovenantRule(
+            id="r_alice", instance_id="t1", capability="general",
+            rule_type="preference", description="Alice's rule",
+            active=True, source="user_stated", member_id="mem_alice",
+            created_at=_now(), updated_at=_now(),
+        )
+        # Per-member rule for bob.
+        bob_rule = CovenantRule(
+            id="r_bob", instance_id="t1", capability="general",
+            rule_type="preference", description="Bob's rule",
+            active=True, source="user_stated", member_id="mem_bob",
+            created_at=_now(), updated_at=_now(),
+        )
+        # Instance-level rule (no member scoping).
+        instance_rule = CovenantRule(
+            id="r_instance", instance_id="t1", capability="general",
+            rule_type="must", description="Instance-wide rule",
+            active=True, source="default",
+            created_at=_now(), updated_at=_now(),
+        )
+        for r in (alice_rule, bob_rule, instance_rule):
+            await store.add_contract_rule(r)
+
+        # Query as alice: should see alice's rule + instance-level.
+        alice_results = await store.query_covenant_rules(
+            "t1", member_id="mem_alice",
+        )
+        ids = {r.id for r in alice_results}
+        assert "r_alice" in ids
+        assert "r_instance" in ids
+        assert "r_bob" not in ids, "bob's per-member rule leaked to alice"
+
+        # Query as bob: should see bob's rule + instance-level.
+        bob_results = await store.query_covenant_rules(
+            "t1", member_id="mem_bob",
+        )
+        ids = {r.id for r in bob_results}
+        assert "r_bob" in ids
+        assert "r_instance" in ids
+        assert "r_alice" not in ids, "alice's per-member rule leaked to bob"
+
 
 class TestContextSpaces:
     async def test_save_and_list(self, store):

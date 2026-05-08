@@ -40,6 +40,8 @@ from kernos.kernel.state import (
     KnowledgeEntry,
     Preference,
     StateStore,
+    _enforcement_tier_for,
+    classify_covenant_tier,
 )
 from kernos.utils import utc_now
 
@@ -412,6 +414,12 @@ async def _write_rule(
     if category not in ("must", "must_not", "preference", "escalation"):
         category = "must"
     rule_id = _new_object_id("rule")
+    # Codex review fold (2026-05-08): use the canonical tier/enforcement
+    # classifiers from state.py so note_this(rule) doesn't diverge from
+    # contract_parser / manage_covenants defaults. Previously hardcoded
+    # tier="situational" + dataclass-default enforcement_tier="confirm",
+    # which mis-classified must_not + escalation (should be pinned) and
+    # preference (should be silent).
     rule = CovenantRule(
         id=rule_id,
         instance_id=instance_id,
@@ -425,7 +433,8 @@ async def _write_rule(
         updated_at=now,
         context_space=active_space_id or None,
         layer="practice",
-        tier="situational",
+        tier=classify_covenant_tier(category, "user_stated"),
+        enforcement_tier=_enforcement_tier_for(category),
         member_id=member_id,
     )
     try:

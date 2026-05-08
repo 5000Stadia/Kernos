@@ -47,24 +47,28 @@ def _format_tool_receipts(
     """
     lines: list[str] = []
 
-    # First: render any tool_calls_trace entries. Match each to a
-    # corresponding ActionStateRecord by operation name; if matched,
-    # render the structured form, else fall back to the trace's
-    # binary success/preview shape.
-    records_by_op: dict[str, object] = {}
+    # Index records as a FIFO list per operation so multiple calls to
+    # the same tool in one turn each surface their own structured
+    # render (codex review fold 2026-05-08: previous shape kept only
+    # the first record per operation, dropping later ones — two
+    # note_this calls in one turn would collapse to one receipt).
+    records_by_op: dict[str, list] = {}
     for rec in (action_state_records or []):
         op = getattr(rec, "operation", "")
-        if op and op not in records_by_op:
-            records_by_op[op] = rec
+        if op:
+            records_by_op.setdefault(op, []).append(rec)
 
     for tc in (tool_calls_trace or []):
         name = tc.get("name", "")
         preview = (tc.get("result_preview") or "")[:150]
         if not name:
             continue
-        rec = records_by_op.pop(name, None)
-        if rec is not None:
-            # Structured render from the ActionStateRecord.
+        rec_list = records_by_op.get(name)
+        if rec_list:
+            # Structured render from the next ActionStateRecord in
+            # FIFO order — pairs structured records 1:1 with their
+            # corresponding tool_calls_trace entries when both exist.
+            rec = rec_list.pop(0)
             lines.append(_render_record_line(name, rec))
             continue
         # Fallback: legacy trace-only format.
@@ -77,11 +81,12 @@ def _format_tool_receipts(
         else:
             lines.append(f"[{name}] state={status}")
 
-    # Second: render any ActionStateRecords that didn't have a
-    # matching tool_calls_trace entry (rare — would mean a record
-    # was populated outside the dispatcher path).
-    for op, rec in records_by_op.items():
-        lines.append(_render_record_line(op, rec))
+    # Render any ActionStateRecords that didn't have a matching
+    # tool_calls_trace entry (rare — would mean a record was
+    # populated outside the dispatcher path).
+    for op, rec_list in records_by_op.items():
+        for rec in rec_list:
+            lines.append(_render_record_line(op, rec))
 
     if not lines:
         return None

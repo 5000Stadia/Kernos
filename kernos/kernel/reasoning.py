@@ -964,18 +964,44 @@ class ReasoningService:
                 from kernos.kernel.note_this import handle_note_this
                 if self._state is None:
                     return "Memory state store is not available."
+                kind_arg = str(tool_input.get("kind", ""))
                 summary, record = await handle_note_this(
                     state=self._state,
                     instance_id=request.instance_id,
                     member_id=getattr(request, "member_id", "") or "",
                     active_space_id=request.active_space_id,
                     turn_id=getattr(request, "conversation_id", "") or "",
-                    kind=str(tool_input.get("kind", "")),
+                    kind=kind_arg,
                     content=str(tool_input.get("content", "")),
                     subject=str(tool_input.get("subject", "")),
                     category=str(tool_input.get("category", "")),
                 )
                 self._turn_action_records.append(record)
+                # Codex review fold (2026-05-08): when kind=rule and the
+                # write succeeded, fire validate_covenant_set async (same
+                # pattern as manage_covenants update). Surfaces conflicts,
+                # merges, and rewrites the LLM analysis catches; without
+                # this, note_this(rule) silently bypassed the validation
+                # discipline manage_covenants honors.
+                if (
+                    kind_arg == "rule"
+                    and record.execution_state == "completed"
+                    and record.affected_objects
+                    and record.affected_objects[0].startswith("rule_")
+                ):
+                    import asyncio as _asyncio
+                    from kernos.kernel.covenant_manager import (
+                        validate_covenant_set,
+                    )
+                    _asyncio.create_task(
+                        validate_covenant_set(
+                            state=self._state,
+                            events=self._events,
+                            reasoning_service=self,
+                            instance_id=request.instance_id,
+                            new_rule_id=record.affected_objects[0],
+                        )
+                    )
                 return summary
             elif tool_name == "remember":
                 if self._retrieval:

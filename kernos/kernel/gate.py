@@ -145,6 +145,14 @@ class DispatchGate:
             "mark_reference_superseded",
             "quarantine_reference",
             "restore_reference_from_quarantine",
+            # RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): note_this
+            # writes to KnowledgeEntry / Preference / CovenantRule
+            # depending on kind. All three are reversible (entries
+            # superseded; covenants tombstoned), so soft_write at the
+            # gate. Without this entry the gate would classify as
+            # unknown and both live execution seams would refuse the
+            # call.
+            "note_this",
         }
 
         if tool_name in _KERNEL_READS:

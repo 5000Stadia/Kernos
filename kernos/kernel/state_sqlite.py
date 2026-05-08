@@ -579,16 +579,25 @@ class SqliteStateStore(StateStore):
 
     def _cov_to_row(self, r: CovenantRule) -> tuple:
         d = asdict(r)
+        # member_id is a first-class column (codex review 2026-05-08:
+        # was previously routed through the JSON overflow blob, but the
+        # read-side merge order made the column default '' override the
+        # overflow value, so reloaded rules always lost their
+        # member_id and became instance-level. Including member_id in
+        # the structured column set fixes the round-trip).
         _cols = {"id", "instance_id", "capability", "rule_type", "description",
                  "active", "source", "layer", "enforcement_tier", "tier",
-                 "context_space", "superseded_by", "created_at", "updated_at"}
+                 "context_space", "member_id", "superseded_by",
+                 "created_at", "updated_at"}
         overflow = {k: v for k, v in d.items() if k not in _cols}
         return (
             d["id"], d["instance_id"], d.get("capability", "general"),
             d["rule_type"], d["description"], 1 if d.get("active") else 0,
             d.get("source", "default"), d.get("layer", "principle"),
             d.get("enforcement_tier", ""), d.get("tier", ""),
-            d.get("context_space") or "", d.get("superseded_by", ""),
+            d.get("context_space") or "",
+            d.get("member_id", "") or "",
+            d.get("superseded_by", ""),
             json.dumps(overflow, ensure_ascii=False),
             d.get("created_at", ""), d.get("updated_at", ""),
         )
@@ -649,9 +658,9 @@ class SqliteStateStore(StateStore):
         await db.execute(
             "INSERT OR REPLACE INTO covenants "
             "(id, instance_id, capability, rule_type, description, active, source, "
-            "layer, enforcement_tier, tier, context_space, superseded_by, data, "
-            "created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "layer, enforcement_tier, tier, context_space, member_id, superseded_by, "
+            "data, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             vals,
         )
         await db.commit()
@@ -667,7 +676,8 @@ class SqliteStateStore(StateStore):
         overflow = _from_json(d.get("data", "{}"), {})
         _cols = {"id", "instance_id", "capability", "rule_type", "description",
                  "active", "source", "layer", "enforcement_tier", "tier",
-                 "context_space", "superseded_by", "created_at", "updated_at"}
+                 "context_space", "member_id", "superseded_by",
+                 "created_at", "updated_at"}
         for k, v in updates.items():
             if k in _cols:
                 d[k] = v

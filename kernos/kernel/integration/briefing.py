@@ -1225,6 +1225,22 @@ class ActionStateRecord:
                 f"ActionStateRecord.partial_state must be None or a "
                 f"dict; got {type(self.partial_state).__name__}"
             )
+        # Codex review fold (2026-05-08): partial execution state MUST
+        # carry structured partial_state so renderer rules (Batch 2+)
+        # can format the per-step breakdown faithfully. Without this
+        # link, "execution_state=partial" + partial_state=None would
+        # silently render as if it were a generic completion.
+        if self.execution_state == "partial" and self.partial_state is None:
+            raise BriefingValidationError(
+                "ActionStateRecord.partial_state is required when "
+                "execution_state=='partial' (rendering rules need the "
+                "per-step breakdown to surface partial outcomes faithfully)"
+            )
+        if not isinstance(self.missing_metadata, bool):
+            raise BriefingValidationError(
+                f"ActionStateRecord.missing_metadata must be a bool; "
+                f"got {type(self.missing_metadata).__name__}"
+            )
         for ref in self.receipt_refs:
             if not isinstance(ref, str) or not ref.strip():
                 raise BriefingValidationError(
@@ -1329,6 +1345,17 @@ class AuditTrace:
     # other schema fields the renderer (Batch 2 onward) consumes for
     # render rules and fail-closed scope decisions. Empty tuple when
     # no action surfaces were touched this turn.
+    #
+    # Contract scope (codex review fold 2026-05-08): this field carries
+    # records produced during INTEGRATION SYNTHESIS only. The runner
+    # drains its collector at finalize time, so any records appended
+    # AFTER finalize (e.g. by tools dispatched during the renderer pass)
+    # do NOT land here — they reach the conv-log via the handler-level
+    # drain into TurnContext.action_state_records and the persist
+    # phase's "Action state this turn" block. Batch 2 render rules
+    # consuming Briefing.audit_trace see prep-time records only; if a
+    # future spec needs cross-phase visibility, add a post-enactment
+    # carrier rather than racing the existing drainer.
     action_state_records: tuple[ActionStateRecord, ...] = ()
     iterations_used: int = 0
     budget_state: BudgetState = field(default_factory=BudgetState)
