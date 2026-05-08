@@ -389,6 +389,11 @@ async def on_ready():
     # new path; ReasoningService.drain_tool_trace() reads from this
     # same list. The handler owns the drain (drain-ordering invariant).
     reasoning_trace_sink: list[dict] = []
+    # RESPONSE-FIDELITY-V1 Batch 1.3 hardening (2026-05-08): shared
+    # ActionStateRecord sink — note_this (and Batch 2+ migrated
+    # surfaces) append here via ReasoningService; the integration
+    # runner peeks at finalize, the handler drains at turn end.
+    reasoning_action_record_sink: list = []
 
     # IWL C5/C6: production wiring for the decoupled-cognition path.
     # Constructs a per-turn turn_runner_provider closure that:
@@ -647,6 +652,7 @@ async def on_ready():
         dispatcher_audit_emitter=_dispatcher_audit_emitter,
         integration_audit_emitter=_integration_audit_emitter,
         trace_sink=reasoning_trace_sink,
+        action_record_sink=reasoning_action_record_sink,
         executor=shared_executor,
         descriptor_lookup=shared_descriptor_lookup,
         integration_dispatcher=_integration_dispatcher,
@@ -659,6 +665,7 @@ async def on_ready():
         audit=audit,
         chains=chains,
         trace_sink=reasoning_trace_sink,
+        action_record_sink=reasoning_action_record_sink,
         turn_runner_provider=build_turn_runner_provider(_thin_path_ctx),
     )
     engine = TaskEngine(reasoning=reasoning, events=events)

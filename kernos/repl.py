@@ -293,6 +293,9 @@ async def build_dev_handler(
     # Per-turn TurnRunner factory — verbatim mirror of server.py's
     # _build_per_turn_runner closure.
     reasoning_trace_sink: list[dict] = []
+    # RESPONSE-FIDELITY-V1 Batch 1.3 hardening (2026-05-08): shared
+    # ActionStateRecord sink (mirror of server.py wiring).
+    reasoning_action_record_sink: list = []
 
     cohort_registry = CohortRegistry()
     try:
@@ -448,6 +451,7 @@ async def build_dev_handler(
         dispatcher_audit_emitter=_dispatcher_audit_emitter,
         integration_audit_emitter=_integration_audit_emitter,
         trace_sink=reasoning_trace_sink,
+        action_record_sink=reasoning_action_record_sink,
         executor=shared_executor,
         descriptor_lookup=shared_descriptor_lookup,
         integration_dispatcher=_integration_dispatcher,
@@ -460,6 +464,7 @@ async def build_dev_handler(
         audit=audit,
         chains=chains,
         trace_sink=reasoning_trace_sink,
+        action_record_sink=reasoning_action_record_sink,
         turn_runner_provider=build_turn_runner_provider(_thin_path_ctx),
     )
     engine = TaskEngine(reasoning=reasoning, events=events)

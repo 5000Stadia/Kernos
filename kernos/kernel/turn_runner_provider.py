@@ -82,6 +82,14 @@ class ThinPathContext:
     dispatcher_audit_emitter: Any = None
     integration_audit_emitter: Any = None
     trace_sink: list = dataclasses.field(default_factory=list)
+    # RESPONSE-FIDELITY-V1 Batch 1.3 hardening (2026-05-08): shared
+    # list mirroring the trace_sink pattern. ReasoningService appends
+    # ActionStateRecords here (via note_this and Batch 2+ migrated
+    # surfaces); the integration runner peeks (copy without clearing)
+    # at finalize time so records appear on Briefing.audit_trace
+    # without preventing the handler-level drain that feeds the
+    # "Action state this turn" conv-log block.
+    action_record_sink: list = dataclasses.field(default_factory=list)
 
     # Set in step 4 (late-bound to live components):
     executor: Any = None
@@ -460,21 +468,21 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         # surfacing). Overriding callers can still build a config
         # by hand and wire IntegrationService(config=...) directly.
         from kernos.kernel.integration.runner import IntegrationConfig
-        # RESPONSE-FIDELITY-V1 Batch 1.3 (2026-05-08): wire the
-        # ActionStateRecord drainer to ReasoningService.drain_action_records.
-        # When present, the integration runner pulls accumulated
-        # records at finalize time and folds them into
-        # Briefing.audit_trace.action_state_records. Tools currently
-        # appending: note_this. Existing surfaces migrate in Batch 2
-        # onward.
+        # RESPONSE-FIDELITY-V1 Batch 1.3 (2026-05-08, hardened
+        # 2026-05-08): integration runner peeks the shared
+        # action_record_sink at finalize time. Peek-without-clear so
+        # the handler can still drain the same list afterwards to
+        # populate ctx.action_state_records for the conv-log block.
+        # The provider closure has no direct ReasoningService
+        # reference (chicken-and-egg construction), so we wire via
+        # the shared list — same pattern as trace_sink.
+        _action_record_sink = ctx.action_record_sink
         integration = IntegrationService(
             chain_caller=wrapped_chain,
             read_only_dispatcher=ctx.integration_dispatcher,
             audit_emitter=ctx.integration_audit_emitter,
             config=IntegrationConfig.from_env(),
-            action_record_drainer=getattr(
-                reasoning, "drain_action_records", None,
-            ),
+            action_record_drainer=lambda: list(_action_record_sink),
         )
         enactment = EnactmentService(
             presence_renderer=presence,

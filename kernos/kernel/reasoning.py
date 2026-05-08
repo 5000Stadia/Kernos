@@ -252,6 +252,7 @@ class ReasoningService:
         chains: ChainConfig | None = None,
         trace_sink: list[dict] | None = None,  # IWL C2: shared tool-trace seam
         turn_runner_provider: Any = None,  # IWL C6: per-turn factory; takes (request, event_emitter) -> (TurnRunner, ProductionResponseDelivery)
+        action_record_sink: list | None = None,  # RESPONSE-FIDELITY-V1 Batch 1.3: shared ActionStateRecord seam (mirrors trace_sink)
     ) -> None:
         if chains is not None:
             self._chains = chains
@@ -289,9 +290,15 @@ class ReasoningService:
         # RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): per-turn collector
         # for ActionStateRecords populated by tool handlers (currently
         # only note_this; existing surfaces migrate in Batch 2 onward).
-        # Drained by the integration runner at finalize time and
-        # written into Briefing.audit_trace.action_state_records.
-        self._turn_action_records: list = []
+        # When ``action_record_sink`` is injected at construction
+        # (production wiring; mirrors trace_sink pattern), the runner's
+        # peek-callable reads from the same backing list so records
+        # land on Briefing.audit_trace.action_state_records without
+        # preventing the handler-level drain that feeds the conv-log
+        # "Action state this turn" block.
+        self._turn_action_records: list = (
+            action_record_sink if action_record_sink is not None else []
+        )
         # Hybrid token counting: real input_tokens from last principal reasoning call per-instance
         self._last_real_input_tokens: dict[str, int] = {}  # instance_id → tokens
         # Pre-flight chain-skip support — lazily-loaded model registry
@@ -509,12 +516,16 @@ class ReasoningService:
         """Return and clear the accumulated ActionStateRecords for
         the current turn.
 
-        RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): mirrors
-        drain_tool_trace's contract. Tool handlers (currently only
-        note_this; existing surfaces migrate in Batch 2 onward) append
-        to the per-turn list; the integration runner drains at
-        finalize time and folds the records into
-        Briefing.audit_trace.action_state_records.
+        RESPONSE-FIDELITY-V1 Batch 1.2 (2026-05-08): tool handlers
+        (currently only note_this; existing surfaces migrate in
+        Batch 2 onward) append to the per-turn list. Drain ordering
+        (hardened 2026-05-08): the integration runner PEEKS at
+        finalize time (copy without clearing) so records reach
+        Briefing.audit_trace.action_state_records; the handler then
+        DRAINS (this method, clear-on-read) at turn end to populate
+        TurnContext.action_state_records for the conv-log "Action
+        state this turn" block. Two readers, one shared list — same
+        pattern as trace_sink.
         """
         records = list(self._turn_action_records)
         self._turn_action_records.clear()
