@@ -915,8 +915,45 @@ async def on_ready():
     except Exception as exc:
         logger.warning("Failed to recover active plans: %s", exc)
 
-    await tree.sync()
-    logger.info("Slash commands synced")
+    # DISCORD-429-SMART-BACKOFF (2026-05-08, hardening): tree.sync()
+    # POSTs to /applications/{id}/commands which can 429 under
+    # Cloudflare-flagged tokens or 503 during Discord-side
+    # unavailability. Either failure used to be logged by discord.py's
+    # event handler ("Ignoring exception in on_ready") but the slash
+    # commands ended up unsynced for the session. Wrap so we log
+    # specifically + retry on 503; slash-command sync isn't blocking
+    # for normal message flow, so partial success is acceptable.
+    try:
+        await tree.sync()
+        logger.info("Slash commands synced")
+    except discord.HTTPException as exc:
+        if exc.status == 429:
+            code = getattr(exc, "code", None)
+            label = (
+                "Cloudflare-level / abuse flag (40062)"
+                if code == 40062
+                else f"code={code}"
+            )
+            logger.warning(
+                "DISCORD_TREE_SYNC_RATE_LIMITED: %s — slash commands "
+                "not synced for this session. Existing slash commands "
+                "from prior sessions still work; only NEW or CHANGED "
+                "command definitions won't be visible until the next "
+                "successful sync.",
+                label,
+            )
+        elif exc.status >= 500:
+            logger.warning(
+                "DISCORD_TREE_SYNC_SERVER_ERROR: status=%d — Discord "
+                "API transient unavailability. Slash commands not "
+                "synced this session; retry on next boot.",
+                exc.status,
+            )
+        else:
+            logger.warning(
+                "DISCORD_TREE_SYNC_FAILED: status=%d code=%s text=%s",
+                exc.status, getattr(exc, "code", "?"), exc,
+            )
 
 
 
@@ -964,6 +1001,98 @@ _TEXT_EXTENSIONS = {
 # Discord can re-deliver events on gateway reconnect or missed ACKs.
 _seen_message_ids: set[int] = set()
 _SEEN_MAX = 200
+
+
+# ---------------------------------------------------------------------------
+# Per-call Discord 429 graceful-degradation helpers
+# ---------------------------------------------------------------------------
+#
+# DISCORD-429-SMART-BACKOFF, post-shipping hardening (2026-05-08):
+# the smart-backoff wrapper around client.run handles AUTH-side 429s,
+# but Cloudflare-flagged tokens 429 on EVERY API call — including
+# typing indicators and message sends. discord.py's internal retry
+# loop hammers the endpoint 5 times at the Retry-After cadence
+# (typically 3s) then raises HTTPException, which previously killed
+# the turn entirely (see server.py:1030 pre-fix: typing's
+# __aenter__ raised, the broad except swallowed handler.process,
+# user got "Something went wrong" with nothing in the trace).
+#
+# These helpers degrade gracefully:
+#   * _begin_typing_safely: typing is cosmetic. On 429, log + skip.
+#     handler.process still runs and the response is generated.
+#   * _send_safely: log the response_text fully so the operator has
+#     the full content from disk if Discord delivery fails. Returns
+#     False on 429 so the caller can stop chunking subsequent
+#     pieces (further sends to the same channel will also 429).
+
+
+async def _begin_typing_safely(channel) -> Any:
+    """Open a typing indicator best-effort.
+
+    Returns the entered context manager on success. On HTTP 429,
+    logs the rate-limit (with code 40062 surfaced when present) and
+    returns None — the caller proceeds without a typing indicator.
+    Other exceptions re-raise.
+
+    Why a custom context manager: discord.py's
+    ``async with channel.typing()`` enters by sending POST /typing.
+    If the bot is Cloudflare-flagged, that POST 429s and the
+    ``async with`` body never runs. Wrapping the enter call lets us
+    swallow the cosmetic failure without aborting the turn.
+    """
+    try:
+        ctx = channel.typing()
+        await ctx.__aenter__()
+        return ctx
+    except discord.HTTPException as exc:
+        if exc.status == 429:
+            code = getattr(exc, "code", None)
+            label = (
+                "Cloudflare-level / abuse flag (40062)"
+                if code == 40062
+                else f"code={code}"
+            )
+            logger.warning(
+                "DISCORD_TYPING_RATE_LIMITED: %s — proceeding without "
+                "typing indicator. The turn will run and the response "
+                "will be sent normally; only the cosmetic typing "
+                "animation is skipped.",
+                label,
+            )
+            return None
+        raise
+
+
+async def _send_safely(channel, content: str) -> bool:
+    """Send a message with 429 graceful degradation.
+
+    Returns True on success, False on rate-limit failure. The
+    caller checks the return to decide whether to keep chunking.
+    """
+    try:
+        await channel.send(content)
+        return True
+    except discord.HTTPException as exc:
+        if exc.status == 429:
+            code = getattr(exc, "code", None)
+            label = (
+                "Cloudflare-level / abuse flag (40062)"
+                if code == 40062
+                else f"code={code}"
+            )
+            # Log the full content (truncated) so the operator can
+            # read it from logs even though it didn't reach the user.
+            # The conv-log persist already wrote it to disk, but this
+            # surfaces in the live terminal too.
+            preview = content if len(content) <= 500 else content[:500] + "...(truncated)"
+            logger.warning(
+                "DISCORD_SEND_RATE_LIMITED: %s — could not deliver "
+                "%d-char response. Response is in the conv-log on "
+                "disk; live preview: %r",
+                label, len(content), preview,
+            )
+            return False
+        raise
 
 
 @client.event
@@ -1025,24 +1154,48 @@ async def on_message(message):
             if not text_attachments and not message.content:
                 return
 
-    # Typing animation during processing (no placeholder message)
+    # Typing animation during processing — cosmetic. DISCORD-429-SMART-
+    # BACKOFF (2026-05-08, hardened post-shipping after kernos-main field
+    # session): if the token is Cloudflare-flagged (error 40062), the
+    # typing endpoint 429s immediately. The previous shape wrapped
+    # handler.process inside the typing context manager, so a typing
+    # failure killed the entire turn before reasoning ran. Now: open
+    # the typing indicator best-effort; on failure, log + proceed
+    # without it. handler.process always runs.
+    typing_ctx = await _begin_typing_safely(message.channel)
     try:
-        async with message.channel.typing():
-            response_text = await handler.process(normalized)
-    except Exception as exc:
-        logger.error("Handler error: %s", exc, exc_info=True)
-        await message.channel.send("Something went wrong — try again in a moment.")
         try:
-            await message.add_reaction("⚠️")
-        except Exception:
-            pass
-        return
+            response_text = await handler.process(normalized)
+        except Exception as exc:
+            logger.error("Handler error: %s", exc, exc_info=True)
+            await _send_safely(
+                message.channel,
+                "Something went wrong — try again in a moment.",
+            )
+            try:
+                await message.add_reaction("⚠️")
+            except Exception:
+                pass
+            return
+    finally:
+        if typing_ctx is not None:
+            try:
+                await typing_ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
 
     if not response_text:  # Merged message — response comes from primary turn
         return
 
     for chunk in _chunk_response(response_text):
-        await message.channel.send(chunk)
+        sent = await _send_safely(message.channel, chunk)
+        if not sent:
+            # Could not deliver to Discord (e.g., Cloudflare-flagged token).
+            # Response was persisted to conv-log earlier in the persist
+            # phase, so the substrate state is intact — only the user-
+            # visible delivery failed. Stop chunking; further sends will
+            # also fail.
+            break
 
 
 # ---------------------------------------------------------------------------

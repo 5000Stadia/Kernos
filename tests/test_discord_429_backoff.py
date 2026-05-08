@@ -120,6 +120,114 @@ def test_wrapper_retries_on_429_then_succeeds(monkeypatch):
     assert sleeps == [60]  # first schedule entry
 
 
+@pytest.mark.asyncio
+async def test_begin_typing_safely_returns_ctx_on_success():
+    """When typing.__aenter__ succeeds, the helper returns the
+    context manager so the caller can __aexit__ later."""
+    from unittest.mock import AsyncMock
+    from kernos.server import _begin_typing_safely
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=None)
+    channel = MagicMock()
+    channel.typing = MagicMock(return_value=ctx)
+
+    result = await _begin_typing_safely(channel)
+    assert result is ctx
+    ctx.__aenter__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_begin_typing_safely_returns_none_on_429():
+    """Typing 429 → returns None (caller proceeds without indicator).
+    The previous shape let typing's __aenter__ exception kill the
+    whole turn before handler.process ran."""
+    import discord
+    from unittest.mock import AsyncMock
+    from kernos.server import _begin_typing_safely
+
+    err = discord.HTTPException.__new__(discord.HTTPException)
+    err.status = 429
+    err.code = 40062
+    err.text = "rate limited"
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(side_effect=err)
+    channel = MagicMock()
+    channel.typing = MagicMock(return_value=ctx)
+
+    result = await _begin_typing_safely(channel)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_begin_typing_safely_reraises_non_429():
+    """Non-429 errors (e.g., 5xx, network) re-raise so the existing
+    error path catches them."""
+    import discord
+    from unittest.mock import AsyncMock
+    from kernos.server import _begin_typing_safely
+
+    err = discord.HTTPException.__new__(discord.HTTPException)
+    err.status = 500
+    err.code = 0
+    err.text = "internal server error"
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(side_effect=err)
+    channel = MagicMock()
+    channel.typing = MagicMock(return_value=ctx)
+
+    with pytest.raises(discord.HTTPException):
+        await _begin_typing_safely(channel)
+
+
+@pytest.mark.asyncio
+async def test_send_safely_returns_true_on_success():
+    from unittest.mock import AsyncMock
+    from kernos.server import _send_safely
+
+    channel = MagicMock()
+    channel.send = AsyncMock(return_value=None)
+    assert await _send_safely(channel, "hello") is True
+
+
+@pytest.mark.asyncio
+async def test_send_safely_returns_false_on_429():
+    """Send 429 → returns False so the chunking loop in on_message
+    can stop early. Response is already in conv-log on disk; further
+    sends to the same channel would also fail."""
+    import discord
+    from unittest.mock import AsyncMock
+    from kernos.server import _send_safely
+
+    err = discord.HTTPException.__new__(discord.HTTPException)
+    err.status = 429
+    err.code = 40062
+    err.text = "rate limited"
+
+    channel = MagicMock()
+    channel.send = AsyncMock(side_effect=err)
+    assert await _send_safely(channel, "hello") is False
+
+
+@pytest.mark.asyncio
+async def test_send_safely_reraises_non_429():
+    import discord
+    from unittest.mock import AsyncMock
+    from kernos.server import _send_safely
+
+    err = discord.HTTPException.__new__(discord.HTTPException)
+    err.status = 500
+    err.code = 0
+    err.text = "internal server error"
+
+    channel = MagicMock()
+    channel.send = AsyncMock(side_effect=err)
+    with pytest.raises(discord.HTTPException):
+        await _send_safely(channel, "hello")
+
+
 def test_wrapper_exhausts_schedule_then_raises(monkeypatch):
     """All schedule entries fail → wrapper raises the final 429 with
     operator-actionable logging. The bot exits; start.sh's exit
