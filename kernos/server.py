@@ -93,6 +93,20 @@ logger = logging.getLogger(__name__)
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+# DISCORD-429-SHORT-CIRCUIT (2026-05-08): max_ratelimit_timeout caps
+# discord.py's internal retry-on-429 sleep. When discord.py would
+# sleep longer than this value before retrying, it raises RateLimited
+# immediately — bypassing the 5x retry loop that compounds the abuse
+# flag on every 429 response. discord.py CLAMPS this to a 30-second
+# minimum when set via the Client constructor (HTTPClient.__init__:544
+# does ``max(30.0, max_ratelimit_timeout)``). We need shorter, so
+# bypass the clamp via direct assignment after construction. The
+# request loop reads ``self.max_ratelimit_timeout`` (public attribute)
+# without re-clamping, so our value sticks.
+_DISCORD_MAX_RETRY_SLEEP = float(
+    os.getenv("KERNOS_DISCORD_MAX_RETRY_SLEEP_SEC", "0.5")
+)
+client.http.max_ratelimit_timeout = _DISCORD_MAX_RETRY_SLEEP
 tree = app_commands.CommandTree(client)
 adapter = DiscordAdapter()
 
@@ -1066,8 +1080,14 @@ def _seconds_until_resume() -> int:
 def _register_discord_429(reason: str) -> None:
     """Activate the global cool-off after observing a 429.
 
-    Escalates duration by streak count. Logs operator-readable
-    countdown so the surface matches the auth-path wrapper.
+    Escalates duration by streak count. Logs ONE LINE to console
+    (per founder feedback 2026-05-08); the verbose multi-line block
+    was noise once the mechanism was understood.
+
+    The Discord-side notification (one-line message to the active
+    channel) is best-effort and fired by the on_message helper that
+    has the channel reference; this function only handles the state
+    + logging.
     """
     from datetime import datetime, timedelta
     global _discord_pause_until, _discord_429_streak
@@ -1079,25 +1099,23 @@ def _register_discord_429(reason: str) -> None:
 
     human = _format_429_wait_duration(duration)
     retry_at = datetime.now() + timedelta(seconds=duration)
-    print(
-        "\n" + "=" * 64 + "\n"
-        f"DISCORD COOL-OFF — pausing all bot Discord traffic for {human}\n"
-        + "=" * 64 + "\n"
-        f"Reason: {reason}\n"
-        f"Streak: {_discord_429_streak} consecutive 429 observation(s).\n"
-        f"Resuming at {retry_at.strftime('%H:%M:%S')}.\n\n"
-        f"Until then: typing / send / reaction calls skip immediately\n"
-        f"WITHOUT hitting Discord — no compounding the rate-limit flag.\n"
-        f"Substrate (memory, conv-log, LLM reasoning) keeps working;\n"
-        f"only Discord delivery is paused.\n\n"
-        f"Conv-log entries persist on disk so all activity is\n"
-        f"recoverable when the cool-off expires.\n",
-        file=sys.stderr, flush=True,
-    )
     logger.warning(
-        "DISCORD_PAUSE_ACTIVATED: %s duration_s=%d streak=%d "
-        "resume_at=%s",
-        reason, duration, _discord_429_streak, retry_at.isoformat(),
+        "DISCORD_COOL_OFF: paused %s (streak=%d, resume %s) — %s",
+        human, _discord_429_streak,
+        retry_at.strftime("%H:%M:%S"), reason,
+    )
+
+
+def _format_pause_user_notice() -> str:
+    """One-line message surfaced to the active Discord channel when
+    the cool-off activates. Tells the user the bot is rate-limited,
+    when it'll be back, and that their input was processed (so they
+    don't re-send and compound the issue)."""
+    human = _format_429_wait_duration(_seconds_until_resume())
+    return (
+        f"⚠️ Discord is rate-limiting me — pausing replies for "
+        f"~{human}. Your message was received and processed; "
+        f"only the reply delivery is delayed."
     )
 
 
@@ -1115,43 +1133,28 @@ def _register_discord_call_succeeded() -> None:
 async def _begin_typing_safely(channel) -> Any:
     """Open a typing indicator best-effort.
 
-    Layer 1 — global cool-off check: if the bot is currently paused
-    after a recent 429, return None immediately WITHOUT making the
-    typing API call. discord.py's internal 5x retry never fires;
-    no compounding hits to a Cloudflare-flagged endpoint.
+    Returns the entered context manager on success; None when
+    rate-limited (cool-off active or 429 observed). Other exceptions
+    re-raise.
 
-    Layer 2 — per-call: if not paused, open the typing context
-    manager. On 429, register the streak (which activates the cool-
-    off for subsequent calls), log specifically, and return None.
-    Other exceptions re-raise.
+    Catches both ``discord.HTTPException`` (status=429 escaping
+    discord.py's retry loop) and ``discord.RateLimited`` (raised
+    immediately when retry_after exceeds max_ratelimit_timeout —
+    the short-circuit that prevents the 5x compounding burst).
     """
     if _is_discord_paused():
-        logger.debug(
-            "DISCORD_TYPING_SKIPPED_PAUSED: %ds remaining",
-            _seconds_until_resume(),
-        )
         return None
     try:
         ctx = channel.typing()
         await ctx.__aenter__()
         _register_discord_call_succeeded()
         return ctx
+    except discord.RateLimited:
+        _register_discord_429("typing 429")
+        return None
     except discord.HTTPException as exc:
         if exc.status == 429:
-            code = getattr(exc, "code", None)
-            label = (
-                "Cloudflare-level / abuse flag (40062)"
-                if code == 40062
-                else f"code={code}"
-            )
-            logger.warning(
-                "DISCORD_TYPING_RATE_LIMITED: %s — proceeding without "
-                "typing indicator. The turn will run and the response "
-                "will be sent normally; only the cosmetic typing "
-                "animation is skipped.",
-                label,
-            )
-            _register_discord_429(f"typing 429 ({label})")
+            _register_discord_429("typing 429")
             return None
         raise
 
@@ -1159,49 +1162,47 @@ async def _begin_typing_safely(channel) -> Any:
 async def _send_safely(channel, content: str) -> bool:
     """Send a message with 429 graceful degradation.
 
-    Returns True on success, False on rate-limit failure (including
-    the case where we're currently in the global cool-off and don't
-    even attempt the call). The caller checks the return to decide
-    whether to keep chunking.
+    Returns True on success, False on rate-limit failure. Catches
+    both HTTPException(429) and RateLimited (the short-circuit
+    raised by discord.py when retry_after exceeds the configured
+    max_ratelimit_timeout, preventing the 5x retry compound).
+
+    On rate limit, response content is NOT logged in full — keeps
+    the console one-liner. Conv-log on disk already has it.
     """
     if _is_discord_paused():
-        # Skip without hitting Discord. Log the response content so
-        # operators can read it from the live terminal even though
-        # delivery is suppressed.
-        preview = content if len(content) <= 500 else content[:500] + "...(truncated)"
-        logger.warning(
-            "DISCORD_SEND_SKIPPED_PAUSED: %ds remaining — could not "
-            "deliver %d-char response. Conv-log on disk has full "
-            "content; live preview: %r",
-            _seconds_until_resume(), len(content), preview,
-        )
         return False
     try:
         await channel.send(content)
         _register_discord_call_succeeded()
         return True
+    except discord.RateLimited:
+        _register_discord_429("send 429")
+        return False
     except discord.HTTPException as exc:
         if exc.status == 429:
-            code = getattr(exc, "code", None)
-            label = (
-                "Cloudflare-level / abuse flag (40062)"
-                if code == 40062
-                else f"code={code}"
-            )
-            # Log the full content (truncated) so the operator can
-            # read it from logs even though it didn't reach the user.
-            # The conv-log persist already wrote it to disk, but this
-            # surfaces in the live terminal too.
-            preview = content if len(content) <= 500 else content[:500] + "...(truncated)"
-            logger.warning(
-                "DISCORD_SEND_RATE_LIMITED: %s — could not deliver "
-                "%d-char response. Response is in the conv-log on "
-                "disk; live preview: %r",
-                label, len(content), preview,
-            )
-            _register_discord_429(f"send 429 ({label})")
+            _register_discord_429("send 429")
             return False
         raise
+
+
+async def _send_pause_notice_to_channel(channel) -> None:
+    """Best-effort: send the one-line cool-off notice to the user's
+    Discord channel. If the send itself 429s (likely, since we're
+    rate-limited), just shrug — the console log already captured it.
+
+    Called once per cool-off activation by on_message. The streak
+    counter prevents the notice from spamming on repeated turns
+    during the same cool-off period (we only attempt when streak
+    just incremented past 0)."""
+    notice = _format_pause_user_notice()
+    try:
+        await channel.send(notice)
+    except (discord.RateLimited, discord.HTTPException):
+        # Already rate-limited; don't spam retries. The console log
+        # has the cool-off duration; the user will figure it out from
+        # the bot going silent.
+        pass
 
 
 @client.event
@@ -1271,7 +1272,16 @@ async def on_message(message):
     # failure killed the entire turn before reasoning ran. Now: open
     # the typing indicator best-effort; on failure, log + proceed
     # without it. handler.process always runs.
+    streak_before = _discord_429_streak
     typing_ctx = await _begin_typing_safely(message.channel)
+    # If typing just activated the cool-off (streak incremented from
+    # 0 to 1), surface a one-line notice to the user's channel so they
+    # know the bot is paused. Only on the FIRST activation per streak
+    # — subsequent messages during the same cool-off go silent (no
+    # spam). Best-effort send; if it 429s too, console log already
+    # captured the state.
+    if streak_before == 0 and _discord_429_streak >= 1:
+        await _send_pause_notice_to_channel(message.channel)
     try:
         try:
             response_text = await handler.process(normalized)
@@ -1399,38 +1409,13 @@ def _run_with_429_smart_backoff(client: "discord.Client", token: str) -> None:
             wait = _DISCORD_429_BACKOFF_SCHEDULE[attempt]
             attempt += 1
             code = getattr(exc, "code", None)
-            label = (
-                "Cloudflare-level / abuse flag (error code 40062)"
-                if code == 40062
-                else f"error code {code}"
-                if code
-                else "no error code"
-            )
             human = _format_429_wait_duration(wait)
             retry_at = datetime.now() + timedelta(seconds=wait)
-            print(
-                "\n" + "=" * 64 + "\n"
-                f"DISCORD RATE LIMIT — backing off {human} before retry "
-                f"(attempt {attempt}/{schedule_len})\n"
-                + "=" * 64 + "\n"
-                f"Discord returned HTTP 429: {label}.\n"
-                f"discord.py's Retry-After header is unreliable for this\n"
-                f"error class — the flag persists much longer than the\n"
-                f"header says, so we ignore the header and use our own\n"
-                f"backoff schedule (KERNOS_DISCORD_429_BACKOFF_*_SEC).\n\n"
-                f"Auto-retry scheduled at "
-                f"{retry_at.strftime('%H:%M:%S')} ({human} from now).\n"
-                f"No restart needed — the bot will resume on its own.\n\n"
-                f"If retry {schedule_len} (the final 4-hour backoff) "
-                f"still fails,\n"
-                f"rotate the bot token in the Discord Developer Portal.\n",
-                file=sys.stderr, flush=True,
-            )
             logger.warning(
-                "DISCORD_429_BACKOFF: attempt=%d/%d wait_s=%d "
-                "retry_at=%s code=%s",
-                attempt, schedule_len, wait,
-                retry_at.isoformat(), code,
+                "DISCORD_AUTH_429: backing off %s (attempt %d/%d, "
+                "resume %s, code=%s)",
+                human, attempt, schedule_len,
+                retry_at.strftime("%H:%M:%S"), code,
             )
             _time.sleep(wait)
 

@@ -340,6 +340,84 @@ async def test_send_safely_skips_when_paused(monkeypatch):
     channel.send.assert_not_called()
 
 
+def test_max_ratelimit_timeout_bypasses_30s_clamp():
+    """discord.py clamps max_ratelimit_timeout to a 30s minimum at
+    HTTPClient construction. The post-construction direct assignment
+    bypasses that, letting us short-circuit on any retry_after > 0.5s
+    (catches the 3s retry_after that fires on Cloudflare-flagged
+    tokens). Without the bypass, discord.py would still retry 5
+    times on every 429."""
+    import kernos.server as srv
+    assert srv.client.http.max_ratelimit_timeout == 0.5
+
+
+@pytest.mark.asyncio
+async def test_typing_handles_RateLimited_short_circuit():
+    """When max_ratelimit_timeout fires, discord.py raises
+    ``discord.RateLimited`` (a different exception class than
+    HTTPException). The helper catches both."""
+    import discord
+    from unittest.mock import AsyncMock
+    import kernos.server as srv
+
+    rl = discord.RateLimited(3.0)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(side_effect=rl)
+    channel = MagicMock()
+    channel.typing = MagicMock(return_value=ctx)
+
+    result = await srv._begin_typing_safely(channel)
+    assert result is None
+    # Pause activated.
+    assert srv._is_discord_paused() is True
+
+
+@pytest.mark.asyncio
+async def test_send_handles_RateLimited_short_circuit():
+    import discord
+    from unittest.mock import AsyncMock
+    import kernos.server as srv
+
+    rl = discord.RateLimited(3.0)
+    channel = MagicMock()
+    channel.send = AsyncMock(side_effect=rl)
+
+    result = await srv._send_safely(channel, "hello")
+    assert result is False
+    assert srv._is_discord_paused() is True
+
+
+@pytest.mark.asyncio
+async def test_pause_user_notice_is_one_line():
+    """Channel-side notice is a single-line, plain-language message
+    so the user knows the bot is rate-limited. No multi-line block."""
+    import kernos.server as srv
+
+    # Activate cool-off so the notice has a duration to render.
+    srv._discord_pause_until = _time_module.time() + 300.0
+    notice = srv._format_pause_user_notice()
+    assert "\n" not in notice
+    assert "rate-limit" in notice.lower()
+    assert "minutes" in notice or "seconds" in notice or "hour" in notice
+
+
+@pytest.mark.asyncio
+async def test_send_pause_notice_swallows_429(monkeypatch):
+    """If the channel.send for the notice itself 429s (likely, since
+    we're rate-limited), don't escalate or retry — the console log
+    already captured it."""
+    import discord
+    from unittest.mock import AsyncMock
+    import kernos.server as srv
+
+    rl = discord.RateLimited(3.0)
+    channel = MagicMock()
+    channel.send = AsyncMock(side_effect=rl)
+
+    # Should not raise.
+    await srv._send_pause_notice_to_channel(channel)
+
+
 @pytest.mark.asyncio
 async def test_typing_429_activates_pause(monkeypatch):
     """A typing 429 activates the global cool-off so subsequent
