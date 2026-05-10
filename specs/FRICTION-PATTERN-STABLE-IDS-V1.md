@@ -1,8 +1,14 @@
 # FRICTION-PATTERN-STABLE-IDS-V1 — Implementation Spec
 
-**Status:** DRAFT — pre-implementation. Architect provided framing 2026-05-10
-(Notion `35cffafef4db81d0ad9ef705c802d313`); CC drafted spec body. Open for
-Codex pre-spec review.
+**Status:** DRAFT v2 — pre-implementation, Codex pre-spec review folded
+2026-05-10. Eight findings addressed per architect's calls at Notion
+`35cffafef4db8192a2efc3a0e3c23288`: composite per-instance PK,
+immutable `pattern_id`, storage path text rewrite, deferral of manual
+classification tool out of v1, CHECK/FK/UNIQUE constraints, bifurcated
+classifier threshold, explicit `record_recurrence` method with backfill
+excluded from reactivation, collision-resistant friction report
+filenames. Awaiting architect ratification of revised spec body before
+CC implementation begins.
 
 **Author:** CC, 2026-05-10. Resolves the architect's listed leans + four open
 architectural questions; surfaces all substrate-side decisions explicitly.
@@ -51,7 +57,7 @@ deliverables:
 
 ## What this spec does NOT ship
 
-Per the architect's explicit framing:
+Per the architect's explicit framing + Codex review fold:
 
 - **Workflow primitive integration.** Triggers like "when pattern X frequency
   > threshold, fire workflow Y" are NOT here. The workflow spec consumes the
@@ -62,12 +68,60 @@ Per the architect's explicit framing:
   creation by IA / operator suffices for v1's volume (~10 friction reports
   in the current data dir; cataloging by hand once is fine).
 - **Cross-instance pattern aggregation as stored value.** Per-instance
-  counter + cross-instance query via summing across `data/<instance>/`
-  directories. Stored cross-instance counters introduce sync issues that
-  v1 doesn't earn.
+  counter + cross-instance query via SQL over `instance_id`-tagged rows
+  in the shared `data/instance.db`. Stored cross-instance counters
+  introduce sync issues that v1 doesn't earn.
 - **Workshop-V1 / autonomous spec drafting.** This spec is built by CC
   through the standard architect-framed handoff; it is NOT itself produced
   by the loop the catalog enables.
+- **Manual classification tool surface.** Codex review Finding 4 deferred
+  this out of v1. The Python `FrictionPatternStore` API supports
+  `classified_by="manual"` for direct programmatic use (IA / operator
+  scripts); a formal `classify_friction_report` tool surface waits for a
+  follow-up spec when workflow primitive integration creates clearer
+  need. Auto-classifier (Path A + Path B) ships in v1; manual override
+  via Python API ships in v1; formal tool surface does not.
+- **`rename_pattern` operation.** Codex review Blocker 2 established
+  that rename contradicts the stable-ID promise. `update_description`,
+  `set_display_name`, and `add_alias` cover the use cases without
+  breaking immutability.
+
+## Adjacent work in `kernos/kernel/friction.py` (Codex Finding 8)
+
+The catalog's `friction_pattern_occurrence.report_path` becomes the
+evidence key linking catalog rows back to the markdown report files in
+`data/<instance>/diagnostics/friction/`. Today's filename pattern in
+`FrictionObserver._write_report` (`friction.py:417`) is:
+
+```python
+filename = f"FRICTION_{ts}_{safe_type}.md"
+```
+
+where `ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")`.
+**Second-granularity timestamps are not collision-resistant** — two
+friction signals fired in the same second (rare but observable in
+integration-timeout cascades; see existing 2026-05-07 reports) produce
+identical filenames, which would corrupt the catalog's evidence-key
+discipline once `report_path` becomes a UNIQUE-indexed column.
+
+**Required `friction.py` change** (small, ships alongside this spec's
+implementation):
+
+```python
+import uuid
+filename = f"FRICTION_{ts}_{safe_type}_{uuid.uuid4().hex[:8]}.md"
+```
+
+The 8-hex-char UUID slice (32 bits of entropy) is sufficient for
+collision-avoidance at observed friction-emission rates without making
+filenames unwieldy. Existing report files in `data/<instance>/
+diagnostics/friction/` keep their current filenames; backfill picks
+them up with the existing names (no rename needed).
+
+This is a `friction.py` change, not a catalog change, but the catalog's
+UNIQUE-index constraint on `report_path` requires it land before the
+catalog goes live. Spec body: implementer ships both in the same
+batch. (Folded from Codex review Finding 8.)
 
 ## Architectural decisions (resolving the architect's leans)
 
@@ -76,75 +130,132 @@ Each is resolved below; deviations from the lean are flagged.
 
 ### Decision 1 — Pattern catalog structure (storage + ownership)
 
-**Resolution:** sqlite-backed catalog rows in the existing `instance.db`,
-mirroring `kernos/kernel/reference/catalog.py:CatalogStore` exactly. New
-table `friction_pattern`. New module `kernos/kernel/friction_patterns.py`
-exposing `FrictionPatternStore` with its own `aiosqlite` connection
-(per-module-isolation pattern; `KERNEL-TOOL-REGISTRY-V1` sister convention).
+**Resolution:** sqlite-backed catalog rows in the **shared `data/instance.db`,
+scoped by `instance_id` columns** — mirroring
+`kernos/kernel/reference/catalog.py:CatalogStore` exactly. New tables
+`friction_pattern` and `friction_pattern_occurrence`. New module
+`kernos/kernel/friction_patterns.py` exposing `FrictionPatternStore` with
+its own `aiosqlite` connection (per-module-isolation pattern;
+`KERNEL-TOOL-REGISTRY-V1` sister convention).
 
-`data/<instance>/friction_patterns/` is **not** a separate filesystem
-directory. The catalog state lives in `instance.db` exclusively. Existing
-`data/<instance>/diagnostics/friction/*.md` reports remain the durable
-human-readable evidence; the catalog stores the structured layer (pattern
-ID, occurrence counts, lifecycle) that the markdown reports lack.
+**Cross-instance aggregation is a SQL query over `instance_id`-tagged rows**
+in the same DB, not a fanout across per-instance DB files. Pattern IDs are
+**per-instance namespaces** — the same slug can exist independently across
+instances; cross-instance same-slug patterns are independent records with
+no shared lifecycle.
 
-**Aligns with architect's lean** (the lean said "probably under
-`data/<instance>/friction_patterns/`" but per-instance sqlite is the
-established pattern for structured state since SQLITE-BACKEND-V1 shipped
-2026-04-12 — keeps state queryable, schema-managed, atomic).
+The existing `data/<instance>/diagnostics/friction/*.md` reports remain
+the durable human-readable evidence; the catalog stores the structured
+layer (pattern ID, occurrence counts, lifecycle) that the markdown
+reports lack. There is **no** `data/<instance>/friction_patterns/`
+filesystem directory.
 
-### Decision 2 — Pattern ID format
+**Aligns with REFERENCE-PRIMITIVE-V1.CatalogStore exactly.** Codex pre-spec
+review (Finding 3, HIGH) caught that an earlier draft's text said the
+wrong thing in places (suggesting per-instance DB files); this revision's
+storage section now matches the implementation intent. The architect's
+original lean ("probably under `data/<instance>/friction_patterns/`") is
+explicitly superseded by this resolution.
+
+### Decision 2 — Pattern ID format (immutable, slug + aliases)
 
 **Resolution:** human-readable slug, kebab-case, lowercase, ASCII-only.
+**`pattern_id` is IMMUTABLE — generated once at creation, never modified.**
+Codex pre-spec review (Blocker 2) named the deeper architectural insight:
+stable IDs that change aren't stable; aliases preserve human-readable
+continuity without breaking the underlying stability. This spec adopts
+that as a core invariant.
+
 Example IDs: `compaction-fails-when-canvas-empty`, `tool-request-for-surfaced-tool`,
 `integration-timeout-on-large-payload`.
 
 Generator: `slugify(seed: str) -> str` — strips non-alphanumeric, lowercases,
 collapses runs of non-alphanumeric to single hyphen, trims leading/trailing
-hyphens. Collision detection: `FrictionPatternStore.create_pattern` queries
-for existing rows with the candidate ID; on collision, suffixes a numeric
-disambiguator (`-2`, `-3`). Deterministic for the same seed; collision-free
-across the catalog.
+hyphens. **Collision handling lives inside the write transaction** in
+`create_pattern`: query for existing rows scoped by `instance_id`; on
+collision, append a numeric disambiguator (`-2`, `-3`, ...) and retry
+within the same transaction. Numeric suffix is sufficient because IDs are
+immutable — there is no rename path that could reshuffle them; the suffix
+is permanent for the lifetime of the row.
 
-Aliases: each pattern carries a `aliases: list[str]` field for renamed
-patterns. Lookups check `id` first, then `aliases`. Renaming a pattern
-moves the old ID to `aliases` and assigns a new `id`; counters and
-lifecycle continue under the new ID without resetting frequency history.
+**Identity is moved into separate fields that CAN change:**
 
-**Aligns with architect's lean** (slug + aliases).
+- `display_name: str` — human-readable label (free-form text, not slug-shaped).
+  Mutable via `set_display_name(pattern_id, name)`.
+- `description: str` — full prose description.
+  Mutable via `update_description(pattern_id, new_desc)`.
+- `aliases: tuple[str, ...]` — additional lookup keys for the same pattern.
+  Append-only via `add_alias(pattern_id, alias)`. Aliases are never removed
+  (lookup compatibility); they persist alongside the immutable `pattern_id`.
 
-### Decision 3 — Friction-report → pattern tagging (hybrid classifier)
+Lookups (`get_pattern(instance_id, pattern_id_or_alias)`) check `pattern_id`
+first, then `aliases`, **always scoped by `instance_id`**.
 
-**Resolution:** hybrid auto+manual per architect lean. Implementation shape:
+**There is no `rename_pattern` method.** Codex pre-spec review (Blocker 2)
+established that a rename operation directly contradicts the stable-ID
+promise. The replacement methods (`update_description`, `set_display_name`,
+`add_alias`) cover every continuity-of-meaning use case a rename would
+have served, without breaking the stability invariant.
 
-- **Auto-classify pass (per-friction-report):** the existing
-  `FrictionObserver._write_report` path adds a classifier hook. The
-  classifier compares the new `FrictionSignal` against established
-  patterns using two cheap signals — first `signal_type` exact-match
-  against pattern's `signal_type_keys` set (high confidence; deterministic),
-  then a token-overlap score against pattern's `description` field
-  (medium confidence; same algorithmic primitive as
-  PAGE-SEARCH-TOKEN-OVERLAP-V1 in `kernos/kernel/canvas.py:1495`).
+**Aligns with architect's lean** on slug + aliases; tightens lean on rename
+per Codex review (Blocker 2).
 
-- **Confidence threshold:** auto-tag if either (a) `signal_type` exact
-  match OR (b) token-overlap score above threshold (default
-  `KERNOS_FRICTION_CLASSIFIER_THRESHOLD=0.6` — operator-tunable env var).
-  Below threshold: leave `pattern_id` unset on the report; emit a new
-  `friction.pattern_unclassified` event so a higher-tier observer (or
-  operator) can hand-classify later.
+### Decision 3 — Friction-report → pattern tagging (hybrid classifier, bifurcated threshold)
 
-- **Manual classification:** new tool `classify_friction_report(report_path,
-  pattern_id)` exposed for operator + IA. Updates the report's metadata
-  and bumps the pattern counter.
+**Resolution:** hybrid auto+manual per architect lean. **Auto-classifier
+uses TWO independent matching paths with a bifurcated threshold**
+(Codex pre-spec review Finding 6):
 
-- **No LLM call on the classifier hot path.** The architect's framing flags
-  "auto-classify with manual confirmation for new patterns." We do that
-  via the threshold gate, not via per-report LLM classification — avoids
-  adding a per-friction-event cohort call.
+- **Path A — `signal_type_keys` exact-match:** if the friction signal's
+  `signal_type` is a member of any pattern's `signal_type_keys` set, the
+  match scores **1.0 deterministically** and is **NOT subject to any
+  threshold**. This is the canonical fast path for the existing
+  `FrictionSignal.signal_type` vocabulary (the 10 types `FrictionObserver`
+  emits today).
+
+- **Path B — token-overlap against `description`:** when no `signal_type`
+  match exists, score the new signal's description against each pattern's
+  `description` using the phrase-bonus + token-overlap primitive from
+  `kernos/kernel/canvas.py:1495` (PAGE-SEARCH-TOKEN-OVERLAP-V1). Auto-tag
+  if score exceeds `KERNOS_FRICTION_TOKEN_OVERLAP_THRESHOLD` (default 0.6,
+  operator-tunable). This threshold applies ONLY to Path B; it is
+  semantically distinct from any signal-type-related knob.
+
+- **Confidence ranking when multiple matches:** Path A always wins over
+  Path B (deterministic > algorithmic). Among Path A candidates,
+  `signal_type_keys` uniqueness (below) guarantees there is exactly one.
+  Among Path B candidates, highest score wins; ties broken by
+  `created_at` (older pattern wins; preserves stable identity).
+
+**`signal_type_keys` uniqueness invariant:** any given `signal_type` value
+maps to **at most one active-or-reactivated pattern per instance**. This
+is enforced at `create_pattern` write time: if the candidate
+`signal_type_keys` set intersects any existing pattern's keys for the same
+instance, the create raises `SignalTypeKeyCollision` rather than silently
+overwriting. (Codex review Finding 6: ties Path A to a single canonical
+target so the deterministic path doesn't ambiguate.) Pattern in `archived`
+state is excluded from the uniqueness check so an old archived pattern
+doesn't block recreation.
+
+- **Below either threshold:** leave `pattern_id` unset on the report;
+  emit a `friction.pattern_unclassified` event_stream event so a
+  higher-tier observer (or operator) can hand-classify later.
+
+- **Manual classification: deferred out of v1 tool surface** (Codex
+  review Finding 4). The Python `FrictionPatternStore.record_occurrence`
+  API supports `classified_by="manual"` for direct programmatic use
+  (IA / operator scripts); a formal `classify_friction_report` tool
+  surface is deferred to a follow-up spec when workflow primitive
+  integration creates clearer need. See "What this spec does NOT ship"
+  below.
+
+- **No LLM call on the classifier hot path.** Tightens the architect's
+  framing of "auto-classify with manual confirmation for new patterns."
+  Both Path A and Path B are deterministic/algorithmic — no per-report
+  cohort call.
 
 **Tightens the architect's lean** by pinning the auto-classifier to
-deterministic + algorithmic signals rather than an LLM cohort call. Rationale
-in the "Open architectural questions" section below.
+deterministic + algorithmic signals; bifurcates threshold per Codex review.
 
 ### Decision 4 — Pattern grain (broad vs narrow with parent grouping)
 
@@ -172,47 +283,83 @@ count and child counts.
 
 ### Decision 5 — Aggregation across instances
 
-**Resolution:** per-instance counters; cross-instance aggregation is a query
-that fans out across `data/<instance>/instance.db` files. No stored
-cross-instance value.
+**Resolution:** per-instance counters in the shared `data/instance.db`;
+cross-instance aggregation is a SQL query over `instance_id`-tagged
+rows in the same DB. No stored cross-instance value; no fanout across
+per-instance DB files (per Decision 1's storage shape, which Codex
+review Finding 3 corrected).
 
-This means cross-instance queries require multi-DB read access — not a
-problem for the loop's eventual frequency-trigger logic since the trigger
-fires within a single Kernos instance. Cross-instance is for operator
-audit, not runtime loop closure.
+The runtime loop's frequency trigger fires within a single Kernos
+instance, so cross-instance aggregation is for operator audit, not
+runtime loop closure. A simple SQL query (`SELECT instance_id,
+SUM(...) FROM friction_pattern_occurrence WHERE ... GROUP BY
+instance_id`) suffices; no application-level fanout needed.
 
-**Aligns with architect's lean.**
+**Aligns with architect's lean** (per-instance counters; cross-instance
+as query). Storage shape clarified per Codex review.
 
-### Decision 6 — Pattern lifecycle (active / resolved / reactivated)
+### Decision 6 — Pattern lifecycle (active / resolved / reactivated / archived)
 
-**Resolution:** four states + clean transitions:
+**Resolution:** four states with explicit method-to-state mapping.
+Codex pre-spec review (Finding 7) established that recurrence and
+regular occurrence have different lifecycle effects and should be
+separate methods:
 
-- `active` — pattern is being observed; counter accumulates.
-- `resolved` — operator/loop marked it fixed. Counter no longer accumulates
-  on auto-classify (matches surface a new `friction.pattern_recurrence` event
-  with `resolved_pattern_id` instead of bumping the pattern's counter).
-- `reactivated` — a `resolved` pattern hit a recurrence threshold; counter
-  resumes accumulating. Surfaced as a friction signal of its own
-  (`friction.pattern_reactivated`) for architect / loop attention.
-- `archived` — pattern is no longer relevant; not auto-tagged; counter
-  frozen. Opt-in operator-only state for cleanup.
+- `active` — pattern is being observed. `record_occurrence` increments
+  `occurrence_count` and updates `last_observed_at`.
+- `resolved` — operator/loop marked it fixed via `transition_lifecycle(
+  pattern_id, new_state="resolved", resolved_by_spec=...)`. Subsequent
+  matches go through **`record_recurrence`** (not `record_occurrence`)
+  which: emits `friction.pattern_recurrence` event with
+  `resolved_pattern_id`; does NOT increment the pattern's main
+  `occurrence_count`; checks the reactivation threshold and may
+  transition state.
+- `reactivated` — a `resolved` pattern hit the recurrence threshold;
+  `record_recurrence` flipped state and emitted
+  `friction.pattern_reactivated`. Counter resumes accumulating on
+  subsequent `record_occurrence` calls (not `record_recurrence`;
+  reactivated patterns receive new occurrences as active patterns do).
+- `archived` — pattern is no longer relevant; not auto-tagged;
+  `record_occurrence` and `record_recurrence` both reject with
+  `PatternArchived` error. Opt-in operator-only state for cleanup.
+
+**Method-to-lifecycle mapping** (folded from Codex Finding 7):
+
+| Method | Active | Resolved | Reactivated | Archived |
+|---|---|---|---|---|
+| `record_occurrence` | ✅ increment counter | ❌ rejects (use `record_recurrence`) | ✅ increment counter | ❌ rejects |
+| `record_recurrence` | ❌ rejects (use `record_occurrence`) | ✅ recurrence event + threshold check | ❌ rejects (already reactivated) | ❌ rejects |
+| `transition_lifecycle` | active→resolved/archived | resolved→active/archived | reactivated→resolved/archived | archived→active (operator override) |
+
+The classifier hook in `FrictionObserver._write_report` selects the
+right method based on the matched pattern's current `lifecycle_state`:
+active/reactivated → `record_occurrence`; resolved → `record_recurrence`;
+archived → no-op (and emit `friction.pattern_unclassified` so the
+report doesn't lose its pattern association entirely).
 
 **Reactivation discipline:** `resolved` → `reactivated` requires `N`
-matching auto-classify hits within a configurable window. Defaults:
-`N=3`, window `7 days`, both operator-tunable env vars
+matching `record_recurrence` calls within a configurable window where
+each call's `observed_at >= resolved_at`. Defaults: `N=3`, window
+`7 days`, both operator-tunable env vars
 (`KERNOS_FRICTION_REACTIVATION_THRESHOLD=3`,
-`KERNOS_FRICTION_REACTIVATION_WINDOW_DAYS=7`). The recurrence events
-during the window count toward the reactivation threshold without
-incrementing the pattern's main counter.
+`KERNOS_FRICTION_REACTIVATION_WINDOW_DAYS=7`).
+
+**Backfill is excluded from reactivation logic** (Codex review
+Finding 7): the one-shot backfill script that populates the catalog
+from historical friction reports MUST mark each occurrence with
+`classified_by="backfill"`. The reactivation threshold check filters
+out `classified_by="backfill"` rows so a fresh import of pre-resolution
+reports cannot re-trigger reactivation. This makes backfill safe for
+already-resolved patterns; only post-`resolved_at` real occurrences
+contribute to reactivation.
 
 This is intentionally conservative — a single recurrence after a fix is
-not enough signal to reactivate (might be a stale report from before the
-fix landed; might be an edge case the fix didn't cover but isn't worth
-re-opening). Three within a week is the cheapest threshold that
-distinguishes "fix didn't take" from "fix mostly works."
+not enough signal to reactivate. Three within a week (excluding
+backfill) is the cheapest threshold that distinguishes "fix didn't
+take" from "fix mostly works."
 
 **Aligns with architect's lean** (simple lifecycle); pins the reactivation
-threshold explicitly rather than punting to ARTIFACT-LIFECYCLE-V1.
+threshold + method-to-lifecycle mapping per Codex review.
 
 ### Decision 7 — How specs reference patterns
 
@@ -309,13 +456,18 @@ same shape unless they earn the deviation.
 
 ## Code-level shape
 
-### New table
+### New tables
+
+DDL revised per Codex review (Blocker 1 — composite per-instance PK;
+Finding 5 — CHECK on `classified_by`, composite FK, UNIQUE on
+`report_path`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS friction_pattern (
-    pattern_id          TEXT PRIMARY KEY,
     instance_id         TEXT NOT NULL,
+    pattern_id          TEXT NOT NULL,
     parent_pattern_id   TEXT NOT NULL DEFAULT '',
+    display_name        TEXT NOT NULL DEFAULT '',
     description         TEXT NOT NULL,
     signal_type_keys    TEXT NOT NULL DEFAULT '[]',  -- JSON array
     aliases             TEXT NOT NULL DEFAULT '[]',  -- JSON array
@@ -327,6 +479,7 @@ CREATE TABLE IF NOT EXISTS friction_pattern (
     resolved_by_spec    TEXT NOT NULL DEFAULT '',
     reactivated_at      TEXT NOT NULL DEFAULT '',
     created_at          TEXT NOT NULL,
+    PRIMARY KEY (instance_id, pattern_id),
     CHECK (lifecycle_state IN ('active', 'resolved', 'reactivated', 'archived'))
 );
 
@@ -342,19 +495,62 @@ CREATE TABLE IF NOT EXISTS friction_pattern_occurrence (
     observed_at         TEXT NOT NULL,
     report_path         TEXT NOT NULL DEFAULT '',  -- friction report markdown path
     classifier_score    REAL NOT NULL DEFAULT 0.0,
-    classified_by       TEXT NOT NULL DEFAULT 'auto',  -- 'auto' | 'manual' | 'recurrence'
+    classified_by       TEXT NOT NULL DEFAULT 'auto-signal-type',
     space_id            TEXT NOT NULL DEFAULT '',
-    member_id           TEXT NOT NULL DEFAULT ''
+    member_id           TEXT NOT NULL DEFAULT '',
+    is_recurrence       INTEGER NOT NULL DEFAULT 0,  -- 1 when recorded post-resolved_at
+    FOREIGN KEY (instance_id, pattern_id)
+        REFERENCES friction_pattern(instance_id, pattern_id),
+    CHECK (classified_by IN (
+        'auto-signal-type', 'auto-token-overlap', 'manual', 'backfill'
+    ))
 );
 
 CREATE INDEX IF NOT EXISTS idx_friction_pattern_occurrence_pattern
     ON friction_pattern_occurrence (instance_id, pattern_id, observed_at);
 CREATE INDEX IF NOT EXISTS idx_friction_pattern_occurrence_window
     ON friction_pattern_occurrence (instance_id, observed_at);
+
+-- Codex review Finding 5: prevent double-counting if the same friction
+-- report is reprocessed (classifier rerun, manual reclassification,
+-- backfill of an already-cataloged report). Partial-index syntax
+-- because empty report_path is legitimate (e.g., synthetic test rows).
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_friction_pattern_occurrence_report
+    ON friction_pattern_occurrence (instance_id, pattern_id, report_path)
+    WHERE report_path != '';
 ```
 
-Two-table design is deliberate: pattern row is the catalog entry (mostly
-read-mostly); occurrence row is the append-only event log that drives
+**Schema notes per Codex review:**
+
+- **Composite PK `(instance_id, pattern_id)`** (Blocker 1): pattern_id
+  is per-instance namespace, not global. Same slug can exist
+  independently across instances; cross-instance same-slug rows are
+  independent records.
+- **Composite FK on `friction_pattern_occurrence`** (Blocker 1 +
+  Finding 5): occurrence rows reference both `instance_id` and
+  `pattern_id` columns of the parent pattern. Prevents orphaned
+  occurrences from cross-instance pattern deletion.
+- **`CHECK (classified_by IN ...)`** (Finding 5): vocabulary is closed
+  set. The four values map to the bifurcated classifier paths:
+  `auto-signal-type` (Path A exact match), `auto-token-overlap`
+  (Path B fuzzy match), `manual` (operator/IA via Python API),
+  `backfill` (one-shot historical import; excluded from reactivation
+  logic per Decision 6).
+- **`UNIQUE (instance_id, pattern_id, report_path)`** (Finding 5):
+  partial index where `report_path != ''`. A given friction report file
+  can only be associated with a given pattern once, even if reprocessed
+  (classifier rerun, manual reclassification, backfill of a report that
+  was later cataloged via runtime path).
+- **`is_recurrence` flag**: marks rows recorded via `record_recurrence`
+  (post-`resolved_at`). Reactivation threshold query filters on this
+  alongside `classified_by != 'backfill'`.
+
+**`display_name` column** added per Decision 2 (immutable `pattern_id`
+implies identity is split across stable + mutable fields). Free-form
+text label distinct from the slug-shaped `pattern_id`.
+
+Two-table design is deliberate: pattern row is the catalog entry
+(read-mostly); occurrence row is the append-only event log that drives
 counters and time-window queries. Both tables together give frequency
 analysis without scanning friction report files at query time.
 
@@ -365,11 +561,12 @@ analysis without scanning friction report files at query time.
 
 @dataclass(frozen=True)
 class FrictionPattern:
-    pattern_id: str
     instance_id: str
+    pattern_id: str                        # IMMUTABLE; never modified after creation
     description: str
-    signal_type_keys: tuple[str, ...]      # immutable; list of FrictionSignal.signal_type values
-    aliases: tuple[str, ...] = ()
+    signal_type_keys: tuple[str, ...]      # FrictionSignal.signal_type values
+    display_name: str = ""                 # mutable via set_display_name
+    aliases: tuple[str, ...] = ()          # append-only via add_alias
     parent_pattern_id: str = ""
     lifecycle_state: str = "active"        # 'active' | 'resolved' | 'reactivated' | 'archived'
     occurrence_count: int = 0
@@ -381,46 +578,143 @@ class FrictionPattern:
     created_at: str = ""
 
 
+class SignalTypeKeyCollision(ValueError):
+    """Raised when create_pattern's signal_type_keys would collide with
+    an existing active/reactivated pattern's keys for the same instance.
+    Codex review Finding 6: ties Path A exact-match to a single
+    canonical target."""
+
+
+class PatternArchived(RuntimeError):
+    """Raised when record_occurrence / record_recurrence is called on
+    an archived pattern. Operator must transition_lifecycle out of
+    archived first if the pattern is still relevant."""
+
+
 class FrictionPatternStore:
-    """Sqlite-backed catalog over instance.db. Owns its own aiosqlite connection."""
+    """Sqlite-backed catalog over data/instance.db. Owns its own
+    aiosqlite connection (per-module-isolation pattern; mirrors
+    kernos/kernel/reference/catalog.py:CatalogStore)."""
 
     async def ensure_schema(self) -> None: ...
+
+    # --- Creation (immutable pattern_id; collision-handled within transaction) ---
     async def create_pattern(
         self, *, instance_id: str, description: str,
         signal_type_keys: list[str], parent_pattern_id: str = "",
+        display_name: str = "",
         seed_slug: str = "",  # if empty, derived from description
-    ) -> FrictionPattern: ...
+    ) -> FrictionPattern:
+        """Create a new pattern. pattern_id is generated from seed_slug
+        (or derived from description if seed_slug is empty) via the
+        deterministic slugify helper, with numeric suffix retry on
+        collision within the same write transaction.
+
+        Raises SignalTypeKeyCollision if signal_type_keys intersects
+        any existing active/reactivated pattern's keys for this instance
+        (Codex Finding 6 — Path A uniqueness invariant)."""
+
+    # --- Lookup (always instance-scoped) ---
     async def get_pattern(
         self, instance_id: str, pattern_id_or_alias: str,
-    ) -> FrictionPattern | None: ...
+    ) -> FrictionPattern | None:
+        """Lookup by pattern_id, falling back to aliases match. Always
+        scoped by instance_id (Blocker 1)."""
+
     async def list_patterns(
         self, instance_id: str, *, lifecycle_state: str | None = None,
         parent_pattern_id: str | None = None,
     ) -> list[FrictionPattern]: ...
+
+    # --- Mutable identity fields (Decision 2: pattern_id stays immutable) ---
+    async def update_description(
+        self, instance_id: str, pattern_id: str, new_description: str,
+    ) -> FrictionPattern: ...
+
+    async def set_display_name(
+        self, instance_id: str, pattern_id: str, name: str,
+    ) -> FrictionPattern: ...
+
+    async def add_alias(
+        self, instance_id: str, pattern_id: str, alias: str,
+    ) -> FrictionPattern:
+        """Append-only. Aliases are never removed (lookup compatibility
+        guarantee). Idempotent: adding an existing alias is a no-op."""
+
+    # --- Lifecycle transitions ---
     async def transition_lifecycle(
         self, instance_id: str, pattern_id: str, new_state: str,
         *, resolved_by_spec: str = "",
-    ) -> FrictionPattern: ...
-    async def rename_pattern(
-        self, instance_id: str, current_id: str, new_id: str,
-    ) -> FrictionPattern: ...
+    ) -> FrictionPattern:
+        """Move between {active, resolved, reactivated, archived}.
+        Sets resolved_at / reactivated_at when transitioning into
+        those states. Operator override is the only path out of
+        archived."""
+
+    # --- Occurrence recording (split per Codex Finding 7) ---
     async def record_occurrence(
         self, *, instance_id: str, pattern_id: str, observed_at: str,
         report_path: str = "", classifier_score: float = 0.0,
-        classified_by: str = "auto", space_id: str = "", member_id: str = "",
-    ) -> None: ...
+        classified_by: str = "auto-signal-type",
+        space_id: str = "", member_id: str = "",
+    ) -> None:
+        """Record an occurrence on an active or reactivated pattern.
+        Increments occurrence_count and updates last_observed_at.
+
+        Rejects with ValueError if pattern lifecycle_state is 'resolved'
+        (caller must use record_recurrence instead) or 'archived'
+        (raises PatternArchived). Idempotent on (instance_id,
+        pattern_id, report_path) via the partial UNIQUE index.
+
+        classified_by must be one of: 'auto-signal-type',
+        'auto-token-overlap', 'manual', 'backfill'."""
+
+    async def record_recurrence(
+        self, *, instance_id: str, pattern_id: str, observed_at: str,
+        report_path: str = "", classifier_score: float = 0.0,
+        classified_by: str = "auto-signal-type",
+        space_id: str = "", member_id: str = "",
+    ) -> bool:
+        """Record a recurrence on a resolved pattern. Emits
+        friction.pattern_recurrence event_stream event. Does NOT
+        increment the pattern's occurrence_count.
+
+        Returns True if the recurrence triggered reactivation (state
+        flipped resolved -> reactivated), False otherwise. Reactivation
+        threshold counts only post-resolved_at occurrences with
+        classified_by != 'backfill' (Codex Finding 7).
+
+        Rejects with ValueError if pattern lifecycle_state is
+        'active' or 'reactivated' (caller must use record_occurrence)
+        or 'archived' (raises PatternArchived)."""
+
+    # --- Frequency queries ---
     async def query_frequency(
         self, instance_id: str, pattern_id: str,
         *, window_start: str, window_end: str,
-    ) -> int: ...
+        include_recurrences: bool = False,
+    ) -> int:
+        """Count occurrences in [window_start, window_end). By default
+        excludes is_recurrence=1 rows; pass include_recurrences=True
+        to include them. Excludes classified_by='backfill' rows
+        unconditionally."""
+
     async def query_top_patterns(
         self, instance_id: str, *, window_start: str, window_end: str,
         limit: int = 10,
     ) -> list[tuple[FrictionPattern, int]]: ...
-    async def check_reactivation(
-        self, instance_id: str, pattern_id: str,
-    ) -> bool: ...   # returns True after transitioning state if threshold hit
 ```
+
+**`rename_pattern` removed** per Codex review Blocker 2: rename violates
+the stable-ID promise. The replacement methods (`update_description`,
+`set_display_name`, `add_alias`) cover every continuity-of-meaning use
+case without breaking immutability.
+
+**`classify_friction_report` (tool surface) removed** per Codex review
+Finding 4: deferred out of v1. Manual classification is accessible via
+direct `record_occurrence` / `record_recurrence` Python API calls with
+`classified_by="manual"`. Formal tool-surface formalization waits for
+clearer use case post-workflow-primitive integration.
 
 Public API mirrors `kernos/kernel/reference/catalog.py:CatalogStore` —
 `ensure_schema`, `create_*` / `get_*` / `list_*` / `transition_*`, all
@@ -489,7 +783,8 @@ probe per disclosure-boundary discipline.
 
 1. **`test_create_get_pattern`** — create pattern; query back by id;
    verify shape preserved (signal_type_keys round-trips, aliases empty,
-   lifecycle defaults to active, occurrence_count starts at 0).
+   display_name empty, lifecycle defaults to active, occurrence_count
+   starts at 0).
 2. **`test_create_with_parent_grouping`** — create parent + child;
    list_patterns with parent_pattern_id filter returns child;
    list_patterns top-level returns both (no parent filter).
@@ -502,57 +797,111 @@ probe per disclosure-boundary discipline.
 5. **`test_lifecycle_transitions`** — active → resolved sets
    resolved_at; resolved → reactivated sets reactivated_at; archived
    stops accumulating; round-trip each.
-6. **`test_rename_pattern_preserves_history`** — create pattern with
-   3 occurrences; rename; old id appears in aliases; occurrences still
-   queryable under new id; lookup by old id still returns the pattern
-   (alias resolution).
-7. **`test_action_state_record_per_op`** — RESPONSE-FIDELITY-V1
+6. **`test_pattern_id_immutable_with_alias_continuity`** — create
+   pattern with 3 occurrences; verify there is no `rename_pattern`
+   method on the store; call `add_alias(pattern_id, "old-name")`;
+   verify old name resolves to the pattern via `get_pattern`;
+   verify occurrences still queryable under the original immutable
+   `pattern_id`. (Codex review Blocker 2 — stable IDs that change
+   aren't stable.)
+7. **`test_set_display_name_and_update_description`** — round-trip
+   both mutator methods; verify pattern_id unchanged; verify
+   display_name and description updated correctly.
+8. **`test_action_state_record_per_op`** — RESPONSE-FIDELITY-V1
    discipline: each catalog mutation produces an ActionStateRecord
    (verified via fake action-record sink mirroring
    `tests/test_router_evidence.py`'s pattern).
+9. **`test_create_pattern_signal_type_keys_uniqueness`** — create
+   pattern A with `signal_type_keys=["INTEGRATION_TIMEOUT"]`;
+   attempt to create pattern B with overlapping
+   `signal_type_keys=["INTEGRATION_TIMEOUT", "OTHER"]`; verify
+   raises `SignalTypeKeyCollision`. Archive pattern A; verify B can
+   now be created (archived patterns excluded from uniqueness check).
+   (Codex review Finding 6.)
+10. **`test_slug_collision_appends_numeric_suffix`** — create pattern
+    deriving slug `compaction-fails`; create second pattern with same
+    seed; verify second gets `compaction-fails-2`; both pattern_ids
+    immutable thereafter.
 
 ### Auto-classify behavior
 
 `tests/test_friction_pattern_store.py::TestAutoClassify`
 
-1. **`test_signal_type_match_auto_tags`** — seed pattern with
-   `signal_type_keys=["INTEGRATION_TIMEOUT"]`; feed FrictionSignal
-   with that type; verify auto-tagged at high confidence.
-2. **`test_token_overlap_above_threshold_auto_tags`** — pattern with
+1. **`test_signal_type_path_a_match_scores_one_zero`** — seed pattern
+   with `signal_type_keys=["INTEGRATION_TIMEOUT"]`; feed
+   FrictionSignal with that type; verify auto-tagged with
+   `classifier_score == 1.0` and `classified_by == 'auto-signal-type'`.
+   Path A is deterministic; threshold does not apply.
+2. **`test_token_overlap_path_b_uses_own_threshold`** — pattern with
    description "tool request for already-surfaced tool"; signal with
-   description matching by token overlap > 0.6; verify auto-tagged.
-3. **`test_low_confidence_emits_unclassified_event`** — signal with
-   no type match and low overlap; verify
+   description matching by token overlap above
+   `KERNOS_FRICTION_TOKEN_OVERLAP_THRESHOLD` (default 0.6); verify
+   auto-tagged with `classified_by == 'auto-token-overlap'` and
+   `classifier_score < 1.0`.
+3. **`test_path_a_wins_over_path_b`** — pattern A has matching
+   signal_type_keys; pattern B has matching description (high
+   token-overlap); feed signal that matches both; verify Path A
+   chosen (deterministic > algorithmic).
+4. **`test_low_confidence_emits_unclassified_event`** — signal with
+   no type match and token-overlap below threshold; verify
    `friction.pattern_unclassified` event emitted via event_stream;
-   verify pattern not silently auto-tagged.
-4. **`test_threshold_env_var_tunable`** — set
-   `KERNOS_FRICTION_CLASSIFIER_THRESHOLD=0.9`; signal that would have
-   matched at 0.6; verify NOT auto-tagged at the higher threshold.
-5. **`test_classifier_failure_does_not_block_report_write`** —
+   verify NO row written to `friction_pattern_occurrence`.
+5. **`test_token_overlap_threshold_env_var_tunable`** — set
+   `KERNOS_FRICTION_TOKEN_OVERLAP_THRESHOLD=0.9`; signal that would
+   have matched at 0.6; verify NOT auto-tagged at the higher
+   threshold; verify the env var only affects Path B (Path A still
+   scores 1.0 deterministically).
+6. **`test_classifier_failure_does_not_block_report_write`** —
    inject store that raises on `record_occurrence`; verify friction
    report still written to disk; warning logged.
+7. **`test_idempotent_on_report_path_unique_index`** — feed the same
+   friction report twice; verify the second `record_occurrence` is a
+   no-op (UNIQUE partial index dedupes); pattern occurrence_count
+   incremented exactly once. (Codex review Finding 5.)
 
 ### Reactivation
 
 `tests/test_friction_pattern_store.py::TestReactivation`
 
-1. **`test_resolved_pattern_does_not_increment_counter`** — pattern
-   in resolved state; record_occurrence emits recurrence event but
-   pattern's occurrence_count unchanged.
-2. **`test_threshold_recurrences_trigger_reactivation`** — pattern
-   resolved; record 3 occurrences within 7 days; verify lifecycle
-   transitions to reactivated; verify
-   `friction.pattern_reactivated` event emitted.
-3. **`test_below_threshold_recurrences_do_not_reactivate`** —
-   pattern resolved; record 2 occurrences within 7 days (below
+1. **`test_record_occurrence_rejects_on_resolved`** — pattern in
+   resolved state; calling `record_occurrence` raises ValueError
+   pointing the caller at `record_recurrence`. Pattern's
+   occurrence_count unchanged. (Codex review Finding 7 — split
+   methods.)
+2. **`test_record_recurrence_emits_event_without_incrementing`** —
+   pattern resolved; call `record_recurrence`; verify
+   `friction.pattern_recurrence` event_stream event emitted with
+   `resolved_pattern_id`; verify pattern's `occurrence_count` is
+   unchanged; verify a row IS written to
+   `friction_pattern_occurrence` with `is_recurrence=1`.
+3. **`test_threshold_recurrences_trigger_reactivation`** — pattern
+   resolved; call `record_recurrence` 3 times within 7 days, all
+   `classified_by != 'backfill'`; verify lifecycle transitions to
+   reactivated; verify `friction.pattern_reactivated` event emitted;
+   verify `record_recurrence` returns True on the threshold-tripping
+   call.
+4. **`test_below_threshold_recurrences_do_not_reactivate`** —
+   pattern resolved; record 2 recurrences within 7 days (below
    default `KERNOS_FRICTION_REACTIVATION_THRESHOLD=3`); verify
    pattern stays resolved.
-4. **`test_recurrences_outside_window_do_not_reactivate`** — record
-   3 occurrences spread over 30 days (outside 7-day window); verify
+5. **`test_recurrences_outside_window_do_not_reactivate`** — record
+   3 recurrences spread over 30 days (outside 7-day window); verify
    pattern stays resolved.
-5. **`test_reactivated_pattern_resumes_counting`** — pattern
-   reactivated; record_occurrence after reactivation; verify
-   pattern's occurrence_count increments normally.
+6. **`test_backfill_recurrences_excluded_from_reactivation`** —
+   pattern resolved; call `record_recurrence` 5 times with
+   `classified_by="backfill"`; verify pattern stays resolved (Codex
+   review Finding 7 — backfill excluded). Then add one
+   non-backfill recurrence; if total non-backfill < threshold,
+   still no reactivation.
+7. **`test_reactivated_pattern_resumes_counting`** — pattern
+   reactivated; `record_occurrence` after reactivation; verify
+   pattern's `occurrence_count` increments normally; verify
+   `record_recurrence` rejects on reactivated state (already past
+   resolved).
+8. **`test_record_recurrence_rejects_on_active_or_archived`** —
+   active pattern: `record_recurrence` raises ValueError pointing
+   at `record_occurrence`. Archived pattern: both methods raise
+   `PatternArchived`.
 
 ### Member-isolation probe
 
@@ -590,9 +939,10 @@ do not partition counts by member — frictions belong to the instance.
   detectors keep firing; `_write_report` writes the markdown report
   unchanged. Pattern catalog is additive.
 - **RESPONSE-FIDELITY-V1**: `FrictionPatternStore.create_pattern`,
-  `transition_lifecycle`, `rename_pattern`, `record_occurrence`,
-  `manual classify` all produce ActionStateRecords through the per-turn
-  collector. Reuses the `ctx.action_record_sink` shape established by
+  `update_description`, `set_display_name`, `add_alias`,
+  `transition_lifecycle`, `record_occurrence`, `record_recurrence`
+  all produce ActionStateRecords through the per-turn collector.
+  Reuses the `ctx.action_record_sink` shape established by
   ROUTER-EVIDENCE-V1's drain wiring (`kernos/messages/turn_runner_provider.py`).
 - **Future workflow primitive**: consumes `query_top_patterns` and
   `query_frequency` to drive trigger conditions. Workflow spec defines
@@ -608,53 +958,55 @@ do not partition counts by member — frictions belong to the instance.
 
 | Risk | Mitigation |
 |---|---|
-| Pattern proliferation (every minor edge becomes a new pattern) | Threshold gate consolidates near-misses; new pattern creation is explicit operator/IA step, not auto-driven |
-| Classifier false-positives (incidental token overlap) | Conservative default threshold (0.6); env-var tunable; `signal_type` exact-match takes precedence over token overlap |
-| Classifier false-negatives (paraphrased descriptions miss) | Manual classification path always available; unclassified signals surface as their own friction event for human review |
-| Reactivation noise (stale reports re-trigger) | 3-in-7-days threshold conservative enough that single stragglers don't reactivate |
-| Cross-instance counter sync issues | Avoided entirely — per-instance counters; cross-instance is a query, not a stored value |
+| Pattern proliferation (every minor edge becomes a new pattern) | Path B threshold gate consolidates near-misses; new pattern creation is explicit operator/IA step, not auto-driven |
+| Classifier false-positives (incidental token overlap) | Conservative Path B default threshold (0.6); env-var tunable; Path A signal_type exact-match takes precedence and is itself bounded by the `signal_type_keys` uniqueness invariant (Codex Finding 6) |
+| Classifier false-negatives (paraphrased descriptions miss) | Manual classification accessible via Python API (`classified_by="manual"`); unclassified signals surface as `friction.pattern_unclassified` event_stream events for human review |
+| Reactivation noise (stale reports re-trigger) | 3-in-7-days threshold conservative; backfill explicitly excluded from reactivation logic (Codex Finding 7) so historical-import reports never re-trigger; only post-`resolved_at` non-backfill rows count |
+| Stable-ID drift via rename | `pattern_id` is immutable post-creation; identity-mutation methods touch `display_name`, `description`, and `aliases` only (Codex Blocker 2) |
+| Cross-instance pattern collision | Composite PK `(instance_id, pattern_id)` makes same-slug-across-instances independent records by design (Codex Blocker 1) |
+| Cross-instance counter sync issues | Avoided entirely — per-instance counters in shared `data/instance.db`; cross-instance aggregation is a SQL query over `instance_id`-tagged rows, not a stored value |
+| Same friction report double-counted | Partial UNIQUE index `(instance_id, pattern_id, report_path) WHERE report_path != ''` deduplicates reprocessed reports (Codex Finding 5) |
+| Friction-report filename collisions | UUID8 suffix in `friction.py:_write_report` filename pattern (Codex Finding 8); ships in same batch as catalog implementation |
 | Spec frontmatter format drift | Parser tolerant of malformed YAML (returns empty list rather than raising); commit-message ref still works as fallback |
 | Catalog schema drift between `instance.db` consumers | Self-managed schema in `FrictionPatternStore.ensure_schema()` mirrors the per-module-isolation pattern from REFERENCE-PRIMITIVE-V1 |
 
-## Open questions for Codex pre-spec review
+## Open questions resolved by Codex pre-spec review
 
-1. **Slug generator collision strategy.** Numeric suffix (`-2`, `-3`) on
-   collision is the simplest. Alternative: short hash suffix (`-a3f1`)
-   keeps slugs stable when patterns are renamed (current numeric scheme
-   could shuffle). Codex's call.
+All five questions from v1 of this spec resolved by Codex review folded
+2026-05-10 (architect's calls at Notion `35cffafef4db8192a2efc3a0e3c23288`):
 
-2. **Two-table vs one-table.** Patterns + occurrences in two tables is
-   the cleanest for query patterns; could collapse to one table where
-   each row is a pattern row with an embedded JSON array of recent
-   occurrences. Two-table is simpler to query; one-table is simpler
-   to schema-migrate. Two-table preferred but not load-bearing.
-
-3. **Classifier threshold semantics.** Current spec uses a single
-   threshold for both signal_type-match and token-overlap. Could
-   bifurcate (signal_type match always tags; token-overlap has its
-   own tunable threshold). Bifurcated is more honest semantically;
-   single-threshold is one knob.
-
-4. **Backfill timing.** One-shot script vs lazy backfill on first
-   query? One-shot is cleaner; lazy means catalog accumulates over
-   time as reports are queried. v1 instances have ~10 reports — one-shot
-   is trivially small. Recommend one-shot.
-
-5. **Who emits the `friction.pattern_recurrence` event for resolved
-   patterns?** `record_occurrence` itself, or a separate
-   `record_recurrence` method? The latter is cleaner if recurrence
-   semantics drift from regular occurrence; the former is fewer
-   surfaces. Lean: same method, internal switch on lifecycle_state.
+1. ✅ **Slug collision strategy** — numeric suffix retained; immutable
+   `pattern_id` (Blocker 2) means there's no rename path that could
+   reshuffle suffixes, so the simpler scheme is sufficient.
+2. ✅ **Two-table preserved** — pattern + occurrence rows in two tables.
+   Composite FK + UNIQUE partial index (Finding 5) tightens the
+   referential integrity story; collapse to one-table not pursued.
+3. ✅ **Classifier threshold bifurcated** — Path A (signal_type exact)
+   scores 1.0 deterministically; Path B (token-overlap) has its own
+   tunable threshold. (Finding 6.)
+4. ✅ **Backfill: one-shot script** — confirmed, with explicit
+   `classified_by="backfill"` marking so reactivation logic excludes
+   imported pre-`resolved_at` rows. (Finding 7.)
+5. ✅ **`record_recurrence` is a separate method** — different
+   lifecycle effects warrant separate surfaces. (Finding 7.)
 
 ## Sequence (per architect directive)
 
 1. ✅ CC drafts spec at `specs/FRICTION-PATTERN-STABLE-IDS-V1.md` on branch
-   `friction-pattern-stable-ids-v1` (this commit).
-2. 🟡 **Codex pre-spec review** — pasteable blip via founder-relay; Codex
-   reviews from repo state on this branch.
-3. CC folds Codex review into spec.
-4. **Architect ratification** of spec body.
-5. CC implements per spec on the same branch.
+   `friction-pattern-stable-ids-v1` (commit `1f15069`).
+2. ✅ **Codex pre-spec review** — caught two real blockers (per-instance
+   PK contradiction; rename-changing-ID weakens stable-ID promise) and
+   six adjustments. Worth pinning as a worked example of why the
+   three-tier review chain matters.
+3. ✅ **CC folds Codex review** into spec body — this v2 revision.
+   Eight findings folded per architect's calls at Notion
+   `35cffafef4db8192a2efc3a0e3c23288`.
+4. 🟡 **Architect ratification** of revised spec body — pending.
+   Architect reviews diff against `1f15069` and confirms folds match
+   calls.
+5. CC implements per ratified spec on the same branch (`friction.py`
+   filename collision-resistance change ships in the same batch per
+   Finding 8).
 6. **Codex post-implementation review** per established pattern.
 7. CC any final changes.
 8. Architect ratifies on close; merge to main.
