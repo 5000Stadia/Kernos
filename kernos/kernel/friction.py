@@ -4,14 +4,23 @@ Post-turn cohort agent. Reads turn trace data, detects friction patterns,
 writes self-contained bug reports to data/diagnostics/friction/.
 
 Biased toward subtraction: REMOVE > STRUCTURAL_ENFORCE > SIMPLIFY > ADD.
+
+FRICTION-PATTERN-STABLE-IDS-V1 integration: an optional
+``pattern_store`` injection in :class:`FrictionObserver` enables the
+auto-classifier hook. When wired, each friction signal is matched
+against the catalog's patterns; the hook dispatches to
+``record_occurrence`` or ``record_recurrence`` based on the matched
+pattern's ``lifecycle_state``. Fail-open: classifier errors log and
+continue; never block the report write.
 """
 import json
 import logging
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +58,16 @@ class FrictionObserver:
         reasoning: Any = None,
         data_dir: str = "./data",
         enabled: bool = True,
+        pattern_store: Any = None,
+        emit_event: Callable[[str, dict], Awaitable[None]] | None = None,
     ) -> None:
         self._reasoning = reasoning
         self._data_dir = data_dir
         self._enabled = enabled
+        # FRICTION-PATTERN-STABLE-IDS-V1: optional catalog wiring. When
+        # None, behavior is identical to pre-spec (markdown report only).
+        self._pattern_store = pattern_store
+        self._emit_event = emit_event
 
     async def observe(
         self,
@@ -412,9 +427,15 @@ class FrictionObserver:
 
     async def _write_report(self, signal: FrictionSignal, instance_id: str) -> None:
         """Write a friction report file with LLM-generated description."""
+        # FRICTION-PATTERN-STABLE-IDS-V1 round-1 Finding 8: UUID8 suffix
+        # for collision resistance. Second-granularity timestamps alone
+        # are insufficient when friction cascades fire multiple signals
+        # in the same second; the catalog uses report_path as an
+        # evidence key so filename collisions corrupt the catalog.
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         safe_type = signal.signal_type.replace(" ", "_")[:40]
-        filename = f"FRICTION_{ts}_{safe_type}.md"
+        uuid8 = uuid.uuid4().hex[:8]
+        filename = f"FRICTION_{ts}_{safe_type}_{uuid8}.md"
 
         friction_dir = os.path.join(self._data_dir, "diagnostics", "friction")
         os.makedirs(friction_dir, exist_ok=True)
@@ -463,6 +484,102 @@ class FrictionObserver:
             f.write(report)
 
         logger.info("FRICTION_REPORT: written %s", filepath)
+
+        # FRICTION-PATTERN-STABLE-IDS-V1 classifier hook. Fail-open per
+        # round-2 Blocker 2: dispatch by lifecycle_state with the proper
+        # classified_by vocabulary; classifier failure logs and continues,
+        # never blocks the report write.
+        if self._pattern_store is not None:
+            try:
+                await self._classify_and_record(signal, instance_id, filepath)
+            except Exception as exc:
+                logger.warning("FRICTION_CLASSIFY: failed: %s", exc)
+
+    async def _classify_and_record(
+        self, signal: FrictionSignal, instance_id: str, filepath: str,
+    ) -> None:
+        """Match the signal against catalog patterns and record via the
+        right method based on lifecycle_state. Imported lazily to keep
+        friction.py importable in environments where the catalog hasn't
+        been wired (e.g., legacy tests).
+        """
+        from kernos.kernel.friction_patterns import (
+            LIFECYCLE_ACTIVE,
+            LIFECYCLE_REACTIVATED,
+            LIFECYCLE_RESOLVED,
+            classified_by_for_match_path,
+            classify_signal,
+        )
+        from kernos.utils import utc_now
+
+        candidates = await self._pattern_store.list_patterns(instance_id)
+        result = classify_signal(
+            signal_type=signal.signal_type,
+            signal_description=signal.description,
+            candidates=candidates,
+        )
+        if result is None:
+            await self._emit_pattern_unclassified(signal, filepath, instance_id)
+            return
+
+        pattern, score, match_path = result
+        classified_by = classified_by_for_match_path(match_path)
+        observed_at = utc_now()
+        space_id = signal.context.get("space", "") or ""
+        member_id = signal.context.get("member_id", "") or ""
+
+        if pattern.lifecycle_state in (LIFECYCLE_ACTIVE, LIFECYCLE_REACTIVATED):
+            await self._pattern_store.record_occurrence(
+                instance_id=instance_id,
+                pattern_id=pattern.pattern_id,
+                observed_at=observed_at,
+                report_path=filepath,
+                classifier_score=score,
+                classified_by=classified_by,
+                space_id=space_id,
+                member_id=member_id,
+            )
+        elif pattern.lifecycle_state == LIFECYCLE_RESOLVED:
+            await self._pattern_store.record_recurrence(
+                instance_id=instance_id,
+                pattern_id=pattern.pattern_id,
+                observed_at=observed_at,
+                report_path=filepath,
+                classifier_score=score,
+                classified_by=classified_by,
+                space_id=space_id,
+                member_id=member_id,
+                emit_event=self._emit_event,
+            )
+        else:
+            # Archived — preserve audit trail via unclassified event.
+            await self._emit_pattern_unclassified(signal, filepath, instance_id)
+
+    async def _emit_pattern_unclassified(
+        self, signal: FrictionSignal, filepath: str, instance_id: str,
+    ) -> None:
+        """Surface unclassified friction so a higher-tier observer can
+        hand-classify later. Uses the event_stream emit hook if wired,
+        otherwise the kernel.event_stream module fallback."""
+        payload = {
+            "signal_type": signal.signal_type,
+            "description": signal.description[:200],
+            "report_path": filepath,
+        }
+        try:
+            if self._emit_event is not None:
+                await self._emit_event(
+                    "friction.pattern_unclassified", payload,
+                )
+                return
+            from kernos.kernel import event_stream
+            await event_stream.emit(
+                instance_id, "friction.pattern_unclassified", payload,
+            )
+        except Exception as exc:
+            logger.debug(
+                "FRICTION_PATTERNS: pattern_unclassified emit failed: %s", exc,
+            )
 
     async def _generate_description(self, signal: FrictionSignal) -> tuple[str, str]:
         """Use a cheap LLM call to generate a human-readable friction description."""
