@@ -1,0 +1,79 @@
+{
+  "file_path": "docs/audits/RESPONSE-FIDELITY-V1-PHASE-1-audit.md",
+  "source_hash": "2b86a6428473b459ec7e657f5ba00f5970a74ac6a932e53a5c8df7f35c2d26b6",
+  "generated_at": "2026-05-10T09:29:01.172227+00:00",
+  "sections": [
+    {
+      "section_title": "Doctrine",
+      "one_line": "Core principle that the response/presence layer must report substrate reality precisely, not smooth uncertainty",
+      "line_start": 11,
+      "line_end": 14
+    },
+    {
+      "section_title": "Four invariants under audit",
+      "one_line": "Audit rules for receipt-backed claims, explicit state, honest uncertainty, and preserved partial progress",
+      "line_start": 15,
+      "line_end": 21
+    },
+    {
+      "section_title": "Constraints honored during the audit",
+      "one_line": "Audit constraints for presence role, evidence scope, and fail-closed behavior",
+      "line_start": 22,
+      "line_end": 30
+    },
+    {
+      "section_title": "Methodology",
+      "one_line": "Methodology for auditing action surfaces across dispatch, tool results, logs, and directives",
+      "line_start": 31,
+      "line_end": 47
+    },
+    {
+      "section_title": "Section A — Architectural background (current substrate shape)",
+      "one_line": "Baseline of the current substrate shape for auditing receipt, directive, and rendering fidelity",
+      "line_start": 48,
+      "line_end": 147
+    },
+    {
+      "section_title": "Section B — Per-surface findings",
+      "one_line": "Audit of each surface's receipt fidelity, state rendering, and metadata gaps",
+      "line_start": 148,
+      "line_end": 335
+    },
+    {
+      "section_title": "Section C — Cross-surface patterns",
+      "one_line": "Recurring patterns and gaps across Kernos surfaces and receipts",
+      "line_start": 336,
+      "line_end": 407
+    },
+    {
+      "section_title": "Section D — Heat map",
+      "one_line": "Heat ranking of Kernos surfaces by fidelity drift, highlighting audience-visible fix priorities",
+      "line_start": 408,
+      "line_end": 443
+    },
+    {
+      "section_title": "Section E — Proposed fix shapes (Phase 2 input)",
+      "one_line": "Proposed Phase 2 fixes for directive metadata, renderer rules, language discipline, and fail-closed logging",
+      "line_start": 444,
+      "line_end": 569
+    },
+    {
+      "section_title": "Section F — Recommendation: batch vs sequenced",
+      "one_line": "Recommended Phase 2 rollout order: small prep batch, then sequenced migration of directive-state changes",
+      "line_start": 570,
+      "line_end": 630
+    },
+    {
+      "section_title": "Section G — Architectural questions surfaced for architect",
+      "one_line": "Open architecture decisions needing architect ratification before Phase 2",
+      "line_start": 631,
+      "line_end": 692
+    },
+    {
+      "section_title": "Closing — Phase 1 deliverable status",
+      "one_line": "Phase 1 audit status and recommendations for Phase 2 scope and sequencing",
+      "line_start": 693,
+      "line_end": 707
+    }
+  ]
+}

@@ -755,6 +755,12 @@ class ReasoningService:
         "mark_reference_superseded":          frozenset({"confirmed"}),
         "quarantine_reference":               frozenset({"confirmed"}),
         "restore_reference_from_quarantine":  frozenset({"confirmed"}),
+        # RESPONSE-FIDELITY-V1 Batch 1.2 — synchronous receipt-backed
+        # memory path. Dispatched in the confirmed elif chain at
+        # ``execute_tool``; appears here so the registry-parity pins
+        # in ``test_kernel_tool_dispatch_paths.py`` /
+        # ``test_kernel_tool_registry_parity.py`` agree with dispatch.
+        "note_this":                          frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------

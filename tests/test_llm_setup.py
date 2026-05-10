@@ -482,7 +482,13 @@ class TestHealthCheck:
         self._clear_env(monkeypatch)
         monkeypatch.setenv("KERNOS_LLM_PROVIDER", "openai-codex")
         # Redirect the codex creds-file path at a nonexistent location.
+        # CODEX-CREDS-AUTO-RESYNC (commit 15abff4) added a fallback
+        # that hydrates from ``~/.codex/auth.json`` when the configured
+        # creds file is missing. Override that path too so the test
+        # actually exercises the no-creds branch on a host where the
+        # operator is logged into Codex CLI.
         monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(tmp_path / "missing.json"))
+        monkeypatch.setenv("KERNOS_CODEX_CLI_AUTH_PATH", str(tmp_path / "missing-cli-auth.json"))
         result = check_llm_chain_health()
         assert result.ok is False
         assert "openai-codex" in result.reason
@@ -493,8 +499,11 @@ class TestHealthCheck:
         monkeypatch.setenv("KERNOS_LLM_PROVIDER", "anthropic")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         # Fallback: a provider spec with no credentials configured.
+        # See ``test_openai_codex_without_creds_fails`` for why both
+        # creds env vars are overridden.
         monkeypatch.setenv("KERNOS_LLM_FALLBACK", "openai-codex")
         monkeypatch.setenv("OPENAI_CODEX_CREDS_PATH", str(tmp_path / "nope.json"))
+        monkeypatch.setenv("KERNOS_CODEX_CLI_AUTH_PATH", str(tmp_path / "nope-cli-auth.json"))
         result = check_llm_chain_health()
         assert result.ok is True
         assert "anthropic" in result.resolved

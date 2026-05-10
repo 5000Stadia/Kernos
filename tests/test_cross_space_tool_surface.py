@@ -9,6 +9,7 @@ Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -17,6 +18,19 @@ from kernos.kernel.cross_space.tool import (
     build_request_from_tool_input,
 )
 from kernos.kernel.reasoning import ReasoningService
+
+
+def _recent_iso(offset_seconds: int = 0) -> str:
+    """Render a now-relative ISO-Z timestamp inside the awareness lookback.
+
+    The awareness block at ``assemble.py:_cross_space_awareness_block``
+    filters to events newer than ``now - 24h``. Tests must use
+    now-relative timestamps; hard-coded 2026-05-XX dates rot as the
+    suite ages and silently fall outside the lookback.
+    """
+    return (
+        datetime.now(timezone.utc) - timedelta(seconds=offset_seconds)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +156,7 @@ class TestAwarenessBlock:
         events = [
             _FakeEvent(
                 id="evt1", type="cross_space.action", instance_id="inst1",
-                timestamp="2026-05-01T12:00:00Z", source="cross_space",
+                timestamp=_recent_iso(), source="cross_space",
                 payload={
                     "target_space_id": "different_space",
                     "request_id": "csr_x", "action_kind": "write_knowledge",
@@ -164,7 +178,7 @@ class TestAwarenessBlock:
         events = [
             _FakeEvent(
                 id="evt1", type="cross_space.action", instance_id="inst1",
-                timestamp="2026-05-01T12:00:00Z", source="cross_space",
+                timestamp=_recent_iso(), source="cross_space",
                 payload={
                     "target_space_id": "space_target",
                     "request_id": "csr_x",
@@ -198,7 +212,7 @@ class TestAwarenessBlock:
             events.append(_FakeEvent(
                 id=f"evt{i}", type="cross_space.action",
                 instance_id="inst1",
-                timestamp=f"2026-05-01T12:0{i}:00Z",
+                timestamp=_recent_iso(offset_seconds=10 - i),
                 source="cross_space",
                 payload={
                     "target_space_id": "space_target",

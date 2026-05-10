@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-06T18:31:41.596190+00:00",
+  "generated_at": "2026-05-10T09:29:01.204743+00:00",
   "entries": {
     "docs/ADAPTER-GUIDE.md": {
       "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
@@ -149,6 +149,10 @@
     "docs/architecture/workshop-external-services.md": {
       "source_hash": "a015ea365259009c7a7b15411243ef053a10e7bb949ab69f56c7120b28bddcd7",
       "artifact_path": "docs/_catalog/architecture/workshop-external-services.json"
+    },
+    "docs/audits/RESPONSE-FIDELITY-V1-PHASE-1-audit.md": {
+      "source_hash": "2b86a6428473b459ec7e657f5ba00f5970a74ac6a932e53a5c8df7f35c2d26b6",
+      "artifact_path": "docs/_catalog/audits/RESPONSE-FIDELITY-V1-PHASE-1-audit.json"
     },
     "docs/behaviors/covenants.md": {
       "source_hash": "d0177f2e9fbfd74333366280f8a0a270d892a3f77fb45d817ba03a709e462c1b",
