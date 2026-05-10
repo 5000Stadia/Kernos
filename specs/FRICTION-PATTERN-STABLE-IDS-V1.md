@@ -1,7 +1,35 @@
 # FRICTION-PATTERN-STABLE-IDS-V1 — Implementation Spec
 
-**Status:** DRAFT v3 — pre-implementation, TWO Codex pre-spec review
-rounds folded 2026-05-10.
+**Status:** DRAFT v4 — pre-implementation. TWO Codex pre-spec review
+rounds folded + THREE architect calls folded 2026-05-10. Awaiting
+final architect ratification of v4 (same-turn after CC pings; diff
+against `488e8ea` is small).
+
+**v4 folds (Architect calls, same-turn after v3 ratification at
+Notion `35cffafef4db815d9692e4ce3394368c`):**
+
+- **Q1 — FK `ON DELETE RESTRICT`** on the composite FK; codifies the
+  no-destructive-deletions discipline at the substrate level
+  (mirrors REFERENCE-PRIMITIVE-V1's tombstone-only path). Patterns
+  transition through lifecycle states; they are never `DELETE`'d.
+- **Q2 — Serializable transactions** via `BEGIN IMMEDIATE` on all
+  mutating store methods (`create_pattern`, `update_description`,
+  `set_display_name`, `add_alias`, `transition_lifecycle`,
+  `record_occurrence`, `record_recurrence`). Bounded retry loop
+  (3 retries, env-tunable) on `SQLITE_BUSY`; new `StoreContention`
+  exception after retry exhaustion. Closes the
+  read-state-then-write-stale-decision race the classifier hook
+  would otherwise hit when `transition_lifecycle` runs concurrently.
+- **Q3 — `_PATH_B_MIN_CLEANED_TOKENS = 3`** as a module-level
+  constant in the classifier; hard-coded for v1 rather than env-tunable.
+  The constant is the audit trail; tunability deferred until soak
+  data justifies it.
+
+Two new tests added:
+`test_concurrent_transition_and_occurrence_race` (Q2),
+`test_on_delete_restrict_blocks_pattern_delete_with_occurrences` (Q1).
+
+**Earlier folds preserved:**
 
 - **Round 1 (8 findings)** addressed per architect's calls at Notion
   `35cffafef4db8192a2efc3a0e3c23288`: composite per-instance PK,
@@ -242,6 +270,15 @@ uses TWO independent matching paths with a bifurcated threshold**
   **Normalized scorer specification (Path B):**
 
   ```
+  # Module-level constant (Architect call Q3, v3→v4 fold 2026-05-10):
+  # hard-coded floor for the short-description guard. Hard-coded for v1
+  # rather than env-tunable — tunable env vars proliferate complexity;
+  # the constant is the audit trail. Tunability becomes interesting if
+  # soak surfaces patterns that should match but don't due to the floor,
+  # OR multiple instances need different thresholds. Neither is v1
+  # concern; revisit when soak data exists.
+  _PATH_B_MIN_CLEANED_TOKENS = 3
+
   signal_tokens = tokenize(signal.description)
   pattern_tokens = tokenize(pattern.description)
   if not signal_tokens or not pattern_tokens:
@@ -251,7 +288,10 @@ uses TWO independent matching paths with a bifurcated threshold**
   # _STOPWORDS = {"the", "and", "for", "with", "that", "this", "from", "into", "are", "was"}
   signal_clean = {t for t in signal_tokens if len(t) >= 3 and t not in _STOPWORDS}
   pattern_clean = {t for t in pattern_tokens if len(t) >= 3 and t not in _STOPWORDS}
-  if not signal_clean or not pattern_clean:
+
+  # Floor enforced via _PATH_B_MIN_CLEANED_TOKENS module constant
+  if (len(signal_clean) < _PATH_B_MIN_CLEANED_TOKENS or
+      len(pattern_clean) < _PATH_B_MIN_CLEANED_TOKENS):
       return 0.0
 
   # Jaccard over cleaned tokens for the base score
@@ -585,7 +625,8 @@ CREATE TABLE IF NOT EXISTS friction_pattern_occurrence (
     member_id           TEXT NOT NULL DEFAULT '',
     is_recurrence       INTEGER NOT NULL DEFAULT 0,  -- 1 when recorded post-resolved_at
     FOREIGN KEY (instance_id, pattern_id)
-        REFERENCES friction_pattern(instance_id, pattern_id),
+        REFERENCES friction_pattern(instance_id, pattern_id)
+        ON DELETE RESTRICT,
     CHECK (classified_by IN (
         'auto-signal-type', 'auto-token-overlap', 'manual', 'backfill'
     ))
@@ -646,6 +687,19 @@ an explicit "multi-label allowed" flag.
   `test_orphan_insert_rejected` (below) verifies enforcement by
   attempting an insert with an unknown `(instance_id, pattern_id)`
   and asserting the FK constraint trips.
+- **`ON DELETE RESTRICT` on the composite FK** (Architect call Q1,
+  v3→v4 fold 2026-05-10). Patterns transition through lifecycle states
+  (active → resolved → reactivated → archived); they are NEVER deleted
+  from `friction_pattern`. Kernos's no-destructive-deletions discipline
+  applies at the substrate level: if an operator attempts a raw SQL
+  `DELETE` against a pattern row while any `friction_pattern_occurrence`
+  rows reference it, the FK constraint refuses the delete with
+  `SQLITE_CONSTRAINT_FOREIGNKEY`. Mirrors REFERENCE-PRIMITIVE-V1's
+  tombstone-only discipline (`kernos/kernel/reference/catalog.py`'s
+  `tombstoned` column instead of DELETE). If a future need emerges
+  (garbage collection of long-archived patterns), that's a separate
+  spec with explicit archive-occurrences-first discipline; not v1
+  work.
 - **`CHECK (classified_by IN ...)`** (Finding 5): vocabulary is closed
   set. The four values map to the bifurcated classifier paths:
   `auto-signal-type` (Path A exact match), `auto-token-overlap`
@@ -712,6 +766,14 @@ class PatternArchived(RuntimeError):
     """Raised when record_occurrence / record_recurrence is called on
     an archived pattern. Operator must transition_lifecycle out of
     archived first if the pattern is still relevant."""
+
+
+class StoreContention(RuntimeError):
+    """Raised after the BEGIN IMMEDIATE retry loop exhausts its budget
+    (default 3 retries, env-tunable via KERNOS_FRICTION_TXN_RETRY_LIMIT).
+    Indicates extreme concurrent contention on the same pattern; caller
+    should surface as a friction event itself rather than silently
+    swallow. Architect call Q2 (v3→v4 fold)."""
 
 
 class FrictionPatternStore:
@@ -859,6 +921,57 @@ clearer use case post-workflow-primitive integration.
 Public API mirrors `kernos/kernel/reference/catalog.py:CatalogStore` —
 `ensure_schema`, `create_*` / `get_*` / `list_*` / `transition_*`, all
 with explicit `instance_id` argument for per-instance scoping.
+
+### Transaction discipline (Architect call Q2, v3→v4 fold 2026-05-10)
+
+All mutating store methods open a SQLite transaction in **immediate
+(serializable-equivalent) mode** via `BEGIN IMMEDIATE`. Specifically:
+
+- `create_pattern`
+- `update_description`, `set_display_name`, `add_alias`
+- `transition_lifecycle`
+- `record_occurrence`, `record_recurrence`
+
+`BEGIN IMMEDIATE` acquires the RESERVED lock at transaction start (rather
+than deferring until first write). This guarantees that two concurrent
+mutating calls on the same `instance.db` connection pool will serialize
+at the BEGIN boundary, not at the first conflicting write — which
+prevents the read-current-state-then-write-stale-decision race that
+would otherwise let, e.g., a `record_occurrence` write a row for a
+pattern that just transitioned to `resolved`.
+
+**Race semantics:** if two callers concurrently transition active →
+resolved and `record_occurrence` on the same pattern, exactly one
+transaction acquires the RESERVED lock first and proceeds; the other
+fails with `SQLITE_BUSY`. The store wraps the SQLITE_BUSY case in a
+retry loop (bounded: 3 retries with exponential backoff, default
+50ms / 100ms / 200ms; `KERNOS_FRICTION_TXN_RETRY_LIMIT=3` env-tunable).
+After retry exhaustion, the call raises `StoreContention` (subclass of
+`RuntimeError`) so the caller knows the operation didn't land.
+
+The retry path re-reads the current pattern state inside the new
+transaction so dispatch logic always sees fresh `lifecycle_state` —
+in the example above, the retried `record_occurrence` observes the
+now-resolved pattern, rejects with `ValueError` pointing the caller at
+`record_recurrence` per Decision 6's method-to-lifecycle table. The
+caller then dispatches correctly to `record_recurrence` on the next
+attempt. This is the **classifier hook's** problem to handle when it
+issues these calls; library callers see clean ValueError / PatternArchived
+on lifecycle mismatch and `StoreContention` only on extreme contention.
+
+`BEGIN EXCLUSIVE` was considered and rejected: blocking readers is
+overkill for this workload (read-mostly with sparse mutating writes).
+`BEGIN IMMEDIATE` gives serializable-equivalent semantics for writers
+without read blocking.
+
+**Why this matters for the classifier hook:** the snippet in the next
+section dispatches based on `pattern.lifecycle_state`. Without
+serializable transactions, the read in `_classify_signal` could observe
+state X, then a parallel transition could change it to state Y, then
+the hook's `record_occurrence` / `record_recurrence` call could land
+on a Y-state pattern with a dispatch decision made for X. `BEGIN
+IMMEDIATE` on both `transition_lifecycle` and the record methods
+closes that window.
 
 ### Classifier hook in `FrictionObserver`
 
@@ -1025,6 +1138,28 @@ probe per disclosure-boundary discipline.
 16. **`test_alias_normalized_via_slugify`** — `add_alias(A, "Foo Bar!")`
     stores `"foo-bar"`; subsequent `add_alias(B, "foo-bar")` collides
     (Codex Finding 7 mandates normalization).
+17. **`test_concurrent_transition_and_occurrence_race`** — Architect
+    call Q2 (v3→v4 fold). Spawn two coroutines on separate connections
+    against the same `instance.db`: one calls
+    `transition_lifecycle(pattern_id, "resolved")`; the other calls
+    `record_occurrence(pattern_id, ...)` on the same pattern. Verify
+    exactly one succeeds on the first attempt; the other fails with
+    `SQLITE_BUSY` and the store's retry path observes the post-transition
+    `lifecycle_state`. Verify the eventual outcome matches what dispatch
+    would produce sequentially (no double-counting; no row-on-wrong-state).
+    Verify `StoreContention` is raised only after retry exhaustion
+    (set `KERNOS_FRICTION_TXN_RETRY_LIMIT=0` for one variant to force the
+    immediate-failure case).
+18. **`test_on_delete_restrict_blocks_pattern_delete_with_occurrences`**
+    — Architect call Q1 (v3→v4 fold). Create pattern; record one
+    occurrence; attempt raw SQL `DELETE FROM friction_pattern WHERE
+    pattern_id = ?`; verify the FK constraint raises
+    `SQLITE_CONSTRAINT_FOREIGNKEY`. Verify the same DELETE succeeds
+    after the occurrence row is removed (proving the constraint is
+    occurrence-presence-driven, not a blanket no-delete). This pin
+    catches "FK declared but ON DELETE clause silently defaults to NO
+    ACTION" regressions; combined with `test_orphan_insert_rejected_via_fk`
+    it covers both directions of the FK contract.
 
 ### Auto-classify behavior
 
@@ -1241,17 +1376,23 @@ All five questions from v1 of this spec resolved by Codex review folded
    scope too narrow, signal_type_keys uniqueness not enforced on
    transitions, alias collisions unconstrained, backfill excluded too
    aggressively, friction path text inconsistent). All folded.
-5. ✅ **CC folds Codex review round 2** into spec body — this v3
+5. ✅ **CC folds Codex review round 2** into spec body — v3 revision
+   (commit `488e8ea`).
+6. ✅ **Architect ratifies v3** + issues three architectural calls
+   (FK ON DELETE RESTRICT; serializable transactions via BEGIN
+   IMMEDIATE; Path B short-description floor hard-coded). Round-3
+   Codex review explicitly skipped per pipeline compression rules.
+   See Notion `35cffafef4db815d9692e4ce3394368c`.
+7. ✅ **CC folds three architect calls** into spec body — this v4
    revision.
-6. 🟡 **Architect ratification** of revised spec body — pending.
-   Architect reviews diff against `1f15069` (cumulative) and confirms
-   folds across both Codex rounds match calls.
-7. CC implements per ratified spec on the same branch (`friction.py`
-   filename collision-resistance change ships in the same batch per
-   round 1 Finding 8).
-6. **Codex post-implementation review** per established pattern.
-7. CC any final changes.
-8. Architect ratifies on close; merge to main.
+8. 🟡 **Architect ratifies v4** — pending (same-turn after CC pings;
+   diff against `488e8ea` is small).
+9. CC implements per ratified v4 spec on the same branch
+   (`friction.py` filename collision-resistance change ships in the
+   same batch per round 1 Finding 8).
+10. **Codex post-implementation review** per established pattern.
+11. CC any final changes.
+12. Architect ratifies on close; merge to main.
 
 No IA pre-spec review per architect directive — substrate concerns are
 bounded enough that architect framing + Codex review covers it. IA
