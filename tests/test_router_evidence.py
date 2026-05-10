@@ -429,6 +429,52 @@ class TestBuildEvidenceLayer2:
         assert len(ev.ledger_tail) <= LEDGER_TAIL_CAP_TOKENS * 4
         assert ev.truncated is True
 
+    async def test_aggregate_per_space_bound_when_both_layers_contribute(self):
+        """Architect ratification verification (2026-05-10): with Layer 2
+        active, the per-space bundle MUST stay bounded across all three
+        fields combined, not just per-field. Sum of cap budgets:
+        recent_tail=200 (trimmed under Living State) + living_state=500
+        + ledger_tail=200 = 900 token-equivalents (3600 chars). This
+        test feeds oversized inputs to all three and asserts the
+        aggregate fits."""
+        space = _make_space("space_a", "A", "desc")
+        oversized_recent = [
+            {"role": "user", "content": "x" * 1000, "timestamp": ""}
+            for _ in range(20)
+        ]
+        oversized_living = "L" * (LIVING_STATE_CAP_TOKENS * 4 * 5)
+        oversized_ledger = ["E" * (LEDGER_TAIL_CAP_TOKENS * 4 * 3)]
+        conv_logger = MagicMock()
+        conv_logger.read_recent = AsyncMock(return_value=oversized_recent)
+        compaction = MagicMock()
+        compaction.load_living_state = AsyncMock(return_value=oversized_living)
+        compaction.load_recent_ledger_entries = AsyncMock(return_value=oversized_ledger)
+
+        bundles = await build_space_evidence(
+            conv_logger=conv_logger,
+            compaction=compaction,
+            instance_id="inst-A",
+            member_id="mem-A",
+            candidates=[space],
+            message_content="",
+        )
+        ev = bundles["space_a"]
+        aggregate_chars = (
+            len(ev.recent_tail) + len(ev.living_state) + len(ev.ledger_tail)
+        )
+        # Layer 2 present → recent_tail uses the smaller cap
+        per_space_token_budget = (
+            RECENT_TAIL_CAP_WHEN_LIVING_STATE
+            + LIVING_STATE_CAP_TOKENS
+            + LEDGER_TAIL_CAP_TOKENS
+        )
+        assert aggregate_chars <= per_space_token_budget * 4, (
+            f"per-space aggregate {aggregate_chars} chars exceeds budget "
+            f"{per_space_token_budget * 4} chars; per-space cap discipline "
+            f"breaks once Layer 2 contributes at full size"
+        )
+        assert ev.truncated is True
+
 
 # ---------------------------------------------------------------------------
 # Member-isolation: Layer 2 reads through compaction's _space_dir boundary
