@@ -17,6 +17,8 @@ import os
 from kernos.kernel.event_types import EventType
 from kernos.kernel.events import emit_event
 from kernos.kernel.router import RouterResult
+from kernos.kernel.space_candidates import list_route_candidate_spaces
+from kernos.kernel.space_evidence import build_space_evidence
 from kernos.messages.phase_context import PhaseContext
 from kernos.utils import utc_now
 
@@ -60,9 +62,13 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     _first_word = _content.split()[0].lower() if _content else ""
     _DIAGNOSTIC_BYPASS_COMMANDS = {"/dump", "/status"}
     if _first_word in _DIAGNOSTIC_BYPASS_COMMANDS and current_focus_id:
+        # ROUTER-EVIDENCE-V1: the diagnostic bypass MUST short-circuit
+        # before evidence build — diagnostic intent is the same regardless
+        # of substrate, and loading evidence for every candidate space here
+        # is wasted work that can also slow `/dump` noticeably.
         logger.info(
             "ROUTE_DIAGNOSTIC_BYPASS: cmd=%s staying in current_focus=%s "
-            "(skipped router cohort)",
+            "(skipped router cohort + evidence build)",
             _first_word, current_focus_id,
         )
         ctx.router_result = RouterResult(
@@ -72,7 +78,43 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             query_mode=False,
         )
     else:
-        ctx.router_result = await handler._router.route(instance_id, message.content, recent_full, current_focus_id, member_id=ctx.member_id)
+        # ROUTER-EVIDENCE-V1: build per-space evidence bundles before the
+        # router call so the cohort sees substrate-derived orientation
+        # signals (recent activity tail, Living State, Ledger entries),
+        # not just static descriptions. Both the candidate list and the
+        # evidence build are best-effort — any failure here falls back
+        # to descriptions-only routing (legacy behavior) so the router
+        # cohort always gets a chance to decide.
+        candidates: list = []
+        evidence: dict = {}
+        try:
+            candidates = await list_route_candidate_spaces(
+                handler.state, instance_id, member_id=ctx.member_id,
+            )
+            evidence = await build_space_evidence(
+                conv_logger=handler.conv_logger,
+                compaction=handler.compaction,
+                instance_id=instance_id,
+                member_id=ctx.member_id,
+                candidates=candidates,
+                message_content=message.content or "",
+                current_focus_id=current_focus_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "ROUTER_EVIDENCE: candidate/evidence build failed, "
+                "routing without evidence: %s", exc,
+            )
+            candidates = []
+            evidence = {}
+        # When candidates is empty, pass None so the router falls back to
+        # its internal candidate computation (legacy behavior).
+        ctx.router_result = await handler._router.route(
+            instance_id, message.content, recent_full, current_focus_id,
+            member_id=ctx.member_id,
+            candidate_spaces=candidates if candidates else None,
+            space_evidence=evidence if evidence else None,
+        )
 
     # Query mode: quick question about another domain — stay in current space
     if ctx.router_result.query_mode and current_focus_id and ctx.router_result.focus != current_focus_id:
@@ -119,7 +161,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         _route_space = await handler.state.get_context_space(instance_id, ctx.active_space_id)
         _route_space_name = _route_space.name if _route_space else ""
     logger.info(
-        "ROUTE: space=%s (%s) tags=%s confident=%s prev=%s switched=%s router=llm",
+        "ROUTE: space=%s (%s) tags=%s continuation=%s prev=%s switched=%s router=llm",
         ctx.active_space_id, _route_space_name or "unknown",
         ctx.router_result.tags, ctx.router_result.continuation,
         ctx.previous_space_id, ctx.space_switched,

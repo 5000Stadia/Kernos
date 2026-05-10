@@ -39,6 +39,16 @@ def _make_ctx(content: str, current_focus: str = "space_general") -> PhaseContex
     handler.state.get_context_space = AsyncMock(return_value=None)
     handler.state.update_context_space = AsyncMock(return_value=None)
     handler.state.save_instance_profile = AsyncMock(return_value=None)
+    # ROUTER-EVIDENCE-V1: route.py now calls list_route_candidate_spaces
+    # which calls state.list_context_spaces. Empty list keeps non-bypass
+    # paths exercising the legacy router-internal-candidates fallback.
+    handler.state.list_context_spaces = AsyncMock(return_value=[])
+    # ROUTER-EVIDENCE-V1: compaction service is consulted by the
+    # evidence builder. AsyncMocks default-return Sentinels which the
+    # builder treats as empty content via its fail-open path.
+    handler.compaction = MagicMock()
+    handler.compaction.load_living_state = AsyncMock(return_value="")
+    handler.compaction.load_recent_ledger_entries = AsyncMock(return_value=[])
     handler.events = MagicMock()
     handler.events.emit = AsyncMock(return_value=None)
     handler._router = MagicMock()
@@ -54,6 +64,7 @@ def _make_ctx(content: str, current_focus: str = "space_general") -> PhaseContex
     handler._tool_catalog = MagicMock()
     handler.conv_logger = MagicMock()
     handler.conv_logger.read_current_log_text = AsyncMock(return_value="")
+    handler.conv_logger.read_recent = AsyncMock(return_value=[])
     handler._check_catalog_version = AsyncMock(return_value=None)
     # _run_session_exit fires as a fire-and-forget task on space switch.
     async def _noop(*a, **k):
@@ -106,6 +117,22 @@ async def test_dump_bypasses_router_cohort_and_stays_in_current_focus():
         f"Codex caught in the CCV1 soak — substrate diagnostic "
         f"inspecting the wrong space."
     )
+
+
+async def test_dump_bypass_short_circuits_evidence_build():
+    """ROUTER-EVIDENCE-V1 v2 risk A: the bypass MUST short-circuit
+    BEFORE building per-space evidence. Loading evidence for every
+    candidate space on every /dump is wasted work and would slow the
+    diagnostic noticeably on instances with many spaces."""
+    ctx = _make_ctx("/dump", current_focus="space_general")
+    await route_run(ctx)
+
+    # If evidence build had been reached, list_context_spaces would
+    # have been called. The bypass short-circuits before that.
+    ctx.handler.state.list_context_spaces.assert_not_called()
+    ctx.handler.compaction.load_living_state.assert_not_called()
+    ctx.handler.compaction.load_recent_ledger_entries.assert_not_called()
+    ctx.handler.conv_logger.read_recent.assert_not_called()
 
 
 async def test_status_bypasses_router_cohort_and_stays_in_current_focus():

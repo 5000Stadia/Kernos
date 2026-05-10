@@ -1,8 +1,9 @@
 """Context Space Router — LLM-based message routing.
 
-Routes messages to context spaces using a lightweight Haiku LLM call.
-Reads message meaning, recent history, and space descriptions.
-Algorithmic fallback for single-space tenants (zero cost).
+Routes messages to context spaces using a lightweight LLM call. Reads
+message meaning, recent history, space descriptions, and (per
+ROUTER-EVIDENCE-V1) per-space substrate evidence — recent activity tail
+and compacted Living State + Ledger entries.
 """
 import json
 from kernos.utils import utc_now
@@ -11,12 +12,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from kernos.kernel.reasoning import ReasoningService
+from kernos.kernel.space_candidates import list_route_candidate_spaces
+from kernos.kernel.space_evidence import SpaceEvidence
 from kernos.kernel.spaces import ContextSpace
 from kernos.kernel.state import StateStore
 
 logger = logging.getLogger(__name__)
 
 ROUTER_SYSTEM_PROMPT = """You are a message router for a personal AI assistant that serves the full breadth of one person's life — from professional work to personal projects, health to hobbies, finances to family, legal matters to creative pursuits. Any topic the user brings is in scope. Your job is to route each message to the right context space.
+
+Each space lists a short static description plus, when available, evidence drawn from that space's substrate: a few recent log entries, the compacted Living State (current-truth snapshot), and the most recent Ledger entries (topical index of past compactions). When evidence contradicts a space's static description, weigh the evidence — descriptions are labels, not authoritative routing oracles.
 
 Given the user's message, recent conversation history, and a list of context spaces, do three things:
 
@@ -129,27 +134,36 @@ class LLMRouter:
         recent_history: list[dict],
         current_focus_id: str = "",
         member_id: str = "",
+        *,
+        candidate_spaces: list[ContextSpace] | None = None,
+        space_evidence: dict[str, SpaceEvidence] | None = None,
     ) -> RouterResult:
         """Route a message. Returns RouterResult(tags, focus, continuation).
 
         recent_history: full metadata entries from get_recent_full().
         current_focus_id: the instance's last_active_space_id (for continuation logic).
         member_id: if provided, only route to spaces owned by this member (or legacy unowned).
+        candidate_spaces: pre-computed visibility-filtered candidate set
+            (ROUTER-EVIDENCE-V1). When None, the router calls
+            ``list_route_candidate_spaces`` itself so legacy callers and
+            tests stay green without hand-passing the candidates.
+        space_evidence: per-space substrate evidence bundles
+            (ROUTER-EVIDENCE-V1). When None or empty, the router falls
+            back to descriptions-only — the legacy behavior.
         """
-        spaces = await self._state.list_context_spaces(instance_id)
-        active_spaces = [s for s in spaces if s.status == "active"]
-        # Filter by member: show this member's spaces + legacy (no member_id) + system spaces
-        if member_id:
-            active_spaces = [
-                s for s in active_spaces
-                if not s.member_id or s.member_id == member_id or s.space_type == "system"
-            ]
+        if candidate_spaces is None:
+            active_spaces = await list_route_candidate_spaces(
+                self._state, instance_id, member_id=member_id,
+            )
+        else:
+            active_spaces = list(candidate_spaces)
 
         # No spaces at all — nothing to route to
         if not active_spaces:
             return RouterResult(tags=[], focus="", continuation=False)
 
-        # Build space list for the prompt (with hierarchy info)
+        # Build space list for the prompt (with hierarchy info + evidence blocks)
+        evidence_map: dict[str, SpaceEvidence] = space_evidence or {}
         space_name_map_all = {s.id: s.name for s in active_spaces}
         space_lines = []
         for s in active_spaces:
@@ -161,6 +175,20 @@ class LLMRouter:
             elif s.depth == 0 and not s.is_default and s.space_type != "system":
                 hierarchy = " [root domain]"
             space_lines.append(f"- {s.id}: {s.name}{default_marker}{hierarchy} — {desc}")
+            ev = evidence_map.get(s.id)
+            if ev:
+                if ev.recent_tail:
+                    space_lines.append("    Recent activity:")
+                    for line in ev.recent_tail.splitlines():
+                        space_lines.append(f"      {line}")
+                if ev.living_state:
+                    space_lines.append("    Living State:")
+                    for line in ev.living_state.splitlines():
+                        space_lines.append(f"      {line}")
+                if ev.ledger_tail:
+                    space_lines.append("    Recent Ledger entries:")
+                    for line in ev.ledger_tail.splitlines():
+                        space_lines.append(f"      {line}")
         space_descriptions = "\n".join(space_lines)
 
         # Build recent history with timestamps and existing tags

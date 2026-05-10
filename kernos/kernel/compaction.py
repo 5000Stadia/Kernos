@@ -766,6 +766,53 @@ class CompactionService:
         forward = entries[-2:]
         return "\n\n".join(forward)
 
+    # --- ROUTER-EVIDENCE-V1: public read-only accessors ---
+    #
+    # ROUTER-EVIDENCE-V1 batch 2.2 surfaces the Living State and the most
+    # recent Ledger entries to the router cohort as orientation evidence.
+    # These thin wrappers avoid forcing call sites to reach into the
+    # private extractors above. Member scope is inherited from
+    # ``load_document`` / ``_space_dir`` — the same disclosure boundary
+    # that prevented the scenario-04 leak path.
+
+    async def load_living_state(
+        self, instance_id: str, space_id: str, member_id: str = "",
+    ) -> str:
+        """Return the Living State section, or empty string if no document.
+
+        Member-scoped via ``_space_dir``. Empty member_id falls back to
+        the unowned/legacy path, mirroring ``load_document``.
+        """
+        document = await self.load_document(instance_id, space_id, member_id)
+        if not document:
+            return ""
+        return self._extract_living_state(document)
+
+    async def load_recent_ledger_entries(
+        self, instance_id: str, space_id: str, member_id: str = "",
+        n: int = 3,
+    ) -> list[str]:
+        """Return the last ``n`` Ledger entries, oldest-to-newest among the tail.
+
+        Implementation contract per Codex review 2026-05-09 v2 finding 2:
+          * ``entries[-n:]`` ordering — oldest first within the returned
+            window so callers can render chronologically without
+            reversing.
+          * ``n <= 0`` returns ``[]`` (no work, no surprise).
+          * Missing document returns ``[]``.
+
+        Member-scoped via ``_space_dir``.
+        """
+        if n <= 0:
+            return []
+        document = await self.load_document(instance_id, space_id, member_id)
+        if not document:
+            return []
+        entries = self._parse_ledger_entries(document)
+        if not entries:
+            return []
+        return entries[-n:]
+
     # --- Compact ---
 
     async def compact(
