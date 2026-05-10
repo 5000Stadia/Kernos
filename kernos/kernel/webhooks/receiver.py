@@ -11,9 +11,11 @@ source identifier alongside the validated body.
 
 Route registration: this module exposes ``register_routes(app)``
 which mounts a ``POST /webhooks/{source_id}`` route on a passed-in
-FastAPI application. The integration site (``kernos/server.py`` or
-``kernos/app.py`` depending on which file owns the FastAPI
-instance) calls this at startup.
+FastAPI application. Kernos's live runtime is Discord-via-``server.py``
+(no FastAPI surface), so today only the test suite calls
+``register_routes`` against a stand-alone FastAPI instance. The
+function is kept as ready-but-unwired infrastructure for any future
+HTTP-fronted deployment.
 
 v1: HTTP POST with JSON. Future expansion (other content types,
 streaming bodies, signed query params) lands in a separate spec.

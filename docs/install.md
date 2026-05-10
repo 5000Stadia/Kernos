@@ -62,25 +62,6 @@ python kernos/server.py
 5. Set `DISCORD_OWNER_ID` to your Discord user id and `KERNOS_INSTANCE_ID` to `discord:<that-id>`.
 6. Start the server. The first DM you send begins onboarding.
 
-### Twilio webhook (SMS-first) — `uvicorn kernos.app:app`
-
-Lighter footprint, exposes a Twilio-compatible HTTP webhook. Use when SMS is the primary surface and you don't want the Discord runtime running.
-
-```
-uvicorn kernos.app:app --host 0.0.0.0 --port 8000
-```
-
-**Required env:**
-- `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_PHONE_NUMBER` — Twilio credentials
-- `OWNER_PHONE_NUMBER` — your phone, in E.164 format
-- `KERNOS_INSTANCE_ID=sms:<owner-phone>` — instance identity
-
-**First-run checklist:**
-1. Buy a Twilio phone number with SMS capability.
-2. Configure the number's "A message comes in" webhook to point at your public URL plus `/twilio/sms` (use ngrok or similar for local development).
-3. Drop the credentials and your phone number into `.env`.
-4. Run `uvicorn kernos.app:app`. Text the Twilio number — Kernos onboards the same way Discord does.
-
 ### CLI chat — `python -m kernos.chat`
 
 Local terminal chat. No adapter, no scheduler, no awareness — just turn-by-turn conversation against the same handler + reasoning service. Useful for testing prompts, exercising tools, and offline development.

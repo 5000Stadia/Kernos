@@ -1,85 +1,85 @@
 {
   "file_path": "docs/install.md",
-  "source_hash": "f6b88813b147cc26712e700d8781651b91563475e408e1fd91b70181eca92ca1",
-  "generated_at": "2026-05-06T18:11:46.080552+00:00",
+  "source_hash": "eef88ba2abd67934e132fad02f6c2a3292f49faa79744e40e023e8f8d36f4968",
+  "generated_at": "2026-05-10T09:50:47.991448+00:00",
   "sections": [
     {
       "section_title": "Requirements",
-      "one_line": "Required Python, LLM, and messaging credentials to run Kernos",
+      "one_line": "Required software and credentials for running Kernos",
       "line_start": 5,
       "line_end": 19
     },
     {
       "section_title": "Quick install",
-      "one_line": "Quick setup to clone Kernos, create the environment, configure credentials, and start the server",
+      "one_line": "Quick local install and server startup for Kernos",
       "line_start": 20,
       "line_end": 39
     },
     {
       "section_title": "Launcher paths",
-      "one_line": "Ways to launch Kernos via Discord, Twilio SMS, or local CLI modes",
+      "one_line": "Launcher entry points for running Kernos in Discord or local CLI chat",
       "line_start": 40,
-      "line_end": 100
+      "line_end": 81
     },
     {
       "section_title": "Environment Configuration",
-      "one_line": "Kernos environment variable setup for providers, messaging, storage, services, and debugging",
-      "line_start": 101,
-      "line_end": 194
+      "one_line": "Environment variables for LLM providers, messaging adapters, storage, and optional services",
+      "line_start": 82,
+      "line_end": 175
     },
     {
       "section_title": "Auto-Update",
-      "one_line": "Settings for automatic startup updates, daily pulls, and update branch selection",
-      "line_start": 195,
-      "line_end": 241
+      "one_line": "Startup and daily update settings for checking, pulling, and applying Kernos updates",
+      "line_start": 176,
+      "line_end": 222
     },
     {
       "section_title": "Workspace Scope",
-      "one_line": "Filesystem access scope for agent code in Kernos workspaces",
-      "line_start": 242,
-      "line_end": 259
+      "one_line": "Controls how much filesystem access agent code has in a Kernos workspace.",
+      "line_start": 223,
+      "line_end": 240
     },
     {
       "section_title": "Workspace Builder Backend",
-      "one_line": "Workspace build backend options and scope rules",
-      "line_start": 260,
-      "line_end": 291
+      "one_line": "Backend options for choosing and scoping the workspace code builder",
+      "line_start": 241,
+      "line_end": 272
     },
     {
       "section_title": "Verifying Install",
-      "one_line": "Checking that Kernos starts, onboardings work, and the local test suite passes",
-      "line_start": 292,
-      "line_end": 303
+      "one_line": "Checking that Kernos is installed correctly and the onboarding flow works",
+      "line_start": 273,
+      "line_end": 284
     },
     {
       "section_title": "Running in Production",
-      "one_line": "Production deployment options and safety guidance for running Kernos",
-      "line_start": 304,
-      "line_end": 315
+      "one_line": "Production deployment options and safety considerations for running Kernos",
+      "line_start": 285,
+      "line_end": 296
     },
     {
       "section_title": "First-boot canvases",
-      "one_line": "Canvas seeding on first boot after install, including scope, contents, and reseeding rules.",
-      "line_start": 316,
-      "line_end": 330
+      "one_line": "Initial canvases seeded on first boot for system reference, workflow patterns, procedures, and tools",
+      "line_start": 297,
+      "line_end": 311
     },
     {
       "section_title": "Troubleshooting",
-      "one_line": "Common fixes for Kernos setup, provider, Discord bot, compaction, and MCP connection issues",
-      "line_start": 331,
-      "line_end": 342
+      "one_line": "Common setup and runtime fixes for Kernos import, provider, Discord, compaction, and MCP issues.",
+      "line_start": 312,
+      "line_end": 323
     },
     {
       "section_title": "Getting Help",
-      "one_line": "Issue reporting and support via the Kernos GitHub repository",
-      "line_start": 343,
-      "line_end": 346
+      "one_line": "Reporting Kernos issues on GitHub",
+      "line_start": 324,
+      "line_end": 327
     },
     {
       "section_title": "Related",
-      "one_line": "Project overview and roadmap links",
-      "line_start": 347,
-      "line_end": 350
+      "one_line": "Links to the project overview and roadmap",
+      "line_start": 328,
+      "line_end": 331
     }
   ]
 }

@@ -1,43 +1,43 @@
 {
   "file_path": "docs/capabilities/sms.md",
-  "source_hash": "d5d277b4ea94f197f6c02d000d9fe80990aab37eee5ab54ba5fb8efba9e5d25c",
-  "generated_at": "2026-05-06T18:06:05.213780+00:00",
+  "source_hash": "8cedee5f7b71e2a898cc3055c2e48269bc3f4692da8d4dafbe88ed1bf869337f",
+  "generated_at": "2026-05-10T09:50:11.420098+00:00",
   "sections": [
     {
       "section_title": "Status",
-      "one_line": "Live status and inbound SMS polling without a public server",
+      "one_line": "Current live status and inbound SMS polling without a public server",
       "line_start": 5,
       "line_end": 8
     },
     {
       "section_title": "How It Works",
-      "one_line": "Inbound and outbound SMS flow through Twilio in the Discord bot process",
+      "one_line": "SMS inbound polling and outbound sending flow between Twilio and the Discord bot",
       "line_start": 9,
       "line_end": 14
     },
     {
       "section_title": "Setup",
-      "one_line": "Configure Kernos SMS environment variables for Twilio, phone numbers, and instance identity",
+      "one_line": "Kernos SMS and Discord environment variables for Twilio credentials and instance identity",
       "line_start": 15,
       "line_end": 32
     },
     {
       "section_title": "Phone Authorization",
-      "one_line": "Phone access control for authorized numbers only",
+      "one_line": "Limits access to authorized phone numbers and the owner number",
       "line_start": 33,
       "line_end": 36
     },
     {
       "section_title": "Channel Status",
-      "one_line": "Twilio SMS channel status in manage_channels, including outbound send capability",
+      "one_line": "Twilio SMS channel status for outbound sending in manage_channels list",
       "line_start": 37,
       "line_end": 40
     },
     {
       "section_title": "Code Locations",
-      "one_line": "Code locations for Kernos SMS components, startup wiring, and webhook handling",
+      "one_line": "Locations of key Kernos SMS components and startup wiring in the codebase",
       "line_start": 41,
-      "line_end": 48
+      "line_end": 47
     }
   ]
 }

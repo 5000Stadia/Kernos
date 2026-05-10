@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-10T09:29:01.204743+00:00",
+  "generated_at": "2026-05-10T09:50:48.019448+00:00",
   "entries": {
     "docs/ADAPTER-GUIDE.md": {
       "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
@@ -219,7 +219,7 @@
       "artifact_path": "docs/_catalog/capabilities/relational-messaging.json"
     },
     "docs/capabilities/sms.md": {
-      "source_hash": "d5d277b4ea94f197f6c02d000d9fe80990aab37eee5ab54ba5fb8efba9e5d25c",
+      "source_hash": "8cedee5f7b71e2a898cc3055c2e48269bc3f4692da8d4dafbe88ed1bf869337f",
       "artifact_path": "docs/_catalog/capabilities/sms.json"
     },
     "docs/capabilities/tool-surface.md": {
@@ -267,7 +267,7 @@
       "artifact_path": "docs/_catalog/index.json"
     },
     "docs/install.md": {
-      "source_hash": "f6b88813b147cc26712e700d8781651b91563475e408e1fd91b70181eca92ca1",
+      "source_hash": "eef88ba2abd67934e132fad02f6c2a3292f49faa79744e40e023e8f8d36f4968",
       "artifact_path": "docs/_catalog/install.json"
     },
     "docs/kernos-introduction.md": {
