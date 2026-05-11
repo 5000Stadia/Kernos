@@ -446,9 +446,36 @@ async def record_occurrence(
     """
 ```
 
-**Composition story:** workflow step failures with a matching `signal_type` become observable to the friction pattern catalog when this spec lands. The integration probe in Decision 3's test category covers it: pre-seed a `FrictionPattern` whose `signal_type_keys` matches the workflow step's failure signature; trigger a failing step; verify `occurrence_count` increments.
+**Composition story (revised v2 per Codex round 1 High 3):** workflow step failures with a matching `signal_type` become observable to the friction pattern catalog when this spec lands. The integration probe in the test category covers it: pre-seed a `FrictionPattern` whose `signal_type_keys` matches the workflow step's failure signature; trigger a failing step; verify the appropriate counter increments per the pattern's lifecycle state.
 
-The hook fires from `WorkflowActionSink.append()` when the appended record has `execution_state == "failed"` — extract the failure_reason prefix from `user_visible_summary`, classify against the catalog, call `record_occurrence` if a pattern matches. Mirrors the existing FrictionObserver `_classify_and_record` shape in `kernos/kernel/friction.py`.
+**The hook MUST mirror `FrictionObserver._classify_and_record` exactly** (the merged Spec 1 shape at `kernos/kernel/friction.py:526`): dispatch by `pattern.lifecycle_state`:
+
+- `active` / `reactivated` → `record_occurrence`
+- `resolved` → `record_recurrence` (NOT `record_occurrence`; the latter rejects on resolved)
+- `archived` → silently skip (no catalog write)
+
+**Plus classify-only-when-the-append-actually-inserted:** the friction hook fires INSIDE the `if sink.append() returned True:` branch. INSERT-OR-IGNORE skips (legitimate idempotency from resume-safe) MUST NOT count toward friction frequency.
+
+`record_occurrence` and `record_recurrence` signatures (from Spec 1's merged `FrictionPatternStore`):
+
+```python
+async def record_occurrence(
+    self, *, instance_id, pattern_id, observed_at,
+    report_path="", classifier_score=0.0,
+    classified_by="auto-signal-type",
+    space_id="", member_id="",
+) -> None: ...
+
+async def record_recurrence(
+    self, *, instance_id, pattern_id, observed_at,
+    report_path="", classifier_score=0.0,
+    classified_by="auto-signal-type",
+    space_id="", member_id="",
+    emit_event=None,  # for friction.pattern_recurrence
+) -> bool: ...  # True if recurrence reactivated the pattern
+```
+
+The workflow hook passes `report_path=""` (workflow steps don't write markdown reports; correlation is via `action_id`).
 
 ---
 
