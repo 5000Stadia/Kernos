@@ -135,13 +135,15 @@ CREATE INDEX IF NOT EXISTS idx_executions_state
     ON workflow_executions(instance_id, state);
 ```
 
-**Open-question #2 background:** the PK is singular `execution_id`. The proposed composite FK from `workflow_action_records` on `(instance_id, execution_id)` requires either:
+**Open-question #2 — RESOLVED in v3.** Architect ruled FK target is the existing singular `execution_id` (option c in the original framing). UUID-generated `execution_id` is globally unique; FK on the singular column is sufficient for referential integrity. `instance_id` in the new table's composite PK is for query locality / partitioning, NOT FK targeting. No migration on `workflow_executions` required.
 
-(a) Adding a `CREATE UNIQUE INDEX ... ON workflow_executions(instance_id, execution_id)` so SQLite accepts the composite FK target. Backward-compatible (existing rows satisfy the composite uniqueness because `execution_id` is already PK).
+The three options originally considered (kept for historical context):
 
-(b) Dropping the FK and relying on tool-implementation discipline (the engine only writes rows for executions it just created).
+(a) Composite UNIQUE migration on `workflow_executions(instance_id, execution_id)` so SQLite accepts composite FK. Codex round 1 leaned this way.
 
-(c) Targeting only `execution_id` in the FK (drop `instance_id` from the FK columns). Then `workflow_action_records` still carries `instance_id` for scoping but the FK target is the existing singular PK.
+(b) Drop the FK entirely; rely on tool-implementation discipline.
+
+(c) Target only `execution_id` (drop `instance_id` from the FK columns). **Architect chose this in Q2.**
 
 ### Existing migration pattern (gate_nonce, fire_id)
 
@@ -170,7 +172,7 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
     # (Same pattern for fire_id...)
 ```
 
-This is the precedent for any schema migration on `workflow_executions`. Adding a composite UNIQUE index follows the same idempotent-on-retry pattern.
+This is the precedent for any FUTURE schema migration on `workflow_executions`. v3 of this spec does NOT migrate the table per architect Q2; the singular FK target is sufficient.
 
 ---
 
@@ -486,7 +488,7 @@ The spec at `specs/FRICTION-PATTERN-STABLE-IDS-V1.md` is the worked example for 
 - Schema-in-store via `ensure_schema()` (no separate migrations dir).
 - `PRAGMA foreign_keys=ON` mandatory on every connection.
 - `BEGIN IMMEDIATE` + bounded retry on `SQLITE_BUSY` for concurrent writers.
-- `ON DELETE RESTRICT` on the composite FK (no destructive deletions).
+- `ON DELETE RESTRICT` on the FK (no destructive deletions).
 - `INSERT OR IGNORE` for resume-safe idempotency on PK collision.
 
 The spec body's Decisions 2 (storage), 5 (failure shape), and 6 (resume-safe) all reuse this convention. Codex should verify these are consistent across the two specs.
@@ -510,7 +512,7 @@ The spec body's Decision 5 (failure shape) mirrors Spec 2's handler convention f
 The main spec body surfaces five open architectural questions. The four most-likely-load-bearing are:
 
 1. **Decision 1 deviation** (preserve schema vs extend with `workflow_context`). Tradeoff: cross-producer audit cost (extend) vs storage-row indirection (preserve). Spec body chose preserve; Codex's call.
-2. **FK target on `workflow_executions`** (composite UNIQUE index vs drop FK vs target singular execution_id only). Spec body chose composite UNIQUE; alternatives (b) and (c) above are reasonable.
+2. **FK target on `workflow_executions`** — RESOLVED. Architect Q2 ruled singular `execution_id` target. No migration on `workflow_executions` required.
 3. **`operation_class` for `mark_state` / `append_to_ledger`** (no clean fit in current vocabulary; v1 maps to `mutate`).
 4. **`risk_level` per workflow step** (v1 uses `low` uniformly; a `route_to_agent` posting publicly is higher-risk than a `mark_state`).
 

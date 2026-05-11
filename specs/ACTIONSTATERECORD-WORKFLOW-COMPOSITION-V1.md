@@ -1,7 +1,16 @@
 # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 — Implementation Spec
 
-**Status:** DRAFT v2 — pre-implementation, ONE Codex pre-spec review
-round folded 2026-05-11. Seven findings addressed:
+**Status:** DRAFT v3 — pre-implementation. ONE Codex pre-spec review
+round folded (7 findings) + FIVE architect calls folded 2026-05-11.
+Architect's calls clarified the FK target back to singular, the
+risk_level derivation to operation-class-based, and pulled back the
+concurrent-restart-as-load-bearing framing while leaving the atomic-
+boundary fix in place (different concern: single-engine crash-window
+vs inter-engine concurrent restart). Awaiting Codex round-2 review
+of the implementation surface (the architectural decisions are
+locked).
+
+**Codex round 1 (7 findings, folded into v2):**
 
 - **Blocker** — resume idempotency hides re-execution because the
   record append and the cursor advance weren't atomic. Refactored
@@ -34,21 +43,47 @@ round folded 2026-05-11. Seven findings addressed:
 - **Low** — failure summary computed mechanically from the same
   `error` string passed to `_record_step_failed`, eliminating drift.
 
-Architect's four listed open questions all answered per Codex's
-direction in this fold:
+**Architect's five calls (folded into v3):**
 
-- Decision 1: preserve schema with the tighter invariant (don't fold
-  to `workflow_context`).
-- FK target: composite UNIQUE on `(instance_id, execution_id)`,
-  backward-compatible.
-- `operation_class`: map both `mark_state` and `append_to_ledger` to
-  `mutate`; don't extend the enum.
-- Concurrent restart: closed via the atomicity fix in Decision 6.
+- **Q1 — Preserve ActionStateRecord schema** (deviation confirmed
+  correct). Workflow context is metadata about *where* an action
+  came from, not *what* the action is; pushing context to the
+  storage row preserves single-shape discipline on the dataclass
+  and avoids cross-arc coupling with RESPONSE-FIDELITY Batch 2.
+  v2 was already correct; v3 promotes the deviation to canonical
+  decision.
+- **Q2 — FK on `workflow_executions(execution_id)` SINGULAR, not
+  composite.** Workflow `execution_id` is UUID-generated and
+  globally unique; FK on the singular column is sufficient.
+  `instance_id` in the new table's composite PK is for query
+  locality and partitioning, NOT FK targeting. No composite UNIQUE
+  migration needed on `workflow_executions`. Changes v2's
+  composite-FK design back to singular.
+- **Q3 — `operation_class` `mutate` for `mark_state` and
+  `append_to_ledger`** (v2 already correct). Vocabulary expansion
+  deferred to a future spec.
+- **Q4 — `risk_level` derived from `operation_class`, not
+  `action_type`.** Mapping: `read` → low; `mutate` → medium;
+  `delete` → high; other classes (including `send`,
+  `notify_user`-style verbs, `call_tool`) → medium. Uses
+  vocabulary that already exists in the schema. Changes v2's
+  action_type-based three-tier mapping to a simpler
+  operation-class-derived rule.
+- **Q5 — Concurrent restart edge case NOT a v1 concern.**
+  UUID-generated `execution_id` provides probabilistic uniqueness;
+  the engine's state machine prevents the paused-then-terminated-
+  then-new path. Pulled back from "load-bearing" framing to
+  defensive flag in Decision 6. NOTE: the atomic-boundary fix from
+  Codex Blocker 1 stays in place — it addresses a DIFFERENT
+  concern (single-engine crash between record append and cursor
+  advance), not inter-engine concurrent restart. Q5 specifically
+  resolves the inter-engine collision question.
 
-Awaiting architect ratification of v2 before CC implementation begins.
+Codex round 2 (if architect calls for it) reviews implementation
+surface — the architectural decisions are now locked.
 
 **Author:** CC, 2026-05-11. Resolves architect's framing + folds
-Codex's round-1 review.
+Codex round 1 + folds architect's five v3 calls.
 
 **Source framing:** PHASE-3-AUTONOMY-LOOP design consideration (Notion
 `35cffafef4db81da8107e562307bc738`). Spec 3 of the five-spec autonomy
@@ -184,8 +219,10 @@ intuition; folded.
 
 ### Decision 2 — Storage shape
 
-**Resolution:** new table `workflow_action_records` in `instance.db`,
-mirroring the FRICTION-PATTERN-STABLE-IDS-V1 catalog convention:
+**Resolution (revised v3 per architect Q2):** new table
+`workflow_action_records` in `instance.db`. **FK is on the singular
+`execution_id` column**, not composite. `instance_id` in the new
+table's PK is for query locality and partitioning, NOT FK targeting.
 
 ```sql
 CREATE TABLE IF NOT EXISTS workflow_action_records (
@@ -199,8 +236,8 @@ CREATE TABLE IF NOT EXISTS workflow_action_records (
     correlation_id          TEXT NOT NULL DEFAULT '',
     recorded_at             TEXT NOT NULL,
     PRIMARY KEY (instance_id, workflow_execution_id, step_index),
-    FOREIGN KEY (instance_id, workflow_execution_id)
-        REFERENCES workflow_executions(instance_id, execution_id)
+    FOREIGN KEY (workflow_execution_id)
+        REFERENCES workflow_executions(execution_id)
         ON DELETE RESTRICT
 );
 
@@ -210,10 +247,27 @@ CREATE INDEX IF NOT EXISTS idx_workflow_action_records_workflow
     ON workflow_action_records (instance_id, workflow_id);
 ```
 
-Composite PK `(instance_id, workflow_execution_id, step_index)` carries
-the resume-safe idempotency contract directly: `INSERT OR IGNORE` on a
-duplicate primary key is the cheapest way to skip re-emission on
-restart-resume.
+**Architect's Q2 reasoning:** workflow `execution_id` is UUID-generated
+and globally unique. FK on the singular column is sufficient for
+referential integrity. The FRICTION-PATTERN composite-PK-with-composite-FK
+convention applied THERE because `pattern_id` is a per-instance
+namespace (same slug can exist independently across instances).
+Workflow execution_id has no equivalent namespacing constraint;
+singular FK is the right fit.
+
+**Consequence:** no schema migration on `workflow_executions` is
+required. The existing singular `execution_id` PK at
+`execution_engine.py:213` already serves as the FK target.
+
+`(instance_id, workflow_execution_id, step_index)` composite PK on
+the new table is still load-bearing for two things:
+
+1. **Resume-safe idempotency contract** — `INSERT OR IGNORE` on a
+   duplicate primary key is the cheapest way to skip re-emission
+   under the atomic-boundary contract (Decision 6).
+2. **Query locality / partitioning** — most queries filter by
+   `instance_id` first; having it as the PK leading column lets
+   SQLite use the PK index for these lookups.
 
 `ON DELETE RESTRICT` mirrors FRICTION-PATTERN's no-destructive-deletions
 discipline. Workflow executions transition through state machine
@@ -221,23 +275,6 @@ discipline. Workflow executions transition through state machine
 DELETE'd. If a future GC spec wants to clean up old terminated
 executions, it ships its own pre-removal pass over
 `workflow_action_records` first.
-
-**`workflow_executions` does NOT currently declare a composite PK on
-`(instance_id, execution_id)`** — the existing schema at
-`execution_engine.py:212` has `execution_id` as the singular PK. To
-satisfy the composite FK here, the implementer either:
-
-(a) **Add a composite UNIQUE index** to `workflow_executions` —
-`(instance_id, execution_id)` — which SQLite accepts as an FK target.
-Backward-compatible.
-
-(b) **Drop the FK** and rely on tool-implementation discipline (the
-engine only writes rows for executions it just created).
-
-Recommend (a). Mirrors FRICTION-PATTERN's FK discipline at the
-substrate level rather than at the tool-implementation level. Codex
-will likely have an opinion on this; flagged in the open-questions
-section.
 
 **PRAGMA foreign_keys=ON** is mandatory on every connection (same
 discipline as FRICTION-PATTERN-STABLE-IDS-V1; Codex caught this in
@@ -264,15 +301,16 @@ shared store using a `BEGIN IMMEDIATE` transaction that includes
 both the `INSERT OR IGNORE` into `workflow_action_records` and the
 `UPDATE workflow_executions SET action_index_completed = ?`.
 
-Schema setup order on engine start:
+Schema setup order on engine start (revised v3 per Q2 — no composite
+UNIQUE migration):
 
 1. Ensure `workflow_executions` table.
 2. ALTER-IF-MISSING the existing migration columns (`gate_nonce`,
    `fire_id`) per the gate_nonce migration pattern.
-3. CREATE UNIQUE INDEX `(instance_id, execution_id)` for the
-   composite FK target.
-4. CREATE `workflow_action_records` (FK target now exists).
-5. CREATE indexes on `workflow_action_records`.
+3. CREATE `workflow_action_records` (FK targets the existing
+   singular `execution_id` PK; no migration on `workflow_executions`
+   required).
+4. CREATE indexes on `workflow_action_records`.
 
 The engine owns the connection lifecycle. The sink is constructed
 once at engine start and passed a borrowing reference; it does not
@@ -394,28 +432,63 @@ spec can extend the record with explicit post-gate authorization
 context for downstream steps if soak shows the need; v1 doesn't
 attempt it.
 
-#### `risk_level` derived from action_type (Codex Medium 6)
+#### `risk_level` derived from `operation_class` (revised v3 per architect Q4)
 
-The earlier draft hard-coded `risk_level="low"` uniformly. Codex
-correctly flagged that as substrate-truth loss: a `route_to_agent`
-posting to a public inbox is genuinely higher-risk than a
-`mark_state`. v2 derives the field from action_type per the
-following mapping (using the existing `ACTION_RISK_LEVELS` vocabulary
-of `low / medium / high` — no enum extension):
+v2 had a per-action-type three-tier mapping (low / medium / high
+per individual verb). v3 follows the architect's Q4 ruling: derive
+`risk_level` from `operation_class` instead. Simpler rule; uses
+vocabulary that already exists in the schema; no new mapping table
+to maintain as new action verbs land.
 
-| Action verb | `risk_level` | Reasoning |
+**The rule:**
+
+| `operation_class` | `risk_level` | Why |
 |---|---|---|
-| `mark_state` | `low` | Direct-effect; internal state mutation only |
-| `append_to_ledger` | `low` | Direct-effect; append-only audit row |
-| `notify_user` | `medium` | World-effect; reaches the user but reversible (correction can follow) |
-| `write_canvas` | `medium` | World-effect; reversible (canvas tombstone discipline) |
-| `route_to_agent` | `high` | World-effect; reaches another agent's inbox; not always reversible |
-| `post_to_service` | `high` | World-effect; reaches an external service; commonly not reversible |
-| `call_tool` | derived; default `medium` | Wraps any kernel tool; risk per the tool's own classification when available, `medium` fallback. If the tool's risk can't be derived at append time, set `missing_metadata=True` to surface the gap. |
+| `read` | `low` | No state mutation |
+| `propose` | `low` | Pre-commit; no substrate write |
+| `mutate` | `medium` | Standard state write; reversible discipline |
+| `delete` | `high` | Destructive; high reversal cost |
+| `send` | `medium` | World-effect but typically reversible at the message layer |
+| `schedule` | `medium` | World-effect but at a future-deferred level |
+| `register` | `medium` | Adds substrate registration; reversible via tombstone |
+| `manage` | `medium` | Per-tool variance; medium as conservative default |
 
-Helper `_risk_level_for_action_type(action_type, tool_input)`
-encapsulates the mapping. The helper lives in `action_sink.py`
-alongside `_build_action_state_record` so engine code stays compact.
+**Workflow verb → operation_class assignments** (combine with the
+above table to derive `risk_level`):
+
+| Action verb | `operation_class` | `risk_level` |
+|---|---|---|
+| `mark_state` | `mutate` (per architect Q3) | `medium` |
+| `append_to_ledger` | `mutate` (per architect Q3) | `medium` |
+| `notify_user` | `send` | `medium` |
+| `write_canvas` | `mutate` | `medium` |
+| `route_to_agent` | `register` | `medium` |
+| `post_to_service` | `send` | `medium` |
+| `call_tool` | derived from wrapped tool; default `mutate` | derived; default `medium` |
+
+Most workflow verbs land on `medium` under this rule. That's
+intentional: workflow actions are inherently world-affecting (the
+workflow primitive exists to coordinate world-effect work);
+`medium` captures the baseline. `delete`-class operations (if a
+workflow ever issues one through `call_tool`) surface as `high`
+appropriately; `read`-class operations (a `call_tool` reading
+state) surface as `low`.
+
+**`missing_metadata=True` fallback:** when `call_tool` invokes a
+tool whose own `operation_class` can't be determined at append
+time, the record sets `missing_metadata=True`. Renderer / audit
+consumers know the `risk_level` is the derivation default rather
+than a derived value.
+
+Helper `_risk_level_for_operation_class(operation_class)` lives in
+`action_sink.py` alongside `_build_action_state_record` and the
+operation_class assignment helper. Engine code stays compact.
+
+**Architect's Q4 intent:** uniform `low` understates real risk;
+per-action-type custom rules are over-engineering for v1. The
+operation-class-derived approach gives appropriate gradation with
+no new vocabulary, and the mapping is short enough to fit in a
+single helper function.
 
 ### Decision 6 — Resume-safe semantics (v2 fold — atomic boundary)
 
@@ -526,21 +599,25 @@ step within the resume-safe contract) is silent; the crash-window
 state-detection above catches the only case where the silence would
 hide a real bug.
 
-#### Concurrent-restart edge case (Codex open question)
+#### Concurrent-restart edge case (revised v3 per architect Q5)
 
-Codex correctly elevated concurrent-restart from "defensive" to "the
-main state-machine hole to close." The v1 spec body framed it as a
-defensive flag; v2 closes it via the atomic boundary above.
+**Architect's Q5 ruling: not a v1 concern.** Workflow `execution_id`
+is UUID-generated and globally unique; probabilistic uniqueness
+makes collision negligible. The engine's existing state machine
+prevents the paused-then-terminated-then-new-collides path.
+Defensive flagging stays here for record-keeping; no spec change
+or implementation work is required.
 
-The remaining concern is two engine instances both observing an
-in-flight execution at the same time. The existing workflow primitive
-uses `last_heartbeat` for engine-liveness detection; v2 reuses that
-discipline: an execution's heartbeat is updated on every cursor
-advance, so a stale heartbeat lets a second engine reclaim the
-execution by transitioning it through the existing recovery state
-machine. The atomic boundary in this Decision composes with that
-recovery — the second engine reads the existing record + cursor and
-resumes from there.
+This pulls back the v2 framing that elevated concurrent-restart to
+"the main state-machine hole." The atomic-boundary fix above stays
+in place because it addresses a DIFFERENT concern (single-engine
+crash between record append and cursor advance, per Codex
+Blocker 1). The Q5 ruling is on the inter-engine collision case,
+not the intra-engine crash-window case.
+
+If a real inter-engine collision pattern surfaces during soak (e.g.,
+deployment-replay scenarios where two engines reclaim the same
+execution_id by accident), that's its own follow-up spec.
 
 ### Decision 7 — FRICTION-PATTERN composition (v2 fold)
 
@@ -641,41 +718,44 @@ correlate to the source step via `action_id` (a future
 `workflow:<execution_id>:step:<idx>` if soak shows the need for
 human-readable traceback).
 
-## Open architectural questions — v2 status
+## Open architectural questions — v3 status (all locked)
 
-The v1 spec body surfaced three open architectural questions for
-Codex round 1. All resolved 2026-05-11:
+The v1 spec body surfaced three open architectural questions. Codex
+round 1 folded into v2. Architect made five calls 2026-05-11 that
+folded into v3. All architectural decisions are now locked; Codex
+round 2 (if architect requests it) verifies implementation surface
+only.
 
-1. ✅ **Decision 1 deviation.** Codex agreed with preserve-schema
-   for v1 but tightened the rationale: the load-bearing invariant
-   is that workflow-facing APIs return `WorkflowActionRecord` (not
-   bare `ActionStateRecord`), OR the bare record carries a stable
-   `receipt_refs` entry of the form
-   `workflow:<execution_id>:step:<idx>`. v2 Decision 1 reflects
-   this. Don't fold to `workflow_context` for v1.
-2. ✅ **FK target.** Codex chose composite UNIQUE on
-   `(instance_id, execution_id)`. Backward-compatible (existing
-   `execution_id` PK already unique). v2 Decision 2 keeps that
-   direction; the migration block in Decision 3 schema-setup-order
-   shows where the CREATE UNIQUE INDEX lands.
+1. ✅ **Decision 1 deviation.** Codex agreed with preserve-schema;
+   architect Q1 confirmed deviation is correct and promoted it to
+   the canonical decision. Don't fold to `workflow_context` for v1.
+   The load-bearing invariant: workflow-facing APIs return
+   `WorkflowActionRecord` (not bare `ActionStateRecord`) OR the
+   bare record carries a stable `receipt_refs` entry of the form
+   `workflow:<execution_id>:step:<idx>`.
+2. ✅ **FK target.** Codex initially chose composite UNIQUE.
+   Architect Q2 ruled singular `execution_id` (UUID-generated;
+   globally unique; FK on singular column sufficient). v3 Decision 2
+   reflects the singular FK; no migration on `workflow_executions`
+   required.
 3. ✅ **`partial_state` for workflow steps.** Stays None for v1;
    future spec can extend if soak surfaces partial-completion
    semantics.
-
-Codex round 1 also surfaced four new findings already folded above:
-
-4. ✅ **`operation_class` mapping.** Codex confirmed `mutate` for
-   both `mark_state` and `append_to_ledger` is fine for v1; don't
-   extend the enum.
-5. ✅ **`risk_level` derivation.** v2 Decision 5 derives from
-   action_type; uses existing `low / medium / high` vocabulary;
-   `missing_metadata=True` flag when `call_tool` risk can't be
-   derived.
-6. ✅ **Concurrent restart edge case.** Promoted from "defensive"
-   to load-bearing; closed via the atomic boundary in v2 Decision 6.
-7. ✅ **Failure summary mechanical copy.** v2 Decision 5 computes
-   the error string once and passes to both the record builder and
-   `_record_step_failed`.
+4. ✅ **`operation_class` mapping.** Codex + architect Q3 both
+   confirmed `mutate` for `mark_state` and `append_to_ledger`.
+   Vocabulary expansion deferred.
+5. ✅ **`risk_level` derivation.** Codex flagged uniform-low as
+   substrate-truth loss; architect Q4 ruled derive from
+   `operation_class` (NOT `action_type` as v2 had). v3 Decision 5
+   reflects the operation-class-based rule.
+6. ✅ **Concurrent restart edge case.** Codex elevated to
+   "load-bearing." Architect Q5 ruled NOT a v1 concern; UUID
+   uniqueness + state-machine handles it. v3 Decision 6 pulled
+   back the framing but left the atomic-boundary fix in place
+   (different concern: single-engine crash-window, not inter-engine
+   collision).
+7. ✅ **Failure summary mechanical copy.** v2 Decision 5 already
+   correct; v3 unchanged.
 
 ## Code-level shape
 
@@ -690,14 +770,12 @@ Codex round 1 also surfaced four new findings already folded above:
   with `FrictionPatternStore` (Decision 7) mirroring
   `FrictionObserver._classify_and_record`.
 - MODIFIED: `kernos/kernel/workflows/execution_engine.py`:
-  - `_EXECUTIONS_SCHEMA` migration block gains a
-    `CREATE UNIQUE INDEX IF NOT EXISTS` on
-    `(instance_id, execution_id)` for the composite FK target.
-    Mirrors the existing `gate_nonce` migration's
-    race-tolerant-ALTER pattern.
-  - `_ensure_schema` runs the new sink's schema migration AFTER the
-    composite UNIQUE INDEX exists (schema setup order per
-    Decision 3).
+  - `_EXECUTIONS_SCHEMA` unchanged (no migration on
+    `workflow_executions` required per architect Q2 — singular FK
+    target sufficient).
+  - `_ensure_schema` runs the new sink's schema migration after
+    the existing `workflow_executions` ensure + ALTER migrations
+    (schema setup order per Decision 3).
   - `WorkflowEngine.__init__` constructs the sink with the shared
     connection; sink is a borrowing reference.
   - The step-execute loop body wraps each emission site in a
@@ -937,7 +1015,7 @@ prose summaries.
 
 | Risk | Mitigation |
 |---|---|
-| Schema migration of `workflow_executions` to add composite UNIQUE | Pre-existing-table-aware migration in `_ensure_schema`; CREATE UNIQUE INDEX IF NOT EXISTS in race-tolerant pattern. Mirrors the existing gate_nonce migration. |
+| Schema migration on `workflow_executions` | NONE required (architect Q2 ruled singular FK target is sufficient; the new table references the existing `execution_id` PK directly). |
 | Record-build cost on every step (extra DB write per workflow step) | Workflow steps are already DB-bound (event_stream write + ledger append). One transaction with two writes is amortized; v1 accepts the cost. |
 | Resume-idempotency hiding re-execution (Codex Blocker 1) | v2 Decision 6 atomic boundary: record append + cursor advance in one transaction. The PK collision becomes a clean idempotency signal only when both lands or neither does. |
 | Crash-window state leaks from pre-v2 deployments | Engine startup self-healing pass reconciles cursor to highest recorded step; logs WORKFLOW_CRASH_WINDOW loud (Decision 6 second block). |
@@ -991,21 +1069,27 @@ Surfacing transparently:
    (resume idempotency hides re-execution), two high (gate
    authorization semantics; friction dispatch by lifecycle), three
    medium (Decision 1 rationale; connection ownership; risk_level
-   uniformity), one low (failure summary drift). Plus all four
-   architect-listed open questions answered.
-4. ✅ **CC folds Codex round 1** into spec body — this v2 revision.
-5. 🟡 **Architect ratification of v2 spec body** — pending. Architect
-   reviews diff (the round-1 fold isolated by diffing v2 against
-   `c5af8a6` v1+context).
-6. CC implements per ratified v2 spec.
-7. Codex post-implementation review.
-8. CC any final changes.
-9. Architect ratifies on close.
-
-Per pipeline compression rules (Spec 1's closeout): multi-round Codex
-pre-spec review expected given schema + state-machine complexity.
-Round 1 caught one blocker; whether round 2 is needed is the
-architect's call at v2 ratification.
+   uniformity), one low (failure summary drift). Plus surfaced four
+   open architectural questions.
+4. ✅ **CC folds Codex round 1** into spec body (v2 at `062cf19`).
+5. ✅ **Architect makes five calls on v2's open questions
+   2026-05-11**: preserve schema (Q1); singular FK target (Q2);
+   `operation_class` mutate for direct-effect verbs (Q3);
+   `risk_level` derived from `operation_class` (Q4); concurrent
+   restart NOT a v1 concern (Q5).
+6. ✅ **CC folds architect's five calls** into spec body — this v3
+   revision.
+7. 🟡 **Codex pre-spec review round 2** — pending. Per architect
+   directive, verifies implementation surface only (architectural
+   decisions are locked). Multi-round review expected given
+   schema-touching + state-machine complexity per pipeline
+   compression rules.
+8. CC folds Codex round 2.
+9. Architect ratification of v-final.
+10. CC implements per ratified spec.
+11. Codex post-implementation review.
+12. CC any final changes.
+13. Architect ratifies on close.
 
 ## Linked artifacts
 
