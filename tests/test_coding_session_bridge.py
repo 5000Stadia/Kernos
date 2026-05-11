@@ -528,6 +528,323 @@ class TestEventEmission:
 # ---------------------------------------------------------------------------
 
 
+class TestResponseRobustness:
+    """Codex post-impl H1 + M4: partial response writes don't permanently
+    fail the request within timeout; body request_id mismatch refused."""
+
+    async def test_partial_json_response_within_timeout_returns_attempted(
+        self, tmp_path,
+    ):
+        """Simulate a polling read catching a partial response write
+        (writer wrote opening brace and stopped). Within the timeout
+        window, this should return attempted (poll again later), not
+        failed (Codex H1)."""
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="A question.",
+        )
+        request_id = ask_record.receipt_refs[0]
+
+        # Write a partial response file (invalid JSON).
+        response_path = (
+            _responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json"
+        )
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        response_path.write_text("{\"request_id\": \"par", encoding="utf-8")
+
+        _, rec = await handle_read_coding_session_response(
+            instance_id="inst-A",
+            data_dir=str(tmp_path),
+            request_id=request_id,
+        )
+        assert rec.execution_state == "attempted"
+        assert "poll" in rec.user_visible_summary.lower() or \
+               "partial" in rec.user_visible_summary.lower()
+
+    async def test_partial_json_response_past_timeout_returns_failed(
+        self, tmp_path, monkeypatch,
+    ):
+        """Past timeout, malformed JSON becomes a real failure."""
+        monkeypatch.setenv("KERNOS_CODING_SESSION_BRIDGE_TIMEOUT_SECONDS", "1")
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="A question.",
+        )
+        request_id = ask_record.receipt_refs[0]
+
+        # Backdate the request timestamp past the timeout.
+        request_path = (
+            _requests_dir(str(tmp_path), "inst-A") / f"{request_id}.json"
+        )
+        body = json.loads(request_path.read_text(encoding="utf-8"))
+        body["timestamp"] = (
+            datetime.now(timezone.utc) - timedelta(hours=2)
+        ).isoformat()
+        request_path.write_text(
+            json.dumps(body, ensure_ascii=False), encoding="utf-8",
+        )
+
+        # Write a malformed response.
+        response_path = (
+            _responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json"
+        )
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        response_path.write_text("not-json", encoding="utf-8")
+
+        _, rec = await handle_read_coding_session_response(
+            instance_id="inst-A",
+            data_dir=str(tmp_path),
+            request_id=request_id,
+        )
+        assert rec.execution_state == "failed"
+
+    async def test_response_body_request_id_mismatch_refused(self, tmp_path):
+        """Codex M4: a misplaced response file (whose body request_id
+        differs from the requested id) must NOT complete the wrong
+        consultation. The handler refuses with failed."""
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="A question.",
+        )
+        request_id = ask_record.receipt_refs[0]
+
+        # Write a response file but with a different request_id inside.
+        response_path = (
+            _responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json"
+        )
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        response_path.write_text(
+            json.dumps({
+                "request_id": "some-other-id",  # mismatch
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "target": "claude_code",
+                "findings": "looked at the wrong thing",
+                "source_references": [],
+                "caveats": "",
+                "investigation_outcome": "completed",
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        _, rec = await handle_read_coding_session_response(
+            instance_id="inst-A",
+            data_dir=str(tmp_path),
+            request_id=request_id,
+        )
+        assert rec.execution_state == "failed"
+        assert "request_id" in rec.user_visible_summary.lower()
+        assert "mismatch" in rec.user_visible_summary.lower()
+
+    async def test_unknown_investigation_outcome_normalized(self, tmp_path):
+        """An out-of-vocabulary investigation_outcome is normalized to
+        unable_to_investigate rather than passed through unchecked."""
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="A question.",
+        )
+        request_id = ask_record.receipt_refs[0]
+
+        response_path = (
+            _responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json"
+        )
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        response_path.write_text(
+            json.dumps({
+                "request_id": request_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "target": "claude_code",
+                "findings": "looked",
+                "source_references": [],
+                "caveats": "",
+                "investigation_outcome": "made_up_value",
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        captured: list[dict] = []
+
+        async def _stub_emit(
+            instance_id, event_type, payload=None, *,
+            member_id=None, space_id=None, correlation_id=None,
+        ):
+            captured.append({"payload": payload})
+            return "evt"
+
+        from kernos.kernel import event_stream as es_mod
+        import pytest
+        from _pytest.monkeypatch import MonkeyPatch
+        mp = MonkeyPatch()
+        try:
+            mp.setattr(es_mod, "emit", _stub_emit)
+            summary, rec = await handle_read_coding_session_response(
+                instance_id="inst-A",
+                data_dir=str(tmp_path),
+                request_id=request_id,
+            )
+        finally:
+            mp.undo()
+
+        assert rec.execution_state == "completed"
+        # The emitted payload's investigation_outcome is normalized.
+        assert captured[0]["payload"]["investigation_outcome"] == "unable_to_investigate"
+
+
+class TestAtomicSentinelClaim:
+    """Codex post-impl M2: O_CREAT|O_EXCL atomic claim ensures only one
+    of two concurrent emitters actually emits the event."""
+
+    async def test_concurrent_emits_dedup_at_sentinel_claim(self, tmp_path):
+        import asyncio
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="A question.",
+        )
+        request_id = ask_record.receipt_refs[0]
+        _write_response(str(tmp_path), "inst-A", request_id)
+
+        emit_count = 0
+
+        async def _slow_emit(
+            event_type: str, payload: dict, *, correlation_id=None,
+        ) -> None:
+            nonlocal emit_count
+            # Tiny await so the scheduler interleaves the second
+            # coroutine while we're inside; if the claim is atomic, the
+            # second one finds the sentinel already present and bails.
+            await asyncio.sleep(0.01)
+            emit_count += 1
+
+        from kernos.kernel.coding_session_bridge import (
+            _emit_response_received_once,
+            _responses_dir,
+        )
+        response_data = json.loads(
+            (_responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json")
+            .read_text(encoding="utf-8")
+        )
+        # Fire two coroutines concurrently.
+        await asyncio.gather(
+            _emit_response_received_once(
+                instance_id="inst-A",
+                request_id=request_id,
+                response_payload=response_data,
+                data_dir=str(tmp_path),
+                emit_event=_slow_emit,
+            ),
+            _emit_response_received_once(
+                instance_id="inst-A",
+                request_id=request_id,
+                response_payload=response_data,
+                data_dir=str(tmp_path),
+                emit_event=_slow_emit,
+            ),
+        )
+        assert emit_count == 1, (
+            f"expected exactly one emit due to O_CREAT|O_EXCL atomic "
+            f"sentinel claim; got {emit_count}"
+        )
+
+    async def test_correlation_id_kwarg_passed_to_callable(self, tmp_path):
+        """Codex M3: injected emit_event callable can accept
+        correlation_id explicitly per the documented contract."""
+        captured: list[dict] = []
+
+        async def _emit_with_correlation(
+            event_type: str, payload: dict, *, correlation_id=None,
+        ) -> None:
+            captured.append({
+                "event_type": event_type,
+                "payload": payload,
+                "correlation_id": correlation_id,
+            })
+
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="Q.",
+        )
+        request_id = ask_record.receipt_refs[0]
+        _write_response(str(tmp_path), "inst-A", request_id)
+
+        from kernos.kernel.coding_session_bridge import (
+            _emit_response_received_once,
+            _responses_dir,
+        )
+        response_data = json.loads(
+            (_responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json")
+            .read_text(encoding="utf-8")
+        )
+        await _emit_response_received_once(
+            instance_id="inst-A",
+            request_id=request_id,
+            response_payload=response_data,
+            data_dir=str(tmp_path),
+            emit_event=_emit_with_correlation,
+        )
+        assert len(captured) == 1
+        assert captured[0]["correlation_id"] == request_id
+
+    async def test_minimal_signature_callable_still_works(self, tmp_path):
+        """Backward-compat: callables that don't accept correlation_id
+        still work; the bridge falls back to the minimal signature."""
+        captured: list[tuple] = []
+
+        async def _legacy_emit(event_type: str, payload: dict) -> None:
+            captured.append((event_type, payload))
+
+        _, ask_record = await handle_ask_coding_session(
+            instance_id="inst-A",
+            member_id="mem-A",
+            active_space_id="space-A",
+            data_dir=str(tmp_path),
+            target="claude_code",
+            question="Q.",
+        )
+        request_id = ask_record.receipt_refs[0]
+        _write_response(str(tmp_path), "inst-A", request_id)
+
+        from kernos.kernel.coding_session_bridge import (
+            _emit_response_received_once,
+            _responses_dir,
+        )
+        response_data = json.loads(
+            (_responses_dir(str(tmp_path), "inst-A") / f"{request_id}.json")
+            .read_text(encoding="utf-8")
+        )
+        await _emit_response_received_once(
+            instance_id="inst-A",
+            request_id=request_id,
+            response_payload=response_data,
+            data_dir=str(tmp_path),
+            emit_event=_legacy_emit,
+        )
+        assert len(captured) == 1
+        assert captured[0][0] == "coding_consult.response_received"
+
+
 class TestToolSchemas:
     def test_ask_schema_required_fields(self):
         schema = ASK_CODING_SESSION_TOOL["input_schema"]
@@ -546,3 +863,75 @@ class TestToolSchemas:
             READ_CODING_SESSION_RESPONSE_TOOL["name"]
             == "read_coding_session_response"
         )
+
+
+class TestDispatchIntegration:
+    """Codex post-impl coverage gap: verifies registry exposure +
+    confirmed-only dispatch + _turn_action_records append work
+    together via the actual ReasoningService.execute_tool path."""
+
+    def test_kernel_tools_set_includes_both_names(self):
+        from kernos.kernel.reasoning import ReasoningService
+        assert "ask_coding_session" in ReasoningService._KERNEL_TOOLS
+        assert "read_coding_session_response" in ReasoningService._KERNEL_TOOLS
+
+    def test_kernel_tool_paths_are_confirmed_only(self):
+        from kernos.kernel.reasoning import ReasoningService
+        ask_paths = ReasoningService._KERNEL_TOOL_PATHS["ask_coding_session"]
+        read_paths = ReasoningService._KERNEL_TOOL_PATHS[
+            "read_coding_session_response"
+        ]
+        assert ask_paths == frozenset({"confirmed"})
+        assert read_paths == frozenset({"confirmed"})
+
+    def test_registry_surfaces_both_schemas(self):
+        from kernos.kernel.kernel_tool_registry import kernel_tool_schema_map
+        schemas = kernel_tool_schema_map()
+        names = {s["name"] for s in schemas.values()}
+        assert "ask_coding_session" in names
+        assert "read_coding_session_response" in names
+
+    async def test_dispatch_appends_action_state_record(self, tmp_path, monkeypatch):
+        """Round-trip the dispatch path: instantiate a ReasoningService,
+        call execute_tool for ask_coding_session, verify the record was
+        appended to self._turn_action_records (same shape as note_this)."""
+        monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+        from unittest.mock import AsyncMock, MagicMock
+        from kernos.kernel.reasoning import ReasoningService
+        from kernos.kernel.integration import ActionStateRecord
+
+        # Stub provider + events + audit + mcp.
+        rs = ReasoningService(
+            AsyncMock(),  # provider
+            AsyncMock(),  # events
+            MagicMock(),  # mcp
+            AsyncMock(),  # audit
+        )
+
+        # Synthesize a minimal request-like object.
+        request = MagicMock()
+        request.instance_id = "inst-A"
+        request.active_space_id = "space-A"
+        request.member_id = "mem-A"
+        request.conversation_id = "turn-1"
+
+        # Call execute_tool for ask_coding_session.
+        summary = await rs.execute_tool(
+            "ask_coding_session",
+            {
+                "target": "claude_code",
+                "question": "Audit a thing.",
+                "context": {},
+            },
+            request,
+        )
+        assert isinstance(summary, str)
+        assert "request_id=" in summary
+        # Record was appended.
+        assert len(rs._turn_action_records) == 1
+        record = rs._turn_action_records[0]
+        assert isinstance(record, ActionStateRecord)
+        assert record.operation == "ask_coding_session"
+        assert record.operation_class == "mutate"
+        assert record.execution_state == "attempted"
+        assert len(record.receipt_refs) == 1

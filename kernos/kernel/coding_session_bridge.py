@@ -100,6 +100,35 @@ def _timeout_seconds() -> int:
     return _env_int("KERNOS_CODING_SESSION_BRIDGE_TIMEOUT_SECONDS", 3600)
 
 
+async def _is_request_past_timeout(
+    instance_id: str, request_id: str, data_dir: str,
+) -> bool:
+    """Read the request's ``timestamp`` field and return True if it's
+    older than ``_timeout_seconds()``. Used by both the response-file
+    polling path and the JSONDecodeError partial-write path
+    (Codex post-impl H1).
+    """
+    request_path = _requests_dir(data_dir, instance_id) / f"{request_id}.json"
+    if not request_path.exists():
+        return False
+    try:
+        with open(request_path, "r", encoding="utf-8") as f:
+            request_data = json.load(f)
+        submitted_at = request_data.get("timestamp", "")
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not submitted_at:
+        return False
+    from datetime import datetime, timezone
+    try:
+        submitted_dt = datetime.fromisoformat(submitted_at)
+        now_dt = datetime.now(timezone.utc)
+        elapsed = (now_dt - submitted_dt).total_seconds()
+        return elapsed > _timeout_seconds()
+    except (ValueError, TypeError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Path helpers (tool-internal scope enforcement)
 # ---------------------------------------------------------------------------
@@ -256,18 +285,61 @@ async def _emit_response_received_once(
     request_id: str,
     response_payload: dict,
     data_dir: str,
-    emit_event: Callable[[str, dict], Awaitable[None]] | None,
+    emit_event: Callable[..., Awaitable[None]] | None,
 ) -> None:
     """Fire ``coding_consult.response_received`` exactly once per
     response arrival. Idempotency via sentinel file
-    ``responses/{request_id}.emitted`` written atomically via
-    ``os.rename`` (per architect's event-emission revision).
-    """
-    sentinel_path = _responses_dir(data_dir, instance_id) / f"{request_id}.emitted"
-    if sentinel_path.exists():
-        return  # already emitted
+    ``responses/{request_id}.emitted`` claimed atomically before
+    emit via ``O_CREAT | O_EXCL`` so two concurrent readers cannot
+    both pass the check and double-emit (Codex post-impl M2).
 
-    # Build payload.
+    Claim-before-emit ordering means if the emit itself fails after
+    a successful claim, the sentinel remains in place and the event
+    will NOT re-fire on subsequent reads. The trade-off prefers
+    exactly-once over at-least-once: the architect's spec contract
+    is "fires once per response arrival." A failed emit logs loud;
+    manual intervention or audit-log replay covers the failure case.
+
+    ``emit_event`` callable signature is
+    ``async (event_type, payload, *, correlation_id) -> None`` so
+    injected emitters can use the correlation_id metadata if they
+    want; the spec contract is that ``correlation_id == request_id``
+    literally regardless of which emission path runs (Codex M3).
+    Implementations that only accept ``(event_type, payload)`` can
+    drop ``correlation_id`` via ``**kwargs``-style swallowing; the
+    request_id remains in the payload for those consumers.
+    """
+    responses_dir = _responses_dir(data_dir, instance_id)
+    responses_dir.mkdir(parents=True, exist_ok=True)
+    sentinel_path = responses_dir / f"{request_id}.emitted"
+
+    # Atomic claim: O_CREAT | O_EXCL refuses if the file already
+    # exists. Two concurrent emitters race here; only one wins the
+    # OS-level claim. The losers see FileExistsError and bail
+    # without emitting.
+    try:
+        fd = os.open(
+            str(sentinel_path),
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o644,
+        )
+    except FileExistsError:
+        return  # another emit already won the claim
+    except OSError as exc:
+        logger.warning(
+            "CODING_SESSION_BRIDGE: sentinel claim failed (event may "
+            "re-fire on next read): %s", exc,
+        )
+        return
+    try:
+        # Write a marker timestamp into the sentinel for debugging.
+        # The presence of the file is the load-bearing semantic, not
+        # the contents; a zero-byte sentinel would also work.
+        os.write(fd, utc_now().encode("utf-8"))
+    finally:
+        os.close(fd)
+
+    # Build payload — only after the claim succeeds.
     request_path = _requests_dir(data_dir, instance_id) / f"{request_id}.json"
     originating_member_id = ""
     originating_kernos_instance = instance_id
@@ -295,46 +367,55 @@ async def _emit_response_received_once(
         ),
     }
 
-    emitted = False
     if emit_event is not None:
         try:
-            await emit_event("coding_consult.response_received", payload)
-            emitted = True
-        except Exception as exc:
-            logger.warning(
-                "CODING_SESSION_BRIDGE: emit via callable failed: %s", exc,
-            )
-
-    if not emitted:
-        try:
-            from kernos.kernel import event_stream
-            await event_stream.emit(
-                instance_id,
+            # Codex post-impl M3: pass correlation_id explicitly so
+            # the injected callable can satisfy the full event
+            # contract. Callables that only accept (event_type,
+            # payload) should declare **kwargs (or use a wrapper
+            # that does) to swallow the extra kwarg.
+            await emit_event(
                 "coding_consult.response_received",
                 payload,
                 correlation_id=request_id,
             )
-            emitted = True
+            return
+        except TypeError:
+            # Callable doesn't accept correlation_id kwarg; retry the
+            # minimal signature so existing emit_event consumers
+            # (FRICTION-PATTERN-style callables) keep working.
+            try:
+                await emit_event(
+                    "coding_consult.response_received", payload,
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    "CODING_SESSION_BRIDGE: emit via callable "
+                    "(minimal signature) failed: %s", exc,
+                )
         except Exception as exc:
-            logger.debug(
-                "CODING_SESSION_BRIDGE: emit via event_stream failed: %s",
+            logger.warning(
+                "CODING_SESSION_BRIDGE: emit via callable failed: %s",
                 exc,
             )
 
-    # Sentinel via atomic rename: write to a tempfile then rename so
-    # concurrent readers either see the sentinel or don't, never a
-    # partial.
-    if emitted:
-        try:
-            tmp = sentinel_path.with_suffix(".emitted.tmp")
-            tmp.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(utc_now(), encoding="utf-8")
-            os.rename(str(tmp), str(sentinel_path))
-        except OSError as exc:
-            logger.warning(
-                "CODING_SESSION_BRIDGE: sentinel write failed (event "
-                "will re-emit on next read): %s", exc,
-            )
+    # Fallback: module-level event_stream emit always carries the
+    # correlation_id metadata. payload.request_id is the load-bearing
+    # workflow-gate filter key regardless of which path emits.
+    try:
+        from kernos.kernel import event_stream
+        await event_stream.emit(
+            instance_id,
+            "coding_consult.response_received",
+            payload,
+            correlation_id=request_id,
+        )
+    except Exception as exc:
+        logger.debug(
+            "CODING_SESSION_BRIDGE: emit via event_stream failed: %s",
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -524,10 +605,17 @@ async def handle_read_coding_session_response(
     response_path = _responses_dir(data_dir, instance_id) / f"{request_id}.json"
 
     if response_path.exists():
+        # Codex post-impl H1: response files are written by external
+        # tooling (operator / CC session) and not under our atomic
+        # control. A polling read that catches a partial JSON write
+        # must NOT permanently fail the request — the writer may still
+        # be in progress. JSONDecodeError within the timeout window is
+        # treated as ``attempted`` (try again later); only past timeout
+        # OR with no matching request does it become ``failed``.
         try:
             with open(response_path, "r", encoding="utf-8") as f:
                 response_data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
+        except OSError as exc:
             return (
                 f"Error: response file present but unreadable: {exc}",
                 ActionStateRecord(
@@ -539,12 +627,93 @@ async def handle_read_coding_session_response(
                     execution_state="failed",
                     receipt_refs=(request_id,),
                     user_visible_summary=(
-                        f"read_coding_session_response: response unreadable "
-                        f"for {request_id}: {exc}"
+                        f"read_coding_session_response: response file "
+                        f"unreadable for {request_id}: {exc}"
                     ),
                     risk_level="low",
                 ),
             )
+        except json.JSONDecodeError as exc:
+            # Within timeout window → response write in progress; tell
+            # the caller to poll again. Past timeout → real failure.
+            timed_out = await _is_request_past_timeout(
+                instance_id, request_id, data_dir,
+            )
+            if timed_out:
+                return (
+                    f"Bridge response malformed and request past timeout: {exc}",
+                    ActionStateRecord(
+                        action_id=action_id,
+                        surface="coding_session_bridge",
+                        operation="read_coding_session_response",
+                        operation_class="read",
+                        authorization_state="not_required",
+                        execution_state="failed",
+                        receipt_refs=(request_id,),
+                        user_visible_summary=(
+                            f"read_coding_session_response: response "
+                            f"malformed and timeout exceeded for "
+                            f"{request_id}: {exc}"
+                        ),
+                        risk_level="low",
+                    ),
+                )
+            return (
+                f"Response file present but JSON not yet parseable "
+                f"(write in progress?). Poll again shortly.",
+                ActionStateRecord(
+                    action_id=action_id,
+                    surface="coding_session_bridge",
+                    operation="read_coding_session_response",
+                    operation_class="read",
+                    authorization_state="not_required",
+                    execution_state="attempted",
+                    receipt_refs=(request_id,),
+                    user_visible_summary=(
+                        f"read_coding_session_response: response "
+                        f"file present but partial for {request_id}; "
+                        f"poll again"
+                    ),
+                    risk_level="low",
+                ),
+            )
+
+        # Codex post-impl M4: response files are written by external
+        # tooling; verify the body's request_id matches the one we
+        # asked for so a misplaced / stale response file can't
+        # complete the wrong consultation. Also normalize
+        # investigation_outcome against the documented enum.
+        body_request_id = response_data.get("request_id", "")
+        if body_request_id and body_request_id != request_id:
+            return (
+                f"Response body request_id {body_request_id!r} does not "
+                f"match expected {request_id!r}; refusing to complete "
+                f"the wrong consultation.",
+                ActionStateRecord(
+                    action_id=action_id,
+                    surface="coding_session_bridge",
+                    operation="read_coding_session_response",
+                    operation_class="read",
+                    authorization_state="not_required",
+                    execution_state="failed",
+                    receipt_refs=(request_id,),
+                    user_visible_summary=(
+                        f"read_coding_session_response: body request_id "
+                        f"mismatch for {request_id} (got "
+                        f"{body_request_id!r})"
+                    ),
+                    risk_level="low",
+                ),
+            )
+
+        outcome_raw = str(response_data.get("investigation_outcome", "completed"))
+        if outcome_raw not in VALID_INVESTIGATION_OUTCOMES:
+            logger.warning(
+                "CODING_SESSION_BRIDGE: response %s has unknown "
+                "investigation_outcome=%r; treating as 'unable_to_investigate'",
+                request_id, outcome_raw,
+            )
+            response_data["investigation_outcome"] = "unable_to_investigate"
 
         # Idempotent event emission.
         await _emit_response_received_once(
@@ -617,26 +786,10 @@ async def handle_read_coding_session_response(
             ),
         )
 
-    # Timeout check.
-    try:
-        with open(request_path, "r", encoding="utf-8") as f:
-            request_data = json.load(f)
-        submitted_at = request_data.get("timestamp", "")
-    except (OSError, json.JSONDecodeError):
-        submitted_at = ""
-
-    timed_out = False
-    if submitted_at:
-        from datetime import datetime, timezone
-
-        try:
-            submitted_dt = datetime.fromisoformat(submitted_at)
-            now_dt = datetime.now(timezone.utc)
-            elapsed = (now_dt - submitted_dt).total_seconds()
-            if elapsed > _timeout_seconds():
-                timed_out = True
-        except (ValueError, TypeError):
-            pass
+    # Timeout check via shared helper (reused by JSONDecodeError path).
+    timed_out = await _is_request_past_timeout(
+        instance_id, request_id, data_dir,
+    )
 
     if timed_out:
         return (

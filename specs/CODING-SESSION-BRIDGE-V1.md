@@ -1,8 +1,14 @@
 # CODING-SESSION-BRIDGE-V1 — Implementation Review Document
 
-**Status:** IMPLEMENTED — code shipped on branch `coding-session-bridge-v1`,
-commit `6a20f58`. Awaiting Codex post-implementation review +
-architect's close ratification.
+**Status:** IMPLEMENTED v2 — Codex post-implementation review (5
+findings) folded. Awaiting architect's close ratification.
+
+Codex's review caught five real issues: response-side atomicity not
+enforced for partial writes (H1); exactly-once emission was not
+concurrency-safe (M2); injected emit callable couldn't carry
+correlation metadata (M3); response files weren't validated against
+the request id they claim to complete (M4); env var name typo in
+spec text (L5). All folded into code + tests.
 
 **Architect-ratified spec source:** Notion `35cffafef4db8152b3dad07092eaf142`
 (renamed from CODING-CONSULT-V1; IA review folded; event-emission
@@ -147,14 +153,47 @@ When `read_coding_session_response` detects a fresh response,
   `originating_member_id`, `target`, `investigation_outcome`
 
 Idempotency: a sentinel file `responses/{request_id}.emitted` is
-written via `os.rename` atomicity after the first emission. Subsequent
-reads see the sentinel and skip re-emission (per CC's IA observation 1).
+**claimed atomically before emit** via `os.open(..., O_CREAT|O_EXCL)`
+so two concurrent readers cannot both pass the sentinel check and
+double-emit (Codex post-impl M2 fold). Claim-before-emit ordering
+means if the emit itself fails after a successful claim, the
+sentinel remains and the event will NOT re-fire on subsequent reads
+— exactly-once over at-least-once per the spec contract. A failed
+emit logs loud; audit-log replay covers the failure case.
 
 Emission path: prefers the optional `emit_event` callable passed by
 the caller; falls back to module-level `event_stream.emit` so the
 event never silently disappears even when no callable is injected
 (mirrors the FRICTION-PATTERN-STABLE-IDS-V1 lifecycle-event fallback
 pattern).
+
+**Injected callable signature (Codex post-impl M3 fold):**
+`async (event_type, payload, *, correlation_id) -> None`. The
+correlation_id kwarg is the documented way to carry the
+`correlation_id = request_id` contract through the callable path —
+the `event_stream.emit` fallback always sets it; the callable path
+now does too. Legacy callables with the minimal
+`(event_type, payload)` signature continue working: a `TypeError`
+on the kwarg-bearing call triggers a retry with the minimal
+signature. New emit-event consumers should accept the kwarg (even
+via `**_`) so the correlation flows end-to-end.
+
+**Response-body request_id validation (Codex post-impl M4 fold):**
+the read handler checks that the response file's body
+`request_id` matches the requested id; a mismatched body cannot
+complete the wrong consultation. `investigation_outcome` is also
+normalized against the documented enum so an unknown value
+becomes `unable_to_investigate` rather than passing through
+unchecked.
+
+**Partial-write tolerance (Codex post-impl H1 fold):** response
+files are written by external tooling (operator / CC session) and
+not under our atomic control. A polling read that catches a partial
+JSON write returns `attempted` (response in progress; poll again
+later) while the request is still within timeout. Only past timeout
+does a malformed response become a real `failed`. This prevents a
+race between the writer and a polling reader from permanently
+breaking the consultation.
 
 ## Path scope discipline (tool-internal validation)
 
@@ -174,7 +213,7 @@ allowlist enforced at the gate) if multiple tools need it.
 
 ## Timeout
 
-`KERNOS_FRICTION_CODING_SESSION_BRIDGE_TIMEOUT_SECONDS` env var (default
+`KERNOS_CODING_SESSION_BRIDGE_TIMEOUT_SECONDS` env var (default
 3600 = 1 hour). `read_coding_session_response` reads the request's
 `timestamp` field and compares to `now`; past the threshold returns
 `failed` with a timeout reason.
@@ -214,7 +253,7 @@ shows up.
 - Substrate-level path scoping primitive (deferred to its own spec
   if/when multiple tools need it).
 
-## Test categories (20 tests, all green)
+## Test categories (31 tests, all green)
 
 **Round-trip (3):** ask writes request file + returns attempted; read
 returns completed with findings; ActionStateRecord chain preserves
@@ -235,6 +274,22 @@ payload shape; sentinel prevents re-emit on repeated reads;
 `event_stream` fallback uses `correlation_id = request_id` literally.
 
 **Tool schemas (3):** required-fields sanity, enum sanity, name sanity.
+
+**Response robustness (4) — Codex post-impl H1+M4 fold:** partial
+JSON within timeout returns `attempted`; partial JSON past timeout
+returns `failed`; body request_id mismatch refused; unknown
+investigation_outcome normalized to `unable_to_investigate`.
+
+**Atomic sentinel claim (3) — Codex post-impl M2+M3 fold:** two
+concurrent emits dedup at the OS-level claim (exactly one emits);
+correlation_id kwarg carried to the callable; legacy minimal
+signature still accepted.
+
+**Dispatch integration (4) — Codex post-impl coverage-gap fold:**
+`_KERNEL_TOOLS` includes both names; `_KERNEL_TOOL_PATHS` are
+confirmed-only; the registry surfaces both schemas; the
+`ReasoningService.execute_tool` path appends the ActionStateRecord
+to `_turn_action_records`.
 
 ## Architectural pushback prompts for Codex
 
