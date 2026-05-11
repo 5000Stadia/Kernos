@@ -83,10 +83,17 @@ class FrictionObserver:
         pref_detected: bool,
         provider_errors: list[str] | None = None,
         has_now_block_time: bool = False,
+        member_id: str = "",
     ) -> list[FrictionSignal]:
         """Run all signal detectors and write reports for any friction found.
 
         Returns the list of detected signals (empty if no friction).
+
+        ``member_id`` (Codex post-impl Finding M5) carries the
+        originating member through into the per-signal context so the
+        FRICTION-PATTERN-STABLE-IDS-V1 classifier hook can record it on
+        occurrence rows for provenance. Optional for backward-compat
+        with callers that don't have a member; defaults to empty string.
         """
         if not self._enabled:
             return []
@@ -96,6 +103,7 @@ class FrictionObserver:
         ctx_snapshot = {
             "user_message": user_message[:500],
             "space": active_space_id,
+            "member_id": member_id,
             "surfaced_tool_count": len(surfaced_tool_names),
             "tool_calls": [t["name"] for t in tool_trace],
             "merged_count": merged_count,
@@ -511,6 +519,13 @@ class FrictionObserver:
             classify_signal,
         )
         from kernos.utils import utc_now
+
+        # Lazy schema-ensure. The store's start() is idempotent so
+        # repeated calls are no-ops after the first; this keeps the
+        # handler's synchronous __init__ clean (can't await there).
+        # Codex post-impl Finding H1: production wiring must reach the
+        # store, not just construct it.
+        await self._pattern_store.ensure_schema(self._data_dir)
 
         candidates = await self._pattern_store.list_patterns(instance_id)
         result = classify_signal(

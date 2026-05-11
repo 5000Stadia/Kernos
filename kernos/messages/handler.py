@@ -944,12 +944,38 @@ class MessageHandler:
         # Phase timing accumulator for /status averages
         self._phase_timing_history: list[dict[str, int]] = []  # list of {phase: ms} dicts
 
-        # Friction observer — post-turn diagnostics
+        # Friction observer — post-turn diagnostics.
+        # FRICTION-PATTERN-STABLE-IDS-V1: optional FrictionPatternStore
+        # injection wires the catalog's auto-classifier. Disabled by
+        # default until KERNOS_FRICTION_PATTERN_STORE=1 turns it on so
+        # legacy deployments stay unchanged; the store opens its own
+        # sqlite connection lazily on first use via ensure_schema().
         from kernos.kernel.friction import FrictionObserver
+        from kernos.kernel.friction_patterns import FrictionPatternStore
+
+        self._friction_pattern_store: FrictionPatternStore | None = None
+        if os.getenv("KERNOS_FRICTION_PATTERN_STORE", "0") == "1":
+            self._friction_pattern_store = FrictionPatternStore()
+
+        async def _emit_friction_pattern_event(
+            event_type: str, payload: dict,
+        ) -> None:
+            instance_id = payload.get("instance_id", "")
+            try:
+                from kernos.kernel import event_stream
+                await event_stream.emit(instance_id, event_type, payload)
+            except Exception as exc:
+                logger.debug(
+                    "FRICTION_PATTERN_EVENT: emit failed type=%s: %s",
+                    event_type, exc,
+                )
+
         self._friction = FrictionObserver(
             reasoning=reasoning,
             data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
             enabled=os.getenv("KERNOS_FRICTION_OBSERVER", "1") != "0",
+            pattern_store=self._friction_pattern_store,
+            emit_event=_emit_friction_pattern_event,
         )
 
         # Runtime trace — structured event log for diagnostic visibility
@@ -6671,6 +6697,10 @@ class MessageHandler:
                 pref_detected=ctx.pref_detected,
                 provider_errors=provider_errors,
                 has_now_block_time=True,
+                # FRICTION-PATTERN-STABLE-IDS-V1 Codex post-impl M5:
+                # propagate member_id into ctx_snapshot so occurrence
+                # rows get the provenance per spec.
+                member_id=getattr(ctx, "member_id", "") or "",
             )
         except Exception as exc:
             logger.debug("FRICTION: observer failed: %s", exc)

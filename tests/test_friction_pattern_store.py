@@ -24,6 +24,7 @@ from kernos.kernel.friction_patterns import (
     CLASSIFIED_MANUAL,
     FrictionPattern,
     FrictionPatternStore,
+    InvalidLifecycleTransition,
     LIFECYCLE_ACTIVE,
     LIFECYCLE_ARCHIVED,
     LIFECYCLE_REACTIVATED,
@@ -957,6 +958,284 @@ class TestConcurrentTransitionAndOccurrenceRace:
 # ---------------------------------------------------------------------------
 # Slugify helper
 # ---------------------------------------------------------------------------
+
+
+class TestForbiddenLifecycleTransitions:
+    """Codex post-impl Finding H2: pair validation per Decision 6 table."""
+
+    async def test_active_to_reactivated_rejected(self, store):
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Active to reactivated forbidden alpha")
+        with pytest.raises(InvalidLifecycleTransition):
+            await store.transition_lifecycle(
+                "inst-A", p.pattern_id, LIFECYCLE_REACTIVATED,
+            )
+
+    async def test_archived_to_resolved_rejected(self, store):
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Archived to resolved forbidden alpha")
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ARCHIVED)
+        with pytest.raises(InvalidLifecycleTransition):
+            await store.transition_lifecycle(
+                "inst-A", p.pattern_id, LIFECYCLE_RESOLVED,
+            )
+
+    async def test_archived_to_reactivated_rejected(self, store):
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Archived to reactivated forbidden alpha")
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ARCHIVED)
+        with pytest.raises(InvalidLifecycleTransition):
+            await store.transition_lifecycle(
+                "inst-A", p.pattern_id, LIFECYCLE_REACTIVATED,
+            )
+
+    async def test_resolved_to_reactivated_rejected_via_transition_lifecycle(
+        self, store,
+    ):
+        """resolved -> reactivated is exclusively the record_recurrence
+        threshold's job; transition_lifecycle must not allow the
+        operator to bypass it."""
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Resolved manual reactivation forbidden alpha")
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED)
+        with pytest.raises(InvalidLifecycleTransition):
+            await store.transition_lifecycle(
+                "inst-A", p.pattern_id, LIFECYCLE_REACTIVATED,
+            )
+
+    async def test_reactivated_to_active_rejected(self, store):
+        """Reactivated patterns transition to resolved (when fix
+        re-lands) or archived; not back to active directly."""
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Reactivated to active forbidden alpha")
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED)
+        for i in range(3):
+            await store.record_recurrence(
+                instance_id="inst-A",
+                pattern_id=p.pattern_id,
+                observed_at=_now(),
+                report_path=f"reports/rt_{i}.md",
+            )
+        reloaded = await store.get_pattern("inst-A", p.pattern_id)
+        assert reloaded.lifecycle_state == LIFECYCLE_REACTIVATED
+        with pytest.raises(InvalidLifecycleTransition):
+            await store.transition_lifecycle(
+                "inst-A", p.pattern_id, LIFECYCLE_ACTIVE,
+            )
+
+    async def test_allowed_transitions_succeed(self, store):
+        """Positive cases: every pair in the allowed table works."""
+        # active -> resolved -> active -> archived -> active
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Allowed transitions alpha")
+        for target in (
+            LIFECYCLE_RESOLVED, LIFECYCLE_ACTIVE,
+            LIFECYCLE_ARCHIVED, LIFECYCLE_ACTIVE,
+        ):
+            updated = await store.transition_lifecycle(
+                "inst-A", p.pattern_id, target,
+            )
+            assert updated.lifecycle_state == target
+        # active -> resolved -> archived
+        updated = await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED,
+        )
+        updated = await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ARCHIVED,
+        )
+        assert updated.lifecycle_state == LIFECYCLE_ARCHIVED
+
+
+class TestRecurrenceFallbackEmit:
+    """Codex post-impl Finding M4: recurrence/reactivation must reach
+    event_stream even when no emit_event callable is injected."""
+
+    async def test_recurrence_falls_back_to_event_stream_when_no_callable(
+        self, store, monkeypatch,
+    ):
+        captured: list[tuple[str, str, dict]] = []
+
+        async def _stub_emit(instance_id: str, event_type: str, payload: dict, **_):
+            captured.append((instance_id, event_type, payload))
+
+        # Patch the module-level event_stream.emit. The store falls
+        # back to kernos.kernel.event_stream.emit when no callable is
+        # passed; we replace that module's emit function so we can
+        # observe the calls.
+        from kernos.kernel import event_stream as es_mod
+        monkeypatch.setattr(es_mod, "emit", _stub_emit)
+
+        p = await store.create_pattern(
+            instance_id="inst-A", description="Fallback emit test alpha")
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED)
+        # No emit_event passed → fallback path.
+        await store.record_recurrence(
+            instance_id="inst-A",
+            pattern_id=p.pattern_id,
+            observed_at=_now(),
+            report_path="reports/fb.md",
+        )
+        assert any(
+            e[1] == "friction.pattern_recurrence" for e in captured
+        ), f"event_stream fallback did not fire; captured={captured}"
+
+
+class TestFrictionObserverHookIntegration:
+    """Codex post-impl test-coverage gap: hook dispatch wasn't tested
+    against an actual FrictionObserver run. These tests exercise the
+    integration end-to-end (signal in → markdown report on disk → hook
+    fires → catalog row written under correct method)."""
+
+    async def _make_observer(self, store, data_dir):
+        from kernos.kernel.friction import FrictionObserver
+
+        emitted: list[tuple[str, dict]] = []
+
+        async def _emit(event_type: str, payload: dict) -> None:
+            emitted.append((event_type, payload))
+
+        observer = FrictionObserver(
+            reasoning=None,
+            data_dir=str(data_dir),
+            enabled=True,
+            pattern_store=store,
+            emit_event=_emit,
+        )
+        return observer, emitted
+
+    async def test_hook_dispatches_record_occurrence_for_active(
+        self, store, tmp_path,
+    ):
+        observer, emitted = await self._make_observer(store, tmp_path)
+        # Pre-create an active pattern that matches Path A.
+        p = await store.create_pattern(
+            instance_id="inst-A",
+            description="Empty response pattern alpha",
+            signal_type_keys=["EMPTY_RESPONSE"],
+        )
+        # Run observer with an empty-response scenario.
+        signals = await observer.observe(
+            instance_id="inst-A",
+            user_message="hi there",
+            response_text="",
+            tool_trace=[],
+            surfaced_tool_names=set(),
+            active_space_id="space-A",
+            merged_count=1,
+            is_reactive=True,
+            pref_detected=False,
+            member_id="mem-A",
+        )
+        assert any(s.signal_type == "EMPTY_RESPONSE" for s in signals)
+        reloaded = await store.get_pattern("inst-A", p.pattern_id)
+        assert reloaded.occurrence_count == 1
+        assert reloaded.lifecycle_state == LIFECYCLE_ACTIVE
+
+    async def test_hook_dispatches_record_recurrence_for_resolved(
+        self, store, tmp_path,
+    ):
+        observer, emitted = await self._make_observer(store, tmp_path)
+        p = await store.create_pattern(
+            instance_id="inst-A",
+            description="Resolved hook test alpha",
+            signal_type_keys=["EMPTY_RESPONSE"],
+        )
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED,
+        )
+        signals = await observer.observe(
+            instance_id="inst-A",
+            user_message="hi there",
+            response_text="",
+            tool_trace=[],
+            surfaced_tool_names=set(),
+            active_space_id="space-A",
+            merged_count=1,
+            is_reactive=True,
+            pref_detected=False,
+            member_id="mem-A",
+        )
+        assert signals
+        reloaded = await store.get_pattern("inst-A", p.pattern_id)
+        # Recurrence does NOT increment occurrence_count.
+        assert reloaded.occurrence_count == 0
+        assert reloaded.lifecycle_state == LIFECYCLE_RESOLVED
+        assert any(
+            e[0] == "friction.pattern_recurrence" for e in emitted
+        )
+
+    async def test_hook_drops_archived_to_unclassified(
+        self, store, tmp_path,
+    ):
+        observer, emitted = await self._make_observer(store, tmp_path)
+        p = await store.create_pattern(
+            instance_id="inst-A",
+            description="Archived hook test alpha",
+            signal_type_keys=["EMPTY_RESPONSE"],
+        )
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ARCHIVED,
+        )
+        signals = await observer.observe(
+            instance_id="inst-A",
+            user_message="hi there",
+            response_text="",
+            tool_trace=[],
+            surfaced_tool_names=set(),
+            active_space_id="space-A",
+            merged_count=1,
+            is_reactive=True,
+            pref_detected=False,
+            member_id="mem-A",
+        )
+        assert signals
+        reloaded = await store.get_pattern("inst-A", p.pattern_id)
+        # Archived pattern receives no occurrence.
+        assert reloaded.occurrence_count == 0
+        assert reloaded.lifecycle_state == LIFECYCLE_ARCHIVED
+        # And the unclassified event fires for audit-trail preservation.
+        assert any(
+            e[0] == "friction.pattern_unclassified" for e in emitted
+        )
+
+    async def test_hook_records_member_id_provenance(
+        self, store, tmp_path,
+    ):
+        """Codex post-impl Finding M5: occurrence rows must carry
+        the originating member_id, sourced from observe()'s new
+        member_id kwarg into the signal's context snapshot."""
+        observer, _emitted = await self._make_observer(store, tmp_path)
+        p = await store.create_pattern(
+            instance_id="inst-A",
+            description="Member provenance test alpha",
+            signal_type_keys=["EMPTY_RESPONSE"],
+        )
+        await observer.observe(
+            instance_id="inst-A",
+            user_message="hi there",
+            response_text="",
+            tool_trace=[],
+            surfaced_tool_names=set(),
+            active_space_id="space-A",
+            merged_count=1,
+            is_reactive=True,
+            pref_detected=False,
+            member_id="mem-PROVENANCE",
+        )
+        # Verify the occurrence row has member_id populated.
+        async with store.db.execute(
+            "SELECT member_id FROM friction_pattern_occurrence "
+            "WHERE instance_id = ? AND pattern_id = ?",
+            ("inst-A", p.pattern_id),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["member_id"] == "mem-PROVENANCE"
 
 
 class TestSlugify:

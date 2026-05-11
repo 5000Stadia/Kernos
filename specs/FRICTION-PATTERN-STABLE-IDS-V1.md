@@ -1,9 +1,13 @@
 # FRICTION-PATTERN-STABLE-IDS-V1 — Implementation Spec
 
-**Status:** DRAFT v4 — pre-implementation. TWO Codex pre-spec review
-rounds folded + THREE architect calls folded 2026-05-10. Awaiting
-final architect ratification of v4 (same-turn after CC pings; diff
-against `488e8ea` is small).
+**Status:** IMPLEMENTED v5 — code shipped on branch
+`friction-pattern-stable-ids-v1`. TWO Codex pre-spec review rounds +
+THREE architect calls + ONE Codex post-implementation review round
+folded (six findings: H1 runtime wiring, H2 transition pair
+validation, H3 ActionStateRecord deferral, M4 event_stream fallback,
+M5 member_id propagation, L6 frontmatter parser contract tightening,
+plus the retry-clamp architecture note). Awaiting architect's close
+ratification.
 
 **v4 folds (Architect calls, same-turn after v3 ratification at
 Notion `35cffafef4db815d9692e4ce3394368c`):**
@@ -437,13 +441,25 @@ separate methods:
   `record_occurrence` and `record_recurrence` both reject with
   `PatternArchived` error. Opt-in operator-only state for cleanup.
 
-**Method-to-lifecycle mapping** (folded from Codex Finding 7):
+**Method-to-lifecycle mapping** (folded from Codex Finding 7;
+transition validation tightened per Codex post-impl Finding H2):
 
 | Method | Active | Resolved | Reactivated | Archived |
 |---|---|---|---|---|
 | `record_occurrence` | ✅ increment counter | ❌ rejects (use `record_recurrence`) | ✅ increment counter | ❌ rejects |
 | `record_recurrence` | ❌ rejects (use `record_occurrence`) | ✅ recurrence event + threshold check | ❌ rejects (already reactivated) | ❌ rejects |
-| `transition_lifecycle` | active→resolved/archived | resolved→active/archived | reactivated→resolved/archived | archived→active (operator override) |
+| `transition_lifecycle` | active→{resolved, archived} | resolved→{active, archived} | reactivated→{resolved, archived} | archived→{active} (operator override) |
+
+**`transition_lifecycle` pair validation** (Codex post-impl H2):
+the (current_state, new_state) pair is validated against the
+allowed set in `_LIFECYCLE_TRANSITIONS`. Disallowed pairs raise
+`InvalidLifecycleTransition`. Notably, `resolved→reactivated` is
+**not** operator-callable via `transition_lifecycle` — that
+transition is exclusively the result of the `record_recurrence`
+threshold + window check, which preserves measurement integrity
+for the autonomy loop. An operator manually flipping `resolved` →
+`reactivated` would bypass the discipline that gives the loop its
+verifiable "did the fix take?" answer.
 
 The classifier hook in `FrictionObserver._write_report` selects the
 right method based on the matched pattern's current `lifecycle_state`:
@@ -1045,18 +1061,35 @@ report write.
 
 ```python
 def parse_spec_pattern_refs(spec_path: Path) -> list[str]:
-    """Read addresses_friction_patterns from a spec's YAML frontmatter.
+    """Read addresses_friction_patterns from a spec's frontmatter.
 
     Returns [] if the spec has no frontmatter or no field. Tolerant of
-    formatting (YAML errors return [] rather than raise — frontmatter is
-    optional metadata, not load-bearing).
+    formatting — any unsupported shape (missing fence, parse error,
+    unsupported nested types) returns [] silently. Frontmatter is
+    optional metadata, not load-bearing.
     """
 ```
 
-Implementation: read the first ~50 lines of the spec, look for `---\n`
-fence, extract YAML between fences, parse, return list. Uses `yaml`
-package (already in `pyproject.toml` for other uses; if not, falls
-back to a manual line-parser since the format is narrow).
+Implementation: **manual line parser** (narrow scope; v1 doesn't
+require general YAML support). Reads the first ~8KB of the spec
+file; looks for `---\n` opening fence; extracts the frontmatter
+block until the closing `---\n` fence; scans the block for
+`addresses_friction_patterns:` followed by either:
+
+- **Inline list form** — `addresses_friction_patterns: [pattern-a, pattern-b]`
+- **YAML list form** — multi-line `-` items beneath the key
+
+Both forms produce a flat `list[str]` of slug-shaped pattern IDs.
+Any other shape (nested mapping, multi-line block scalar, etc.)
+returns `[]` silently per the tolerance contract; this is below
+the general-YAML threshold v1 needs (Codex post-impl Finding L6
+clarified that the implementation is intentionally narrow, not a
+full YAML parser).
+
+If the autonomy loop later needs richer frontmatter (e.g., per-spec
+metadata beyond pattern refs), the parser can grow to use `pyyaml`
+via the same surface — `pyyaml` is already in `pyproject.toml`. Not
+v1 work.
 
 ## Embedded live tests
 
@@ -1093,10 +1126,11 @@ probe per disclosure-boundary discipline.
 7. **`test_set_display_name_and_update_description`** — round-trip
    both mutator methods; verify pattern_id unchanged; verify
    display_name and description updated correctly.
-8. **`test_action_state_record_per_op`** — RESPONSE-FIDELITY-V1
-   discipline: each catalog mutation produces an ActionStateRecord
-   (verified via fake action-record sink mirroring
-   `tests/test_router_evidence.py`'s pattern).
+8. **(DEFERRED) ActionStateRecord per-mutation test.** Removed from
+   v1 scope per Codex post-impl Finding H3. Catalog mutations are
+   not turn-scoped; the ActionStateRecord composition lands in
+   ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1. v1 verifies event_stream
+   emissions for the `friction.pattern_*` lifecycle events instead.
 9. **`test_create_pattern_signal_type_keys_uniqueness`** — create
    pattern A with `signal_type_keys=["INTEGRATION_TIMEOUT"]`;
    attempt to create pattern B with overlapping
@@ -1301,18 +1335,69 @@ do not partition counts by member — frictions belong to the instance.
    YAML syntax error; parser returns `[]` with a logger.warning;
    does not raise.
 
+## Runtime wiring (Codex post-impl Finding H1)
+
+`MessageHandler.__init__` constructs `FrictionPatternStore` lazily
+and passes it to `FrictionObserver` only when
+`KERNOS_FRICTION_PATTERN_STORE=1` is set in the environment. The
+default (env unset or `0`) preserves legacy behavior: friction
+reports write markdown to disk only, no catalog rows are created,
+no recurrence detection runs.
+
+When enabled:
+
+1. `FrictionPatternStore()` is constructed alongside `FrictionObserver`
+   in handler init.
+2. A bound `emit_event` closure that calls `event_stream.emit` with
+   the handler's instance_id resolution is passed into
+   `FrictionObserver`. The closure also flows through to the store's
+   `record_recurrence` calls (no per-call injection needed by
+   downstream callers).
+3. The store's connection + schema are created lazily on the first
+   classifier-hook invocation via `ensure_schema(data_dir)` from
+   inside `FrictionObserver._classify_and_record`. `start()` is
+   idempotent so repeated calls are no-ops.
+4. The handler does NOT explicitly `stop()` the store on shutdown.
+   SQLite's WAL + the OS-level connection cleanup are sufficient
+   for the read-mostly workload; if soak shows connection leaks,
+   a follow-up spec wires a proper teardown into the handler's
+   `shutdown_runners` path.
+
+**Why opt-in rather than default-on:** v1 enables instance-scoped
+catalog state. The autonomy loop's measurement layer needs this on,
+but pre-loop deployments that aren't running the loop don't yet
+need the catalog. The env-flag gate gives operators an explicit
+"turn the catalog on" step that ties cleanly to the loop's bring-up
+sequence. Default-on can ship in a follow-up when the loop
+infrastructure is end-to-end.
+
+**Why lazy `ensure_schema`:** `MessageHandler.__init__` is
+synchronous; `aiosqlite.connect` and `CREATE TABLE` are
+asynchronous. Either the handler grows an `async start()` (touches
+every adapter that constructs a handler) or the store auto-inits on
+first use. The store is idempotent on `start()`; lazy init is the
+cheaper path.
+
 ## Composition notes
 
 - **Existing FrictionObserver** (`kernos/kernel/friction.py`): unchanged
   except for the optional `pattern_store` injection. Existing signal
   detectors keep firing; `_write_report` writes the markdown report
   unchanged. Pattern catalog is additive.
-- **RESPONSE-FIDELITY-V1**: `FrictionPatternStore.create_pattern`,
-  `update_description`, `set_display_name`, `add_alias`,
-  `transition_lifecycle`, `record_occurrence`, `record_recurrence`
-  all produce ActionStateRecords through the per-turn collector.
-  Reuses the `ctx.action_record_sink` shape established by
-  ROUTER-EVIDENCE-V1's drain wiring (`kernos/messages/turn_runner_provider.py`).
+- **RESPONSE-FIDELITY-V1 (ActionStateRecord composition is DEFERRED).**
+  Codex post-implementation review Finding H3 caught that v1 catalog
+  mutations are not turn-scoped — the friction observer hook fires
+  post-turn from a background coroutine, and the store has no
+  `ctx.action_record_sink` available. ActionStateRecord composition
+  for catalog mutations lands when
+  ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 ships (already queued in
+  the five-spec roadmap as Spec #3, post-FRICTION-PATTERN).
+  v1 emits `friction.pattern_*` events to event_stream
+  (recurrence, reactivated, unclassified); the per-mutation
+  ActionStateRecord surface is the workflow-composition spec's
+  scope. This claim about producing ActionStateRecords through the
+  per-turn collector was present in v3 spec text and has been
+  withdrawn here.
 - **Future workflow primitive**: consumes `query_top_patterns` and
   `query_frequency` to drive trigger conditions. Workflow spec defines
   trigger semantics; this spec just exposes the query API.

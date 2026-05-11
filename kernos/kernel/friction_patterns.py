@@ -66,6 +66,19 @@ VALID_LIFECYCLE_STATES = frozenset({
     LIFECYCLE_ARCHIVED,
 })
 
+# Permitted transitions per spec Decision 6's method-to-lifecycle table.
+# Resolved → reactivated is NOT operator-callable; it happens only via
+# the record_recurrence threshold check. Restricting the operator path
+# prevents an operator from manually flipping a pattern to reactivated
+# (which would bypass the threshold + window discipline that the
+# autonomy loop depends on for measurement integrity).
+_LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
+    LIFECYCLE_ACTIVE: frozenset({LIFECYCLE_RESOLVED, LIFECYCLE_ARCHIVED}),
+    LIFECYCLE_RESOLVED: frozenset({LIFECYCLE_ACTIVE, LIFECYCLE_ARCHIVED}),
+    LIFECYCLE_REACTIVATED: frozenset({LIFECYCLE_RESOLVED, LIFECYCLE_ARCHIVED}),
+    LIFECYCLE_ARCHIVED: frozenset({LIFECYCLE_ACTIVE}),
+}
+
 # classified_by vocabulary (CHECK constraint mirrored in DDL below).
 CLASSIFIED_AUTO_SIGNAL_TYPE = "auto-signal-type"
 CLASSIFIED_AUTO_TOKEN_OVERLAP = "auto-token-overlap"
@@ -139,7 +152,12 @@ def _token_overlap_threshold() -> float:
 
 
 def _txn_retry_limit() -> int:
-    return _env_int("KERNOS_FRICTION_TXN_RETRY_LIMIT", 3)
+    # Clamp to >=0 (Codex post-impl architecture note): a negative value
+    # in the env var would otherwise make the retry loop do no work
+    # (range(N+1) where N+1<=0). The 0 case is a legitimate testing
+    # path (force immediate-failure semantics for StoreContention pin);
+    # negative values aren't.
+    return max(0, _env_int("KERNOS_FRICTION_TXN_RETRY_LIMIT", 3))
 
 
 # ---------------------------------------------------------------------------
@@ -798,6 +816,24 @@ class FrictionPatternStore:
             if current.lifecycle_state == new_state:
                 return current
 
+            # Pair validation per Decision 6's method-to-lifecycle table.
+            # Codex post-impl Finding H2: enum membership alone is
+            # insufficient — must also validate the (current, new) pair
+            # is on the allowed list. Resolved → reactivated is
+            # specifically NOT operator-callable; it's the threshold's
+            # job. (See _LIFECYCLE_TRANSITIONS comment for rationale.)
+            allowed = _LIFECYCLE_TRANSITIONS.get(
+                current.lifecycle_state, frozenset(),
+            )
+            if new_state not in allowed:
+                raise InvalidLifecycleTransition(
+                    f"transition {current.lifecycle_state!r} → "
+                    f"{new_state!r} is not allowed for "
+                    f"pattern {pattern_id!r}; "
+                    f"allowed from {current.lifecycle_state!r}: "
+                    f"{sorted(allowed)}"
+                )
+
             # Re-check signal_type_keys uniqueness on transitions BACK INTO
             # active/reactivated (architect call Q1 round-2 finding 6).
             if new_state in (LIFECYCLE_ACTIVE, LIFECYCLE_REACTIVATED):
@@ -1054,28 +1090,52 @@ class FrictionPatternStore:
         result = await self._run_in_immediate_txn(_do)
 
         # Emit events AFTER the transaction commits.
-        if emit_event is not None:
-            if recurrence_event is not None:
-                try:
-                    await emit_event(
-                        "friction.pattern_recurrence", recurrence_event,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "FRICTION_PATTERNS: pattern_recurrence emit failed: %s",
-                        exc,
-                    )
-            if reactivation_event is not None:
-                try:
-                    await emit_event(
-                        "friction.pattern_reactivated", reactivation_event,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "FRICTION_PATTERNS: pattern_reactivated emit failed: %s",
-                        exc,
-                    )
+        # Codex post-impl Finding M4: recurrence/reactivation events
+        # must reach event_stream even when the caller doesn't inject
+        # an emit_event closure. Fall back to the module-level emitter
+        # so the events don't silently disappear in code paths that
+        # construct the store directly (tests, scripts, lazy wiring).
+        if recurrence_event is not None:
+            await self._emit_lifecycle_event(
+                instance_id, "friction.pattern_recurrence",
+                recurrence_event, emit_event,
+            )
+        if reactivation_event is not None:
+            await self._emit_lifecycle_event(
+                instance_id, "friction.pattern_reactivated",
+                reactivation_event, emit_event,
+            )
         return result
+
+    @staticmethod
+    async def _emit_lifecycle_event(
+        instance_id: str,
+        event_type: str,
+        payload: dict,
+        emit_event,
+    ) -> None:
+        """Emit a friction.pattern_* lifecycle event. Uses the injected
+        ``emit_event`` callable when supplied; otherwise falls back to
+        the module-level ``event_stream.emit`` so events never silently
+        disappear.
+        """
+        if emit_event is not None:
+            try:
+                await emit_event(event_type, payload)
+                return
+            except Exception as exc:
+                logger.warning(
+                    "FRICTION_PATTERNS: %s emit via callable failed: %s",
+                    event_type, exc,
+                )
+        try:
+            from kernos.kernel import event_stream
+            await event_stream.emit(instance_id, event_type, payload)
+        except Exception as exc:
+            logger.debug(
+                "FRICTION_PATTERNS: %s emit via event_stream failed: %s",
+                event_type, exc,
+            )
 
     @staticmethod
     def _compute_window_cutoff(window_days: int) -> Any:
