@@ -657,7 +657,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -761,6 +761,11 @@ class ReasoningService:
         # in ``test_kernel_tool_dispatch_paths.py`` /
         # ``test_kernel_tool_registry_parity.py`` agree with dispatch.
         "note_this":                          frozenset({"confirmed"}),
+        # CODING-SESSION-BRIDGE-V1: file-based bridge to already-running
+        # coding sessions. ask=soft_write, read=read; both dispatched
+        # in the confirmed elif chain.
+        "ask_coding_session":                 frozenset({"confirmed"}),
+        "read_coding_session_response":       frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1019,6 +1024,36 @@ class ReasoningService:
                             new_rule_id=record.affected_objects[0],
                         )
                     )
+                return summary
+            elif tool_name in ("ask_coding_session", "read_coding_session_response"):
+                # CODING-SESSION-BRIDGE-V1: file-bridge tools talking to
+                # already-running coding sessions. Each returns
+                # (summary, ActionStateRecord); the record is appended
+                # to the per-turn collector for the integration runner
+                # to fold into AuditTrace (same shape as note_this).
+                from kernos.kernel.coding_session_bridge import (
+                    handle_ask_coding_session,
+                    handle_read_coding_session_response,
+                )
+                import os as _os_local
+                data_dir = _os_local.getenv("KERNOS_DATA_DIR", "./data")
+                if tool_name == "ask_coding_session":
+                    summary, record = await handle_ask_coding_session(
+                        instance_id=request.instance_id,
+                        member_id=getattr(request, "member_id", "") or "",
+                        active_space_id=request.active_space_id,
+                        data_dir=data_dir,
+                        target=str(tool_input.get("target", "")),
+                        question=str(tool_input.get("question", "")),
+                        context=tool_input.get("context") or {},
+                    )
+                else:
+                    summary, record = await handle_read_coding_session_response(
+                        instance_id=request.instance_id,
+                        data_dir=data_dir,
+                        request_id=str(tool_input.get("request_id", "")),
+                    )
+                self._turn_action_records.append(record)
                 return summary
             elif tool_name == "remember":
                 if self._retrieval:

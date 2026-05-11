@@ -136,6 +136,10 @@ def _import_kernel_schemas() -> list[dict]:
         PROPOSE_FIX_TOOL,
         SUBMIT_SPEC_TOOL,
     )
+    from kernos.kernel.coding_session_bridge import (
+        ASK_CODING_SESSION_TOOL,
+        READ_CODING_SESSION_RESPONSE_TOOL,
+    )
     from kernos.kernel.execution import MANAGE_PLAN_TOOL
     from kernos.kernel.external_agents.tool import CONSULT_TOOL
     from kernos.kernel.files import FILE_TOOLS
@@ -172,6 +176,9 @@ def _import_kernel_schemas() -> list[dict]:
         # RESPONSE-FIDELITY-V1 Batch 1.2: synchronous receipt-backed
         # memory path (resolves G.1 from the Phase 1 audit).
         NOTE_THIS_TOOL,
+        # CODING-SESSION-BRIDGE-V1: file-bridge to running coding sessions.
+        ASK_CODING_SESSION_TOOL,
+        READ_CODING_SESSION_RESPONSE_TOOL,
         # Awareness + capabilities
         DISMISS_WHISPER_TOOL,
         MANAGE_CAPABILITIES_TOOL,
