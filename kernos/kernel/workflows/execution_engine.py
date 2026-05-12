@@ -81,6 +81,18 @@ from kernos.kernel.workflows.action_library import (
     ActionLibrary,
     ActionResult,
 )
+from kernos.kernel.integration.briefing import ActionStateRecord
+from kernos.kernel.workflows.action_sink import (
+    EventStreamEmitter,
+    ToolOperationClassLookup,
+    WorkflowActionSink,
+    WorkflowExecutionActionSink,
+    _append_and_abort,
+    _append_and_advance,
+    _append_and_persist_gate_nonce,
+    _build_action_state_record,
+    ensure_workflow_action_records_schema,
+)
 from kernos.kernel.workflows.ledger import WorkflowLedger
 from kernos.kernel.workflows.predicates import evaluate as evaluate_predicate
 from kernos.kernel.workflows.trigger_registry import Trigger, TriggerRegistry
@@ -90,6 +102,9 @@ from kernos.kernel.workflows.workflow_registry import (
     Workflow,
     WorkflowRegistry,
 )
+
+if False:  # TYPE_CHECKING — avoid circular import at module load
+    from kernos.kernel.friction_patterns import FrictionPatternStore
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +377,44 @@ _INTERPOLATION_KEYS = (
 )
 
 
+def _safe_build_record(
+    *,
+    execution: "WorkflowExecution",
+    step_index: int,
+    action: ActionDescriptor,
+    execution_state: str,
+    result: ActionResult | None = None,
+    error: str = "",
+    tool_lookup: ToolOperationClassLookup | None = None,
+) -> ActionStateRecord | None:
+    """Wrapper around ``_build_action_state_record`` that catches
+    enum-validation failures.
+
+    Risks-table invariant: action-record-construction failure MUST
+    NOT abort the workflow step. If the helper raises (e.g. an
+    unknown action verb whose operation_class fallback also fails
+    validation), log loud and skip the record so the workflow runs
+    even if audit is degraded.
+    """
+    try:
+        return _build_action_state_record(
+            execution=execution,
+            step_index=step_index,
+            action=action,
+            execution_state=execution_state,
+            result=result,
+            error=error,
+            tool_lookup=tool_lookup,
+        )
+    except Exception as exc:
+        logger.warning(
+            "WORKFLOW_ACTION_RECORD_BUILD_FAILED execution_id=%s "
+            "step=%d action_type=%s error=%s",
+            execution.execution_id, step_index, action.action_type, exc,
+        )
+        return None
+
+
 def _interpolate_params(value: Any, ctx: dict[str, str]) -> Any:
     if isinstance(value, str):
         out = value
@@ -406,6 +459,18 @@ class ExecutionEngine:
         # descriptor predicate.
         self._gate_nonces: dict[str, str] = {}
         self._gate_hook_registered: bool = False
+        # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1: substrate sink for
+        # per-step ActionStateRecords. Constructed in ``start()`` once
+        # the workflow DB connection is open. Per-execution wrappers
+        # (``WorkflowExecutionActionSink``) bind the execution context.
+        self._action_sink: WorkflowActionSink | None = None
+        # Codex round-2 High 3: serialize BEGIN IMMEDIATE / COMMIT
+        # boundaries on the shared workflow DB connection. Concurrent
+        # asyncio tasks would otherwise interleave their transaction
+        # markers and SQLite would error with "cannot start a
+        # transaction within a transaction". The lock is acquired
+        # inside ``_run_workflow_txn``.
+        self._workflow_db_write_lock = asyncio.Lock()
 
     # -- lifecycle ------------------------------------------------------
 
@@ -418,6 +483,9 @@ class ExecutionEngine:
         ledger: WorkflowLedger,
         *,
         space_resolver: ActiveSpaceResolver | None = None,
+        pattern_store: "FrictionPatternStore | None" = None,
+        action_sink_emit_event: EventStreamEmitter | None = None,
+        tool_operation_class_lookup: ToolOperationClassLookup | None = None,
     ) -> None:
         if self._db is not None:
             return
@@ -432,6 +500,16 @@ class ExecutionEngine:
         )
         self._db.row_factory = aiosqlite.Row
         await _ensure_schema(self._db)
+        # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1: workflow_action_records
+        # schema runs AFTER the existing workflow_executions ensure +
+        # ALTER migrations so the FK target column already exists.
+        await ensure_workflow_action_records_schema(self._db)
+        self._action_sink = WorkflowActionSink(
+            self._db,
+            pattern_store=pattern_store,
+            emit_event=action_sink_emit_event,
+            tool_lookup=tool_operation_class_lookup,
+        )
         self._stop_event = asyncio.Event()
         # Register the trigger match listener.
         self._listener_callable = self._on_trigger_match
@@ -440,6 +518,11 @@ class ExecutionEngine:
         if not self._gate_hook_registered:
             event_stream.register_post_flush_hook(self._on_post_flush_for_gates)
             self._gate_hook_registered = True
+        # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 Decision 6 / Codex
+        # round-2 High 2: state-aware crash-window self-heal. Runs
+        # BEFORE the restart-resume pass so reconciled executions
+        # restart with the correct cursor.
+        await self._self_heal_action_records()
         # Restart-resume: re-enqueue running executions where the next
         # action is resume-safe; abort the rest with aborted_by_restart.
         await self._restart_resume_pass()
@@ -574,6 +657,11 @@ class ExecutionEngine:
         except _ContextBuildError as exc:
             await self._abort(execution, f"context_build_failed:{exc}")
             return
+        # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1: per-execution
+        # action sink wrapper. Execution identity bound at
+        # construction; appends do NOT take instance_id /
+        # workflow_execution_id arguments.
+        action_sink = self._execution_action_sink(execution)
         gate_by_name = {g.gate_name: g for g in wf.approval_gates}
         start_idx = max(0, execution.action_index_completed + 1)
         for idx in range(start_idx, len(wf.action_sequence)):
@@ -605,11 +693,19 @@ class ExecutionEngine:
                 # founders / debug tools can diagnose the failure
                 # mode (e.g. AgentInboxUnavailable) without having to
                 # parse the message string.
-                await self._record_step_failed(
-                    execution, idx, action,
-                    error=f"execute_raised:{type(exc).__name__}:{exc}",
+                error = f"execute_raised:{type(exc).__name__}:{exc}"
+                # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 Decision 6
+                # matrix row 4: append failed record + transition to
+                # aborted state in one transaction.
+                await self._append_failed_and_abort(
+                    execution, action_sink, idx, action,
+                    error=error,
+                    aborted_reason=f"step_{idx}_raised:{type(exc).__name__}",
                 )
-                await self._abort(
+                await self._record_step_failed(
+                    execution, idx, action, error=error,
+                )
+                await self._emit_terminated_aborted(
                     execution, f"step_{idx}_raised:{type(exc).__name__}",
                 )
                 return
@@ -629,37 +725,206 @@ class ExecutionEngine:
                 # nonce; do NOT enter gate wait. AC #8 pin.
                 # `pending_gate_nonce` is a local; going out of scope
                 # here is the discard.
-                await self._record_step_failed(
-                    execution, idx, action,
-                    error=result.error or "verifier_rejected",
-                )
+                error = result.error or "verifier_rejected"
                 if action.continuation_rules.on_failure == "abort":
-                    await self._abort(execution, f"step_{idx}_failed")
+                    # Decision 6 matrix row 4: aborting failure.
+                    await self._append_failed_and_abort(
+                        execution, action_sink, idx, action,
+                        error=error,
+                        aborted_reason=f"step_{idx}_failed",
+                    )
+                    await self._record_step_failed(
+                        execution, idx, action, error=error,
+                    )
+                    await self._emit_terminated_aborted(
+                        execution, f"step_{idx}_failed",
+                    )
                     return
-                # continue/retry: v1 just continues; retry budget is
-                # observed by the action library's own dispatch path
-                # in future iterations. Even when continuing, a
-                # FAILED gated action MUST NOT enter the gate (per
-                # the discard-on-failure invariant). Skip the gate
-                # block entirely on failure.
-                await self._mark_step_complete(execution, idx)
+                # Decision 6 matrix row 3: continue-on-failure.
+                # Append failed record + advance cursor atomically.
+                await self._append_failed_and_advance(
+                    execution, action_sink, idx, action, error=error,
+                )
+                await self._record_step_failed(
+                    execution, idx, action, error=error,
+                )
                 continue
-            await self._record_step_succeeded(execution, idx, action, result)
-            # Approval-gate handling: action FIRST (already executed
-            # above and succeeded), pause AFTER. The nonce minted
-            # pre-action is now persisted on the execution row so
-            # match logic can require both descriptor predicate AND
-            # nonce match. Failed gated actions never reach here.
+            # Success path. Decision 6 matrix rows 1 + 2 distinguish
+            # non-gated success (append + advance cursor) from gated
+            # success (append + persist gate_nonce; cursor advances
+            # later after gate release).
             if action.gate_ref is not None:
+                await self._append_success_and_persist_gate_nonce(
+                    execution, action_sink, idx, action, result,
+                    gate_nonce=pending_gate_nonce,
+                )
+                await self._record_step_succeeded(
+                    execution, idx, action, result,
+                )
                 gate = gate_by_name[action.gate_ref]
-                await self._persist_gate_nonce(execution, pending_gate_nonce)
+                # ``_persist_gate_nonce`` already happened inside the
+                # transaction above; updating execution.gate_nonce in
+                # memory so ``_await_gate`` and the post-flush match
+                # logic see the engine-minted nonce.
+                execution.gate_nonce = pending_gate_nonce
                 cont = await self._await_gate(execution, gate)
                 if not cont:
                     return  # _await_gate aborted
                 await self._clear_gate_nonce(execution)
-            await self._mark_step_complete(execution, idx)
+                await self._mark_step_complete(execution, idx)
+            else:
+                await self._append_success_and_advance(
+                    execution, action_sink, idx, action, result,
+                )
+                await self._record_step_succeeded(
+                    execution, idx, action, result,
+                )
         # All steps done — mark completed.
         await self._complete(execution)
+
+    # -- Decision 6 per-outcome wrappers -------------------------------
+
+    async def _append_success_and_advance(
+        self,
+        execution: WorkflowExecution,
+        sink: WorkflowExecutionActionSink,
+        idx: int,
+        action: ActionDescriptor,
+        result: ActionResult,
+    ) -> None:
+        record = _safe_build_record(
+            execution=execution, step_index=idx, action=action,
+            execution_state="completed", result=result,
+            tool_lookup=self._action_sink._tool_lookup
+            if self._action_sink is not None else None,
+        )
+        if record is None:
+            return
+        await self._run_workflow_txn(
+            lambda db: _append_and_advance(
+                db, sink, record,
+                step_index=idx, action_type=action.action_type,
+            ),
+        )
+        execution.action_index_completed = idx
+
+    async def _append_success_and_persist_gate_nonce(
+        self,
+        execution: WorkflowExecution,
+        sink: WorkflowExecutionActionSink,
+        idx: int,
+        action: ActionDescriptor,
+        result: ActionResult,
+        *,
+        gate_nonce: str,
+    ) -> None:
+        record = _safe_build_record(
+            execution=execution, step_index=idx, action=action,
+            execution_state="completed", result=result,
+            tool_lookup=self._action_sink._tool_lookup
+            if self._action_sink is not None else None,
+        )
+        if record is None:
+            return
+        await self._run_workflow_txn(
+            lambda db: _append_and_persist_gate_nonce(
+                db, sink, record,
+                step_index=idx, action_type=action.action_type,
+                gate_nonce=gate_nonce,
+            ),
+        )
+
+    async def _append_failed_and_advance(
+        self,
+        execution: WorkflowExecution,
+        sink: WorkflowExecutionActionSink,
+        idx: int,
+        action: ActionDescriptor,
+        *,
+        error: str,
+    ) -> None:
+        record = _safe_build_record(
+            execution=execution, step_index=idx, action=action,
+            execution_state="failed", error=error,
+            tool_lookup=self._action_sink._tool_lookup
+            if self._action_sink is not None else None,
+        )
+        if record is None:
+            return
+        inserted = await self._run_workflow_txn(
+            lambda db: _append_and_advance(
+                db, sink, record,
+                step_index=idx, action_type=action.action_type,
+            ),
+        )
+        execution.action_index_completed = idx
+        if inserted:
+            await self._post_commit_friction(sink, record, idx, action)
+
+    async def _append_failed_and_abort(
+        self,
+        execution: WorkflowExecution,
+        sink: WorkflowExecutionActionSink,
+        idx: int,
+        action: ActionDescriptor,
+        *,
+        error: str,
+        aborted_reason: str,
+    ) -> None:
+        record = _safe_build_record(
+            execution=execution, step_index=idx, action=action,
+            execution_state="failed", error=error,
+            tool_lookup=self._action_sink._tool_lookup
+            if self._action_sink is not None else None,
+        )
+        if record is None:
+            # Fall back to legacy abort path so the execution still
+            # terminates correctly when record construction fails.
+            await self._abort(execution, aborted_reason)
+            return
+        inserted = await self._run_workflow_txn(
+            lambda db: _append_and_abort(
+                db, sink, record,
+                step_index=idx, action_type=action.action_type,
+                aborted_reason=aborted_reason,
+            ),
+        )
+        execution.state = "aborted"
+        execution.aborted_reason = aborted_reason
+        execution.terminated_at = _now()
+        if inserted:
+            await self._post_commit_friction(sink, record, idx, action)
+
+    async def _post_commit_friction(
+        self,
+        sink: WorkflowExecutionActionSink,
+        record: ActionStateRecord,
+        idx: int,
+        action: ActionDescriptor,
+    ) -> None:
+        try:
+            await sink._classify_friction(
+                record=record,
+                step_index=idx,
+                action_type=action.action_type,
+            )
+        except Exception as exc:
+            logger.debug(
+                "WORKFLOW_FRICTION_HOOK_FAILED execution_id=%s error=%s",
+                sink.workflow_execution_id, exc,
+            )
+
+    async def _emit_terminated_aborted(
+        self, execution: WorkflowExecution, reason: str,
+    ) -> None:
+        await event_stream.emit(
+            execution.instance_id, "workflow.execution_terminated",
+            {"execution_id": execution.execution_id,
+             "workflow_id": execution.workflow_id,
+             "outcome": "aborted",
+             "reason": reason},
+            correlation_id=execution.correlation_id,
+        )
 
     async def _await_gate(
         self, execution: WorkflowExecution, gate: ApprovalGate,
@@ -775,6 +1040,173 @@ class ExecutionEngine:
                         break
                 except Exception:
                     pass
+
+    # -- workflow_db transactional helper -------------------------------
+
+    async def _run_workflow_txn(
+        self,
+        body: Callable[[aiosqlite.Connection], Awaitable[Any]],
+        *,
+        retries: int = 3,
+        retry_backoff_ms: int = 50,
+    ) -> Any:
+        """Run ``body`` inside a BEGIN IMMEDIATE transaction on the
+        engine's shared workflow DB connection.
+
+        ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 Decision 3 / Codex
+        round-2 High 3: aiosqlite serializes SQL through a single
+        background thread per connection but does NOT prevent two
+        asyncio tasks from interleaving BEGIN IMMEDIATE / COMMIT
+        boundaries on the shared connection. SQLite errors with
+        "cannot start a transaction within a transaction" on the
+        second BEGIN. This helper acquires an engine-level
+        ``asyncio.Lock`` for the duration so the boundary discipline
+        is impossible to bypass accidentally.
+
+        ROLLBACK on body exception; bounded busy-retry on
+        ``database is locked``. The body MUST NOT call BEGIN /
+        COMMIT itself.
+        """
+        assert self._db is not None
+        attempt = 0
+        async with self._workflow_db_write_lock:
+            while True:
+                try:
+                    await self._db.execute("BEGIN IMMEDIATE")
+                    try:
+                        value = await body(self._db)
+                    except Exception:
+                        try:
+                            await self._db.execute("ROLLBACK")
+                        except aiosqlite.OperationalError:
+                            pass
+                        raise
+                    await self._db.execute("COMMIT")
+                    return value
+                except aiosqlite.OperationalError as exc:
+                    if (
+                        "database is locked" in str(exc).lower()
+                        and attempt < retries
+                    ):
+                        attempt += 1
+                        await asyncio.sleep(
+                            (retry_backoff_ms / 1000.0)
+                            * (2 ** (attempt - 1))
+                        )
+                        continue
+                    raise
+
+    def _execution_action_sink(
+        self, execution: WorkflowExecution,
+    ) -> WorkflowExecutionActionSink:
+        """Construct the per-execution action sink wrapper.
+
+        Bound at this layer so the wrapper picks up the execution's
+        ``instance_id``, ``workflow_execution_id``, ``workflow_id``,
+        ``correlation_id``, and ``member_id`` directly from the
+        ``WorkflowExecution`` (Codex round-2 Medium 6 writer
+        invariant). Callers downstream cannot override these.
+        """
+        assert self._action_sink is not None, "action_sink not initialised"
+        return self._action_sink.for_execution(
+            execution, member_id=execution.member_id or "",
+        )
+
+    # -- crash-window self-heal -----------------------------------------
+
+    async def _self_heal_action_records(self) -> None:
+        """State-aware reconcile pass on engine startup.
+
+        ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 Decision 6 / Codex
+        round-2 High 2: if a running execution has an action record
+        for step N but ``action_index_completed < N``, decide whether
+        to advance the cursor or leave the restart path to handle it.
+
+        Advance ONLY when:
+            * record.execution_state == "completed" AND
+              action.gate_ref is None AND
+              execution.gate_nonce == ""
+          OR
+            * record.execution_state == "failed" AND
+              action.continuation_rules.on_failure != "abort"
+
+        Otherwise log SKIP and rely on the existing restart logic
+        (which already inspects gate_nonce, gate_ref, and
+        continuation_rules) to do the right thing.
+        """
+        assert self._db is not None
+        if self._action_sink is None or self._workflow_registry is None:
+            return
+        async with self._db.execute(
+            "SELECT * FROM workflow_executions WHERE state = 'running'"
+        ) as cur:
+            rows = await cur.fetchall()
+        for row in rows:
+            execution = WorkflowExecution.from_row(row)
+            wf = await self._workflow_registry.get_workflow(execution.workflow_id)
+            if wf is None:
+                continue
+            max_step = await self._action_sink.get_max_step_index(
+                execution.instance_id, execution.execution_id,
+            )
+            if max_step is None or max_step <= execution.action_index_completed:
+                continue
+            if max_step >= len(wf.action_sequence):
+                # Records past the end of the action sequence are
+                # symptomatic of a corrupted workflow or a stale
+                # record from a renamed workflow. Don't advance;
+                # log loud.
+                logger.warning(
+                    "WORKFLOW_CRASH_WINDOW_SKIP execution_id=%s "
+                    "record_step=%d cursor=%d reason=record_past_end",
+                    execution.execution_id, max_step,
+                    execution.action_index_completed,
+                )
+                continue
+            record_row = await self._action_sink.get_by_step(
+                execution.instance_id, execution.execution_id,
+                step_index=max_step,
+            )
+            action = wf.action_sequence[max_step]
+            record_state = (
+                record_row.record.execution_state
+                if record_row is not None else "?"
+            )
+            can_advance_completed = (
+                record_row is not None
+                and record_row.record.execution_state == "completed"
+                and action.gate_ref is None
+                and not execution.gate_nonce
+            )
+            can_advance_continue_failed = (
+                record_row is not None
+                and record_row.record.execution_state == "failed"
+                and action.continuation_rules.on_failure != "abort"
+            )
+            if can_advance_completed or can_advance_continue_failed:
+                logger.warning(
+                    "WORKFLOW_CRASH_WINDOW_RECONCILE execution_id=%s "
+                    "record_step=%d cursor=%d state=%s",
+                    execution.execution_id, max_step,
+                    execution.action_index_completed, record_state,
+                )
+                await self._db.execute(
+                    "UPDATE workflow_executions "
+                    "SET action_index_completed = ?, last_heartbeat = ? "
+                    "WHERE execution_id = ? AND action_index_completed < ?",
+                    (max_step, _now(), execution.execution_id, max_step),
+                )
+            else:
+                logger.warning(
+                    "WORKFLOW_CRASH_WINDOW_SKIP execution_id=%s "
+                    "record_step=%d cursor=%d state=%s gate_ref=%s "
+                    "on_failure=%s gate_nonce=%s",
+                    execution.execution_id, max_step,
+                    execution.action_index_completed, record_state,
+                    action.gate_ref,
+                    action.continuation_rules.on_failure,
+                    execution.gate_nonce or "",
+                )
 
     # -- restart-resume -------------------------------------------------
 
