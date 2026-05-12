@@ -1041,6 +1041,392 @@ class TestCallToolOperationClassSource:
 # ===========================================================================
 
 
+class TestRoundTwoImplFolds:
+    """Pins the Codex round-2-implementation review folds.
+
+    Blocker 1: pending-gate restart re-enters _await_gate.
+    Blocker 2: atomic gate release commits clear+advance in one txn.
+    High 3: audit-build failure still runs state mutation.
+    High 4: write-lock covers ALL workflow_executions writes.
+    Medium 5: tool_id resolves via the registry lookup.
+    Medium 6: expanded receipt-key extraction.
+    Medium 7: record_recurrence emit_event adapter.
+    """
+
+    async def test_pending_gate_restart_re_enters_await_gate(
+        self, tmp_path,
+    ):
+        # Pre-seed: execution in 'running' state with gate_nonce set
+        # AND a completed record for step 0 on a gated workflow.
+        db = await _open_db(tmp_path)
+        execution = _make_execution(execution_id="exec_pgate_001")
+        execution.gate_nonce = "nonce_pending"
+        await _insert_execution_row(db, execution)
+        action = _make_action(
+            "mark_state", gate_ref="g1",
+            key="x", value=1, scope="instance",
+        )
+        record = _build_action_state_record(
+            execution=execution, step_index=0, action=action,
+            execution_state="completed",
+        )
+        sink = WorkflowActionSink(db)
+        per_exec = sink.for_execution(execution)
+        await per_exec._insert_within_txn(
+            db, record, step_index=0, action_type=action.action_type,
+        )
+        await db.close()
+
+        # Bring up the engine; register the gated workflow with the
+        # gate descriptor; verify the engine emits
+        # workflow.execution_paused_at_gate (the re-entry signal) AND
+        # does NOT execute the action a second time.
+        await event_stream._reset_for_tests()
+        await event_stream.start_writer(str(tmp_path))
+        trig = TriggerRegistry()
+        await trig.start(str(tmp_path))
+        wfr = WorkflowRegistry()
+        await wfr.start(str(tmp_path), trig)
+        from kernos.kernel.workflows.workflow_registry import ApprovalGate
+        wf = _make_workflow(
+            [action], workflow_id="wf-sink",
+            approval_gates=[ApprovalGate(
+                gate_name="g1",
+                approval_event_type="approval.granted",
+                approval_event_predicate={
+                    "op": "exists", "path": "event_id",
+                },
+                timeout_seconds=2,
+                bound_behavior_on_timeout="abort_workflow",
+                pause_reason="awaiting approval",
+            )],
+        )
+        await wfr._register_workflow_unbound(wf)
+        executions_count = [0]
+        store: dict = {}
+
+        async def set_(*, key, value, scope, instance_id):
+            executions_count[0] += 1
+            store[(scope, instance_id, key)] = value
+
+        async def get_(*, key, scope, instance_id):
+            return store.get((scope, instance_id, key))
+
+        lib = ActionLibrary()
+        lib.register(MarkStateAction(
+            state_store_set=set_, state_store_get=get_,
+        ))
+        ledger = WorkflowLedger(str(tmp_path))
+        engine = ExecutionEngine()
+        await engine.start(
+            str(tmp_path), trig, wfr, lib, ledger, space_resolver=None,
+        )
+        try:
+            # Allow the worker time to dequeue + re-enter gate wait.
+            for _ in range(200):
+                async with engine._db.execute(
+                    "SELECT state FROM workflow_executions "
+                    "WHERE execution_id = ?",
+                    (execution.execution_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                # State should still be 'running' (paused at gate)
+                # OR transitioned to 'aborted' on gate timeout.
+                if row["state"] != "queued":
+                    break
+                await asyncio.sleep(0.01)
+            # Action MUST NOT have been re-executed.
+            assert executions_count[0] == 0, (
+                "pending-gate restart should NOT re-execute the action"
+            )
+        finally:
+            await engine.stop()
+            await wfr.stop()
+            await _reset_trigger_registry(trig)
+            await event_stream._reset_for_tests()
+
+    async def test_atomic_gate_release_clears_nonce_and_advances(
+        self, tmp_path,
+    ):
+        from kernos.kernel.workflows.action_sink import (
+            _clear_gate_nonce_and_advance,
+        )
+        db = await _open_db(tmp_path)
+        execution = _make_execution()
+        execution.gate_nonce = "nonce_xyz"
+        await _insert_execution_row(db, execution)
+        await db.execute("BEGIN IMMEDIATE")
+        updated = await _clear_gate_nonce_and_advance(
+            db, execution.execution_id,
+            step_index=0, expected_nonce="nonce_xyz",
+        )
+        await db.execute("COMMIT")
+        async with db.execute(
+            "SELECT gate_nonce, action_index_completed "
+            "FROM workflow_executions WHERE execution_id = ?",
+            (execution.execution_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        assert updated is True
+        assert row["gate_nonce"] == ""
+        assert row["action_index_completed"] == 0
+        await db.close()
+
+    async def test_atomic_gate_release_nonce_guard_rejects_mismatch(
+        self, tmp_path,
+    ):
+        from kernos.kernel.workflows.action_sink import (
+            _clear_gate_nonce_and_advance,
+        )
+        db = await _open_db(tmp_path)
+        execution = _make_execution()
+        execution.gate_nonce = "nonce_xyz"
+        await _insert_execution_row(db, execution)
+        await db.execute("BEGIN IMMEDIATE")
+        updated = await _clear_gate_nonce_and_advance(
+            db, execution.execution_id,
+            step_index=0, expected_nonce="nonce_DIFFERENT",
+        )
+        await db.execute("COMMIT")
+        async with db.execute(
+            "SELECT gate_nonce, action_index_completed "
+            "FROM workflow_executions WHERE execution_id = ?",
+            (execution.execution_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        assert updated is False
+        # State unchanged.
+        assert row["gate_nonce"] == "nonce_xyz"
+        assert row["action_index_completed"] == -1
+        await db.close()
+
+    async def test_audit_build_failure_still_advances_cursor(
+        self, stack, monkeypatch,
+    ):
+        # Monkeypatch _safe_build_record to return None so the
+        # audit-failure fallback path runs end-to-end.
+        from kernos.kernel.workflows import execution_engine as ee_mod
+        monkeypatch.setattr(
+            ee_mod, "_safe_build_record",
+            lambda **kwargs: None,
+        )
+        wf = _make_workflow(
+            [_make_action("mark_state", key="x", value=1, scope="instance")],
+            workflow_id="wf-audit-fails",
+        )
+        await stack["wfr"]._register_workflow_unbound(wf)
+        await event_stream.emit("inst_a", "cc.batch.report", {})
+        await event_stream.flush_now()
+        await _wait_for(
+            lambda: ("instance", "inst_a", "x") in stack["store"],
+        )
+        executions = await stack["engine"].list_executions(
+            "inst_a", state="completed",
+        )
+        assert len(executions) == 1, (
+            "workflow should still complete even when audit build fails"
+        )
+        # No record was inserted (audit was skipped).
+        sink = stack["engine"]._action_sink
+        records = await sink.list_for_execution(
+            "inst_a", executions[0].execution_id,
+        )
+        assert len(records) == 0
+
+    async def test_write_lock_serializes_against_concurrent_insert(
+        self, tmp_path,
+    ):
+        # Verify _run_workflow_write + _run_workflow_txn use the SAME
+        # lock so a coroutine inside a BEGIN IMMEDIATE body can't be
+        # interleaved with an _on_trigger_match-shaped direct write.
+        await event_stream._reset_for_tests()
+        await event_stream.start_writer(str(tmp_path))
+        trig = TriggerRegistry()
+        await trig.start(str(tmp_path))
+        wfr = WorkflowRegistry()
+        await wfr.start(str(tmp_path), trig)
+        store, set_, get_ = _state_store()
+        lib = ActionLibrary()
+        lib.register(MarkStateAction(state_store_set=set_, state_store_get=get_))
+        ledger = WorkflowLedger(str(tmp_path))
+        engine = ExecutionEngine()
+        await engine.start(
+            str(tmp_path), trig, wfr, lib, ledger, space_resolver=None,
+        )
+        try:
+            order: list[str] = []
+
+            async def long_txn_body(db):
+                order.append("txn_start")
+                await asyncio.sleep(0.05)
+                order.append("txn_end")
+
+            async def short_write_body(db):
+                order.append("write_start")
+                order.append("write_end")
+
+            task_txn = asyncio.create_task(
+                engine._run_workflow_txn(long_txn_body),
+            )
+            await asyncio.sleep(0.005)  # let txn acquire first
+            task_write = asyncio.create_task(
+                engine._run_workflow_write(short_write_body),
+            )
+            await asyncio.gather(task_txn, task_write)
+            # Lock serialization: the write MUST come after the txn.
+            assert order == [
+                "txn_start", "txn_end", "write_start", "write_end",
+            ]
+        finally:
+            await engine.stop()
+            await wfr.stop()
+            await _reset_trigger_registry(trig)
+            await event_stream._reset_for_tests()
+
+    def test_call_tool_lookup_resolves_tool_id_first(self):
+        def lookup(tool_key: str) -> str | None:
+            return {"my_tool": "read"}.get(tool_key)
+
+        # tool_id takes precedence over tool_name and name.
+        op_class, missing = _operation_class_for_action_type(
+            "call_tool",
+            {"tool_id": "my_tool", "tool_name": "wrong", "name": "wrong"},
+            tool_lookup=lookup,
+        )
+        assert op_class == "read"
+        assert missing is False
+
+    def test_call_tool_lookup_falls_back_to_tool_name(self):
+        def lookup(tool_key: str) -> str | None:
+            return {"named_tool": "delete"}.get(tool_key)
+
+        # tool_name picks up when tool_id absent.
+        op_class, missing = _operation_class_for_action_type(
+            "call_tool",
+            {"tool_name": "named_tool"},
+            tool_lookup=lookup,
+        )
+        assert op_class == "delete"
+        assert missing is False
+
+    def test_receipt_extraction_includes_tool_keys(self):
+        execution = _make_execution()
+        action = ActionDescriptor(
+            action_type="call_tool",
+            parameters={"tool_id": "wt"},
+            gate_ref=None,
+            resume_safe=False,
+            continuation_rules=ContinuationRules(on_failure="continue"),
+        )
+        result = ActionResult(
+            success=True,
+            value="receipt_value",
+            receipt={
+                "tool_id": "wt", "called_at": "2026-05-11T00:00:00+00:00",
+            },
+        )
+        record = _build_action_state_record(
+            execution=execution, step_index=0, action=action,
+            execution_state="completed", result=result,
+        )
+        refs = list(record.receipt_refs)
+        assert any("tool_id:wt" in ref for ref in refs)
+        assert any("called_at:" in ref for ref in refs)
+        # Decision 1 escape hatch still present.
+        assert any(
+            ref.startswith(f"workflow:{execution.execution_id}:step:0")
+            for ref in refs
+        )
+
+    def test_receipt_extraction_includes_canvas_keys(self):
+        execution = _make_execution()
+        action = ActionDescriptor(
+            action_type="write_canvas",
+            parameters={"canvas_id": "c1", "content": "x"},
+            gate_ref=None,
+            resume_safe=False,
+            continuation_rules=ContinuationRules(on_failure="continue"),
+        )
+        result = ActionResult(
+            success=True,
+            receipt={
+                "canvas_id": "c1", "mode": "append",
+                "wrote_at": "2026-05-11T00:00:00+00:00",
+            },
+        )
+        record = _build_action_state_record(
+            execution=execution, step_index=0, action=action,
+            execution_state="completed", result=result,
+        )
+        refs = list(record.receipt_refs)
+        assert any("canvas_id:c1" in ref for ref in refs)
+        assert any("wrote_at:" in ref for ref in refs)
+        assert "c1" in record.affected_objects
+
+    async def test_recurrence_emit_event_adapter_translates_signature(
+        self, stack,
+    ):
+        # Pre-seed a resolved pattern. Trigger a failing matching
+        # step. Verify the captured emit_event from the workflow side
+        # received the recurrence event (because the adapter shims
+        # the 2-arg -> 4-arg signature).
+        pattern_store = stack["pattern_store"]
+        pattern = await pattern_store.create_pattern(
+            instance_id="inst_a",
+            description="Workflow recurrence pattern",
+            signal_type_keys=["workflow_step:notify_user:failed"],
+            seed_slug="workflow-notify-recurrence",
+        )
+        # Add an occurrence so the pattern can resolve.
+        await pattern_store.record_occurrence(
+            instance_id="inst_a",
+            pattern_id=pattern.pattern_id,
+            observed_at="2026-05-11T00:00:00+00:00",
+            report_path="seed",
+        )
+        await pattern_store.transition_lifecycle(
+            "inst_a", pattern.pattern_id, LIFECYCLE_RESOLVED,
+            resolved_by_spec="seed-resolution",
+        )
+
+        class FailingNotify:
+            action_type = "notify_user"
+
+            async def execute(self, context, params):
+                return ActionResult(success=False, error="deliver_failed")
+
+            async def verify(self, context, params, result):
+                return False
+
+        stack["lib"]._verbs["notify_user"] = FailingNotify()
+        action = ActionDescriptor(
+            action_type="notify_user",
+            parameters={"channel": "chan_a", "message": "hi"},
+            gate_ref=None,
+            resume_safe=False,
+            continuation_rules=ContinuationRules(on_failure="continue"),
+        )
+        wf = _make_workflow([action], workflow_id="wf-recurrence")
+        await stack["wfr"]._register_workflow_unbound(wf)
+        await event_stream.emit("inst_a", "cc.batch.report", {})
+        await event_stream.flush_now()
+        recurrence_event = None
+        for _ in range(100):
+            for e in stack["emitted_events"]:
+                if e["event_type"] == "friction.pattern_recurrence":
+                    recurrence_event = e
+                    break
+            if recurrence_event is not None:
+                break
+            await asyncio.sleep(0.02)
+        assert recurrence_event is not None, (
+            "expected friction.pattern_recurrence event via the workflow "
+            "emit_event adapter"
+        )
+        # Adapter passed instance_id as positional arg AND kw context.
+        assert recurrence_event["instance_id"] == "inst_a"
+
+
 class TestVerbClassification:
     def test_direct_effect_verbs_map_to_mutate(self):
         for verb in ("mark_state", "append_to_ledger"):

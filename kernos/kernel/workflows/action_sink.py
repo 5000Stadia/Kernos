@@ -131,9 +131,19 @@ def _operation_class_for_action_type(
     """
     if action_type == "call_tool":
         params = params or {}
-        tool_name = params.get("tool_name") or params.get("name") or ""
-        if tool_lookup is not None and tool_name:
-            declared = tool_lookup(tool_name)
+        # Codex round-2-impl Medium 5: the workflow CallToolAction
+        # descriptor uses ``tool_id`` for the tool key (see
+        # action_library.CallToolAction). Check that first; keep
+        # ``tool_name`` / ``name`` as fallbacks for shapes a future
+        # descriptor flavour might use.
+        tool_key = (
+            params.get("tool_id")
+            or params.get("tool_name")
+            or params.get("name")
+            or ""
+        )
+        if tool_lookup is not None and tool_key:
+            declared = tool_lookup(tool_key)
             if declared:
                 return declared, False
         return _CALL_TOOL_DEFAULT_OPERATION_CLASS, True
@@ -270,12 +280,31 @@ def _build_action_state_record(
     affected_objects: list[str] = []
     if result is not None and result.receipt:
         receipt = result.receipt
-        for key in ("receipt_id", "id", "delivered_at"):
+        # Codex round-2-impl Medium 6: the action library emits a
+        # variety of receipt keys depending on verb. Iterate over the
+        # known keys and capture EACH that's populated so the record
+        # carries the tool-side provenance, not just a single ref.
+        #   write_canvas      → canvas_id, mode, wrote_at
+        #   route_to_agent    → persisted_id
+        #   call_tool         → tool_id, called_at
+        #   post_to_service   → service_id, posted_at
+        #   notify_user       → delivered_at (value=persisted_id)
+        for key in (
+            "tool_id", "persisted_id", "canvas_id", "service_id",
+            "receipt_id", "id", "delivered_at", "called_at",
+            "wrote_at", "posted_at",
+        ):
             value = receipt.get(key)
             if value:
                 receipt_refs.append(f"{action.action_type}:{key}:{value}")
-                break
-        for key in ("affected_object_id", "object_id", "subject_id"):
+        # ActionResult.value carries the tool-side primary handle for
+        # notify_user (the receipt). Capture if it's hashable/scalar.
+        if result.value and isinstance(result.value, (str, int)):
+            receipt_refs.append(f"{action.action_type}:value:{result.value}")
+        for key in (
+            "affected_object_id", "object_id", "subject_id",
+            "tool_id", "canvas_id", "service_id", "persisted_id",
+        ):
             value = receipt.get(key)
             if value:
                 affected_objects.append(str(value))
@@ -673,6 +702,29 @@ class WorkflowExecutionActionSink:
                     member_id=self._member_id,
                 )
             elif pattern.lifecycle_state == LIFECYCLE_RESOLVED:
+                # Codex round-2-impl Medium 7: FrictionPatternStore
+                # invokes the injected emitter with (event_type,
+                # payload) — a 2-arg shape that does NOT match our
+                # EventStreamEmitter type (event_stream.emit-style).
+                # Bridge with an adapter so the workflow emitter
+                # actually receives recurrence events with the right
+                # instance_id / correlation / member context. Without
+                # this shim, the store catches the signature TypeError
+                # and silently falls back to module event_stream.emit,
+                # which loses workflow attribution.
+                parent_emit = self._parent._emit_event
+
+                async def _recurrence_emit_adapter(event_type, payload):
+                    if parent_emit is None:
+                        return
+                    await parent_emit(
+                        self._instance_id,
+                        event_type,
+                        payload,
+                        correlation_id=self._correlation_id,
+                        member_id=self._member_id or None,
+                    )
+
                 await store.record_recurrence(
                     instance_id=self._instance_id,
                     pattern_id=pattern.pattern_id,
@@ -682,7 +734,10 @@ class WorkflowExecutionActionSink:
                     classified_by=classified_by,
                     space_id="",
                     member_id=self._member_id,
-                    emit_event=self._parent._emit_event,
+                    emit_event=(
+                        _recurrence_emit_adapter
+                        if parent_emit is not None else None
+                    ),
                 )
             elif pattern.lifecycle_state == LIFECYCLE_ARCHIVED:
                 # classify_signal already filters archived; if a future
@@ -823,6 +878,100 @@ async def _append_and_persist_gate_nonce(
     return inserted
 
 
+async def _clear_gate_nonce_and_advance(
+    db: aiosqlite.Connection,
+    execution_id: str,
+    *,
+    step_index: int,
+    expected_nonce: str = "",
+) -> bool:
+    """Codex round-2-impl Blocker 2: clear gate_nonce AND advance the
+    cursor in one transaction. After gate approval the engine needs
+    both writes to land atomically; a crash between them would leave
+    cursor=K-1 with cleared nonce, which restart logic would then
+    treat as "re-execute step K".
+
+    Optional ``expected_nonce`` adds a defensive WHERE clause so two
+    concurrent gate resolutions for the same execution can't both
+    advance. Returns True if the row was updated; False if the
+    expected nonce no longer matched (caller treats as a no-op).
+    """
+    if expected_nonce:
+        cursor = await db.execute(
+            "UPDATE workflow_executions "
+            "SET gate_nonce = '', action_index_completed = ?, "
+            "last_heartbeat = ? "
+            "WHERE execution_id = ? AND gate_nonce = ?",
+            (step_index, _now(), execution_id, expected_nonce),
+        )
+    else:
+        cursor = await db.execute(
+            "UPDATE workflow_executions "
+            "SET gate_nonce = '', action_index_completed = ?, "
+            "last_heartbeat = ? "
+            "WHERE execution_id = ?",
+            (step_index, _now(), execution_id),
+        )
+    return cursor.rowcount == 1
+
+
+async def _advance_cursor_only(
+    db: aiosqlite.Connection,
+    execution_id: str,
+    *,
+    step_index: int,
+) -> None:
+    """Codex round-2-impl High 3 fallback: advance cursor when the
+    audit-record build failed but the workflow step did succeed.
+    Preserves the "workflow runs even if audit fails" invariant.
+    """
+    await db.execute(
+        "UPDATE workflow_executions "
+        "SET action_index_completed = ?, last_heartbeat = ? "
+        "WHERE execution_id = ? AND action_index_completed < ?",
+        (step_index, _now(), execution_id, step_index),
+    )
+
+
+async def _persist_gate_nonce_only(
+    db: aiosqlite.Connection,
+    execution_id: str,
+    *,
+    gate_nonce: str,
+) -> None:
+    """Codex round-2-impl High 3 fallback: persist gate_nonce when
+    the audit-record build failed on a gated success.
+    """
+    await db.execute(
+        "UPDATE workflow_executions "
+        "SET gate_nonce = ?, last_heartbeat = ? "
+        "WHERE execution_id = ?",
+        (gate_nonce, _now(), execution_id),
+    )
+
+
+async def _abort_state_only(
+    db: aiosqlite.Connection,
+    execution_id: str,
+    *,
+    aborted_reason: str,
+) -> None:
+    """Codex round-2-impl High 3 fallback: transition execution to
+    aborted state WITHOUT inserting a record. The caller is
+    responsible for emitting workflow.execution_terminated. Used when
+    audit-record build fails on the abort path so the workflow still
+    terminates cleanly.
+    """
+    now = _now()
+    await db.execute(
+        "UPDATE workflow_executions "
+        "SET state = 'aborted', aborted_reason = ?, terminated_at = ?, "
+        "last_heartbeat = ? "
+        "WHERE execution_id = ?",
+        (aborted_reason, now, now, execution_id),
+    )
+
+
 async def _append_and_abort(
     db: aiosqlite.Connection,
     sink: WorkflowExecutionActionSink,
@@ -858,10 +1007,14 @@ __all__ = [
     "WorkflowActionSink",
     "WorkflowExecutionActionSink",
     "ensure_workflow_action_records_schema",
+    "_abort_state_only",
+    "_advance_cursor_only",
     "_append_and_abort",
     "_append_and_advance",
     "_append_and_persist_gate_nonce",
     "_build_action_state_record",
+    "_clear_gate_nonce_and_advance",
     "_operation_class_for_action_type",
+    "_persist_gate_nonce_only",
     "_risk_level_for_operation_class",
 ]

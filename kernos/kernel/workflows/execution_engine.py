@@ -87,10 +87,14 @@ from kernos.kernel.workflows.action_sink import (
     ToolOperationClassLookup,
     WorkflowActionSink,
     WorkflowExecutionActionSink,
+    _abort_state_only,
+    _advance_cursor_only,
     _append_and_abort,
     _append_and_advance,
     _append_and_persist_gate_nonce,
     _build_action_state_record,
+    _clear_gate_nonce_and_advance,
+    _persist_gate_nonce_only,
     ensure_workflow_action_records_schema,
 )
 from kernos.kernel.workflows.ledger import WorkflowLedger
@@ -563,7 +567,15 @@ class ExecutionEngine:
     async def _on_trigger_match(self, trigger: Trigger, event: Event) -> None:
         """TriggerRegistry calls this when a trigger matches a durable
         event. Persist a queued WorkflowExecution and push it on the
-        engine queue."""
+        engine queue.
+
+        Codex round-2-impl High 4: this listener fires on the event-
+        stream post-flush task, NOT on the engine's own worker. Route
+        the INSERT through ``_run_workflow_write`` so it can't
+        interleave inside a concurrent ``_run_workflow_txn`` body and
+        end up implicitly committed alongside (or rolled back with)
+        an unrelated transaction.
+        """
         if self._db is None:
             return
         execution = WorkflowExecution(
@@ -577,15 +589,17 @@ class ExecutionEngine:
             trigger_event_id=event.event_id,
             member_id=event.member_id or "",
         )
-        await self._db.execute(
-            "INSERT INTO workflow_executions ("
-            " execution_id, workflow_id, instance_id, correlation_id,"
-            " state, action_index_completed, intermediate_state,"
-            " last_heartbeat, aborted_reason, started_at, terminated_at,"
-            " trigger_event_payload, trigger_event_id, member_id,"
-            " gate_nonce, fire_id"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            execution.to_row(),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "INSERT INTO workflow_executions ("
+                " execution_id, workflow_id, instance_id, correlation_id,"
+                " state, action_index_completed, intermediate_state,"
+                " last_heartbeat, aborted_reason, started_at, terminated_at,"
+                " trigger_event_payload, trigger_event_id, member_id,"
+                " gate_nonce, fire_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                execution.to_row(),
+            ),
         )
         self._queue.put_nowait(execution)
 
@@ -663,7 +677,21 @@ class ExecutionEngine:
         # workflow_execution_id arguments.
         action_sink = self._execution_action_sink(execution)
         gate_by_name = {g.gate_name: g for g in wf.approval_gates}
-        start_idx = max(0, execution.action_index_completed + 1)
+        # Codex round-2-impl Blocker 1: pending-gate restart branch.
+        # If the execution is mid-gated-wait (record persisted for
+        # step K, gate_nonce set, cursor=K-1), re-enter _await_gate
+        # for step K instead of re-executing the action.
+        if await self._is_pending_gate_resume(execution, wf):
+            gate_idx = execution.action_index_completed + 1
+            gate_action = wf.action_sequence[gate_idx]
+            gate = gate_by_name[gate_action.gate_ref]
+            cont = await self._await_gate(execution, gate)
+            if not cont:
+                return  # _await_gate aborted
+            await self._clear_gate_and_advance(execution, gate_idx)
+            start_idx = gate_idx + 1
+        else:
+            start_idx = max(0, execution.action_index_completed + 1)
         for idx in range(start_idx, len(wf.action_sequence)):
             action = wf.action_sequence[idx]
             verb = self._action_library.get(action.action_type)
@@ -770,8 +798,12 @@ class ExecutionEngine:
                 cont = await self._await_gate(execution, gate)
                 if not cont:
                     return  # _await_gate aborted
-                await self._clear_gate_nonce(execution)
-                await self._mark_step_complete(execution, idx)
+                # Codex round-2-impl Blocker 2: atomic gate release.
+                # Clear gate_nonce + advance cursor in one txn so a
+                # crash between them can't leave a "no nonce + cursor
+                # not advanced" state that restart logic would
+                # mis-route.
+                await self._clear_gate_and_advance(execution, idx)
             else:
                 await self._append_success_and_advance(
                     execution, action_sink, idx, action, result,
@@ -799,6 +831,15 @@ class ExecutionEngine:
             if self._action_sink is not None else None,
         )
         if record is None:
+            # Codex round-2-impl High 3: audit-record build failure
+            # MUST NOT skip the workflow state mutation. Advance the
+            # cursor without the record so the workflow can continue.
+            await self._run_workflow_txn(
+                lambda db: _advance_cursor_only(
+                    db, execution.execution_id, step_index=idx,
+                ),
+            )
+            execution.action_index_completed = idx
             return
         await self._run_workflow_txn(
             lambda db: _append_and_advance(
@@ -825,6 +866,14 @@ class ExecutionEngine:
             if self._action_sink is not None else None,
         )
         if record is None:
+            # Codex round-2-impl High 3: persist the gate_nonce even
+            # when audit fails. Otherwise the gate wait could never
+            # match an incoming approval event (no nonce on the row).
+            await self._run_workflow_txn(
+                lambda db: _persist_gate_nonce_only(
+                    db, execution.execution_id, gate_nonce=gate_nonce,
+                ),
+            )
             return
         await self._run_workflow_txn(
             lambda db: _append_and_persist_gate_nonce(
@@ -850,6 +899,14 @@ class ExecutionEngine:
             if self._action_sink is not None else None,
         )
         if record is None:
+            # Codex round-2-impl High 3: still advance cursor on
+            # continue-on-failure even when audit build fails.
+            await self._run_workflow_txn(
+                lambda db: _advance_cursor_only(
+                    db, execution.execution_id, step_index=idx,
+                ),
+            )
+            execution.action_index_completed = idx
             return
         inserted = await self._run_workflow_txn(
             lambda db: _append_and_advance(
@@ -878,9 +935,19 @@ class ExecutionEngine:
             if self._action_sink is not None else None,
         )
         if record is None:
-            # Fall back to legacy abort path so the execution still
-            # terminates correctly when record construction fails.
-            await self._abort(execution, aborted_reason)
+            # Codex round-2-impl High 3: still transition execution
+            # to aborted state when audit build fails. Use the
+            # state-only helper so the caller's _emit_terminated_aborted
+            # path handles emission (no double-emit).
+            await self._run_workflow_txn(
+                lambda db: _abort_state_only(
+                    db, execution.execution_id,
+                    aborted_reason=aborted_reason,
+                ),
+            )
+            execution.state = "aborted"
+            execution.aborted_reason = aborted_reason
+            execution.terminated_at = _now()
             return
         inserted = await self._run_workflow_txn(
             lambda db: _append_and_abort(
@@ -1071,8 +1138,17 @@ class ExecutionEngine:
         attempt = 0
         async with self._workflow_db_write_lock:
             while True:
+                # Codex round-2-impl Low 8: track whether BEGIN
+                # IMMEDIATE actually succeeded so we know whether to
+                # rollback before a retry. The previous shape only
+                # rolled back on a body-raised exception, leaving a
+                # COMMIT-time "database is locked" with the
+                # transaction potentially still open on the next
+                # retry's BEGIN.
+                in_txn = False
                 try:
                     await self._db.execute("BEGIN IMMEDIATE")
+                    in_txn = True
                     try:
                         value = await body(self._db)
                     except Exception:
@@ -1080,10 +1156,24 @@ class ExecutionEngine:
                             await self._db.execute("ROLLBACK")
                         except aiosqlite.OperationalError:
                             pass
+                        in_txn = False
                         raise
                     await self._db.execute("COMMIT")
+                    in_txn = False
                     return value
                 except aiosqlite.OperationalError as exc:
+                    if in_txn:
+                        # Any post-BEGIN OperationalError (most
+                        # commonly COMMIT-time lock contention) leaves
+                        # the transaction open. Rollback before
+                        # retrying so the next BEGIN IMMEDIATE doesn't
+                        # raise "cannot start a transaction within a
+                        # transaction".
+                        try:
+                            await self._db.execute("ROLLBACK")
+                        except aiosqlite.OperationalError:
+                            pass
+                        in_txn = False
                     if (
                         "database is locked" in str(exc).lower()
                         and attempt < retries
@@ -1095,6 +1185,30 @@ class ExecutionEngine:
                         )
                         continue
                     raise
+
+    async def _run_workflow_write(
+        self,
+        body: Callable[[aiosqlite.Connection], Awaitable[Any]],
+    ) -> Any:
+        """Codex round-2-impl High 4: every workflow_executions write
+        — single-statement or multi-statement — must serialize through
+        the engine's write-lock so it can't interleave inside another
+        coroutine's open BEGIN IMMEDIATE. Direct ``self._db.execute``
+        calls would otherwise commit alongside (or roll back with) an
+        unrelated transaction.
+
+        For single-statement writes that don't need explicit-
+        transaction atomicity, this thin helper holds the lock for the
+        duration of the body without issuing BEGIN / COMMIT (auto-
+        commit mode handles the durability boundary).
+
+        For multi-statement atomic writes, callers route through
+        ``_run_workflow_txn`` instead, which adds the BEGIN IMMEDIATE
+        boundary plus rollback + busy-retry discipline.
+        """
+        assert self._db is not None
+        async with self._workflow_db_write_lock:
+            return await body(self._db)
 
     def _execution_action_sink(
         self, execution: WorkflowExecution,
@@ -1190,11 +1304,13 @@ class ExecutionEngine:
                     execution.execution_id, max_step,
                     execution.action_index_completed, record_state,
                 )
-                await self._db.execute(
-                    "UPDATE workflow_executions "
-                    "SET action_index_completed = ?, last_heartbeat = ? "
-                    "WHERE execution_id = ? AND action_index_completed < ?",
-                    (max_step, _now(), execution.execution_id, max_step),
+                await self._run_workflow_write(
+                    lambda db: db.execute(
+                        "UPDATE workflow_executions "
+                        "SET action_index_completed = ?, last_heartbeat = ? "
+                        "WHERE execution_id = ? AND action_index_completed < ?",
+                        (max_step, _now(), execution.execution_id, max_step),
+                    ),
                 )
             else:
                 logger.warning(
@@ -1210,6 +1326,36 @@ class ExecutionEngine:
 
     # -- restart-resume -------------------------------------------------
 
+    async def _is_pending_gate_resume(
+        self,
+        execution: WorkflowExecution,
+        wf: Workflow,
+    ) -> bool:
+        """Codex round-2-impl Blocker 1: detect pending-gate restart
+        state. The execution is mid-execution at a step whose
+        ``gate_ref`` is set; the action already ran and its record is
+        persisted; ``gate_nonce`` is set on the execution row
+        (gated-success atomic boundary); cursor is one less than the
+        gated step. Restart must re-enter ``_await_gate`` for the
+        gated step, NOT re-execute it.
+        """
+        if not execution.gate_nonce:
+            return False
+        next_idx = execution.action_index_completed + 1
+        if next_idx < 0 or next_idx >= len(wf.action_sequence):
+            return False
+        if wf.action_sequence[next_idx].gate_ref is None:
+            return False
+        if self._action_sink is None:
+            return False
+        existing = await self._action_sink.get_by_step(
+            execution.instance_id, execution.execution_id,
+            step_index=next_idx,
+        )
+        if existing is None:
+            return False
+        return existing.record.execution_state == "completed"
+
     async def _restart_resume_pass(self) -> None:
         assert self._db is not None
         assert self._workflow_registry is not None
@@ -1220,10 +1366,26 @@ class ExecutionEngine:
         for row in rows:
             execution = WorkflowExecution.from_row(row)
             wf = await self._workflow_registry.get_workflow(execution.workflow_id)
+            if wf is None:
+                await self._abort(execution, "aborted_by_restart")
+                continue
             next_idx = execution.action_index_completed + 1
+            # Pending-gate restart branch (Codex round-2-impl Blocker 1):
+            # always resume regardless of action's resume_safe flag —
+            # the step already ran; we just need to wait on approval
+            # again.
+            if await self._is_pending_gate_resume(execution, wf):
+                await event_stream.emit(
+                    execution.instance_id, "workflow.execution_resumed",
+                    {"execution_id": execution.execution_id,
+                     "reason": "restart_resume_pending_gate",
+                     "from_step": next_idx},
+                    correlation_id=execution.correlation_id,
+                )
+                self._queue.put_nowait(execution)
+                continue
             if (
-                wf is not None
-                and 0 <= next_idx < len(wf.action_sequence)
+                0 <= next_idx < len(wf.action_sequence)
                 and wf.action_sequence[next_idx].resume_safe
             ):
                 await event_stream.emit(
@@ -1243,13 +1405,14 @@ class ExecutionEngine:
     async def _update_state(
         self, execution: WorkflowExecution, state: str,
     ) -> None:
-        assert self._db is not None
         execution.state = state
         execution.last_heartbeat = _now()
-        await self._db.execute(
-            "UPDATE workflow_executions SET state = ?, last_heartbeat = ? "
-            "WHERE execution_id = ?",
-            (state, execution.last_heartbeat, execution.execution_id),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "UPDATE workflow_executions SET state = ?, last_heartbeat = ? "
+                "WHERE execution_id = ?",
+                (state, execution.last_heartbeat, execution.execution_id),
+            ),
         )
 
     async def _persist_gate_nonce(
@@ -1258,39 +1421,75 @@ class ExecutionEngine:
         """Record the gate_nonce against the running execution row so
         post-flush match logic can require it on incoming approvals.
         Called after the gate_ref action completes successfully —
-        unsuccessful actions discard the unused nonce instead."""
-        assert self._db is not None
+        unsuccessful actions discard the unused nonce instead.
+
+        v-final post-impl: this method is preserved for callers that
+        need standalone nonce persistence outside the per-outcome
+        matrix (e.g., legacy code paths). The matrix-aware success
+        path uses ``_append_and_persist_gate_nonce`` which lands the
+        record + nonce in one transaction.
+        """
         execution.gate_nonce = nonce
-        await self._db.execute(
-            "UPDATE workflow_executions SET gate_nonce = ?, last_heartbeat = ? "
-            "WHERE execution_id = ?",
-            (nonce, _now(), execution.execution_id),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "UPDATE workflow_executions SET gate_nonce = ?, last_heartbeat = ? "
+                "WHERE execution_id = ?",
+                (nonce, _now(), execution.execution_id),
+            ),
         )
+
+    async def _clear_gate_and_advance(
+        self, execution: WorkflowExecution, idx: int,
+    ) -> None:
+        """Codex round-2-impl Blocker 2: atomic gate release. Clear
+        gate_nonce AND advance action_index_completed in one BEGIN
+        IMMEDIATE transaction so a crash between the two writes can't
+        leave the execution in a state where restart logic would
+        re-execute step ``idx``.
+
+        Defensive nonce-guard: the WHERE clause includes the
+        expected gate_nonce so two concurrent gate resolutions for
+        the same execution can't both advance.
+        """
+        expected_nonce = execution.gate_nonce
+        await self._run_workflow_txn(
+            lambda db: _clear_gate_nonce_and_advance(
+                db, execution.execution_id,
+                step_index=idx, expected_nonce=expected_nonce,
+            ),
+        )
+        execution.gate_nonce = ""
+        execution.action_index_completed = idx
 
     async def _clear_gate_nonce(
         self, execution: WorkflowExecution,
     ) -> None:
         """Clear the gate_nonce after the execution resumes from a
-        gate. Stale-nonce-rejection (AC #13) relies on this — once
-        cleared, a replayed approval event carrying the old nonce
-        finds no waiter to wake."""
-        assert self._db is not None
+        gate. Preserved for any caller that explicitly wants nonce
+        clearing without advancing the cursor; v-final's gate-release
+        flow uses ``_clear_gate_and_advance`` to land both writes
+        atomically. Stale-nonce-rejection (AC #13) relies on this —
+        once cleared, a replayed approval event carrying the old
+        nonce finds no waiter to wake."""
         execution.gate_nonce = ""
-        await self._db.execute(
-            "UPDATE workflow_executions SET gate_nonce = '', "
-            "last_heartbeat = ? WHERE execution_id = ?",
-            (_now(), execution.execution_id),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "UPDATE workflow_executions SET gate_nonce = '', "
+                "last_heartbeat = ? WHERE execution_id = ?",
+                (_now(), execution.execution_id),
+            ),
         )
 
     async def _mark_step_complete(
         self, execution: WorkflowExecution, idx: int,
     ) -> None:
-        assert self._db is not None
         execution.action_index_completed = idx
-        await self._db.execute(
-            "UPDATE workflow_executions SET action_index_completed = ?, "
-            "last_heartbeat = ? WHERE execution_id = ?",
-            (idx, _now(), execution.execution_id),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "UPDATE workflow_executions SET action_index_completed = ?, "
+                "last_heartbeat = ? WHERE execution_id = ?",
+                (idx, _now(), execution.execution_id),
+            ),
         )
 
     async def _record_step_succeeded(
@@ -1354,14 +1553,16 @@ class ExecutionEngine:
     async def _abort(
         self, execution: WorkflowExecution, reason: str,
     ) -> None:
-        assert self._db is not None
         execution.state = "aborted"
         execution.aborted_reason = reason
         execution.terminated_at = _now()
-        await self._db.execute(
-            "UPDATE workflow_executions SET state = ?, aborted_reason = ?, "
-            "terminated_at = ? WHERE execution_id = ?",
-            ("aborted", reason, execution.terminated_at, execution.execution_id),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "UPDATE workflow_executions SET state = ?, aborted_reason = ?, "
+                "terminated_at = ? WHERE execution_id = ?",
+                ("aborted", reason, execution.terminated_at,
+                 execution.execution_id),
+            ),
         )
         await event_stream.emit(
             execution.instance_id, "workflow.execution_terminated",
@@ -1373,13 +1574,15 @@ class ExecutionEngine:
         )
 
     async def _complete(self, execution: WorkflowExecution) -> None:
-        assert self._db is not None
         execution.state = "completed"
         execution.terminated_at = _now()
-        await self._db.execute(
-            "UPDATE workflow_executions SET state = ?, terminated_at = ? "
-            "WHERE execution_id = ?",
-            ("completed", execution.terminated_at, execution.execution_id),
+        await self._run_workflow_write(
+            lambda db: db.execute(
+                "UPDATE workflow_executions SET state = ?, terminated_at = ? "
+                "WHERE execution_id = ?",
+                ("completed", execution.terminated_at,
+                 execution.execution_id),
+            ),
         )
         await event_stream.emit(
             execution.instance_id, "workflow.execution_terminated",
@@ -1479,15 +1682,21 @@ class ExecutionEngine:
             fire_id=fire_id,
         )
         try:
-            await self._db.execute(
-                "INSERT INTO workflow_executions ("
-                " execution_id, workflow_id, instance_id, correlation_id,"
-                " state, action_index_completed, intermediate_state,"
-                " last_heartbeat, aborted_reason, started_at, terminated_at,"
-                " trigger_event_payload, trigger_event_id, member_id,"
-                " gate_nonce, fire_id"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                execution.to_row(),
+            # Codex round-2-impl High 4: route through the engine
+            # write-lock so a concurrent _run_workflow_txn body
+            # can't commit this INSERT along with unrelated step
+            # work.
+            await self._run_workflow_write(
+                lambda db: db.execute(
+                    "INSERT INTO workflow_executions ("
+                    " execution_id, workflow_id, instance_id, correlation_id,"
+                    " state, action_index_completed, intermediate_state,"
+                    " last_heartbeat, aborted_reason, started_at, terminated_at,"
+                    " trigger_event_payload, trigger_event_id, member_id,"
+                    " gate_nonce, fire_id"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    execution.to_row(),
+                ),
             )
         except aiosqlite.IntegrityError as exc:
             # Partial-unique-index race: another caller won the
