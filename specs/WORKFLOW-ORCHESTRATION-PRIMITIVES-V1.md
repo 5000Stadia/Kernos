@@ -1,13 +1,67 @@
 # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 — Implementation Spec
 
-**Status:** DRAFT v1 — pre-implementation. Awaiting Codex pre-spec
-review.
+**Status:** DRAFT v2 — pre-implementation. ONE Codex pre-spec review
+round folded (10 findings: 3 blockers, 3 high, 4 medium).
+
+**Codex round 1 (10 findings, folded into v2):**
+
+- **Blocker 1** — branch decisions weren't durable across restart.
+  The branch verb mutated cursor in-memory only; on restart, the
+  natural `action_index_completed + 1` would resume past the branch
+  step instead of at the chosen target. Folded by adding a new
+  `next_step_index` column on `workflow_executions` that the branch
+  verb writes atomically with its record/cursor commit; restart-
+  resume consults it before defaulting (Decision 9 below).
+- **Blocker 2** — branch was implicitly described as a skip
+  primitive but the engine's linear advance contradicts that.
+  Folded by declaring branch IS a goto and clarifying that "skip
+  downstream" requires terminal-branch routing or careful main-
+  sequence layout (Decision 5 revised).
+- **Blocker 3** — terminal branch step indices collide with Spec 3's
+  `workflow_action_records` PK (which is keyed by
+  `(instance_id, execution_id, step_index)`). Folded by introducing
+  a **global step ordinal**: at workflow registration, every
+  step (main sequence + every terminal branch) receives a unique
+  globally-monotonic `step_index`. `step_id` remains the human-
+  readable identifier for references; `step_index` is the substrate
+  ordinal that Spec 3 keys against (Decision 0 revised).
+- **High 4** — step output capture outcome matrix was
+  underspecified. Folded by mirroring Spec 3's per-outcome shape:
+  all five outcomes (completed / gated-completed / continue-failed
+  / abort-failed / execute-raised) capture an envelope; the helper
+  signatures explicitly thread output payload through each path
+  (Decision 2 revised + Decision 9 revised).
+- **High 5** — gate output capture lacked an event-payload handoff.
+  Folded by having `_await_gate` return the matched event payload
+  alongside the existing continuation bool; the engine threads
+  that payload to `_clear_gate_and_advance` for atomic capture
+  (Decision 6 revised).
+- **High 6** — `bool(condition_value)` would route truthy strings
+  like `"false"` to the true branch. Folded by requiring native
+  bool only at branch dispatch; non-bool values fail loud
+  (Decision 5 revised).
+- **Medium 7** — branch verb's risk_level was `low` but Spec 3's
+  derivation maps `mutate` → `medium`. Folded to `medium` for
+  consistency (Decision 10 revised).
+- **Medium 8** — predicate cache key was too weak. Folded to
+  `(execution_id, gate_nonce)`; cleared on release / timeout /
+  abort (Decision 8 revised).
+- **Medium 9** — step / branch / gate ID grammar was undefined and
+  could break reference parsing (paths split on `.`, terminal
+  targets split on `:`). Folded by validating IDs against
+  `[A-Za-z][A-Za-z0-9_-]*` at registration (Decision 0 revised).
+- **Medium 10** — `ON CONFLICT DO UPDATE` on `workflow_step_outputs`
+  could desync from Spec 3's append-only `workflow_action_records`.
+  Folded by gating the step_output INSERT on the per-outcome
+  helper's `inserted=True` return — step output and action record
+  advance together (Decision 11, new).
 
 **Author:** CC, 2026-05-12. Resolves architect's framing in the
-Spec 4a build directive at Notion
-`35effafef4db8168855eeb2524d2ff4e`. Substrate gaps in the original
-Spec 4 draft (CC pre-spec review at Notion
-`35effafef4db81dcbc0cf432b425fb24`) drove the Option B split:
+Spec 4a build directive + folds Codex round 1.
+
+**Source build directive:** Notion `35effafef4db8168855eeb2524d2ff4e`.
+Substrate gaps in the original Spec 4 draft (CC pre-spec review at
+Notion `35effafef4db81dcbc0cf432b425fb24`) drove the Option B split:
 this spec is Spec 4a; Spec 4b (self-improvement workflow definition)
 rebuilds against the primitives this spec ships.
 
@@ -109,7 +163,7 @@ Per the architect's build directive:
 
 ## Architectural decisions
 
-### Decision 0 — Step IDs on ActionDescriptor (CC-surfaced addition)
+### Decision 0 — Step IDs + global step ordinal + ID grammar (CC-surfaced addition; revised v2 per Codex Blocker 3 + Medium 9)
 
 **Architect's framing did not name this explicitly,** but every
 other extension assumes step IDs exist. The current
@@ -118,8 +172,19 @@ steps are identified by their index in `action_sequence`. To
 reference a prior step's output via `{step.<id>.output.<path>}`,
 the step needs a stable string identifier.
 
-**Resolution:** add an optional `id: str` field to
-`ActionDescriptor`.
+**Codex round 1 Blocker 3** caught a further gap: Spec 3's
+`workflow_action_records` table is PK'd by
+`(instance_id, workflow_execution_id, step_index)`. With terminal
+branches each running their own action list, a terminal step at
+local index 0 would collide with main step 0 — the ON CONFLICT DO
+NOTHING clause would silently swallow the terminal step's record.
+The fix: introduce a **global step ordinal** assigned at workflow
+registration, monotonically increasing across the main sequence
+and every terminal branch.
+
+**Resolution:** add `id: str` and `step_index: int` to
+`ActionDescriptor`. The author writes `id` (human-readable);
+`step_index` is assigned at registration time by `validate_workflow`.
 
 ```python
 @dataclass
@@ -130,25 +195,68 @@ class ActionDescriptor:
     continuation_rules: ContinuationRules = field(default_factory=ContinuationRules)
     gate_ref: str | None = None
     resume_safe: bool = False
-    id: str = ""  # NEW: optional, but required if this step is a reference target
+    id: str = ""                  # NEW: human-readable identifier
+    step_index: int = -1           # NEW: globally-assigned ordinal (registration-time)
 ```
+
+**Global step ordinal assignment** at workflow registration:
+
+```
+Main sequence:                  step_index = 0 .. N-1
+Terminal branch "rejected":     step_index = N .. N+M-1
+Terminal branch "<branch_2>":   step_index = N+M .. N+M+P-1
+...
+```
+
+The ordinal is assigned in declaration order. Once assigned, it's
+stable for the lifetime of the workflow (workflow descriptors are
+immutable post-registration; re-registration with the same workflow
+ID overwrites).
+
+**`workflow_action_records` PK remains `(instance_id,
+workflow_execution_id, step_index)`** — no schema change needed.
+Terminal branch records get unique step_index values via the global
+ordinal assignment, so the PK collision Codex flagged disappears.
+
+**`action_index_completed` cursor** on `workflow_executions`
+remains the global step_index of the last completed step. Restart
+logic continues to work: `next_idx = action_index_completed + 1`
+maps to a global ordinal — but this is overridden by Decision 9's
+`next_step_index` column for branch decisions.
+
+**ID grammar (Codex Medium 9):** step IDs, gate names, and terminal
+branch names MUST match the regex `^[A-Za-z][A-Za-z0-9_-]*$`. The
+restriction rules out characters that would break reference
+parsing (`.` splits namespaces; `:` splits terminal-target
+segments). Validated at registration with explicit error per
+offending field.
 
 **Validation at registration (extends `validate_workflow`):**
 
-- Empty `id` allowed (legacy workflows continue to work).
-- Non-empty IDs must be unique within the workflow, including
-  across `terminal_branches` action lists.
-- Branch verb's `branch_on_true` / `branch_on_false` targets must
-  reference declared IDs.
+- Step IDs match the grammar. Required iff the step is a reference
+  target (branch verb target, parameter reference, predicate
+  reference). Optional but encouraged for all steps for
+  observability.
+- Step IDs are unique within the workflow, including across all
+  terminal branches.
+- Terminal branch names match the grammar.
+- Gate names match the grammar.
+- Branch verb's `branch_on_true` / `branch_on_false` targets
+  resolve to declared step IDs (bare) or
+  `terminal:<branch_name>:<step_id>` (with the branch_name and
+  step_id both validated against the grammar).
 - Template references `{step.<id>...}` to non-existent IDs are
   flagged at registration (static check); references to existing
   IDs whose output hasn't been captured at resolve time produce
   runtime errors (dynamic check).
+- The global step_index assignment is performed by
+  `validate_workflow` as part of registration; if validation
+  fails, no indices get assigned.
 
 **Backward compatibility:** existing workflows without `id` fields
-continue to validate and execute. The reference resolver simply
-can't target them — by construction, since their reference syntax
-requires an ID.
+continue to validate and execute (step_index gets assigned per
+main-sequence position). The reference resolver simply can't target
+them — references to undeclared IDs fail at registration.
 
 ### Decision 1 — Step output storage shape
 
@@ -189,14 +297,37 @@ the engine's `aiosqlite` connection and the engine-level
 `asyncio.Lock` write-serialization discipline from Spec 3's
 `_run_workflow_txn` helper.
 
-### Decision 2 — Output value shape
+### Decision 2 — Output value shape + per-outcome capture matrix (revised v2 per Codex High 4)
 
 **Architect's lean:** structured dict only (JSON-encoded);
 non-serializable outputs surface as friction.
 
-**Resolution (adopted with one refinement):** the captured output
-shape is a uniform JSON envelope combining the four fields of
-`ActionResult`:
+**Codex round 1 High 4** caught that the v1 spec's capture
+description ("each action's result persists") was ambiguous across
+the five outcome paths the engine actually runs. Resolution: mirror
+Spec 3's per-outcome shape so capture is unambiguous per path.
+
+**Per-outcome capture matrix:**
+
+| Outcome                | Envelope `success` | Envelope `value`           | Envelope `error`              | Envelope `receipt`        | Captured? |
+|------------------------|--------------------|----------------------------|-------------------------------|---------------------------|-----------|
+| Non-gated success      | True               | result.value (dict)        | None                          | result.receipt            | YES       |
+| Gated success          | True               | result.value (dict)        | None                          | result.receipt            | YES       |
+| Continue-on-failure    | False              | None or partial            | result.error                  | result.receipt (if any)   | YES       |
+| Aborting failure       | False              | None or partial            | result.error                  | result.receipt (if any)   | YES       |
+| Execute-raised         | False              | None                       | f"execute_raised:..." string  | empty dict                | YES       |
+| Verifier-raised        | False              | None                       | f"verify_raised:..." string   | empty dict                | YES       |
+
+**All five outcomes capture an output envelope** (downstream
+references may need to see WHY a prior step failed; an
+unconditional capture also makes the audit trail more complete).
+The per-outcome SQL helpers (Decision 9 + Spec 3's matrix) take a
+mandatory envelope payload — no helper writes a record without
+also writing the corresponding step output.
+
+**Output envelope shape (adopted with one refinement):** the
+captured output is a uniform JSON envelope combining the four
+fields of `ActionResult`:
 
 ```python
 {
@@ -355,20 +486,71 @@ def resolve_references_in_value(value: Any, ctx: ResolutionContext) -> Any:
   `resolve_references_in_value` on the predicate AST's `value:`
   fields before invoking `evaluate_predicate`.
 
-### Decision 5 — `branch` verb
+### Decision 5 — `branch` verb (revised v2 per Codex Blocker 2 + High 6)
 
 **Architect's lean (adopted):** new `branch` verb, not extension to
 `mark_state`.
+
+**Codex round 1 Blocker 2** clarified the semantics: `branch` is a
+**goto**, not a skip. After branching to target step K, the engine
+continues linearly from K. To produce "if-true-do-A-and-stop;
+if-false-do-B-and-stop" semantics, the workflow author pairs
+`branch` with `terminal_branches` so that one outcome routes into
+a terminal branch (which runs to its end without falling back to
+main sequence) and the other continues main sequence.
+
+**Goto semantics example** (matches the architect's draft pattern
+from Spec 4):
+
+```yaml
+action_sequence:
+  - id: ask_cc
+    action_type: call_tool
+    parameters: {...}
+  - id: branch_on_ratification
+    action_type: branch
+    parameters:
+      condition: '{step.await_ratification.gate.output.payload.approved}'
+      branch_on_true: ask_cc_implement     # fall-through main sequence
+      branch_on_false: terminal:rejected:notify_rejection
+  - id: ask_cc_implement
+    action_type: call_tool
+    parameters: {...}
+
+terminal_branches:
+  rejected:
+    - id: notify_rejection
+      action_type: notify_user
+      parameters: {...}
+```
+
+When `approved=true`, the workflow continues at `ask_cc_implement`
+and runs the rest of main sequence linearly. When `approved=false`,
+the workflow switches into terminal branch `rejected` and runs
+that branch to completion; main sequence is NOT re-entered.
+
+**Codex round 1 High 6** caught a real safety bug: `bool(value)`
+on Python strings like `"false"` or `"0"` returns True because
+non-empty strings are truthy. A workflow author writing
+`{step.X.output.approved}` against a step that returns the string
+`"false"` (e.g., a tool that stringifies its outputs) would route
+to the true branch — directly opposite intent.
+
+**Resolution:** require the resolved condition to be a **native
+bool**. Non-bool values raise a loud failure that aborts the
+workflow. This composes with Decision 3's sole-reference-shortcut
+which preserves native types: `{step.X.output.approved}` where
+`approved` is `True` resolves to Python `True` (not `"True"`).
 
 **Verb implementation** in `action_library.py`:
 
 ```python
 class BranchAction:
     """Conditional control flow at workflow level.
-    
-    Reads ``condition`` parameter (resolved via template syntax),
-    coerces to bool. The engine's _run_action_sequence reads the
-    chosen target from the receipt and updates next_idx pointer.
+
+    Goto semantics: routes to one of two named step IDs. The engine
+    continues linearly from the chosen target. To produce
+    skip-downstream semantics, pair with terminal_branches.
     """
 
     action_type = "branch"
@@ -380,18 +562,24 @@ class BranchAction:
     async def execute(self, context: Any, params: dict) -> ActionResult:
         # ``condition`` parameter is already resolved by the engine
         # via resolve_references_in_value before this handler fires.
+        # Codex round 1 High 6: require native bool, no coercion.
         condition_value = params.get("condition")
-        # Coerce to bool: explicit True/False win; truthy/falsy 
-        # values follow Python semantics with an explicit cast.
-        chosen_branch = bool(condition_value)
+        if not isinstance(condition_value, bool):
+            return ActionResult(
+                success=False,
+                error=(
+                    f"branch_condition_not_bool:"
+                    f"got {type(condition_value).__name__}={condition_value!r}"
+                ),
+            )
         target_step_id = (
-            params["branch_on_true"] if chosen_branch
+            params["branch_on_true"] if condition_value
             else params["branch_on_false"]
         )
         return ActionResult(
             success=True,
             value={
-                "condition_resolved_to": chosen_branch,
+                "condition_resolved_to": condition_value,
                 "target_step_id": target_step_id,
             },
             receipt={
@@ -402,14 +590,17 @@ class BranchAction:
 
     async def verify(self, context, params, result):
         # Branch verb has no world-effect to verify. Success means
-        # the engine routed correctly.
+        # the engine routed correctly. The strict-bool check inside
+        # execute() means a False success result is a real failure
+        # (caller routes through continuation_rules.on_failure).
         return result.success
 ```
 
 **Verb parameters (validated at registration):**
 
 - `condition: <reference string>` — REQUIRED. Template reference
-  resolving to a boolean-coercible value.
+  resolving to a **native bool**. Non-bool resolutions abort the
+  workflow via continuation_rules (default: abort).
 - `branch_on_true: <step_id>` — REQUIRED. Must reference a declared
   step ID in main `action_sequence` or in a `terminal_branches`
   entry (with the `terminal:<name>:<step_id>` syntax).
@@ -417,57 +608,151 @@ class BranchAction:
 
 **Engine sequencing:** the existing `for idx in range(start_idx,
 len(wf.action_sequence)):` loop becomes a while loop with an
-explicit `next_idx` pointer. When a `branch` verb succeeds, the
-engine inspects the verb's receipt and sets `next_idx` to the
-target step's index instead of the natural `idx + 1`.
+explicit `next_step_index` pointer. When a `branch` verb succeeds,
+the engine inspects the verb's receipt and sets `next_step_index`
+to the target step's global ordinal (Decision 0) instead of the
+natural `current_step_index + 1`. The `next_step_index` is
+persisted to workflow_executions atomically with the branch step's
+record commit (see Decision 9's revised state machine for the
+durability guarantee).
 
 **Branch target ID resolution:**
 
 | Target ID form                       | Engine action                                                       |
 |--------------------------------------|---------------------------------------------------------------------|
-| `<step_id>` (bare)                   | Look up step in main `action_sequence`; set `next_idx`              |
-| `terminal:<branch_name>:<step_id>`   | Look up step in `terminal_branches[<branch_name>]`; switch sequence |
+| `<step_id>` (bare)                   | Look up step in main `action_sequence` map; set `next_step_index`   |
+| `terminal:<branch_name>:<step_id>`   | Look up step in `terminal_branches[<branch_name>]` map; switch sequence (the global step ordinal from Decision 0 makes this a uniform lookup) |
 
 Once a terminal branch is entered, the engine continues running the
-terminal branch's action sequence to completion (or abort) and does
-NOT return to the main sequence.
+terminal branch's action sequence to its end and does NOT return to
+the main sequence. The engine knows it's in a terminal branch
+because `next_step_index` is within the global ordinal range
+assigned to that branch.
 
-**ActionStateRecord composition (Spec 3):** the branch step's
-ActionStateRecord captures:
+**ActionStateRecord composition (Spec 3; revised v2 per Codex Medium 7):**
+the branch step's ActionStateRecord captures:
 
 - `surface = "workflow_step"`
 - `operation = "branch"`
-- `operation_class = "mutate"` (control-flow mutation)
-- `risk_level = "low"` (no world effect; cheap to revert by replay)
+- `operation_class = "mutate"` (control-flow mutation of next_step_index)
+- `risk_level = "medium"` (per Spec 3's `mutate` → `medium` derivation;
+  v1 had `low` which contradicted Spec 3)
 - `receipt_refs` include `branch_target:<target_step_id>` and the
   resolved condition value
 - `user_visible_summary = f"branch evaluated condition={condition_value} → {target_step_id}"`
 
-### Decision 6 — Gate output capture
+### Decision 6 — Gate output capture (revised v2 per Codex High 5)
 
-**Implementation:** in `_await_gate`'s post-resume path. The
-satisfying event's payload gets captured into
-`workflow_step_outputs` with `output_kind='gate'`,
-`output_name=<gate_name>`.
+**Codex round 1 High 5** caught that the v1 spec didn't define how
+the satisfying event's payload reaches `_clear_gate_and_advance`.
+Currently `_await_gate` signals only via `Event.set()`; the matched
+event payload isn't preserved anywhere accessible to the
+gate-release transaction. Resolution: extend `_await_gate` to
+return the matched event payload alongside the continuation bool,
+AND populate a per-execution payload buffer that the post-flush
+match logic writes before calling `waiter.set()`.
 
-**Capture happens AFTER gate release confirmation** (i.e., after
-the post-flush hook has matched the event and signalled the
-waiter), so capture is synchronous with the release. Inside the
-`_clear_gate_and_advance` transaction from Spec 3, the gate-output
-INSERT lands too — but the existing transaction shape doesn't
-include this. Either:
+**Event payload handoff path:**
 
-**Option a (lean):** extend `_clear_gate_nonce_and_advance` to take
-an optional `gate_output_payload` argument and INSERT it into
-`workflow_step_outputs` in the same transaction.
+1. `_on_post_flush_for_gates` matches a satisfying event for an
+   awaited gate (predicate match + nonce check + execution_id
+   binding all pass).
+2. Before signalling `waiter.set()`, the hook writes the event's
+   payload to `self._gate_release_payloads[execution_id] = event.payload`.
+3. `_await_gate` returns `(True, event.payload)` after the waiter
+   wakes (reading from the buffer).
+4. `_run_action_sequence` threads the payload into
+   `_clear_gate_and_advance` which writes it into
+   `workflow_step_outputs` atomically with the gate-release SQL.
 
-**Option b:** capture the gate output in a separate
-`_run_workflow_txn` body BEFORE the gate-release transaction.
+**Engine method signature changes:**
 
-Decision: **Option a.** Single transaction is cleaner for the
-crash-window invariant (gate release and gate output land
-atomically; restart sees consistent state). Slightly more SQL in
-the helper but the contract is tighter.
+```python
+async def _await_gate(
+    self, execution: WorkflowExecution, gate: ApprovalGate,
+) -> tuple[bool, dict | None]:
+    """v2: returns (continue, matched_event_payload) instead of just
+    the continuation bool. payload is None when the gate timed out
+    (and the timeout handler chose continuation; e.g.,
+    auto_proceed_with_default).
+    """
+    ...
+
+async def _clear_gate_and_advance(
+    self, execution, idx, *, gate_output_payload: dict | None,
+) -> None:
+    """v2: accepts the matched event payload; threads it into
+    _clear_gate_nonce_and_advance which captures it atomically."""
+    ...
+```
+
+**Per-flush buffer cleanup:** the
+`self._gate_release_payloads[execution_id]` entry is read by
+`_await_gate` once and then popped, so a subsequent gate on the
+same execution doesn't accidentally read a stale payload.
+Timeout handlers (auto_proceed_with_default) explicitly bypass the
+buffer because no real event matched; in those cases
+`_clear_gate_and_advance` is invoked with
+`gate_output_payload={"timed_out": True, "default_value": ...}`
+synthesized from the gate descriptor.
+
+**Atomic capture inside `_clear_gate_nonce_and_advance`:**
+
+```python
+async def _clear_gate_nonce_and_advance(
+    db, execution_id, *,
+    step_index, expected_nonce="",
+    gate_name="",
+    gate_output_payload=None,
+    instance_id="",   # threaded by the caller for the INSERT
+) -> bool:
+    """Decision 6 v2: clear gate_nonce + advance cursor + capture
+    gate output in one transaction. Gate output INSERT uses the
+    SAME table (workflow_step_outputs) with output_kind='gate'."""
+    if expected_nonce:
+        cursor = await db.execute(
+            "UPDATE workflow_executions "
+            "SET gate_nonce = '', action_index_completed = ?, "
+            "next_step_index = -1, last_heartbeat = ? "
+            "WHERE execution_id = ? AND gate_nonce = ?",
+            (step_index, _now(), execution_id, expected_nonce),
+        )
+    else:
+        cursor = await db.execute(
+            "UPDATE workflow_executions "
+            "SET gate_nonce = '', action_index_completed = ?, "
+            "next_step_index = -1, last_heartbeat = ? "
+            "WHERE execution_id = ?",
+            (step_index, _now(), execution_id),
+        )
+    updated = cursor.rowcount == 1
+    if updated and gate_name and gate_output_payload is not None:
+        envelope = {
+            "success": True,
+            "value": {"payload": gate_output_payload},
+            "error": None,
+            "receipt": {},
+        }
+        await db.execute(
+            "INSERT INTO workflow_step_outputs ("
+            " instance_id, workflow_execution_id, output_kind, output_name,"
+            " output_json, truncated, recorded_at"
+            ") VALUES (?, ?, 'gate', ?, ?, 0, ?) "
+            "ON CONFLICT(instance_id, workflow_execution_id, output_kind, output_name) "
+            "DO UPDATE SET output_json = excluded.output_json, "
+            "recorded_at = excluded.recorded_at",
+            (
+                instance_id, execution_id, gate_name,
+                json.dumps(envelope), _now(),
+            ),
+        )
+    return updated
+```
+
+The gate output is referenceable as
+`{gate.<gate_name>.output.payload.<path>}` — the wrapping `payload`
+key inside `value` makes the access shape uniform with step
+outputs (where `value.<path>` accesses the result's value dict).
 
 ### Decision 7 — Terminal branches
 
@@ -549,22 +834,33 @@ ALTER TABLE workflow_executions ADD COLUMN terminal_branch TEXT DEFAULT '';
 Defensive idempotent ALTER (mirrors Spec 3's gate_nonce migration
 pattern).
 
-### Decision 8 — Predicate-evaluator template substitution
+### Decision 8 — Predicate-evaluator template substitution (revised v2 per Codex Medium 8)
 
 **Implementation:** before evaluating each predicate against an
 incoming event, walk the predicate AST and substitute references
 in any `value:` field via the resolver from Decision 4. Cache
-resolved predicates per `(execution_id, gate_name)` per execution.
+resolved predicates per `(execution_id, gate_nonce)` per execution.
+
+**Codex round 1 Medium 8** caught that the v1 cache key
+`(execution_id, gate_name)` was too weak. The same gate name can
+be reused within an execution (re-attempted gate after timeout) or
+across executions; reusing the cached resolved predicate could
+match against a stale value. The gate_nonce is unique per gate
+attempt (engine-minted UUID; cleared on resolution), so keying
+the cache on `(execution_id, gate_nonce)` makes the cache scope
+exactly match the gate-attempt lifetime.
 
 **Cache semantics:**
 
-- First evaluation: walk the AST; resolve references; cache the
-  resolved AST.
-- Subsequent evaluations on the same gate: reuse cached resolved
-  AST.
-- Cache invalidates when the gate is cleared (gate-release) — but
-  by then the gate is gone, so this is a defensive cleanup, not a
-  correctness requirement.
+- First evaluation for a given `(execution_id, gate_nonce)`: walk
+  the AST; resolve references; cache the resolved AST.
+- Subsequent evaluations on the same gate attempt: reuse cached
+  resolved AST (no re-resolution).
+- Cache invalidates explicitly on gate release / timeout / abort
+  by removing the `(execution_id, gate_nonce)` entry. The nonce
+  itself is cleared from `workflow_executions.gate_nonce` in the
+  same transaction (Decision 6), so the cache state and the
+  substrate state stay aligned.
 
 **Predicate composite operators (AND, OR, NOT):** the resolver
 walks recursively. Each `value:` leaf in the AST gets resolved.
@@ -585,71 +881,158 @@ should re-evaluate on the next flush. Loud failure here would
 break the request-and-wait pattern (which intentionally references
 a not-yet-complete step's output until that step completes).
 
-### Decision 9 — Engine wiring (the `_run_action_sequence` rewrite)
+### Decision 9 — Engine wiring + branch durability (revised v2 per Codex Blocker 1)
 
 **Existing shape:** `for idx in range(start_idx, len(wf.action_sequence)):`
-runs steps linearly. The branch verb requires a `next_idx` pointer
-that the loop body can mutate.
+runs steps linearly. The branch verb requires a `next_step_index`
+pointer that the engine respects on advancement AND can recover
+across restart.
 
-**v1 shape:**
+**Codex round 1 Blocker 1** caught a real durability hole: the v1
+draft mutated cursor in memory only. After a branch step's commit
+(record + cursor advance), if the engine crashed before the
+chosen target step started, restart's natural
+`action_index_completed + 1` advance would resume past the branch
+step at the wrong target. The branch decision lived only in the
+branch step's `receipt.branched_to` field — invisible to the
+restart-resume pass.
+
+**Resolution:** persist `next_step_index` on
+`workflow_executions` atomically with the branch step's
+record/cursor commit. Restart-resume reads it before defaulting.
+Cleared when the chosen target step begins execution.
+
+**New column on `workflow_executions`:**
+
+```sql
+ALTER TABLE workflow_executions ADD COLUMN next_step_index INTEGER DEFAULT -1;
+```
+
+Defensive idempotent ALTER (mirrors Spec 3's `gate_nonce` and
+this spec's `terminal_branch` migrations). `-1` is the sentinel
+meaning "no branch override; advance naturally."
+
+**v2 engine shape:**
 
 ```python
 async def _run_action_sequence(self, execution, wf):
     # ... existing context build, gate-resume re-entry from Spec 3 ...
     action_sink = self._execution_action_sink(execution)
     gate_by_name = {g.gate_name: g for g in wf.approval_gates}
-    # New: index lookup for all step IDs (main + terminal branches)
+
+    # Global step ordinal map for every step ID across main +
+    # terminal branches (Decision 0's global step_index).
     step_index_map = self._build_step_index_map(wf)
-    # New: starting cursor — main sequence OR terminal branch
-    cursor = self._initial_cursor(execution, wf)
-    while cursor is not None:
-        action_list, idx = cursor
-        action = action_list[idx]
-        # ... step execution as before ...
-        # After step runs (success or continue-failure), determine next:
-        if action.action_type == "branch":
+    # Inverse: global step_index → action descriptor + (in main? terminal branch name)
+    action_by_index = self._build_action_by_index(wf)
+
+    # Resolve next step. Codex Blocker 1: branch decision persisted
+    # on the execution row takes precedence over natural advance.
+    next_step_index = self._resolve_next_step_index(execution, wf)
+
+    while next_step_index is not None:
+        action = action_by_index[next_step_index]
+        # ... step execution: resolve params + verb.execute + verify ...
+
+        # Determine what comes next:
+        if action.action_type == "branch" and step_succeeded:
             target_id = result.receipt.get("branched_to")
-            cursor = self._cursor_from_target(target_id, wf, step_index_map)
+            next_step_index = self._resolve_target_step_index(
+                target_id, step_index_map,
+            )
+            # The next_step_index gets persisted INSIDE the per-outcome
+            # transaction below (Spec 3 matrix extended).
+        elif _terminal_branch_end_reached(next_step_index, wf):
+            # End of a terminal branch's sequence → workflow completes.
+            next_step_index = None
         else:
-            cursor = self._advance_cursor(cursor, action_list)
+            # Natural advance.
+            next_step_index = next_step_index + 1
+            if next_step_index >= self._total_step_count(wf):
+                next_step_index = None  # past end → completion
     await self._complete(execution)
+
+def _resolve_next_step_index(self, execution, wf):
+    """At workflow start AND after restart-resume, decide the first
+    step to run.
+
+    Restart-resume precedence (Codex Blocker 1 fix):
+      1. If next_step_index is set on the row (>= 0), use it — a
+         branch decision was persisted.
+      2. Otherwise: action_index_completed + 1 (natural advance).
+      3. Bounds-check against total step count.
+    """
+    if execution.next_step_index >= 0:
+        return execution.next_step_index
+    candidate = execution.action_index_completed + 1
+    total = self._total_step_count(wf)
+    return candidate if candidate < total else None
 ```
 
-**Cursor representation:** `(action_list, idx)` tuple where
-`action_list` is either `wf.action_sequence` or a
-`wf.terminal_branches[branch_name]` list. `idx` is the index within
-that list.
+**Branch verb's per-outcome SQL helper extension:** the branch
+step's record-append helper writes `next_step_index` alongside
+the cursor advance. New helper:
 
-**`_advance_cursor(cursor, action_list)`:** returns
-`(action_list, idx + 1)` if `idx + 1 < len(action_list)`, else
-`None` (end-of-sequence; workflow completes).
+```python
+async def _append_and_advance_with_branch(
+    db, sink, record, *,
+    step_index, action_type,
+    next_step_index_value,
+) -> bool:
+    """Branch verb's atomic boundary: append record, advance cursor
+    to the branch step itself, AND set next_step_index on the
+    execution row in one transaction. Restart will read
+    next_step_index before defaulting to action_index_completed + 1.
+    """
+    inserted = await sink._insert_within_txn(...)
+    await db.execute(
+        "UPDATE workflow_executions "
+        "SET action_index_completed = ?, next_step_index = ?, "
+        "last_heartbeat = ? "
+        "WHERE execution_id = ?",
+        (step_index, next_step_index_value, _now(), sink.workflow_execution_id),
+    )
+    return inserted
+```
 
-**`_cursor_from_target(target_id, wf, step_index_map)`:** parses
-the target ID:
+**`next_step_index` cleared when target step starts:** the
+non-branch per-outcome helpers (`_append_and_advance`,
+`_append_and_persist_gate_nonce`, `_append_and_abort`) extended to
+also clear `next_step_index = -1` in their UPDATE clauses, so the
+override expires after the target step's first commit.
 
-- Bare `<step_id>` → look up in main sequence map.
-- `terminal:<branch_name>:<step_id>` → look up in terminal branches
-  map; returns `(terminal_branches[branch_name], idx)`.
+**Restart-resume semantics with branch durability:**
 
-**Restart-resume compatibility:** the existing
-`action_index_completed` cursor is preserved AS-IS for
-backward-compatibility. But terminal branches and branch verbs add
-complexity here. Two options:
+| State at crash                                            | Restart resolves to                                  |
+|-----------------------------------------------------------|------------------------------------------------------|
+| Branch step committed; target step not yet started         | next_step_index set → resume at target step          |
+| Branch step + target step committed                        | next_step_index cleared by target's commit → natural advance |
+| Pending-gate state (Spec 3)                                 | Spec 3's pending-gate-restart branch                  |
+| No branch / no gate; cursor advanced naturally              | natural action_index_completed + 1                    |
+| Mid-terminal-branch (no specific durability state)          | Per Decision 9 Option b below: aborts cleanly         |
 
-**Option a:** add a `terminal_branch` column (already added per
-Decision 7) and a `cursor_within_branch` column to track per-branch
-position on restart.
+**Cursor representation:** simplified to a single global
+`next_step_index: int`. Eliminates the `(action_list, idx)` tuple
+of v1 — the global ordinal handles main + terminal branch lookup
+uniformly via the `action_by_index` map.
 
-**Option b:** the simpler v1 model: terminal branches are
-explicitly NOT resume-safe in v1. Restart-resume always returns to
-the main sequence; if the execution was in a terminal branch when
-the engine crashed, the execution aborts with a clear message.
+**Terminal-branch resume policy (preserved from v1 Option b):**
+terminal branches are NOT resume-safe in v1. If the engine crashes
+mid-terminal-branch (next_step_index falls within a terminal
+branch's ordinal range AND no branch override is set AND it's not
+the entry point), the execution aborts with
+`aborted_by_restart_mid_terminal_branch`. The branch durability
+fix above handles the entry-point case (branch chose a terminal;
+target step starts running).
 
-**Decision: Option b.** Simpler v1 implementation; matches the
-"resume_safe defaults to False" conservative posture of the
-existing primitive. If a future spec needs terminal-branch resume,
-it extends here. The architect can override to Option a if soak
-shows the simplification is wrong.
+**Why terminal branches still aren't resume-safe in v1:** terminal
+branches typically run housekeeping / cleanup / notification work
+that's idempotent at the workflow-purpose level (the workflow ran
+to its useful end before entering the terminal branch). Re-running
+the terminal branch from scratch on restart may double-emit
+notifications or duplicate ledger appends. v1 prefers the
+conservative abort; a future spec can flip to per-step
+resume_safe granularity on terminal branches.
 
 ### Decision 10 — Composition with Spec 3 ActionStateRecord
 
@@ -680,6 +1063,61 @@ Specific extensions for the new verbs and reference resolution:
   to the branch verb's record to the terminal branch's step
   records.
 
+### Decision 11 — Step output / action record consistency invariant (v2; Codex Medium 10)
+
+**Codex round 1 Medium 10** caught a real desync between this
+spec's `ON CONFLICT DO UPDATE` on `workflow_step_outputs` and
+Spec 3's `ON CONFLICT DO NOTHING` on `workflow_action_records`.
+The append-only audit table (Spec 3) keeps the FIRST observed
+record on retry; the runtime-cache step output table (this spec)
+overwrites with the LATEST. On a retry path, downstream references
+would read the new output value while the audit trail says the
+first attempt's value was authoritative.
+
+**Resolution: gate the step output INSERT on the per-outcome
+helper's `inserted=True` return.** The Spec 3 per-outcome helpers
+already return True iff the action record was newly inserted; the
+extended helpers from Decision 9 propagate that return AND skip
+the step output INSERT when False:
+
+```python
+async def _append_and_advance(
+    db, sink, record, *,
+    step_index, action_type,
+    step_output_envelope=None,
+    step_id="",
+) -> bool:
+    inserted = await sink._insert_within_txn(...)
+    # Spec 3: cursor advances regardless of inserted (idempotent on
+    # WHERE cursor < step_index).
+    await db.execute("UPDATE workflow_executions SET ...")
+    if inserted and step_output_envelope is not None and step_id:
+        # Spec 4a Decision 11: step output capture co-locates with
+        # action record append. Skip on idempotency-skip path so
+        # the two tables stay consistent.
+        await _capture_step_output(
+            db, instance_id=sink.instance_id,
+            workflow_execution_id=sink.workflow_execution_id,
+            step_id=step_id,
+            envelope_json=json.dumps(step_output_envelope),
+        )
+    return inserted
+```
+
+**Invariant: every step output has a corresponding action record
+at the same step_index, AND each was inserted by the same
+transaction.** Downstream references can rely on this. The
+truncation marker and serialization-failure placeholder still
+land normally — the consistency invariant is about
+NOT-WRITING the step output when the corresponding record was
+skipped.
+
+**Gate output INSERT does NOT gate on inserted** (gate outputs
+have no corresponding action record; they're keyed by gate_name,
+not step_index). The atomicity invariant for gate output is
+"captured with the gate release" — which Decision 6's
+`_clear_gate_nonce_and_advance` ensures via the same transaction.
+
 ## Schema setup order (engine start)
 
 ```python
@@ -692,9 +1130,10 @@ await ensure_workflow_step_outputs_schema(self._db)      # NEW: Spec 4a schema
 The new schema:
 
 - Creates `workflow_step_outputs` table + indexes if absent.
-- Runs the `ALTER TABLE workflow_executions ADD COLUMN terminal_branch TEXT DEFAULT ''`
-  migration with the same idempotent-on-duplicate-column-name
-  pattern Spec 3 uses for `gate_nonce`.
+- Runs `ALTER TABLE workflow_executions ADD COLUMN terminal_branch TEXT DEFAULT ''`
+  migration (idempotent on duplicate column name).
+- Runs `ALTER TABLE workflow_executions ADD COLUMN next_step_index INTEGER DEFAULT -1`
+  migration (Codex Blocker 1 fix; same idempotent pattern).
 
 ## Code-level shape
 
@@ -1205,30 +1644,55 @@ behavioral outputs.
    matching payload uses cached resolution; verify only one
    `workflow_step_outputs` SELECT fires.
 
-### Test category 3: `branch` verb
+### Test category 3: `branch` verb (revised v2 per Codex Blocker 2 + High 6)
 
 `tests/test_workflow_orchestration_primitives.py::TestBranchVerb`
 
-1. **`test_branch_routes_to_true_target`** — workflow has step1
-   (returns `value={"approved": true}`), step2 (branch on `approved`),
-   step3 (true_target), step4 (false_target); verify execution
-   reaches step3 and skips step4.
+1. **`test_branch_goto_to_true_target`** — workflow has step1
+   (returns `value={"approved": true}`), step2 (branch on `approved`,
+   `branch_on_true: step3`, `branch_on_false: terminal:rejected:r1`),
+   step3 (main fall-through), step4 (main fall-through). Verify the
+   engine goes to step3, then step4 (linear fall-through; branch is
+   goto, not skip). False branch test below verifies the terminal
+   path.
 
-2. **`test_branch_routes_to_false_target`** — same setup; step1
-   returns `value={"approved": false}`; verify execution reaches
-   step4 and skips step3.
+2. **`test_branch_to_terminal_false_routes_into_branch`** — same
+   setup as test 1; step1 returns `value={"approved": false}`.
+   Verify execution enters terminal branch `rejected` at step `r1`
+   and runs to that branch's end; verify step3 and step4 in main
+   sequence are NOT visited; verify
+   `workflow_executions.terminal_branch = "rejected"`.
 
-3. **`test_branch_action_state_record_captures_target`** — after
-   branch fires, the ActionStateRecord for the branch step has
-   `operation = "branch"`, `receipt_refs` includes the resolved
-   target; `user_visible_summary` describes the choice.
+3. **`test_branch_native_bool_only_aborts_on_string`** — step1
+   returns `value={"approved": "true"}` (string, not bool); step2
+   branches on it. Verify the branch verb's execute returns
+   `success=False` with `error="branch_condition_not_bool:..."`;
+   verify continuation_rules.on_failure="abort" path routes to
+   aborting failure (Decision 9's _append_failed_and_abort).
 
-4. **`test_branch_terminal_target`** — branch_on_true target is
-   `terminal:rejected:step_x`; verify execution switches into the
-   terminal branch; verify main sequence's later steps don't run;
-   verify `workflow_executions.terminal_branch = "rejected"`.
+4. **`test_branch_action_state_record_captures_target`** — after
+   branch fires successfully, the ActionStateRecord for the branch
+   step has `operation = "branch"`, `operation_class = "mutate"`,
+   `risk_level = "medium"` (Codex Medium 7), `receipt_refs`
+   includes `branch_target:<target_step_id>` and
+   `condition_value:<bool>`, `user_visible_summary` describes the
+   choice.
 
-5. **`test_branch_validation_at_registration`** — workflow with
+5. **`test_branch_durability_across_restart`** — Codex Blocker 1:
+   simulate a crash AFTER the branch step's transaction commits
+   (record persisted + cursor advanced + `next_step_index` set) but
+   BEFORE the target step runs. Restart the engine; verify the
+   engine resumes at the chosen target step (via
+   `_resolve_next_step_index` reading `next_step_index`), NOT at
+   `action_index_completed + 1`.
+
+6. **`test_branch_next_step_index_cleared_by_target_commit`** —
+   verify that when the target step's per-outcome SQL helper runs
+   (`_append_and_advance` etc.), it also clears
+   `next_step_index = -1` so a subsequent crash + restart resumes
+   naturally.
+
+7. **`test_branch_validation_at_registration`** — workflow with
    branch verb whose target references unknown step ID; verify
    `validate_workflow` raises `WorkflowError` with the dangling
    reference name.
@@ -1262,10 +1726,11 @@ behavioral outputs.
    step; gate releases on event with `payload={"approved": true, "by": "user"}`;
    verify `workflow_step_outputs` row exists with
    `output_kind='gate'`, `output_name=<gate_name>`, envelope
-   containing the event payload.
+   containing the event payload nested under `value.payload`
+   (Decision 6 v2 shape).
 
 2. **`test_gate_output_referenced_by_subsequent_step`** — subsequent
-   step's parameter is `'{gate.<gate_name>.output.approved}'`;
+   step's parameter is `'{gate.<gate_name>.output.payload.approved}'`;
    verify the step's verb receives the resolved bool.
 
 3. **`test_gate_output_capture_atomic_with_release`** — simulate a
@@ -1273,7 +1738,69 @@ behavioral outputs.
    step runs; restart; verify gate_nonce cleared, cursor advanced,
    AND gate output row present (proof of atomic transaction).
 
-### Test category 6: Composition with Spec 3
+4. **`test_await_gate_returns_payload`** — Codex High 5: pin the
+   `_await_gate` v2 signature returns `(True, matched_payload)`;
+   the `self._gate_release_payloads[execution_id]` buffer gets
+   populated by `_on_post_flush_for_gates` before `waiter.set()`;
+   `_await_gate` reads + pops it after wake.
+
+5. **`test_await_gate_timeout_synthesizes_payload`** — gate with
+   `auto_proceed_with_default`; gate times out; verify
+   `_clear_gate_and_advance` receives the synthesized payload
+   `{timed_out: True, default_value: ...}` and captures it under
+   the gate's output_name; subsequent reference resolves to the
+   synthesized values.
+
+### Test category 6: Per-outcome step output capture (Codex High 4)
+
+`tests/test_workflow_orchestration_primitives.py::TestPerOutcomeOutputCapture`
+
+1. **`test_capture_on_non_gated_success`** — successful step's
+   envelope persists with `success=True`, value, receipt.
+
+2. **`test_capture_on_gated_success`** — gated step's envelope
+   persists alongside `output_kind='gate'` for the gate; verify
+   both rows present.
+
+3. **`test_capture_on_continue_failure`** — continue-failure
+   step's envelope persists with `success=False`, error string,
+   any partial receipt; cursor advances per Spec 3 matrix.
+
+4. **`test_capture_on_aborting_failure`** — aborting-failure
+   step's envelope persists with `success=False`, error string;
+   execution transitions to aborted state atomically (Spec 3 +
+   this spec).
+
+5. **`test_capture_on_execute_raised`** — verb raises during
+   execute; envelope persists with `success=False`,
+   `error="execute_raised:<ExcType>:<msg>"`, empty receipt.
+
+6. **`test_consistency_invariant_on_idempotency_skip`** — Codex
+   Medium 10: on retry of the same step (ON CONFLICT DO NOTHING
+   on action record), the corresponding workflow_step_outputs
+   INSERT must SKIP too. Verify the step output keeps the
+   original value (matching the original action record), not the
+   retry's value.
+
+### Test category 7: ID grammar + reference parsing (Codex Medium 9)
+
+`tests/test_workflow_orchestration_primitives.py::TestIdentifierGrammar`
+
+1. **`test_step_id_grammar_validated`** — step with id="bad.id"
+   (contains dot) fails registration with `WorkflowError`
+   referencing the grammar pattern.
+
+2. **`test_gate_name_grammar_validated`** — gate with
+   gate_name="bad:gate" fails registration.
+
+3. **`test_terminal_branch_name_grammar_validated`** — terminal
+   branch with name="bad name" (whitespace) fails registration.
+
+4. **`test_valid_grammars_accepted`** — IDs like `ask_cc`,
+   `step-3`, `Branch1` (alphanumeric + hyphen + underscore + mixed
+   case) all validate.
+
+### Test category 8: Composition with Spec 3
 
 `tests/test_workflow_orchestration_primitives.py::TestSpec3Composition`
 
@@ -1370,33 +1897,53 @@ before ratification:
 | Cross-step reference graph at registration                          | Static validation: ensure every `{step.<id>...}` reference's target step exists. Runtime: the engine builds the graph at workflow load time, not per-execution.                                                                                          |
 | Conflict with Spec 3's per-outcome transaction matrix               | Each per-outcome SQL helper extended to accept optional step_output capture payload; the capture is part of the SAME transaction as the record append + state mutation. Atomic boundary preserved.                                                      |
 | Terminal branch not resume-safe (Decision 9 Option b)              | Restart of a mid-terminal-branch execution aborts cleanly with a clear message. If soak shows the abort rate is high, Decision 9 can flip to Option a (full resume support).                                                                            |
+| Branch decisions not durable across restart (Codex Blocker 1)       | v2 Decision 9 adds `next_step_index` column on workflow_executions, written atomically with the branch step's record commit; restart-resume reads it before defaulting to `action_index_completed + 1`; cleared by the target step's commit.            |
+| Terminal branch step_index PK collision with Spec 3 (Codex Blocker 3)| v2 Decision 0 introduces a global step ordinal assigned at workflow registration; step_index is unique across main + terminal branches; Spec 3's `workflow_action_records` PK works unmodified.                                                          |
+| Branch verb boolean coercion routes "false" to true (Codex High 6)   | v2 Decision 5 requires native bool only; non-bool resolutions surface as `branch_condition_not_bool` failures and route through continuation_rules.                                                                                                    |
+| Step output and action record desync on retry (Codex Medium 10)      | v2 Decision 11 gates step output INSERT on the per-outcome helper's `inserted=True` return; idempotency-skip on the record also skips the output, keeping the two tables consistent.                                                                  |
+| Gate output payload handoff (Codex High 5)                           | v2 Decision 6 extends `_await_gate` to return the matched event payload; the engine threads it into `_clear_gate_and_advance` for atomic capture.                                                                                                      |
+| Predicate cache key weakness (Codex Medium 8)                        | v2 Decision 8 keys cache on `(execution_id, gate_nonce)`; nonce is per-attempt UUID; cache invalidates on release / timeout / abort.                                                                                                                   |
+| Reference parsing ambiguity from `.` or `:` in IDs (Codex Medium 9)  | v2 Decision 0 validates step / gate / terminal-branch identifiers against `[A-Za-z][A-Za-z0-9_-]*` at registration.                                                                                                                                  |
 
 ## Sequence (per architect directive)
 
 1. ✅ Architect-framed (Notion `35effafef4db8168855eeb2524d2ff4e`,
    build directive after Spec 4 verdict).
-2. ✅ CC drafts spec at `specs/WORKFLOW-ORCHESTRATION-PRIMITIVES-V1.md`
-   on branch `workflow-orchestration-primitives-v1` (this commit).
-3. 🟡 **Codex pre-spec review** — pending. Architect provides
-   pasteable blip after CC commits. Multi-round review expected
-   per "substrate-touching with state-machine semantics" tier (Spec 1
-   round 2 caught 9 findings; Spec 3 round 2 caught Blocker 1's
-   per-outcome transaction matrix; this spec's per-step capture +
-   reference graph + branch + terminal branches is comparable
-   surface area).
-4. CC folds Codex round 1.
-5. Architect ratification of revised spec (potentially with architect
-   calls on open architectural questions).
-6. CC implements per ratified spec.
-7. Codex post-implementation review.
-8. CC any final changes.
-9. Architect ratifies on close; merge to `main`.
-10. **Spec 4b** — architect rewrites the self-improvement workflow
+2. ✅ CC drafts spec v1 at `specs/WORKFLOW-ORCHESTRATION-PRIMITIVES-V1.md`
+   on branch `workflow-orchestration-primitives-v1`
+   (commit `43616a2`).
+3. ✅ **Codex pre-spec review round 1** — 10 findings: 3 blockers,
+   3 high, 4 medium. All implementation-surface; none challenged
+   the architectural shape.
+4. ✅ **CC folds Codex round 1** into spec v2 (this revision).
+5. 🟡 **Codex pre-spec review round 2** (if architect requests) —
+   verifies implementation surface of the v2 folds, particularly
+   the branch durability + global step ordinal + per-outcome
+   output capture matrix.
+6. Architect ratification of v-final spec body (potentially with
+   architect calls on the 5 open architectural questions surfaced
+   below).
+7. CC implements per ratified spec.
+8. Codex post-implementation review.
+9. CC any final changes.
+10. Architect ratifies on close; merge to `main`.
+11. **Spec 4b** — architect rewrites the self-improvement workflow
     YAML against this spec's primitives. CC pre-spec review
     (substrate composition only). Architect ratifies. CC
     implements (including production wiring sequence). Codex
     post-impl review. Architect ratifies on close.
-11. First end-to-end autonomy loop run.
+12. First end-to-end autonomy loop run.
+
+**Founder direction pending architect re-framing:** founder
+indicated Kernos-authored workflows are essential and inherent to
+the substrate (not a follow-up capability). CC filed the direction
+to architect inbox at Notion
+`35effafef4db8111be97c985c1d5ac33` with three options (A: expand
+4a in place / B: insert 4a+ for authoring substrate / C:
+restructure). The Codex round-1 folds in this commit are
+orthogonal to that direction (they fix execution-side correctness
+that any framing needs). Architect's framing call resolves whether
+this spec's scope expands.
 
 ## Linked artifacts
 
