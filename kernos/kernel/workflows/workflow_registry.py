@@ -394,20 +394,34 @@ def _validate_workflow_orchestration_extensions(wf: Workflow) -> None:
             action.step_index = next_ordinal
             next_ordinal += 1
 
-    # Build the step_id → step_index map for branch / reference
-    # target resolution.
-    id_to_index: dict[str, int] = {}
+    # Build separate ID maps so bare branch targets resolve only
+    # against main_sequence steps, and terminal:<name>:<id> targets
+    # resolve only against the named terminal branch's steps.
+    # Spec 4 post-impl High 5: separate maps prevent bare-target
+    # cross-terminal escapes and accidental name conflicts.
+    main_id_to_index: dict[str, int] = {}
     for action in wf.action_sequence:
         if action.id:
-            id_to_index[action.id] = action.step_index
+            main_id_to_index[action.id] = action.step_index
+    terminal_id_to_index: dict[str, dict[str, int]] = {}
     for branch_name, branch_actions in wf.terminal_branches.items():
+        terminal_id_to_index[branch_name] = {}
         for action in branch_actions:
             if action.id:
-                id_to_index[action.id] = action.step_index
+                terminal_id_to_index[branch_name][action.id] = action.step_index
+    # Combined map for reference resolution (which is unscoped by
+    # design — a step in a terminal branch CAN reference any prior
+    # step's output regardless of which sequence it lived in).
+    all_id_to_index: dict[str, int] = {}
+    all_id_to_index.update(main_id_to_index)
+    for branch_ids in terminal_id_to_index.values():
+        all_id_to_index.update(branch_ids)
 
     # Branch verb validation: branch_on_true / branch_on_false
-    # targets must resolve to existing step IDs (bare) or
-    # terminal:<name>:<id> (composed).
+    # targets must resolve to existing step IDs. Bare IDs resolve to
+    # main_sequence ONLY (Spec 4 post-impl High 5).
+    # terminal:<name>:<step_id> resolves to that named terminal
+    # branch's steps only — no cross-terminal jumps.
     def _resolve_branch_target(target: str) -> bool:
         if not isinstance(target, str) or not target:
             return False
@@ -416,17 +430,16 @@ def _validate_workflow_orchestration_extensions(wf: Workflow) -> None:
             if len(parts) != 3:
                 return False
             _, branch_name, step_id = parts
-            if branch_name not in wf.terminal_branches:
-                return False
-            for action in wf.terminal_branches[branch_name]:
-                if action.id == step_id:
-                    return True
-            return False
-        return target in id_to_index
+            return step_id in terminal_id_to_index.get(branch_name, {})
+        return target in main_id_to_index
 
     all_actions = list(wf.action_sequence)
     for branch_actions in wf.terminal_branches.values():
         all_actions.extend(branch_actions)
+    # Build branch-target adjacency for cycle detection (Spec 4
+    # post-impl High 5). Each branch verb's two target step_indices
+    # are edges in the workflow control-flow DAG.
+    branch_edges: dict[int, set[int]] = {}
     for action in all_actions:
         if action.action_type != "branch":
             continue
@@ -443,13 +456,87 @@ def _validate_workflow_orchestration_extensions(wf: Workflow) -> None:
             raise WorkflowError(
                 f"branch verb step (id={action.id!r}, "
                 f"step_index={action.step_index}) branch_on_true "
-                f"{target_true!r} does not resolve to a declared step"
+                f"{target_true!r} does not resolve to a declared step "
+                f"(bare IDs target main_sequence only; use "
+                f"terminal:<name>:<step_id> for terminal branches)"
             )
         if not _resolve_branch_target(target_false):
             raise WorkflowError(
                 f"branch verb step (id={action.id!r}, "
                 f"step_index={action.step_index}) branch_on_false "
-                f"{target_false!r} does not resolve to a declared step"
+                f"{target_false!r} does not resolve to a declared step "
+                f"(bare IDs target main_sequence only; use "
+                f"terminal:<name>:<step_id> for terminal branches)"
+            )
+        # Map targets to step_index for cycle detection.
+        def _target_to_index(target: str) -> int:
+            if target.startswith("terminal:"):
+                _, branch_name, step_id = target.split(":", 2)
+                return terminal_id_to_index[branch_name][step_id]
+            return main_id_to_index[target]
+        edges = branch_edges.setdefault(action.step_index, set())
+        edges.add(_target_to_index(target_true))
+        edges.add(_target_to_index(target_false))
+
+    # Spec 4 post-impl High 5: branch graph cycle detection. The
+    # workflow's control-flow graph (natural advance + branch edges)
+    # MUST be a DAG. A cycle would let a workflow loop indefinitely
+    # without progress — every cycle has at least one branch verb,
+    # so we walk from each branch's targets and detect back-edges.
+    def _detect_cycle_from(start: int) -> list[int] | None:
+        """Walk the control-flow graph from ``start``; return the
+        cycle path if a cycle is found, else None."""
+        # Visited + on-current-path tracking for cycle detection
+        # (standard DFS pattern).
+        on_path: set[int] = set()
+        visited: set[int] = set()
+        path: list[int] = []
+
+        def _walk(node: int) -> list[int] | None:
+            if node in on_path:
+                # Cycle detected; return the cycle slice of path.
+                idx = path.index(node)
+                return path[idx:] + [node]
+            if node in visited:
+                return None
+            visited.add(node)
+            on_path.add(node)
+            path.append(node)
+            action = next(
+                (a for a in all_actions if a.step_index == node), None,
+            )
+            if action is not None:
+                # Branch edges go to declared targets.
+                if action.action_type == "branch":
+                    for target in branch_edges.get(node, set()):
+                        cycle = _walk(target)
+                        if cycle:
+                            return cycle
+                else:
+                    # Natural advance: next ordinal in same sequence
+                    # (main OR same terminal branch). Cross-sequence
+                    # advance is blocked by _natural_next_step_index
+                    # at runtime; for cycle detection we still walk
+                    # the natural successor inside the same sequence.
+                    successor = _natural_successor_for_cycle_detection(
+                        node, wf,
+                    )
+                    if successor is not None:
+                        cycle = _walk(successor)
+                        if cycle:
+                            return cycle
+            path.pop()
+            on_path.discard(node)
+            return None
+
+        return _walk(start)
+
+    for branch_step_index in branch_edges:
+        cycle = _detect_cycle_from(branch_step_index)
+        if cycle:
+            raise WorkflowError(
+                f"branch graph contains a cycle through step_indices "
+                f"{cycle}; workflows must form a DAG"
             )
 
     # Reference well-formedness: every {step.<id>...} or
@@ -461,7 +548,7 @@ def _validate_workflow_orchestration_extensions(wf: Workflow) -> None:
         for reference in refs:
             namespace, target = parse_reference_head(reference)
             if namespace == "step":
-                if target and target not in id_to_index:
+                if target and target not in all_id_to_index:
                     raise WorkflowError(
                         f"action (id={action.id!r}, "
                         f"step_index={action.step_index}) references "
@@ -581,6 +668,71 @@ def _workflow_descriptor_blob(wf: Workflow) -> str:
     return json.dumps(body)
 
 
+def _natural_successor_for_cycle_detection(
+    step_index: int, wf: Workflow,
+) -> int | None:
+    """Return the natural successor step_index for a non-branch step.
+
+    Used by validate_workflow's cycle detection. Walks within the
+    same sequence (main OR same terminal branch); returns None at
+    sequence end. Mirrors the engine's _natural_next_step_index
+    runtime logic for validation-time analysis.
+    """
+    # Check main sequence.
+    main_indices = sorted(
+        a.step_index for a in wf.action_sequence if a.step_index >= 0
+    )
+    if step_index in main_indices:
+        pos = main_indices.index(step_index)
+        if pos + 1 < len(main_indices):
+            return main_indices[pos + 1]
+        return None
+    # Check each terminal branch.
+    for branch_actions in wf.terminal_branches.values():
+        branch_indices = sorted(
+            a.step_index for a in branch_actions if a.step_index >= 0
+        )
+        if step_index in branch_indices:
+            pos = branch_indices.index(step_index)
+            if pos + 1 < len(branch_indices):
+                return branch_indices[pos + 1]
+            return None
+    return None
+
+
+def _assign_global_step_ordinals_if_missing(wf: Workflow) -> None:
+    """Spec 4 post-impl High 3: assign deterministic global step
+    ordinals on load when any descriptor lacks one.
+
+    Pre-Spec-4 workflows (registered before this spec landed) have
+    descriptors without ``step_index``; the parser defaults to -1.
+    The engine's _build_action_by_index drops actions with
+    step_index < 0, causing the workflow to silently no-op.
+
+    Fix: detect any missing ordinal and assign in deterministic
+    order (main 0..N-1, terminal_branches in dict-iteration order
+    N..N+M-1). Mutates the workflow in place. Idempotent if all
+    indices are already assigned.
+    """
+    needs_assignment = any(
+        a.step_index < 0 for a in wf.action_sequence
+    ) or any(
+        a.step_index < 0
+        for branch_actions in wf.terminal_branches.values()
+        for a in branch_actions
+    )
+    if not needs_assignment:
+        return
+    next_ordinal = 0
+    for action in wf.action_sequence:
+        action.step_index = next_ordinal
+        next_ordinal += 1
+    for branch_name in wf.terminal_branches:
+        for action in wf.terminal_branches[branch_name]:
+            action.step_index = next_ordinal
+            next_ordinal += 1
+
+
 def _action_descriptor_from_raw(a: dict) -> ActionDescriptor:
     """Build an ActionDescriptor from a stored JSON descriptor.
 
@@ -622,7 +774,7 @@ def _workflow_from_row(row) -> Workflow:
                 terminal_branches[branch_name] = [
                     _action_descriptor_from_raw(a) for a in branch_actions
                 ]
-    return Workflow(
+    wf = Workflow(
         workflow_id=row["workflow_id"],
         instance_id=row["instance_id"],
         name=row["name"],
@@ -640,6 +792,12 @@ def _workflow_from_row(row) -> Workflow:
         terminal_branches=terminal_branches,
         instance_local=body.get("instance_local", False),
     )
+    # Spec 4 post-impl High 3: assign deterministic global step
+    # ordinals if any are missing (pre-Spec-4 descriptors don't
+    # carry step_index in their JSON; the engine would otherwise
+    # see total_step_count=0 and silently no-op).
+    _assign_global_step_ordinals_if_missing(wf)
+    return wf
 
 
 # ---------------------------------------------------------------------------

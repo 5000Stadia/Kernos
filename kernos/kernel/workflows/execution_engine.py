@@ -498,9 +498,15 @@ def _safe_build_record(
     result: ActionResult | None = None,
     error: str = "",
     tool_lookup: ToolOperationClassLookup | None = None,
+    resolved_params: dict | None = None,
 ) -> ActionStateRecord | None:
     """Wrapper around ``_build_action_state_record`` that catches
     enum-validation failures.
+
+    Spec 4 post-impl Medium 7: ``resolved_params`` carries the
+    post-reference-resolution parameter dict so the audit record
+    captures the values actually passed to the verb (not the raw
+    descriptor templates).
 
     Risks-table invariant: action-record-construction failure MUST
     NOT abort the workflow step. If the helper raises (e.g. an
@@ -517,6 +523,7 @@ def _safe_build_record(
             result=result,
             error=error,
             tool_lookup=tool_lookup,
+            resolved_params=resolved_params,
         )
     except Exception as exc:
         logger.warning(
@@ -823,12 +830,21 @@ class ExecutionEngine:
             cont, gate_payload = await self._await_gate(execution, gate)
             if not cont:
                 return  # _await_gate aborted
-            await self._clear_gate_and_advance(
+            updated = await self._clear_gate_and_advance(
                 execution, gate_step_index,
                 gate_name=gate_action.gate_ref,
                 gate_output_payload=gate_payload,
             )
-            current_step_index = gate_step_index + 1
+            if not updated:
+                # Spec 4 post-impl Medium 8: stale-nonce divergence
+                # at gate release means the row's state has diverged
+                # from our in-memory execution. Bail out; the
+                # restart-resume pass picks up the actual DB state
+                # on next engine start.
+                return
+            current_step_index = self._natural_next_step_index(
+                gate_step_index, terminal_ranges, main_range=main_range,
+            )
         else:
             current_step_index = self._resolve_next_step_index(execution, wf)
         # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 9: explicit
@@ -902,6 +918,7 @@ class ExecutionEngine:
                         f"step_{action.id or current_step_index}"
                         f"_raised:{type(exc).__name__}"
                     ),
+                    resolved_params=resolved_params,
                 )
                 await self._record_step_failed(
                     execution, current_step_index, action, error=error,
@@ -932,6 +949,7 @@ class ExecutionEngine:
                         aborted_reason=(
                             f"step_{action.id or current_step_index}_failed"
                         ),
+                        resolved_params=resolved_params,
                     )
                     await self._record_step_failed(
                         execution, current_step_index, action, error=error,
@@ -945,6 +963,7 @@ class ExecutionEngine:
                 await self._append_failed_and_advance(
                     execution, action_sink, current_step_index, action,
                     error=error,
+                    resolved_params=resolved_params,
                 )
                 await self._record_step_failed(
                     execution, current_step_index, action, error=error,
@@ -976,6 +995,7 @@ class ExecutionEngine:
                         aborted_reason=(
                             f"step_{action.id or current_step_index}_branch_failed"
                         ),
+                        resolved_params=resolved_params,
                     )
                     await self._record_step_failed(
                         execution, current_step_index, action, error=error,
@@ -988,6 +1008,7 @@ class ExecutionEngine:
                 await self._append_branch_and_advance(
                     execution, action_sink, current_step_index, action, result,
                     next_step_index=target_global,
+                    resolved_params=resolved_params,
                 )
                 await self._record_step_succeeded(
                     execution, current_step_index, action, result,
@@ -998,6 +1019,7 @@ class ExecutionEngine:
                 await self._append_success_and_persist_gate_nonce(
                     execution, action_sink, current_step_index, action, result,
                     gate_nonce=pending_gate_nonce,
+                    resolved_params=resolved_params,
                 )
                 await self._record_step_succeeded(
                     execution, current_step_index, action, result,
@@ -1007,14 +1029,19 @@ class ExecutionEngine:
                 cont, gate_payload = await self._await_gate(execution, gate)
                 if not cont:
                     return  # _await_gate aborted
-                await self._clear_gate_and_advance(
+                updated = await self._clear_gate_and_advance(
                     execution, current_step_index,
                     gate_name=action.gate_ref,
                     gate_output_payload=gate_payload,
                 )
+                if not updated:
+                    # Spec 4 post-impl Medium 8: stale-nonce divergence.
+                    # Bail out; restart-resume picks up actual state.
+                    return
             else:
                 await self._append_success_and_advance(
                     execution, action_sink, current_step_index, action, result,
+                    resolved_params=resolved_params,
                 )
                 await self._record_step_succeeded(
                     execution, current_step_index, action, result,
@@ -1199,12 +1226,15 @@ class ExecutionEngine:
         idx: int,
         action: ActionDescriptor,
         result: ActionResult,
+        *,
+        resolved_params: dict | None = None,
     ) -> None:
         record = _safe_build_record(
             execution=execution, step_index=idx, action=action,
             execution_state="completed", result=result,
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
+            resolved_params=resolved_params,
         )
         # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 2: per-outcome
         # capture matrix — non-gated success envelope.
@@ -1243,6 +1273,7 @@ class ExecutionEngine:
         result: ActionResult,
         *,
         next_step_index: int,
+        resolved_params: dict | None = None,
     ) -> None:
         """WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 5 + 9 /
         Codex round-1 Blocker 1: branch verb's atomic boundary.
@@ -1255,6 +1286,7 @@ class ExecutionEngine:
             execution_state="completed", result=result,
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
+            resolved_params=resolved_params,
         )
         envelope = build_output_envelope(
             success=True, value=result.value,
@@ -1298,12 +1330,14 @@ class ExecutionEngine:
         result: ActionResult,
         *,
         gate_nonce: str,
+        resolved_params: dict | None = None,
     ) -> None:
         record = _safe_build_record(
             execution=execution, step_index=idx, action=action,
             execution_state="completed", result=result,
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
+            resolved_params=resolved_params,
         )
         envelope = build_output_envelope(
             success=True, value=result.value,
@@ -1333,12 +1367,14 @@ class ExecutionEngine:
         action: ActionDescriptor,
         *,
         error: str,
+        resolved_params: dict | None = None,
     ) -> None:
         record = _safe_build_record(
             execution=execution, step_index=idx, action=action,
             execution_state="failed", error=error,
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
+            resolved_params=resolved_params,
         )
         # Per-outcome envelope for continue-on-failure (Decision 2 v2).
         envelope = build_output_envelope(
@@ -1375,12 +1411,14 @@ class ExecutionEngine:
         *,
         error: str,
         aborted_reason: str,
+        resolved_params: dict | None = None,
     ) -> None:
         record = _safe_build_record(
             execution=execution, step_index=idx, action=action,
             execution_state="failed", error=error,
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
+            resolved_params=resolved_params,
         )
         # Per-outcome envelope for aborting failure (Decision 2 v2).
         envelope = build_output_envelope(
@@ -1885,32 +1923,49 @@ class ExecutionEngine:
         execution: WorkflowExecution,
         wf: Workflow,
     ) -> bool:
-        """Codex round-2-impl Blocker 1: detect pending-gate restart
-        state. The execution is mid-execution at a step whose
-        ``gate_ref`` is set; the action already ran and its record is
-        persisted; ``gate_nonce`` is set on the execution row
-        (gated-success atomic boundary); cursor is one less than the
-        gated step. Restart must re-enter ``_await_gate`` for the
-        gated step, NOT re-execute it.
+        """Codex round-2-impl Blocker 1 + Spec 4 post-impl Blocker 2:
+        detect pending-gate restart state via global step ordinal.
+
+        The execution is mid-execution at a step whose ``gate_ref`` is
+        set; the action already ran and its record is persisted;
+        ``gate_nonce`` is set on the execution row (gated-success
+        atomic boundary). The step to resume at is either the
+        ``next_step_index`` override (if a branch verb routed to this
+        gated step) OR the natural ``action_index_completed + 1``.
+        Restart must re-enter ``_await_gate`` for that step, NOT
+        re-execute it.
         """
         if not execution.gate_nonce:
             return False
-        next_idx = execution.action_index_completed + 1
-        if next_idx < 0 or next_idx >= len(wf.action_sequence):
-            return False
-        if wf.action_sequence[next_idx].gate_ref is None:
-            return False
         if self._action_sink is None:
+            return False
+        # Spec 4 post-impl Blocker 2: use global action_by_index +
+        # next_step_index when set so branch-to-gated targets are
+        # resume-correct.
+        action_by_index = self._build_action_by_index(wf)
+        if execution.next_step_index >= 0:
+            gate_step_index = execution.next_step_index
+        else:
+            gate_step_index = execution.action_index_completed + 1
+        if gate_step_index not in action_by_index:
+            return False
+        gate_action = action_by_index[gate_step_index]
+        if gate_action.gate_ref is None:
             return False
         existing = await self._action_sink.get_by_step(
             execution.instance_id, execution.execution_id,
-            step_index=next_idx,
+            step_index=gate_step_index,
         )
         if existing is None:
             return False
         return existing.record.execution_state == "completed"
 
     async def _restart_resume_pass(self) -> None:
+        """Spec 4 post-impl Blocker 1: honor durable branch decisions
+        via execution.next_step_index. Resolve via the global
+        action_by_index map so terminal-branch targets resume
+        correctly across crash boundaries.
+        """
         assert self._db is not None
         assert self._workflow_registry is not None
         async with self._db.execute(
@@ -1923,12 +1978,16 @@ class ExecutionEngine:
             if wf is None:
                 await self._abort(execution, "aborted_by_restart")
                 continue
-            next_idx = execution.action_index_completed + 1
-            # Pending-gate restart branch (Codex round-2-impl Blocker 1):
-            # always resume regardless of action's resume_safe flag —
-            # the step already ran; we just need to wait on approval
-            # again.
+            # Pending-gate restart branch (Codex round-2-impl Blocker 1
+            # + Spec 4 post-impl Blocker 2): always resume regardless
+            # of action's resume_safe flag — the step already ran; we
+            # just need to wait on approval again.
             if await self._is_pending_gate_resume(execution, wf):
+                next_idx = (
+                    execution.next_step_index
+                    if execution.next_step_index >= 0
+                    else execution.action_index_completed + 1
+                )
                 await event_stream.emit(
                     execution.instance_id, "workflow.execution_resumed",
                     {"execution_id": execution.execution_id,
@@ -1938,21 +1997,54 @@ class ExecutionEngine:
                 )
                 self._queue.put_nowait(execution)
                 continue
-            if (
-                0 <= next_idx < len(wf.action_sequence)
-                and wf.action_sequence[next_idx].resume_safe
-            ):
-                await event_stream.emit(
-                    execution.instance_id, "workflow.execution_resumed",
-                    {"execution_id": execution.execution_id,
-                     "reason": "restart_resume",
-                     "from_step": next_idx},
-                    correlation_id=execution.correlation_id,
-                )
-                self._queue.put_nowait(execution)
+            # Spec 4 post-impl Blocker 1: durable-branch restart.
+            # next_step_index, if set, was persisted atomically with a
+            # branch step's record commit. Use it as the candidate for
+            # the next step instead of the natural cursor advance.
+            action_by_index = self._build_action_by_index(wf)
+            terminal_ranges = self._build_terminal_branch_ranges(wf)
+            if execution.next_step_index >= 0:
+                next_step_index = execution.next_step_index
             else:
-                # Conservative default: not resume-safe → abort.
-                await self._abort(execution, "aborted_by_restart")
+                next_step_index = execution.action_index_completed + 1
+            # Terminal-branch resume policy (Decision 9 Option b): if
+            # the resume target is inside a terminal branch AND
+            # next_step_index is NOT set (i.e., we were already
+            # executing terminal-branch steps before the crash), abort
+            # cleanly. Honor next_step_index for the branch-entry case
+            # (target step hasn't run yet).
+            in_terminal = self._terminal_branch_for_step(
+                next_step_index, terminal_ranges,
+            )
+            if in_terminal and execution.next_step_index < 0:
+                await self._abort(
+                    execution,
+                    f"aborted_by_restart_mid_terminal_branch:{in_terminal}",
+                )
+                continue
+            if next_step_index in action_by_index:
+                action_at_target = action_by_index[next_step_index]
+                # Allow durable-branch resume regardless of resume_safe
+                # flag — the branch decision was committed and the
+                # target hasn't executed yet, so resuming at it is
+                # equivalent to the engine never having crashed.
+                durable_branch = execution.next_step_index >= 0
+                if durable_branch or action_at_target.resume_safe:
+                    reason = (
+                        "restart_resume_durable_branch"
+                        if durable_branch else "restart_resume"
+                    )
+                    await event_stream.emit(
+                        execution.instance_id, "workflow.execution_resumed",
+                        {"execution_id": execution.execution_id,
+                         "reason": reason,
+                         "from_step": next_step_index},
+                        correlation_id=execution.correlation_id,
+                    )
+                    self._queue.put_nowait(execution)
+                    continue
+            # Conservative default: not resume-safe → abort.
+            await self._abort(execution, "aborted_by_restart")
 
     # -- audit + persistence helpers -----------------------------------
 
@@ -1997,7 +2089,7 @@ class ExecutionEngine:
         *,
         gate_name: str = "",
         gate_output_payload: dict | None = None,
-    ) -> None:
+    ) -> bool:
         """Codex round-2-impl Blocker 2: atomic gate release. Clear
         gate_nonce AND advance action_index_completed in one BEGIN
         IMMEDIATE transaction so a crash between the two writes can't
@@ -2008,6 +2100,14 @@ class ExecutionEngine:
         expected gate_nonce so two concurrent gate resolutions for
         the same execution can't both advance.
 
+        Spec 4 post-impl Medium 8: returns the bool result from
+        ``_clear_gate_nonce_and_advance``. False indicates the
+        expected nonce no longer matched (the row's gate_nonce
+        diverged from the in-memory execution); in that case the
+        in-memory advance is NOT applied and the caller is expected
+        to reload state. True means the atomic transition
+        succeeded; in-memory state is advanced.
+
         WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 6 (Codex round
         1 High 5): when ``gate_name`` + ``gate_output_payload`` are
         supplied, atomically capture the satisfying event's payload
@@ -2015,7 +2115,7 @@ class ExecutionEngine:
         + the gate release land in the same transaction.
         """
         expected_nonce = execution.gate_nonce
-        await self._run_workflow_txn(
+        updated = await self._run_workflow_txn(
             lambda db: _clear_gate_nonce_and_advance(
                 db, execution.execution_id,
                 step_index=idx, expected_nonce=expected_nonce,
@@ -2024,9 +2124,21 @@ class ExecutionEngine:
                 instance_id=execution.instance_id,
             ),
         )
-        execution.gate_nonce = ""
-        execution.action_index_completed = idx
-        execution.next_step_index = -1
+        if updated:
+            execution.gate_nonce = ""
+            execution.action_index_completed = idx
+            execution.next_step_index = -1
+        else:
+            # Stale-nonce divergence (Spec 4 post-impl Medium 8):
+            # the row's gate_nonce no longer matches what we expected;
+            # another path resolved the gate or aborted the execution.
+            # Do NOT advance the in-memory execution.
+            logger.warning(
+                "WORKFLOW_GATE_RELEASE_STALE_NONCE execution_id=%s "
+                "step=%d expected_nonce=%s — reloading state",
+                execution.execution_id, idx, expected_nonce,
+            )
+        return bool(updated)
 
     async def _clear_gate_nonce(
         self, execution: WorkflowExecution,

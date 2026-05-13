@@ -335,9 +335,9 @@ class TestOutputCapture:
             db, execution.instance_id, execution.execution_id,
         )
         assert step_outs == {}
-        # Gate output wraps the event payload under value.payload
-        # (Decision 6 envelope shape).
-        assert gate_outs["ratification"]["value"]["payload"] == {
+        # Spec 4 post-impl High 4: gate envelope value IS the
+        # event payload directly (no wrapper key).
+        assert gate_outs["ratification"]["value"] == {
             "approved": True, "by": "operator",
         }
         await db.close()
@@ -473,15 +473,17 @@ class TestReferenceResolver:
         assert out == "hi"
 
     def test_gate_namespace_resolves(self):
+        # Spec 4 post-impl High 4: gate envelope value IS the event
+        # payload directly. Reference is {gate.<name>.output.<path>}.
         ctx = self._ctx(gate_outputs={
             "ratify": {
                 "success": True,
-                "value": {"payload": {"approved": True}},
+                "value": {"approved": True},
                 "error": None, "receipt": {},
             }
         })
         out = resolve_references_in_value(
-            "{gate.ratify.output.payload.approved}", ctx,
+            "{gate.ratify.output.approved}", ctx,
         )
         assert out is True
 
@@ -608,13 +610,37 @@ class TestWorkflowValidation:
             validate_workflow(wf)
 
     def test_branch_terminal_target_validated(self):
+        # Forward-only branch graph (no back-edge): step a → branch b →
+        # either step c (main forward) or terminal r1.
         wf = _make_workflow(
             [
                 _make_action("mark_state", id="a", key="x", value=1, scope="instance"),
                 _make_action(
                     "branch", id="b",
                     condition=True,
-                    branch_on_true="a",
+                    branch_on_true="c",
+                    branch_on_false="terminal:rejected:r1",
+                ),
+                _make_action("mark_state", id="c", key="y", value=2, scope="instance"),
+            ],
+            terminal_branches={
+                "rejected": [
+                    _make_action("mark_state", id="r1", key="z", value=3, scope="instance"),
+                ],
+            },
+        )
+        validate_workflow(wf)  # should not raise
+
+    def test_branch_cycle_rejected(self):
+        # Spec 4 post-impl High 5: cycle detection. Branch at step 1
+        # targets step 0 on true (back-edge) → cycle.
+        wf = _make_workflow(
+            [
+                _make_action("mark_state", id="a", key="x", value=1, scope="instance"),
+                _make_action(
+                    "branch", id="b",
+                    condition=True,
+                    branch_on_true="a",  # back-edge → cycle
                     branch_on_false="terminal:rejected:r1",
                 ),
             ],
@@ -624,7 +650,8 @@ class TestWorkflowValidation:
                 ],
             },
         )
-        validate_workflow(wf)  # should not raise
+        with pytest.raises(WorkflowError, match="cycle"):
+            validate_workflow(wf)
 
     def test_reference_to_unknown_step_rejected(self):
         wf = _make_workflow([
@@ -864,9 +891,10 @@ class TestGateOutputCapture:
             gate_outputs=gate_outs,
             mode="parameter",
         )
-        # Pin the reference path semantics from Decision 6.
+        # Spec 4 post-impl High 4: {gate.<name>.output.<path>}
+        # resolves to event_payload[path] directly.
         resolved = resolve_references_in_value(
-            "{gate.ratify.output.payload.approved}", ctx,
+            "{gate.ratify.output.approved}", ctx,
         )
         assert resolved is True
         await db.close()

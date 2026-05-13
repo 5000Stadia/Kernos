@@ -81,6 +81,9 @@ ACTION_OPERATION_CLASS_BY_VERB: dict[str, str] = {
     "write_canvas": "mutate",
     "route_to_agent": "register",
     "post_to_service": "send",
+    # Spec 4 post-impl Medium 6: branch verb explicitly classified
+    # as mutate (control-flow mutation of next_step_index).
+    "branch": "mutate",
     # call_tool resolved by _operation_class_for_call_tool
 }
 
@@ -248,30 +251,42 @@ def _build_action_state_record(
     result: "ActionResult | None" = None,
     error: str = "",
     tool_lookup: ToolOperationClassLookup | None = None,
+    resolved_params: dict | None = None,
 ) -> ActionStateRecord:
     """Construct an ``ActionStateRecord`` for a workflow step.
+
+    Spec 4 post-impl Medium 7: ``resolved_params`` carries the
+    post-reference-resolution parameter dict so the record captures
+    the values actually passed to the verb (NOT the templated
+    descriptor strings). Used for both audit (param_resolved refs)
+    AND tool-id-aware operation_class lookup for call_tool whose
+    tool_id might be a template reference.
 
     Direct mapping:
         action_id           → uuid-prefixed ``act_<hex>``
         surface             → ``"workflow_step"``
         operation           → ``action.action_type``
-        operation_class     → derived (see _operation_class_for_action_type)
+        operation_class     → derived (see _operation_class_for_action_type;
+                              uses resolved_params for call_tool)
         authorization_state → ``"not_required"`` UNIFORMLY (Decision 5;
                               gate state stays on event_stream events)
         execution_state     → caller-provided (``completed`` | ``failed``)
-        receipt_refs        → upstream tool refs + the stable provenance
-                              tag ``workflow:<execution_id>:step:<idx>``
-                              (Decision 1 escape hatch)
+        receipt_refs        → upstream tool refs + stable provenance tag +
+                              ``param_resolved:<path>:<summary>`` refs +
+                              for branch: ``branch_target`` + ``condition_value``
         affected_objects    → IDs from the step's result receipt when present
-        user_visible_summary→ success summary OR the failure error string
-                              (the same string passed to _record_step_failed
-                              per Decision 5 / Codex round 1 Low 7)
+        user_visible_summary→ success summary OR the failure error string;
+                              branch verb gets a goto-specific summary
         risk_level          → derived from operation_class (Decision 5)
         missing_metadata    → True only when call_tool falls back to default
     """
+    # Use resolved_params for the lookup when available (Spec 4
+    # post-impl Medium 7); falls back to descriptor params for
+    # legacy callers.
+    lookup_params = resolved_params if resolved_params is not None else action.parameters
     op_class, missing_metadata = _operation_class_for_action_type(
         action.action_type,
-        action.parameters,
+        lookup_params,
         tool_lookup=tool_lookup,
     )
     risk_level = _risk_level_for_operation_class(op_class)
@@ -289,13 +304,15 @@ def _build_action_state_record(
         #   call_tool         → tool_id, called_at
         #   post_to_service   → service_id, posted_at
         #   notify_user       → delivered_at (value=persisted_id)
+        #   branch            → branched_to, condition_value
         for key in (
             "tool_id", "persisted_id", "canvas_id", "service_id",
             "receipt_id", "id", "delivered_at", "called_at",
             "wrote_at", "posted_at",
+            "branched_to", "condition_value",
         ):
             value = receipt.get(key)
-            if value:
+            if value is not None and value != "":
                 receipt_refs.append(f"{action.action_type}:{key}:{value}")
         # ActionResult.value carries the tool-side primary handle for
         # notify_user (the receipt). Capture if it's hashable/scalar.
@@ -308,6 +325,23 @@ def _build_action_state_record(
             value = receipt.get(key)
             if value:
                 affected_objects.append(str(value))
+    # Spec 4 post-impl Medium 7: resolved parameter audit. For each
+    # parameter that contained a template reference (i.e., the
+    # resolved value differs from the descriptor value), capture
+    # the resolved value as a receipt ref so audit consumers see
+    # what was actually passed to the verb.
+    if resolved_params is not None:
+        for key, descriptor_value in (action.parameters or {}).items():
+            resolved_value = resolved_params.get(key)
+            if resolved_value != descriptor_value:
+                # Truncate value summary for readability.
+                summary_value = (
+                    str(resolved_value)[:64] if resolved_value is not None
+                    else "null"
+                )
+                receipt_refs.append(
+                    f"param_resolved:{key}:{summary_value}"
+                )
     # Decision 1 escape hatch: stable provenance tag so a bare
     # ActionStateRecord surfaced from a workflow path is still
     # routable back to its workflow context.
@@ -316,9 +350,22 @@ def _build_action_state_record(
     )
 
     if execution_state == "completed":
-        summary = (
-            f"workflow step {step_index} ({action.action_type}) completed"
-        )
+        # Spec 4 post-impl Medium 6: branch verb gets a
+        # goto-specific summary so audit shows the routing choice.
+        if action.action_type == "branch" and result is not None:
+            target = result.receipt.get("branched_to", "?") if result.receipt else "?"
+            cond = (
+                result.receipt.get("condition_value", "?")
+                if result.receipt else "?"
+            )
+            summary = (
+                f"branch evaluated condition={cond} → {target} "
+                f"(step {step_index})"
+            )
+        else:
+            summary = (
+                f"workflow step {step_index} ({action.action_type}) completed"
+            )
     elif execution_state == "failed":
         summary = error or "workflow_step_failed"
     else:

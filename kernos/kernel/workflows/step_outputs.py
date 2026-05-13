@@ -226,13 +226,16 @@ async def capture_gate_output(
     event_payload: dict,
 ) -> None:
     """Persist a gate output (the satisfying approval event's
-    payload) under output_kind='gate'. Reference syntax
-    ``{gate.<gate_name>.output.payload.<path>}`` resolves against
-    the wrapping envelope shape.
+    payload) under output_kind='gate'.
+
+    Spec 4 post-impl High 4: the envelope's ``value`` IS the
+    matched event's payload directly (no ``payload`` wrapper key).
+    Reference syntax ``{gate.<gate_name>.output.<path>}`` resolves
+    to ``event_payload[path]``, matching the spec's documented form.
     """
     envelope = {
         "success": True,
-        "value": {"payload": event_payload},
+        "value": event_payload,
         "error": None,
         "receipt": {},
     }
