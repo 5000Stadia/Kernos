@@ -108,6 +108,9 @@ from kernos.kernel.workflows.step_outputs import (
     ensure_workflow_step_outputs_schema,
     load_workflow_outputs,
 )
+from kernos.kernel.workflows.registered_workflows import (
+    ensure_registered_workflows_schema,
+)
 from kernos.kernel.workflows.ledger import WorkflowLedger
 from kernos.kernel.workflows.predicates import evaluate as evaluate_predicate
 from kernos.kernel.workflows.trigger_registry import Trigger, TriggerRegistry
@@ -645,6 +648,10 @@ class ExecutionEngine:
         # on workflow_executions. Idempotent migration; runs every
         # engine start.
         await ensure_workflow_step_outputs_schema(self._db)
+        # WORKFLOW-AUTHORING-PRIMITIVES-V1: registered_workflows
+        # table for the authoring layer's governance + activation-
+        # state machine. Idempotent migration.
+        await ensure_registered_workflows_schema(self._db)
         self._action_sink = WorkflowActionSink(
             self._db,
             pattern_store=pattern_store,
@@ -712,8 +719,24 @@ class ExecutionEngine:
         interleave inside a concurrent ``_run_workflow_txn`` body and
         end up implicitly committed alongside (or rolled back with)
         an unrelated transaction.
+
+        Spec 5 Codex round-1 Blocker 3: dispatch-time activation
+        check. If the workflow is registered via the authoring layer
+        AND its activation_state is not 'active', skip the dispatch
+        silently (log at DEBUG; no execution row created). Workflows
+        NOT registered via the authoring layer (legacy / pre-Spec-5
+        path) dispatch unconditionally per existing behavior.
         """
         if self._db is None:
+            return
+        # Spec 5 activation gate (Codex Blocker 3): if the workflow
+        # is registered via authoring, only dispatch when active.
+        if await self._is_authoring_workflow_inactive(trigger.workflow_id):
+            logger.debug(
+                "WORKFLOW_DISPATCH_SKIPPED workflow_id=%s reason=not_active "
+                "trigger_id=%s event_id=%s",
+                trigger.workflow_id, trigger.trigger_id, event.event_id,
+            )
             return
         execution = WorkflowExecution(
             execution_id=str(uuid.uuid4()),
@@ -1777,6 +1800,47 @@ class ExecutionEngine:
                         )
                         continue
                     raise
+
+    async def _is_authoring_workflow_inactive(
+        self, workflow_id: str,
+    ) -> bool:
+        """Spec 5 Codex Blocker 3: dispatch-time activation check.
+
+        Returns True iff the workflow is registered via the
+        authoring layer (Spec 5) AND its activation_state is NOT
+        'active'.
+
+        Spec 5 post-impl Codex Medium 7: distinguish "no row"
+        (legacy / non-authoring workflow; dispatch unconditionally)
+        from lookup error (uncertainty; fail-closed = skip
+        dispatch). Returns True on exception so a corrupted /
+        unreachable registered_workflows table doesn't let workflows
+        dispatch when their activation state is unknown.
+        """
+        if self._db is None:
+            # Defensive: no DB available; skip dispatch.
+            return True
+        try:
+            async with self._db.execute(
+                "SELECT activation_state FROM registered_workflows "
+                "WHERE workflow_id = ? LIMIT 1",
+                (workflow_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        except Exception as exc:
+            # Fail-closed (Codex Medium 7): lookup failure means
+            # we don't know the workflow's authoring state. Safer
+            # to skip dispatch than to fire a workflow that may
+            # have been deactivated.
+            logger.warning(
+                "WORKFLOW_ACTIVATION_LOOKUP_FAILED workflow_id=%s error=%s",
+                workflow_id, exc,
+            )
+            return True
+        if row is None:
+            # Legacy / non-authoring workflow; dispatch unconditionally.
+            return False
+        return row["activation_state"] != "active"
 
     async def _run_workflow_write(
         self,

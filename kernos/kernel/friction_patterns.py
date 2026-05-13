@@ -507,6 +507,25 @@ class FrictionPatternStore:
         await self._db.execute(_FRICTION_PATTERN_OCCURRENCE_IDX_PATTERN)
         await self._db.execute(_FRICTION_PATTERN_OCCURRENCE_IDX_WINDOW)
         await self._db.execute(_FRICTION_PATTERN_OCCURRENCE_IDX_REPORT)
+        # WORKFLOW-AUTHORING-PRIMITIVES-V1 (Spec 5) Decision 8 +
+        # Codex round-1 Medium 11: workflow_resolvable column on
+        # friction_pattern. Architect curates the tag set; the
+        # disposition layer's recurrence subscriber emits a soft
+        # reflection only for tagged patterns. Idempotent ALTER
+        # pattern (mirrors Spec 3's gate_nonce migration).
+        async with self._db.execute(
+            "SELECT name FROM pragma_table_info('friction_pattern')"
+        ) as cur:
+            cols = {row[0] for row in await cur.fetchall()}
+        if "workflow_resolvable" not in cols:
+            try:
+                await self._db.execute(
+                    "ALTER TABLE friction_pattern "
+                    "ADD COLUMN workflow_resolvable INTEGER NOT NULL DEFAULT 0"
+                )
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     async def ensure_schema(self, data_dir: str) -> None:
         """Alias for ``start``. Mirrors the API name the spec uses."""
