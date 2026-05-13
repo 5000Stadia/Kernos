@@ -221,10 +221,28 @@ def _matches_substrate_state_key(key: str) -> bool:
     )
 
 
+def _is_templated(value: object) -> bool:
+    """Spec 5 post-impl Codex Blocker 3: detect template syntax in
+    substrate-sensitive fields. Conservative-by-default: any value
+    containing reference braces classifies as substrate-tier even
+    though we can't statically resolve the final substrate target.
+    """
+    return isinstance(value, str) and "{" in value and "}" in value
+
+
 def classify_governance_tier(wf: "Workflow") -> str:
     """Walk action_sequence + terminal_branches; return computed
     governance tier. substrate_tier if ANY action targets a
-    substrate-modification surface; composition_tier otherwise.
+    substrate-modification surface OR if a substrate-sensitive
+    selector field is templated (Codex Blocker 3 fold).
+
+    The templated-selector rule closes a real bypass: a Kernos-
+    authored workflow with ``tool_id: '{idea_payload.tool_id}'``
+    would have classified as composition because the literal string
+    isn't in SUBSTRATE_TOOL_IDS, but at runtime the resolver could
+    substitute ``activate_workflow``. Conservative-by-default forces
+    any templated substrate-sensitive field to substrate_tier so
+    architect ratification is required.
     """
     all_actions = list(wf.action_sequence)
     for branch_actions in wf.terminal_branches.values():
@@ -233,22 +251,33 @@ def classify_governance_tier(wf: "Workflow") -> str:
         params = action.parameters or {}
         if action.action_type == "call_tool":
             tool_id = params.get("tool_id") or params.get("tool_name") or ""
+            # Templated selector → conservative substrate (Codex B3).
+            if _is_templated(tool_id):
+                return TIER_SUBSTRATE
             if tool_id in SUBSTRATE_TOOL_IDS:
                 return TIER_SUBSTRATE
         elif action.action_type == "mark_state":
             key = params.get("key", "")
+            if _is_templated(key):
+                return TIER_SUBSTRATE
             if _matches_substrate_state_key(key):
                 return TIER_SUBSTRATE
         elif action.action_type == "append_to_ledger":
             ledger = params.get("ledger", "")
+            if _is_templated(ledger):
+                return TIER_SUBSTRATE
             if ledger in SUBSTRATE_LEDGER_NAMES:
                 return TIER_SUBSTRATE
         elif action.action_type == "post_to_service":
             service_id = params.get("service_id", "")
+            if _is_templated(service_id):
+                return TIER_SUBSTRATE
             if service_id in SUBSTRATE_SERVICE_IDS:
                 return TIER_SUBSTRATE
         elif action.action_type == "write_canvas":
             canvas_id = params.get("canvas_id", "")
+            if _is_templated(canvas_id):
+                return TIER_SUBSTRATE
             if canvas_id in SUBSTRATE_CANVAS_IDS:
                 return TIER_SUBSTRATE
         # notify_user, route_to_agent, branch: never substrate.
@@ -349,6 +378,46 @@ class AuthoringResult:
     extra: dict = field(default_factory=dict)
 
 
+def _emit_record_after(operation: str):
+    """Decorator: after the wrapped authoring function returns,
+    emit an ActionStateRecord via event_stream per Spec 5 post-impl
+    Codex High 5. Captures both success and failure outcomes.
+
+    The emitter (_emit_authoring_record) is defined below; the
+    decorator looks it up at call time (not decoration time) so
+    forward reference works.
+    """
+    import functools
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            ctx: AuthoringContext | None = (
+                kwargs.get("ctx") if "ctx" in kwargs
+                else (args[1] if len(args) > 1 else None)
+            )
+            instance_id = ""
+            descriptor = kwargs.get("descriptor")
+            if descriptor is None and len(args) > 2:
+                descriptor = args[2]
+            if isinstance(descriptor, dict):
+                instance_id = descriptor.get("instance_id", "") or ""
+            result = await fn(*args, **kwargs)
+            if ctx is not None:
+                await _emit_authoring_record(
+                    operation=operation,
+                    actor=ctx,
+                    workflow_id=result.workflow_id,
+                    trigger_id=result.trigger_id,
+                    result=result,
+                    instance_id=instance_id,
+                )
+            return result
+        return wrapper
+    return decorator
+
+
+@_emit_record_after("register_workflow")
 async def register_workflow(
     engine: "ExecutionEngine",
     ctx: AuthoringContext,
@@ -423,34 +492,35 @@ async def register_workflow(
     # Spec 5 governance-tier classification.
     computed_tier = classify_governance_tier(wf)
     is_architect = _is_architect(ctx)
-    # Kernos cannot claim substrate_tier (Codex High 4).
+    # Spec 5 post-impl Codex Medium 9: aggregate governance errors
+    # so a Kernos-issued request with BOTH a substrate-tier claim
+    # AND a substrate-tier descriptor surfaces both findings in one
+    # response (instead of one error per attempt).
+    governance_errors: list[ValidationError] = []
     if not is_architect and governance_tier == TIER_SUBSTRATE:
-        return AuthoringResult(
-            success=False,
-            errors=[ValidationError(
-                field_path="governance_tier",
-                category=CAT_GOVERNANCE_CLAIM_VIOLATION,
-                message=(
-                    f"actor_kind={ctx.actor_kind} cannot claim "
-                    f"governance_tier=substrate_tier; only architect may"
-                ),
-            )],
-        )
-    # Kernos cannot register substrate_tier workflows (governance
-    # boundary; substrate-level enforcement).
+        governance_errors.append(ValidationError(
+            field_path="governance_tier",
+            category=CAT_GOVERNANCE_CLAIM_VIOLATION,
+            message=(
+                f"actor_kind={ctx.actor_kind} cannot claim "
+                f"governance_tier=substrate_tier; only architect may"
+            ),
+        ))
     if not is_architect and computed_tier == TIER_SUBSTRATE:
+        governance_errors.append(ValidationError(
+            field_path="action_sequence",
+            category=CAT_GOVERNANCE_TIER_VIOLATION,
+            message=(
+                "workflow's computed governance tier is "
+                "substrate_tier (substrate-modifying action or "
+                "templated substrate-sensitive selector detected); "
+                "Kernos cannot author substrate_tier workflows"
+            ),
+        ))
+    if governance_errors:
         return AuthoringResult(
             success=False,
-            errors=[ValidationError(
-                field_path="action_sequence",
-                category=CAT_GOVERNANCE_TIER_VIOLATION,
-                message=(
-                    "workflow's computed governance tier is "
-                    "substrate_tier (substrate-modifying action "
-                    "detected); Kernos cannot author substrate_tier "
-                    "workflows"
-                ),
-            )],
+            errors=governance_errors,
         )
     # Effective tier: architect can over-classify (composition →
     # substrate) but Kernos cannot. Computed tier overrides
@@ -534,6 +604,7 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@_emit_record_after("register_trigger")
 async def register_trigger(
     engine: "ExecutionEngine",
     ctx: AuthoringContext,
@@ -543,20 +614,29 @@ async def register_trigger(
 ) -> AuthoringResult:
     """Bind a trigger to a registered workflow.
 
-    Decision 2 v2: REQUIRES workflow to be in
-    ``registered_not_activated`` state (Codex Blocker 1). Active or
+    Spec 5 v2 Decision 2 / Codex round-1 Blocker 1: REQUIRES workflow
+    to be in ``registered_not_activated`` state. Active or
     deactivated workflows reject trigger registration; pattern is
     deactivate → register triggers → re-activate.
+
+    Spec 5 post-impl Codex Blocker 2: the activation-state read +
+    trigger row INSERT happen in ONE transaction via
+    _run_workflow_txn so an architect activation that commits
+    between the two steps can't slip a trigger past ratification.
+    The TriggerRegistry cache is updated after commit via a
+    cache-only method on the registry; cache lag is recovered by
+    the next match cycle's read.
     """
     import uuid
 
     assert engine._db is not None
     assert engine._trigger_registry is not None
-    # Look up workflow state.
-    registered = await get_registered_workflow(
+    # Pre-flight: workflow registered? (cheap read; final state
+    # check happens inside the atomic txn).
+    pre_registered = await get_registered_workflow(
         engine._db, workflow_id=workflow_id,
     )
-    if registered is None:
+    if pre_registered is None:
         return AuthoringResult(
             success=False,
             errors=[ValidationError(
@@ -565,21 +645,7 @@ async def register_trigger(
                 message=f"workflow_id {workflow_id!r} is not registered",
             )],
         )
-    if registered.activation_state != STATE_REGISTERED:
-        return AuthoringResult(
-            success=False,
-            errors=[ValidationError(
-                field_path="workflow_id",
-                category=CAT_INVALID_ACTIVATION_STATE,
-                message=(
-                    f"workflow {workflow_id} is in state "
-                    f"{registered.activation_state}; operation "
-                    f"register_trigger requires state(s) "
-                    f"{[STATE_REGISTERED]}"
-                ),
-            )],
-        )
-    # Validate predicate via Spec 4's evaluator.
+    # Validate predicate before any I/O.
     from kernos.kernel.workflows.predicates import (
         PredicateError, validate as validate_predicate,
     )
@@ -594,18 +660,53 @@ async def register_trigger(
                 message=f"predicate at predicate failed validation: {exc}",
             )],
         )
-    # Mint trigger_id; register with the existing TriggerRegistry.
+    # Atomic boundary: re-read state inside the txn; INSERT trigger
+    # only if state is STATE_REGISTERED. Loser of the race vs
+    # concurrent activation sees the post-activation state and bails
+    # out without inserting.
     trigger_id = f"trig_{uuid.uuid4().hex}"
-    try:
-        from kernos.kernel.workflows.trigger_registry import Trigger
-        trigger = Trigger(
-            trigger_id=trigger_id,
-            workflow_id=workflow_id,
-            instance_id=registered.instance_id,
-            event_type=event_type,
-            predicate=predicate,
+    from kernos.kernel.workflows.trigger_registry import Trigger
+    trigger = Trigger(
+        trigger_id=trigger_id,
+        workflow_id=workflow_id,
+        instance_id=pre_registered.instance_id,
+        event_type=event_type,
+        predicate=predicate,
+    )
+    if not trigger.created_at:
+        from datetime import datetime, timezone
+        trigger.created_at = datetime.now(timezone.utc).isoformat()
+
+    # Result container so the txn body can communicate back.
+    _result: dict = {"inserted": False, "final_state": ""}
+
+    async def _body(db: aiosqlite.Connection) -> None:
+        # Re-read activation state inside the serialized transaction.
+        async with db.execute(
+            "SELECT activation_state FROM registered_workflows "
+            "WHERE workflow_id = ? LIMIT 1",
+            (workflow_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        current_state = row["activation_state"] if row is not None else ""
+        _result["final_state"] = current_state
+        if current_state != STATE_REGISTERED:
+            return  # bail; not inserted
+        # Insert trigger row directly via the engine's connection
+        # (shared instance.db). The TriggerRegistry's own connection
+        # cache is updated post-commit via _cache_insert below.
+        await db.execute(
+            "INSERT INTO triggers ("
+            " trigger_id, workflow_id, instance_id, event_type, predicate,"
+            " predicate_source, description, actor_filter, correlation_filter,"
+            " idempotency_key_template, owner, version, status, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            trigger.to_row(),
         )
-        await engine._trigger_registry.register_trigger(trigger)
+        _result["inserted"] = True
+
+    try:
+        await engine._run_workflow_txn(_body)
     except Exception as exc:
         return AuthoringResult(
             success=False,
@@ -615,6 +716,33 @@ async def register_trigger(
                 message=f"trigger registration failed: {exc}",
             )],
         )
+    if not _result["inserted"]:
+        return AuthoringResult(
+            success=False,
+            errors=[ValidationError(
+                field_path="workflow_id",
+                category=CAT_INVALID_ACTIVATION_STATE,
+                message=(
+                    f"workflow {workflow_id} is in state "
+                    f"{_result['final_state']}; operation "
+                    f"register_trigger requires state(s) "
+                    f"{[STATE_REGISTERED]}"
+                ),
+            )],
+        )
+    # Update TriggerRegistry's in-memory cache after commit. Lag is
+    # acceptable: cache miss falls through to the next match cycle's
+    # SQL read (the registry's match logic reads from the cache OR
+    # falls back to DB).
+    try:
+        async with engine._trigger_registry._cache_lock:
+            engine._trigger_registry._cache_insert(trigger)
+    except Exception as exc:
+        # Cache update failure is non-fatal; the trigger is durable.
+        logger.warning(
+            "TRIGGER_CACHE_UPDATE_FAILED trigger_id=%s error=%s",
+            trigger_id, exc,
+        )
     return AuthoringResult(
         success=True,
         workflow_id=workflow_id,
@@ -622,6 +750,7 @@ async def register_trigger(
     )
 
 
+@_emit_record_after("activate_workflow")
 async def activate_workflow(
     engine: "ExecutionEngine",
     ctx: AuthoringContext,
@@ -665,15 +794,20 @@ async def activate_workflow(
                 message=f"workflow_id {workflow_id!r} is not registered",
             )],
         )
-    # Idempotent on already-active.
+    # Idempotent on already-active (pre-CAS check; race-safe variant
+    # below catches the case where another caller's CAS commits
+    # between this read and our own attempt).
     if registered.activation_state == STATE_ACTIVE:
         return AuthoringResult(
             success=True,
             workflow_id=workflow_id,
             extra={"already_active": True},
         )
-    # Re-run validation (Q2: substrate may have changed since
-    # registration; architect ratification IS the safety boundary).
+    # Re-run validation + governance classification (Q2: substrate
+    # may have changed since registration; architect ratification IS
+    # the safety boundary). Spec 5 post-impl Codex High 4: also
+    # re-run classify_governance_tier and ensure the tier didn't
+    # change to something Kernos isn't allowed to author.
     wf = await engine._workflow_registry.get_workflow(workflow_id)
     if wf is None:
         return AuthoringResult(
@@ -695,11 +829,45 @@ async def activate_workflow(
             success=False,
             errors=[_workflow_error_to_validation_error(exc)],
         )
-    # CAS transition (Q3).
+    # Spec 5 post-impl Codex High 4: re-run governance classifier.
+    # If the classifier now sees substrate-modification surfaces that
+    # weren't present at registration (substrate-tool-id list grew;
+    # workflow's referenced tools became substrate), AND the original
+    # registration was Kernos-issued composition, reject activation.
+    # Architect can re-author with substrate_tier intent if needed.
+    recomputed_tier = classify_governance_tier(wf)
+    if (
+        recomputed_tier == TIER_SUBSTRATE
+        and registered.governance_tier == TIER_COMPOSITION
+        and not registered.architect_authored
+    ):
+        return AuthoringResult(
+            success=False,
+            errors=[ValidationError(
+                field_path="action_sequence",
+                category=CAT_GOVERNANCE_TIER_VIOLATION,
+                message=(
+                    f"workflow {workflow_id}'s computed governance tier "
+                    f"has drifted to substrate_tier since Kernos "
+                    f"registered it as composition_tier (substrate-tool "
+                    f"rules may have changed). Re-authoring by architect "
+                    f"required."
+                ),
+            )],
+        )
+    # CAS transition (Q3). Spec 5 post-impl Codex High 6: if CAS
+    # fails because another caller already moved the row to active,
+    # treat as idempotent success (already_active=True).
     async def _body(db: aiosqlite.Connection):
         return await transition_to_active(db, workflow_id=workflow_id)
     updated, current_state = await engine._run_workflow_txn(_body)
     if not updated:
+        if current_state == STATE_ACTIVE:
+            return AuthoringResult(
+                success=True,
+                workflow_id=workflow_id,
+                extra={"already_active": True},
+            )
         return AuthoringResult(
             success=False,
             errors=[ValidationError(
@@ -715,6 +883,7 @@ async def activate_workflow(
     return AuthoringResult(success=True, workflow_id=workflow_id)
 
 
+@_emit_record_after("deactivate_workflow")
 async def deactivate_workflow(
     engine: "ExecutionEngine",
     ctx: AuthoringContext,
@@ -763,6 +932,13 @@ async def deactivate_workflow(
         )
     updated, current_state = await engine._run_workflow_txn(_body)
     if not updated:
+        # Spec 5 post-impl Codex High 6: idempotent on race.
+        if current_state == STATE_DEACTIVATED:
+            return AuthoringResult(
+                success=True,
+                workflow_id=workflow_id,
+                extra={"already_deactivated": True},
+            )
         return AuthoringResult(
             success=False,
             errors=[ValidationError(
@@ -882,6 +1058,328 @@ naturally once the pattern stabilizes.
 """
 
 
+# ---------------------------------------------------------------------------
+# Tool-dispatch handlers (Spec 5 post-impl Codex Blocker 1)
+# ---------------------------------------------------------------------------
+#
+# These handlers are the shape reasoning.py's tool-dispatch elif chain
+# expects: take per-turn context (instance_id, member_id) + tool_input
+# dict, return (summary: str, record: ActionStateRecord). They wrap the
+# four authoring functions with AuthoringContext construction + the
+# summary/record translation.
+#
+# NOTE on production wiring: the actual reasoning.py registration —
+# adding "register_workflow" etc. to _KERNEL_TOOLS, the elif dispatch
+# block, and the tool schemas — is Spec 6's production-wiring step 3
+# per the architect's Spec 6 draft (which explicitly says "CC's
+# production wiring for Spec 2 (bridge tools) and Spec 5 (authoring
+# tools) was deferred to consuming spec. Spec 6 is the consumer.").
+#
+# These dispatch handlers exist NOW so Spec 6's wiring batch only
+# needs to add the elif-block call sites + tool-name set + tool
+# schemas; the authoring-side implementation is complete and tested.
+
+
+KERNEL_AUTHORING_TOOL_NAMES: frozenset[str] = frozenset({
+    "register_workflow", "register_trigger",
+    "activate_workflow", "deactivate_workflow",
+})
+
+
+async def handle_register_workflow_tool(
+    *,
+    engine: "ExecutionEngine",
+    instance_id: str,
+    member_id: str,
+    descriptor: dict,
+    governance_tier: str,
+) -> tuple[str, "ActionStateRecord"]:
+    """Tool-dispatch shape for register_workflow.
+
+    Constructs AuthoringContext from the per-turn member_id;
+    derives actor_kind via the env-var-based discriminator;
+    calls the authoring function; returns (summary, record).
+    """
+    ctx = AuthoringContext(
+        actor_id=member_id, actor_kind=derive_actor_kind(member_id),
+    )
+    result = await register_workflow(engine, ctx, descriptor, governance_tier)
+    summary = _summary_for_authoring_result(
+        operation="register_workflow", result=result,
+    )
+    record = _build_authoring_action_state_record(
+        operation="register_workflow", actor=ctx,
+        workflow_id=result.workflow_id,
+        execution_state="completed" if result.success else "failed",
+        error=(
+            "; ".join(e.message for e in result.errors[:3])
+            if result.errors else ""
+        ),
+        errors=result.errors,
+    )
+    return summary, record
+
+
+async def handle_register_trigger_tool(
+    *,
+    engine: "ExecutionEngine",
+    instance_id: str,
+    member_id: str,
+    workflow_id: str,
+    event_type: str,
+    predicate: dict,
+) -> tuple[str, "ActionStateRecord"]:
+    """Tool-dispatch shape for register_trigger."""
+    ctx = AuthoringContext(
+        actor_id=member_id, actor_kind=derive_actor_kind(member_id),
+    )
+    result = await register_trigger(
+        engine, ctx, workflow_id, event_type, predicate,
+    )
+    summary = _summary_for_authoring_result(
+        operation="register_trigger", result=result,
+    )
+    record = _build_authoring_action_state_record(
+        operation="register_trigger", actor=ctx,
+        workflow_id=result.workflow_id,
+        trigger_id=result.trigger_id,
+        execution_state="completed" if result.success else "failed",
+        error=(
+            "; ".join(e.message for e in result.errors[:3])
+            if result.errors else ""
+        ),
+        errors=result.errors,
+    )
+    return summary, record
+
+
+async def handle_activate_workflow_tool(
+    *,
+    engine: "ExecutionEngine",
+    instance_id: str,
+    member_id: str,
+    workflow_id: str,
+) -> tuple[str, "ActionStateRecord"]:
+    """Tool-dispatch shape for activate_workflow."""
+    ctx = AuthoringContext(
+        actor_id=member_id, actor_kind=derive_actor_kind(member_id),
+    )
+    result = await activate_workflow(engine, ctx, workflow_id)
+    summary = _summary_for_authoring_result(
+        operation="activate_workflow", result=result,
+    )
+    record = _build_authoring_action_state_record(
+        operation="activate_workflow", actor=ctx,
+        workflow_id=result.workflow_id,
+        execution_state="completed" if result.success else "failed",
+        error=(
+            "; ".join(e.message for e in result.errors[:3])
+            if result.errors else ""
+        ),
+        errors=result.errors,
+    )
+    return summary, record
+
+
+async def handle_deactivate_workflow_tool(
+    *,
+    engine: "ExecutionEngine",
+    instance_id: str,
+    member_id: str,
+    workflow_id: str,
+    reason: str = "",
+) -> tuple[str, "ActionStateRecord"]:
+    """Tool-dispatch shape for deactivate_workflow."""
+    ctx = AuthoringContext(
+        actor_id=member_id, actor_kind=derive_actor_kind(member_id),
+    )
+    result = await deactivate_workflow(engine, ctx, workflow_id, reason=reason)
+    summary = _summary_for_authoring_result(
+        operation="deactivate_workflow", result=result,
+    )
+    record = _build_authoring_action_state_record(
+        operation="deactivate_workflow", actor=ctx,
+        workflow_id=result.workflow_id,
+        execution_state="completed" if result.success else "failed",
+        error=(
+            "; ".join(e.message for e in result.errors[:3])
+            if result.errors else ""
+        ),
+        errors=result.errors,
+    )
+    return summary, record
+
+
+def _summary_for_authoring_result(
+    *, operation: str, result: AuthoringResult,
+) -> str:
+    """Human-readable summary string for the tool surface."""
+    if result.success:
+        if result.extra.get("already_active"):
+            return (
+                f"{operation} succeeded: workflow {result.workflow_id} "
+                f"already active"
+            )
+        if result.extra.get("already_deactivated"):
+            return (
+                f"{operation} succeeded: workflow {result.workflow_id} "
+                f"already deactivated"
+            )
+        parts = [f"{operation} succeeded"]
+        if result.workflow_id:
+            parts.append(f"workflow_id={result.workflow_id}")
+        if result.trigger_id:
+            parts.append(f"trigger_id={result.trigger_id}")
+        return ", ".join(parts)
+    # Failure: surface the first few categories.
+    err_descriptions = [
+        f"{err.category}: {err.message}" for err in result.errors[:3]
+    ]
+    return f"{operation} failed: " + "; ".join(err_descriptions)
+
+
+async def handle_friction_pattern_recurrence(
+    db: aiosqlite.Connection,
+    event_payload: dict,
+    *,
+    emit_event=None,
+) -> bool:
+    """Spec 5 Decision 8 / post-impl Codex Medium 8: subscriber for
+    friction.pattern_recurrence events.
+
+    Reads the pattern's ``workflow_resolvable`` flag from
+    friction_pattern table; if 1, emits a soft-prompted reflection
+    via event_stream so Kernos's awareness layer can surface it.
+
+    The recurrence event payload key is ``resolved_pattern_id``
+    (Spec 1's actual emit shape; the spec-body's reference to
+    ``pattern_id`` was the spec-side name and is normalized here).
+
+    Returns True iff a soft-prompt event was emitted (the pattern
+    is tagged workflow_resolvable and the lookup succeeded).
+    """
+    from kernos.kernel import event_stream
+
+    if emit_event is None:
+        emit_event = event_stream.emit
+    pattern_id = (
+        event_payload.get("resolved_pattern_id")
+        or event_payload.get("pattern_id")
+        or ""
+    )
+    instance_id = event_payload.get("instance_id", "") or ""
+    if not pattern_id or not instance_id:
+        return False
+    try:
+        async with db.execute(
+            "SELECT workflow_resolvable, description, signal_type_keys "
+            "FROM friction_pattern WHERE instance_id = ? AND pattern_id = ? "
+            "LIMIT 1",
+            (instance_id, pattern_id),
+        ) as cur:
+            row = await cur.fetchone()
+    except Exception as exc:
+        logger.debug(
+            "FRICTION_RECURRENCE_SUBSCRIBER_LOOKUP_FAILED "
+            "pattern_id=%s error=%s", pattern_id, exc,
+        )
+        return False
+    if row is None:
+        return False
+    try:
+        is_workflow_resolvable = bool(row["workflow_resolvable"])
+    except (KeyError, IndexError):
+        # Pre-Spec-5 friction_pattern rows lack the column; default
+        # to False (no soft prompt) until architect curates the tag.
+        is_workflow_resolvable = False
+    if not is_workflow_resolvable:
+        return False
+    # Emit the soft-prompted reflection. Kernos's awareness layer
+    # consumes this event_type (full rendering wiring is Spec 6's
+    # production batch).
+    try:
+        await emit_event(
+            instance_id,
+            "workflow_authoring.soft_prompt_workflow_resolvable",
+            {
+                "pattern_id": pattern_id,
+                "description": row["description"] if row else "",
+                "reflection": (
+                    f"Pattern {pattern_id} recurred. Consider authoring a "
+                    f"workflow to handle this autonomously. Reference the "
+                    f"pattern_id in your descriptor's metadata."
+                ),
+            },
+        )
+        return True
+    except Exception as exc:
+        logger.debug(
+            "FRICTION_RECURRENCE_SUBSCRIBER_EMIT_FAILED "
+            "pattern_id=%s error=%s", pattern_id, exc,
+        )
+        return False
+
+
+async def _emit_authoring_record(
+    *,
+    operation: str,
+    actor: AuthoringContext,
+    workflow_id: str,
+    trigger_id: str = "",
+    result: AuthoringResult,
+    instance_id: str = "",
+) -> None:
+    """Spec 5 post-impl Codex High 5: emit an ActionStateRecord for
+    each authoring operation via event_stream so the audit trail is
+    durable.
+
+    Event shape:
+      event_type = 'workflow_authoring.action_recorded'
+      payload   = the full ActionStateRecord serialized as dict
+    """
+    from kernos.kernel import event_stream
+    record = _build_authoring_action_state_record(
+        operation=operation,
+        actor=actor,
+        workflow_id=workflow_id,
+        trigger_id=trigger_id,
+        execution_state="completed" if result.success else "failed",
+        error=(
+            "; ".join(e.message for e in result.errors[:3])
+            if result.errors else ""
+        ),
+        errors=result.errors,
+    )
+    payload = {
+        "action_id": record.action_id,
+        "surface": record.surface,
+        "operation": record.operation,
+        "operation_class": record.operation_class,
+        "authorization_state": record.authorization_state,
+        "execution_state": record.execution_state,
+        "receipt_refs": list(record.receipt_refs),
+        "affected_objects": list(record.affected_objects),
+        "user_visible_summary": record.user_visible_summary,
+        "risk_level": record.risk_level,
+        "missing_metadata": record.missing_metadata,
+        "actor_id": actor.actor_id,
+        "actor_kind": actor.actor_kind,
+    }
+    try:
+        await event_stream.emit(
+            instance_id or "system",
+            "workflow_authoring.action_recorded",
+            payload,
+            member_id=actor.actor_id or None,
+        )
+    except Exception as exc:
+        logger.debug(
+            "WORKFLOW_AUTHORING_RECORD_EMIT_FAILED operation=%s "
+            "workflow_id=%s error=%s",
+            operation, workflow_id, exc,
+        )
+
+
 __all__ = [
     "ACTOR_ARCHITECT",
     "ACTOR_KERNOS",
@@ -917,6 +1415,12 @@ __all__ = [
     "classify_governance_tier",
     "deactivate_workflow",
     "derive_actor_kind",
+    "handle_activate_workflow_tool",
+    "handle_deactivate_workflow_tool",
+    "handle_friction_pattern_recurrence",
+    "handle_register_trigger_tool",
+    "handle_register_workflow_tool",
+    "KERNEL_AUTHORING_TOOL_NAMES",
     "register_trigger",
     "register_workflow",
 ]

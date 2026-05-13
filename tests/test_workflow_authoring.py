@@ -782,3 +782,439 @@ class TestActorKindDerivation:
             "register_workflow", "register_trigger",
             "activate_workflow", "deactivate_workflow",
         }
+
+
+# ===========================================================================
+# Spec 5 post-impl Codex round folds
+# ===========================================================================
+
+
+class TestPostImplFolds:
+    """Pins Spec 5 post-impl Codex round 1 fixes (9 findings)."""
+
+    # --- B3: dynamic substrate target detection ---
+
+    def test_classifier_rejects_templated_tool_id(self, architect_env):
+        # Spec 5 post-impl Codex Blocker 3: templated substrate-
+        # sensitive selector classifies as substrate_tier.
+        from kernos.kernel.workflows.descriptor_parser import _build_workflow
+        wf = _build_workflow(_descriptor(
+            action_type="call_tool",
+            params={"tool_id": "{idea_payload.tool_id}", "args": {}},
+        ))
+        validate_workflow(wf)
+        assert classify_governance_tier(wf) == TIER_SUBSTRATE
+
+    def test_classifier_rejects_templated_mark_state_key(self, architect_env):
+        from kernos.kernel.workflows.descriptor_parser import _build_workflow
+        wf = _build_workflow(_descriptor(
+            action_type="mark_state",
+            params={"key": "{idea_payload.target_key}",
+                    "value": 1, "scope": "instance"},
+        ))
+        validate_workflow(wf)
+        assert classify_governance_tier(wf) == TIER_SUBSTRATE
+
+    def test_classifier_rejects_templated_ledger(self, architect_env):
+        from kernos.kernel.workflows.descriptor_parser import _build_workflow
+        wf = _build_workflow(_descriptor(
+            action_type="append_to_ledger",
+            params={"ledger": "{idea_payload.ledger}", "entry": {}},
+        ))
+        validate_workflow(wf)
+        assert classify_governance_tier(wf) == TIER_SUBSTRATE
+
+    async def test_kernos_cannot_register_templated_tool_id(
+        self, stack, architect_env,
+    ):
+        # Kernos issues a workflow with templated tool_id; classifier
+        # promotes to substrate; rejected.
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(
+                workflow_id="wf-templated",
+                action_type="call_tool",
+                params={"tool_id": "{idea_payload.tool_id}", "args": {}},
+            ),
+            TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert any(
+            err.category == "governance_tier_violation"
+            for err in result.errors
+        )
+
+    # --- B2: race-safe register_trigger ---
+
+    async def test_register_trigger_inside_atomic_txn(
+        self, stack, architect_env,
+    ):
+        # Confirm register_trigger inserts via the engine's
+        # transaction (queryable on engine._db). Race-coverage is a
+        # property test; this one pins the atomic-insert path.
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(workflow_id="wf-race-trig"),
+            TIER_COMPOSITION,
+        )
+        assert reg.success
+        trig = await register_trigger(
+            stack["engine"], _kernos_ctx(), "wf-race-trig",
+            event_type="cc.batch.report",
+            predicate={"op": "exists", "path": "event_id"},
+        )
+        assert trig.success
+        async with stack["engine"]._db.execute(
+            "SELECT trigger_id FROM triggers WHERE workflow_id = ?",
+            ("wf-race-trig",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["trigger_id"] == trig.trigger_id
+
+    # --- H4: activate re-runs governance classifier ---
+
+    async def test_activation_rejects_tier_drift(
+        self, stack, architect_env, monkeypatch,
+    ):
+        # Kernos registers a composition workflow. Then we mutate
+        # SUBSTRATE_TOOL_IDS to include a tool the workflow uses,
+        # simulating a substrate-rule change since registration.
+        # Activation must detect the drift and reject.
+        from kernos.kernel.workflows import authoring as auth_mod
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(
+                workflow_id="wf-tier-drift",
+                action_type="call_tool",
+                params={"tool_id": "future_tool", "args": {}},
+            ),
+            TIER_COMPOSITION,
+        )
+        assert reg.success
+        # Simulate the substrate-tool-id list growing.
+        new_ids = frozenset(auth_mod.SUBSTRATE_TOOL_IDS | {"future_tool"})
+        monkeypatch.setattr(auth_mod, "SUBSTRATE_TOOL_IDS", new_ids)
+        # Architect activation re-runs classifier; sees substrate
+        # tier; rejects because the row was registered as composition
+        # by Kernos.
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-tier-drift",
+        )
+        assert result.success is False
+        assert any(
+            err.category == "governance_tier_violation"
+            for err in result.errors
+        )
+
+    # --- H5: ActionStateRecord emission ---
+
+    async def test_register_workflow_emits_action_state_record(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel import event_stream as es
+        captured = []
+        original_emit = es.emit
+
+        async def capture_emit(*args, **kwargs):
+            event_type = args[1] if len(args) > 1 else kwargs.get("event_type")
+            if event_type == "workflow_authoring.action_recorded":
+                captured.append({
+                    "instance_id": args[0] if args else "",
+                    "event_type": event_type,
+                    "payload": args[2] if len(args) > 2 else kwargs.get("payload"),
+                })
+            return await original_emit(*args, **kwargs)
+        es.emit = capture_emit
+        try:
+            await register_workflow(
+                stack["engine"], _kernos_ctx(),
+                _descriptor(workflow_id="wf-emits"),
+                TIER_COMPOSITION,
+            )
+        finally:
+            es.emit = original_emit
+        assert len(captured) == 1
+        payload = captured[0]["payload"]
+        assert payload["operation"] == "register_workflow"
+        assert payload["execution_state"] == "completed"
+        assert payload["operation_class"] == "manage"
+        assert payload["risk_level"] == "medium"
+
+    async def test_activate_workflow_emits_high_risk_record(
+        self, stack, architect_env,
+    ):
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(workflow_id="wf-emit-high"),
+            TIER_COMPOSITION,
+        )
+        assert reg.success
+        from kernos.kernel import event_stream as es
+        captured = []
+        original_emit = es.emit
+
+        async def capture_emit(*args, **kwargs):
+            event_type = args[1] if len(args) > 1 else kwargs.get("event_type")
+            if event_type == "workflow_authoring.action_recorded":
+                captured.append({
+                    "payload": args[2] if len(args) > 2 else kwargs.get("payload"),
+                })
+            return await original_emit(*args, **kwargs)
+        es.emit = capture_emit
+        try:
+            await activate_workflow(
+                stack["engine"], _architect_ctx(), "wf-emit-high",
+            )
+        finally:
+            es.emit = original_emit
+        # Find the activate_workflow record.
+        activations = [
+            c for c in captured
+            if c["payload"]["operation"] == "activate_workflow"
+        ]
+        assert len(activations) == 1
+        assert activations[0]["payload"]["risk_level"] == "high"
+
+    # --- H6: idempotent under race ---
+
+    async def test_activate_already_active_returns_success(
+        self, stack, architect_env,
+    ):
+        # Direct DB state transition to simulate a race-winner having
+        # already moved state to active. Subsequent activate should
+        # return success with already_active=True (not failure).
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(workflow_id="wf-race-already-active"),
+            TIER_COMPOSITION,
+        )
+        assert reg.success
+        # First activation
+        ctx = _architect_ctx()
+        first = await activate_workflow(
+            stack["engine"], ctx, "wf-race-already-active",
+        )
+        assert first.success
+        # Second activation: already-active path
+        second = await activate_workflow(
+            stack["engine"], ctx, "wf-race-already-active",
+        )
+        assert second.success
+        assert second.extra.get("already_active") is True
+
+    async def test_deactivate_already_deactivated_returns_success(
+        self, stack, architect_env,
+    ):
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(workflow_id="wf-race-already-deact"),
+            TIER_COMPOSITION,
+        )
+        assert reg.success
+        ctx = _architect_ctx()
+        assert (await activate_workflow(
+            stack["engine"], ctx, "wf-race-already-deact",
+        )).success
+        first = await deactivate_workflow(
+            stack["engine"], ctx, "wf-race-already-deact",
+        )
+        assert first.success
+        second = await deactivate_workflow(
+            stack["engine"], ctx, "wf-race-already-deact",
+        )
+        assert second.success
+        assert second.extra.get("already_deactivated") is True
+
+    # --- M7: fail-closed on lookup error ---
+
+    async def test_dispatch_check_fails_closed_on_db_unavailable(
+        self, stack, architect_env, monkeypatch,
+    ):
+        # Force the engine's _db to None and call the helper directly.
+        engine = stack["engine"]
+        original_db = engine._db
+        engine._db = None
+        try:
+            result = await engine._is_authoring_workflow_inactive("any")
+            assert result is True  # fail-closed
+        finally:
+            engine._db = original_db
+
+    # --- M8: friction recurrence subscriber ---
+
+    async def _ensure_friction_pattern_schema(self, db):
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS friction_pattern ("
+            " instance_id TEXT NOT NULL,"
+            " pattern_id TEXT NOT NULL,"
+            " parent_pattern_id TEXT NOT NULL DEFAULT '',"
+            " display_name TEXT NOT NULL DEFAULT '',"
+            " description TEXT NOT NULL DEFAULT '',"
+            " signal_type_keys TEXT NOT NULL DEFAULT '[]',"
+            " aliases TEXT NOT NULL DEFAULT '[]',"
+            " lifecycle_state TEXT NOT NULL DEFAULT 'active',"
+            " occurrence_count INTEGER NOT NULL DEFAULT 0,"
+            " first_observed_at TEXT NOT NULL DEFAULT '',"
+            " last_observed_at TEXT NOT NULL DEFAULT '',"
+            " resolved_at TEXT NOT NULL DEFAULT '',"
+            " resolved_by_spec TEXT NOT NULL DEFAULT '',"
+            " reactivated_at TEXT NOT NULL DEFAULT '',"
+            " created_at TEXT NOT NULL DEFAULT '',"
+            " workflow_resolvable INTEGER NOT NULL DEFAULT 0,"
+            " PRIMARY KEY (instance_id, pattern_id)"
+            ")"
+        )
+
+    async def test_friction_recurrence_subscriber_emits_for_tagged(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            handle_friction_pattern_recurrence,
+        )
+        await self._ensure_friction_pattern_schema(stack["engine"]._db)
+        # Seed a friction_pattern row tagged workflow_resolvable=1.
+        await stack["engine"]._db.execute(
+            "INSERT INTO friction_pattern ("
+            " instance_id, pattern_id, parent_pattern_id, display_name,"
+            " description, signal_type_keys, aliases, lifecycle_state,"
+            " occurrence_count, first_observed_at, last_observed_at,"
+            " resolved_at, resolved_by_spec, reactivated_at, created_at,"
+            " workflow_resolvable"
+            ") VALUES (?, ?, '', '', ?, '[]', '[]', 'active', 0, '', '', '', '', '', '', 1)",
+            ("inst_a", "pattern_X", "test pattern"),
+        )
+
+        captured = []
+
+        async def capture_emit(instance_id, event_type, payload, **kw):
+            captured.append({
+                "instance_id": instance_id,
+                "event_type": event_type,
+                "payload": payload,
+            })
+
+        await handle_friction_pattern_recurrence(
+            stack["engine"]._db,
+            event_payload={
+                "instance_id": "inst_a",
+                "resolved_pattern_id": "pattern_X",
+            },
+            emit_event=capture_emit,
+        )
+        assert len(captured) == 1
+        assert (
+            captured[0]["event_type"]
+            == "workflow_authoring.soft_prompt_workflow_resolvable"
+        )
+        assert captured[0]["payload"]["pattern_id"] == "pattern_X"
+
+    async def test_friction_recurrence_subscriber_skips_untagged(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            handle_friction_pattern_recurrence,
+        )
+        await self._ensure_friction_pattern_schema(stack["engine"]._db)
+        # Pattern NOT tagged (workflow_resolvable defaults 0).
+        await stack["engine"]._db.execute(
+            "INSERT INTO friction_pattern ("
+            " instance_id, pattern_id, parent_pattern_id, display_name,"
+            " description, signal_type_keys, aliases, lifecycle_state,"
+            " occurrence_count, first_observed_at, last_observed_at,"
+            " resolved_at, resolved_by_spec, reactivated_at, created_at"
+            ") VALUES (?, ?, '', '', ?, '[]', '[]', 'active', 0, '', '', '', '', '', '')",
+            ("inst_a", "pattern_Y", "untagged pattern"),
+        )
+
+        captured = []
+
+        async def capture_emit(*args, **kwargs):
+            captured.append(args)
+
+        result = await handle_friction_pattern_recurrence(
+            stack["engine"]._db,
+            event_payload={
+                "instance_id": "inst_a",
+                "resolved_pattern_id": "pattern_Y",
+            },
+            emit_event=capture_emit,
+        )
+        assert result is False
+        assert len(captured) == 0
+
+    # --- M9: aggregate validation errors ---
+
+    async def test_governance_errors_aggregate(self, stack, architect_env):
+        # Kernos claims substrate_tier on a descriptor that IS
+        # substrate (templated tool_id). Both governance_claim_violation
+        # AND governance_tier_violation should surface.
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(),
+            _descriptor(
+                workflow_id="wf-aggregate",
+                action_type="call_tool",
+                params={"tool_id": "{idea_payload.tool_id}", "args": {}},
+            ),
+            TIER_SUBSTRATE,
+        )
+        assert result.success is False
+        categories = {err.category for err in result.errors}
+        assert "governance_claim_violation" in categories
+        assert "governance_tier_violation" in categories
+
+
+# ===========================================================================
+# Tool-dispatch handler shape (Spec 5 post-impl Codex Blocker 1)
+# ===========================================================================
+
+
+class TestToolDispatchHandlers:
+    async def test_handle_register_workflow_tool_returns_summary_and_record(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            handle_register_workflow_tool, KERNEL_AUTHORING_TOOL_NAMES,
+        )
+        summary, record = await handle_register_workflow_tool(
+            engine=stack["engine"],
+            instance_id="inst_a",
+            member_id="mem_kernos",
+            descriptor=_descriptor(workflow_id="wf-dispatch"),
+            governance_tier=TIER_COMPOSITION,
+        )
+        assert "register_workflow" in summary
+        assert "wf-dispatch" in summary
+        assert record.operation == "register_workflow"
+        assert record.execution_state == "completed"
+
+    async def test_handle_activate_workflow_tool_kernos_rejected(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            handle_register_workflow_tool, handle_activate_workflow_tool,
+        )
+        await handle_register_workflow_tool(
+            engine=stack["engine"],
+            instance_id="inst_a", member_id="mem_kernos",
+            descriptor=_descriptor(workflow_id="wf-kernos-acts"),
+            governance_tier=TIER_COMPOSITION,
+        )
+        summary, record = await handle_activate_workflow_tool(
+            engine=stack["engine"],
+            instance_id="inst_a", member_id="mem_kernos",
+            workflow_id="wf-kernos-acts",
+        )
+        assert "failed" in summary
+        assert "not_authorized" in summary
+        assert record.execution_state == "failed"
+        assert record.risk_level == "high"
+
+    def test_kernel_authoring_tool_names_constant(self):
+        from kernos.kernel.workflows.authoring import (
+            KERNEL_AUTHORING_TOOL_NAMES,
+        )
+        assert KERNEL_AUTHORING_TOOL_NAMES == frozenset({
+            "register_workflow", "register_trigger",
+            "activate_workflow", "deactivate_workflow",
+        })

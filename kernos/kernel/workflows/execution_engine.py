@@ -1808,15 +1808,18 @@ class ExecutionEngine:
 
         Returns True iff the workflow is registered via the
         authoring layer (Spec 5) AND its activation_state is NOT
-        'active'. Workflows that have no registered_workflows row
-        (legacy path) return False so they dispatch unconditionally.
+        'active'.
 
-        Defensive: any error (table missing, etc.) returns False so
-        a partially-migrated environment doesn't accidentally block
-        legacy workflow dispatch.
+        Spec 5 post-impl Codex Medium 7: distinguish "no row"
+        (legacy / non-authoring workflow; dispatch unconditionally)
+        from lookup error (uncertainty; fail-closed = skip
+        dispatch). Returns True on exception so a corrupted /
+        unreachable registered_workflows table doesn't let workflows
+        dispatch when their activation state is unknown.
         """
         if self._db is None:
-            return False
+            # Defensive: no DB available; skip dispatch.
+            return True
         try:
             async with self._db.execute(
                 "SELECT activation_state FROM registered_workflows "
@@ -1824,8 +1827,16 @@ class ExecutionEngine:
                 (workflow_id,),
             ) as cur:
                 row = await cur.fetchone()
-        except Exception:
-            return False
+        except Exception as exc:
+            # Fail-closed (Codex Medium 7): lookup failure means
+            # we don't know the workflow's authoring state. Safer
+            # to skip dispatch than to fire a workflow that may
+            # have been deactivated.
+            logger.warning(
+                "WORKFLOW_ACTIVATION_LOOKUP_FAILED workflow_id=%s error=%s",
+                workflow_id, exc,
+            )
+            return True
         if row is None:
             # Legacy / non-authoring workflow; dispatch unconditionally.
             return False
