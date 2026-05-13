@@ -657,6 +657,72 @@ class AppendToLedgerAction:
 
 
 # ---------------------------------------------------------------------------
+# Control-flow verbs (WORKFLOW-ORCHESTRATION-PRIMITIVES-V1)
+# ---------------------------------------------------------------------------
+
+
+class BranchAction:
+    """Conditional control flow at workflow level.
+
+    WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 5 (revised v2 per
+    Codex round-1 Blocker 2 + High 6). Goto semantics: routes to
+    one of two named step IDs (branch_on_true / branch_on_false).
+    The engine continues linearly from the chosen target — to
+    produce skip-downstream semantics, pair branch with
+    terminal_branches so one outcome routes into a terminal branch
+    that runs to its end without falling back to main sequence.
+
+    Codex round-1 High 6: condition MUST be a native bool. The
+    engine's reference resolver preserves native types via the
+    sole-reference shortcut, so `{step.X.output.approved}` where
+    `approved` is True resolves to Python True (not the string
+    "True"). Non-bool condition values surface as
+    ``branch_condition_not_bool`` failure and route through
+    continuation_rules.
+    """
+
+    action_type = "branch"
+
+    def __init__(self) -> None:
+        # Branch is pure control-flow; no external deps.
+        pass
+
+    async def execute(self, context: Any, params: dict) -> ActionResult:
+        condition_value = params.get("condition")
+        if not isinstance(condition_value, bool):
+            return ActionResult(
+                success=False,
+                error=(
+                    f"branch_condition_not_bool:"
+                    f"got {type(condition_value).__name__}={condition_value!r}"
+                ),
+            )
+        target_step_id = (
+            params["branch_on_true"] if condition_value
+            else params["branch_on_false"]
+        )
+        return ActionResult(
+            success=True,
+            value={
+                "condition_resolved_to": condition_value,
+                "target_step_id": target_step_id,
+            },
+            receipt={
+                "branched_to": target_step_id,
+                "condition_value": condition_value,
+            },
+        )
+
+    async def verify(
+        self, context: Any, params: dict, result: ActionResult,
+    ) -> bool:
+        # Branch verb has no world-effect to verify. The strict-bool
+        # check inside execute() means a False success result is a
+        # real failure that routes through continuation_rules.
+        return result.success
+
+
+# ---------------------------------------------------------------------------
 # Library registry
 # ---------------------------------------------------------------------------
 
@@ -692,6 +758,7 @@ __all__ = [
     "ActionLibrary",
     "ActionResult",
     "AppendToLedgerAction",
+    "BranchAction",
     "CallToolAction",
     "CovenantGate",
     "MarkStateAction",

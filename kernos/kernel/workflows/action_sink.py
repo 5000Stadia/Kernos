@@ -836,19 +836,82 @@ async def _append_and_advance(
     *,
     step_index: int,
     action_type: str,
+    step_output_envelope: dict | None = None,
+    step_id: str = "",
 ) -> bool:
     """Non-gated success OR continue-on-failure: append record + advance
     cursor in one transaction.
+
+    WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 11: step output
+    capture co-locates with the action record append. Gated on the
+    record's ``inserted=True`` return so step_outputs and
+    action_records stay consistent under retry / replay.
+
+    Also clears ``next_step_index = -1`` so any pending branch
+    override expires when this step's commit lands.
     """
     inserted = await sink._insert_within_txn(
         db, record, step_index=step_index, action_type=action_type,
     )
     await db.execute(
         "UPDATE workflow_executions "
-        "SET action_index_completed = ?, last_heartbeat = ? "
+        "SET action_index_completed = ?, next_step_index = -1, "
+        "last_heartbeat = ? "
         "WHERE execution_id = ? AND action_index_completed < ?",
         (step_index, _now(), sink.workflow_execution_id, step_index),
     )
+    if inserted and step_output_envelope is not None and step_id:
+        from kernos.kernel.workflows.step_outputs import capture_step_output
+        await capture_step_output(
+            db,
+            instance_id=sink.instance_id,
+            workflow_execution_id=sink.workflow_execution_id,
+            step_id=step_id,
+            envelope=step_output_envelope,
+        )
+    return inserted
+
+
+async def _append_and_advance_with_branch(
+    db: aiosqlite.Connection,
+    sink: WorkflowExecutionActionSink,
+    record: ActionStateRecord,
+    *,
+    step_index: int,
+    action_type: str,
+    next_step_index: int,
+    step_output_envelope: dict | None = None,
+    step_id: str = "",
+) -> bool:
+    """Branch verb's atomic boundary (Codex round-1 Blocker 1):
+    append record, advance cursor to the branch step itself, AND set
+    next_step_index on the execution row in one transaction. Restart
+    will read next_step_index before defaulting to
+    action_index_completed + 1; the chosen target step is durable
+    across crashes.
+    """
+    inserted = await sink._insert_within_txn(
+        db, record, step_index=step_index, action_type=action_type,
+    )
+    await db.execute(
+        "UPDATE workflow_executions "
+        "SET action_index_completed = ?, next_step_index = ?, "
+        "last_heartbeat = ? "
+        "WHERE execution_id = ? AND action_index_completed < ?",
+        (
+            step_index, next_step_index, _now(),
+            sink.workflow_execution_id, step_index,
+        ),
+    )
+    if inserted and step_output_envelope is not None and step_id:
+        from kernos.kernel.workflows.step_outputs import capture_step_output
+        await capture_step_output(
+            db,
+            instance_id=sink.instance_id,
+            workflow_execution_id=sink.workflow_execution_id,
+            step_id=step_id,
+            envelope=step_output_envelope,
+        )
     return inserted
 
 
@@ -860,11 +923,12 @@ async def _append_and_persist_gate_nonce(
     step_index: int,
     action_type: str,
     gate_nonce: str,
+    step_output_envelope: dict | None = None,
+    step_id: str = "",
 ) -> bool:
     """Gated success: append record + persist gate_nonce on the
     execution row in one transaction. Cursor is NOT advanced here;
-    advancing waits for gate release (``_clear_gate_nonce`` →
-    ``_mark_step_complete``).
+    advancing waits for gate release (``_clear_gate_and_advance``).
     """
     inserted = await sink._insert_within_txn(
         db, record, step_index=step_index, action_type=action_type,
@@ -875,6 +939,15 @@ async def _append_and_persist_gate_nonce(
         "WHERE execution_id = ?",
         (gate_nonce, _now(), sink.workflow_execution_id),
     )
+    if inserted and step_output_envelope is not None and step_id:
+        from kernos.kernel.workflows.step_outputs import capture_step_output
+        await capture_step_output(
+            db,
+            instance_id=sink.instance_id,
+            workflow_execution_id=sink.workflow_execution_id,
+            step_id=step_id,
+            envelope=step_output_envelope,
+        )
     return inserted
 
 
@@ -884,6 +957,9 @@ async def _clear_gate_nonce_and_advance(
     *,
     step_index: int,
     expected_nonce: str = "",
+    gate_name: str = "",
+    gate_output_payload: dict | None = None,
+    instance_id: str = "",
 ) -> bool:
     """Codex round-2-impl Blocker 2: clear gate_nonce AND advance the
     cursor in one transaction. After gate approval the engine needs
@@ -895,12 +971,23 @@ async def _clear_gate_nonce_and_advance(
     concurrent gate resolutions for the same execution can't both
     advance. Returns True if the row was updated; False if the
     expected nonce no longer matched (caller treats as a no-op).
+
+    WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 6 (Codex round-1
+    High 5): when ``gate_name`` + ``gate_output_payload`` +
+    ``instance_id`` are supplied, atomically capture the satisfying
+    event's payload into workflow_step_outputs under
+    output_kind='gate'. Reference syntax
+    ``{gate.<gate_name>.output.payload.<path>}`` resolves against
+    the wrapping envelope.
+
+    Also clears ``next_step_index = -1`` so any pending branch
+    override expires when this step's commit lands.
     """
     if expected_nonce:
         cursor = await db.execute(
             "UPDATE workflow_executions "
             "SET gate_nonce = '', action_index_completed = ?, "
-            "last_heartbeat = ? "
+            "next_step_index = -1, last_heartbeat = ? "
             "WHERE execution_id = ? AND gate_nonce = ?",
             (step_index, _now(), execution_id, expected_nonce),
         )
@@ -908,11 +995,23 @@ async def _clear_gate_nonce_and_advance(
         cursor = await db.execute(
             "UPDATE workflow_executions "
             "SET gate_nonce = '', action_index_completed = ?, "
-            "last_heartbeat = ? "
+            "next_step_index = -1, last_heartbeat = ? "
             "WHERE execution_id = ?",
             (step_index, _now(), execution_id),
         )
-    return cursor.rowcount == 1
+    updated = cursor.rowcount == 1
+    if updated and gate_name and gate_output_payload is not None and instance_id:
+        # Decision 6 v2: atomic gate output capture inside the same
+        # transaction as the gate release.
+        from kernos.kernel.workflows.step_outputs import capture_gate_output
+        await capture_gate_output(
+            db,
+            instance_id=instance_id,
+            workflow_execution_id=execution_id,
+            gate_name=gate_name,
+            event_payload=gate_output_payload,
+        )
+    return updated
 
 
 async def _advance_cursor_only(
@@ -980,6 +1079,8 @@ async def _append_and_abort(
     step_index: int,
     action_type: str,
     aborted_reason: str,
+    step_output_envelope: dict | None = None,
+    step_id: str = "",
 ) -> bool:
     """Aborting failure: append record + transition execution to
     aborted state in one transaction. Cursor is NOT advanced.
@@ -995,6 +1096,15 @@ async def _append_and_abort(
         "WHERE execution_id = ?",
         (aborted_reason, now, now, sink.workflow_execution_id),
     )
+    if inserted and step_output_envelope is not None and step_id:
+        from kernos.kernel.workflows.step_outputs import capture_step_output
+        await capture_step_output(
+            db,
+            instance_id=sink.instance_id,
+            workflow_execution_id=sink.workflow_execution_id,
+            step_id=step_id,
+            envelope=step_output_envelope,
+        )
     return inserted
 
 
@@ -1011,6 +1121,7 @@ __all__ = [
     "_advance_cursor_only",
     "_append_and_abort",
     "_append_and_advance",
+    "_append_and_advance_with_branch",
     "_append_and_persist_gate_nonce",
     "_build_action_state_record",
     "_clear_gate_nonce_and_advance",

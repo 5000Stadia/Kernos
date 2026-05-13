@@ -91,11 +91,22 @@ from kernos.kernel.workflows.action_sink import (
     _advance_cursor_only,
     _append_and_abort,
     _append_and_advance,
+    _append_and_advance_with_branch,
     _append_and_persist_gate_nonce,
     _build_action_state_record,
     _clear_gate_nonce_and_advance,
     _persist_gate_nonce_only,
     ensure_workflow_action_records_schema,
+)
+from kernos.kernel.workflows.refs import (
+    RefResolutionError,
+    ResolutionContext,
+    resolve_references_in_value,
+)
+from kernos.kernel.workflows.step_outputs import (
+    build_output_envelope,
+    ensure_workflow_step_outputs_schema,
+    load_workflow_outputs,
 )
 from kernos.kernel.workflows.ledger import WorkflowLedger
 from kernos.kernel.workflows.predicates import evaluate as evaluate_predicate
@@ -157,8 +168,27 @@ class WorkflowExecution:
     # calls with the same fire_id and lets us return the original
     # execution_id without creating a second row.
     fire_id: str = ""
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 7: when the
+    # workflow enters a terminal branch via the `branch` verb, the
+    # branch_name is captured here for audit. Engine terminal_state
+    # stays completed / aborted; this is metadata only.
+    terminal_branch: str = ""
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 9 (Codex round-1
+    # Blocker 1): the global step_index that the engine should
+    # execute next, OVERRIDING the natural action_index_completed + 1
+    # advance. Set by the `branch` verb's atomic transaction; cleared
+    # to -1 by the target step's commit. Restart-resume reads this
+    # before defaulting.
+    next_step_index: int = -1
 
     def to_row(self) -> tuple:
+        # NOTE: ``to_row`` is only used by the INSERT path
+        # (_on_trigger_match + execute_workflow). The columns
+        # terminal_branch + next_step_index land via ALTER and have
+        # their DB-side defaults (empty string / -1); the INSERT
+        # statements explicitly list the 16 baseline columns, so
+        # to_row stays 16-wide. UPDATE paths handle the new columns
+        # directly.
         return (
             self.execution_id, self.workflow_id, self.instance_id,
             self.correlation_id, self.state, self.action_index_completed,
@@ -192,6 +222,19 @@ class WorkflowExecution:
             fire_id = row["fire_id"] or ""
         except (KeyError, IndexError):
             fire_id = ""
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1: terminal_branch and
+        # next_step_index added by Spec 4a's ALTER migration. Rows
+        # from before the migration get the column defaults.
+        try:
+            terminal_branch = row["terminal_branch"] or ""
+        except (KeyError, IndexError):
+            terminal_branch = ""
+        try:
+            next_step_index = row["next_step_index"]
+            if next_step_index is None:
+                next_step_index = -1
+        except (KeyError, IndexError):
+            next_step_index = -1
         return cls(
             execution_id=row["execution_id"],
             workflow_id=row["workflow_id"],
@@ -209,6 +252,8 @@ class WorkflowExecution:
             member_id=row["member_id"] or "",
             gate_nonce=gate_nonce,
             fire_id=fire_id,
+            terminal_branch=terminal_branch,
+            next_step_index=next_step_index,
         )
 
 
@@ -301,6 +346,29 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
         except aiosqlite.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1: terminal_branch +
+    # next_step_index columns. Co-located with the base ensure_schema
+    # so any code path that opens a workflow_executions table picks
+    # them up (Spec 3 helpers reference next_step_index in UPDATE
+    # clauses; the column MUST exist).
+    if "terminal_branch" not in existing_columns:
+        try:
+            await db.execute(
+                "ALTER TABLE workflow_executions "
+                "ADD COLUMN terminal_branch TEXT DEFAULT ''"
+            )
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+    if "next_step_index" not in existing_columns:
+        try:
+            await db.execute(
+                "ALTER TABLE workflow_executions "
+                "ADD COLUMN next_step_index INTEGER DEFAULT -1"
+            )
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     # The partial unique index gets created by the CREATE TABLE
     # block above on fresh installs. For previously-installed DBs
     # that didn't have the index (because the column didn't exist),
@@ -379,6 +447,46 @@ _INTERPOLATION_KEYS = (
     "execution_id", "gate_nonce", "correlation_id",
     "workflow_id", "instance_id",
 )
+
+
+def _resolve_predicate_ast(predicate: Any, ctx: "ResolutionContext") -> dict | None:
+    """Decision 8: recursively walk a predicate AST, substituting
+    references in ``value:`` and ``values:`` leaves via the resolver.
+
+    Composite operators (AND, OR, NOT) walk into operands/operand.
+    Leaves with ``value`` get substitution. Returns the resolved AST
+    (a new dict) OR None if any reference can't resolve (caller
+    skips this evaluation pass).
+    """
+    from kernos.kernel.workflows.refs import _NOT_FOUND  # type: ignore
+    if not isinstance(predicate, dict):
+        return None
+    op = predicate.get("op")
+    if not op:
+        return None
+    if op in ("AND", "OR"):
+        operands = predicate.get("operands") or []
+        resolved_operands = []
+        for sub in operands:
+            resolved_sub = _resolve_predicate_ast(sub, ctx)
+            if resolved_sub is None:
+                return None
+            resolved_operands.append(resolved_sub)
+        return {"op": op, "operands": resolved_operands}
+    if op == "NOT":
+        sub = predicate.get("operand")
+        resolved_sub = _resolve_predicate_ast(sub, ctx)
+        if resolved_sub is None:
+            return None
+        return {"op": "NOT", "operand": resolved_sub}
+    # Leaf operator. Walk each field and resolve string templates.
+    resolved_leaf: dict[str, Any] = {}
+    for key, val in predicate.items():
+        resolved_val = resolve_references_in_value(val, ctx)
+        if resolved_val is _NOT_FOUND:
+            return None
+        resolved_leaf[key] = resolved_val
+    return resolved_leaf
 
 
 def _safe_build_record(
@@ -462,6 +570,23 @@ class ExecutionEngine:
         # to equal the paused execution's id, in addition to the
         # descriptor predicate.
         self._gate_nonces: dict[str, str] = {}
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 6 / Codex
+        # round-1 High 5: per-execution gate-release payload buffer.
+        # The post-flush match logic writes the satisfying event's
+        # payload here before signalling the waiter; _await_gate reads
+        # and pops it so the payload can be threaded into
+        # _clear_gate_and_advance for atomic capture into
+        # workflow_step_outputs (output_kind='gate').
+        self._gate_release_payloads: dict[str, dict] = {}
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 8 / Codex
+        # round-1 Medium 8: cache resolved predicate AST per
+        # (execution_id, gate_nonce). Predicate evaluation happens
+        # for every event matching event_type that flushes; resolving
+        # references each time would be expensive. Keyed on gate_nonce
+        # (per-attempt UUID) so reuse of a gate_name within an
+        # execution can't read a stale cache. Cleared on gate
+        # release / timeout / abort alongside the other waiter dicts.
+        self._predicate_resolution_cache: dict[tuple[str, str], dict] = {}
         self._gate_hook_registered: bool = False
         # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1: substrate sink for
         # per-step ActionStateRecords. Constructed in ``start()`` once
@@ -508,6 +633,11 @@ class ExecutionEngine:
         # schema runs AFTER the existing workflow_executions ensure +
         # ALTER migrations so the FK target column already exists.
         await ensure_workflow_action_records_schema(self._db)
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1: workflow_step_outputs
+        # table + ALTERs for terminal_branch + next_step_index columns
+        # on workflow_executions. Idempotent migration; runs every
+        # engine start.
+        await ensure_workflow_step_outputs_schema(self._db)
         self._action_sink = WorkflowActionSink(
             self._db,
             pattern_store=pattern_store,
@@ -677,142 +807,388 @@ class ExecutionEngine:
         # workflow_execution_id arguments.
         action_sink = self._execution_action_sink(execution)
         gate_by_name = {g.gate_name: g for g in wf.approval_gates}
-        # Codex round-2-impl Blocker 1: pending-gate restart branch.
-        # If the execution is mid-gated-wait (record persisted for
-        # step K, gate_nonce set, cursor=K-1), re-enter _await_gate
-        # for step K instead of re-executing the action.
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 0 + 9: build
+        # the global step_index → action map across main +
+        # terminal_branches. step_index is the ordinal Spec 3's
+        # workflow_action_records PK uses; lookup by global ordinal
+        # makes branch / terminal targeting uniform.
+        action_by_index = self._build_action_by_index(wf)
+        terminal_ranges = self._build_terminal_branch_ranges(wf)
+        main_range = self._build_main_range(wf)
+        # Codex round-2-impl Blocker 1 (Spec 3): pending-gate restart.
         if await self._is_pending_gate_resume(execution, wf):
-            gate_idx = execution.action_index_completed + 1
-            gate_action = wf.action_sequence[gate_idx]
+            gate_step_index = execution.action_index_completed + 1
+            gate_action = action_by_index[gate_step_index]
             gate = gate_by_name[gate_action.gate_ref]
-            cont = await self._await_gate(execution, gate)
+            cont, gate_payload = await self._await_gate(execution, gate)
             if not cont:
                 return  # _await_gate aborted
-            await self._clear_gate_and_advance(execution, gate_idx)
-            start_idx = gate_idx + 1
+            await self._clear_gate_and_advance(
+                execution, gate_step_index,
+                gate_name=gate_action.gate_ref,
+                gate_output_payload=gate_payload,
+            )
+            current_step_index = gate_step_index + 1
         else:
-            start_idx = max(0, execution.action_index_completed + 1)
-        for idx in range(start_idx, len(wf.action_sequence)):
-            action = wf.action_sequence[idx]
+            current_step_index = self._resolve_next_step_index(execution, wf)
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 9: explicit
+        # while-loop with next_step_index pointer; branch verb mutates
+        # the pointer via the atomic _append_and_advance_with_branch
+        # helper.
+        total_step_count = len(action_by_index)
+        while current_step_index is not None and current_step_index < total_step_count:
+            action = action_by_index[current_step_index]
             verb = self._action_library.get(action.action_type)
-            # WLP-GATE-SCOPING C1: nonce minted BEFORE the gated
-            # action executes so the action's payload can carry it
-            # (e.g. route_to_agent's approval_request block). The
-            # nonce is held in a local until the action completes
-            # successfully; if the action fails or aborts, the unused
-            # nonce is discarded and no pause is entered.
+            # Track terminal branch entry for audit (Decision 7).
+            entered_terminal = self._terminal_branch_for_step(
+                current_step_index, terminal_ranges,
+            )
+            if entered_terminal and entered_terminal != execution.terminal_branch:
+                execution.terminal_branch = entered_terminal
+                # Persist the branch name on the execution row so
+                # post-completion queries can attribute the workflow's
+                # terminal path.
+                await self._run_workflow_write(
+                    lambda db: db.execute(
+                        "UPDATE workflow_executions "
+                        "SET terminal_branch = ?, last_heartbeat = ? "
+                        "WHERE execution_id = ?",
+                        (entered_terminal, _now(), execution.execution_id),
+                    ),
+                )
+            # WLP-GATE-SCOPING C1: gate nonce minted BEFORE the action
+            # executes so the action's payload can carry it.
             pending_gate_nonce = (
                 str(uuid.uuid4()) if action.gate_ref is not None else ""
             )
-            interp_ctx = {
-                "execution_id": execution.execution_id,
-                "gate_nonce": pending_gate_nonce,
-                "correlation_id": execution.correlation_id,
-                "workflow_id": execution.workflow_id,
-                "instance_id": execution.instance_id,
-            }
-            interpolated_params = _interpolate_params(
-                action.parameters, interp_ctx,
-            )
+            # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 3:
+            # resolve template references in action parameters via
+            # the ResolutionContext + reference resolver.
             try:
-                result = await verb.execute(context, interpolated_params)
-            except Exception as exc:
-                # Codex C3 review: include the exception class name so
-                # founders / debug tools can diagnose the failure
-                # mode (e.g. AgentInboxUnavailable) without having to
-                # parse the message string.
-                error = f"execute_raised:{type(exc).__name__}:{exc}"
-                # ACTIONSTATERECORD-WORKFLOW-COMPOSITION-V1 Decision 6
-                # matrix row 4: append failed record + transition to
-                # aborted state in one transaction.
+                resolve_ctx = await self._build_resolution_context(
+                    execution, pending_gate_nonce, mode="parameter",
+                )
+                resolved_params = resolve_references_in_value(
+                    action.parameters, resolve_ctx,
+                )
+            except RefResolutionError as exc:
+                # Decision 3 v2: dynamic resolution failure in
+                # parameter context aborts the workflow via the
+                # per-outcome aborting-failure matrix (Spec 3).
+                error = f"ref_resolution_failed:{exc}"
                 await self._append_failed_and_abort(
-                    execution, action_sink, idx, action,
+                    execution, action_sink, current_step_index, action,
                     error=error,
-                    aborted_reason=f"step_{idx}_raised:{type(exc).__name__}",
+                    aborted_reason=(
+                        f"step_{action.id or current_step_index}_ref_failed"
+                    ),
                 )
                 await self._record_step_failed(
-                    execution, idx, action, error=error,
+                    execution, current_step_index, action, error=error,
                 )
                 await self._emit_terminated_aborted(
-                    execution, f"step_{idx}_raised:{type(exc).__name__}",
+                    execution,
+                    f"step_{action.id or current_step_index}_ref_failed",
+                )
+                return
+            try:
+                result = await verb.execute(context, resolved_params)
+            except Exception as exc:
+                error = f"execute_raised:{type(exc).__name__}:{exc}"
+                await self._append_failed_and_abort(
+                    execution, action_sink, current_step_index, action,
+                    error=error,
+                    aborted_reason=(
+                        f"step_{action.id or current_step_index}"
+                        f"_raised:{type(exc).__name__}"
+                    ),
+                )
+                await self._record_step_failed(
+                    execution, current_step_index, action, error=error,
+                )
+                await self._emit_terminated_aborted(
+                    execution,
+                    f"step_{action.id or current_step_index}"
+                    f"_raised:{type(exc).__name__}",
                 )
                 return
             verified = False
             try:
                 verified = await verb.verify(
-                    context, interpolated_params, result,
+                    context, resolved_params, result,
                 )
             except Exception as exc:
                 logger.warning(
                     "VERIFY_RAISED execution_id=%s step=%s error=%s",
-                    execution.execution_id, idx, exc,
+                    execution.execution_id, current_step_index, exc,
                 )
             action_succeeded = result.success and verified
             if not action_succeeded:
-                # Gated-action failure path: discard the unused
-                # nonce; do NOT enter gate wait. AC #8 pin.
-                # `pending_gate_nonce` is a local; going out of scope
-                # here is the discard.
                 error = result.error or "verifier_rejected"
                 if action.continuation_rules.on_failure == "abort":
-                    # Decision 6 matrix row 4: aborting failure.
                     await self._append_failed_and_abort(
-                        execution, action_sink, idx, action,
+                        execution, action_sink, current_step_index, action,
                         error=error,
-                        aborted_reason=f"step_{idx}_failed",
+                        aborted_reason=(
+                            f"step_{action.id or current_step_index}_failed"
+                        ),
                     )
                     await self._record_step_failed(
-                        execution, idx, action, error=error,
+                        execution, current_step_index, action, error=error,
                     )
                     await self._emit_terminated_aborted(
-                        execution, f"step_{idx}_failed",
+                        execution,
+                        f"step_{action.id or current_step_index}_failed",
                     )
                     return
-                # Decision 6 matrix row 3: continue-on-failure.
-                # Append failed record + advance cursor atomically.
+                # Continue-on-failure.
                 await self._append_failed_and_advance(
-                    execution, action_sink, idx, action, error=error,
+                    execution, action_sink, current_step_index, action,
+                    error=error,
                 )
                 await self._record_step_failed(
-                    execution, idx, action, error=error,
+                    execution, current_step_index, action, error=error,
+                )
+                current_step_index = self._natural_next_step_index(
+                    current_step_index, terminal_ranges,
+                    main_range=main_range,
                 )
                 continue
-            # Success path. Decision 6 matrix rows 1 + 2 distinguish
-            # non-gated success (append + advance cursor) from gated
-            # success (append + persist gate_nonce; cursor advances
-            # later after gate release).
+            # Success path.
+            if action.action_type == "branch":
+                # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 5 +
+                # Codex round-1 Blocker 1: branch verb. Resolve the
+                # target step_id to a global ordinal; persist
+                # next_step_index atomically with the record.
+                target_id = result.receipt.get("branched_to", "")
+                target_global = self._resolve_branch_target_to_global(
+                    target_id, action_by_index, wf, terminal_ranges,
+                )
+                if target_global is None:
+                    # Should not happen if validate_workflow passed;
+                    # defensive abort.
+                    error = (
+                        f"branch_target_unresolved:{target_id!r}"
+                    )
+                    await self._append_failed_and_abort(
+                        execution, action_sink, current_step_index, action,
+                        error=error,
+                        aborted_reason=(
+                            f"step_{action.id or current_step_index}_branch_failed"
+                        ),
+                    )
+                    await self._record_step_failed(
+                        execution, current_step_index, action, error=error,
+                    )
+                    await self._emit_terminated_aborted(
+                        execution,
+                        f"step_{action.id or current_step_index}_branch_failed",
+                    )
+                    return
+                await self._append_branch_and_advance(
+                    execution, action_sink, current_step_index, action, result,
+                    next_step_index=target_global,
+                )
+                await self._record_step_succeeded(
+                    execution, current_step_index, action, result,
+                )
+                current_step_index = target_global
+                continue
             if action.gate_ref is not None:
                 await self._append_success_and_persist_gate_nonce(
-                    execution, action_sink, idx, action, result,
+                    execution, action_sink, current_step_index, action, result,
                     gate_nonce=pending_gate_nonce,
                 )
                 await self._record_step_succeeded(
-                    execution, idx, action, result,
+                    execution, current_step_index, action, result,
                 )
                 gate = gate_by_name[action.gate_ref]
-                # ``_persist_gate_nonce`` already happened inside the
-                # transaction above; updating execution.gate_nonce in
-                # memory so ``_await_gate`` and the post-flush match
-                # logic see the engine-minted nonce.
                 execution.gate_nonce = pending_gate_nonce
-                cont = await self._await_gate(execution, gate)
+                cont, gate_payload = await self._await_gate(execution, gate)
                 if not cont:
                     return  # _await_gate aborted
-                # Codex round-2-impl Blocker 2: atomic gate release.
-                # Clear gate_nonce + advance cursor in one txn so a
-                # crash between them can't leave a "no nonce + cursor
-                # not advanced" state that restart logic would
-                # mis-route.
-                await self._clear_gate_and_advance(execution, idx)
+                await self._clear_gate_and_advance(
+                    execution, current_step_index,
+                    gate_name=action.gate_ref,
+                    gate_output_payload=gate_payload,
+                )
             else:
                 await self._append_success_and_advance(
-                    execution, action_sink, idx, action, result,
+                    execution, action_sink, current_step_index, action, result,
                 )
                 await self._record_step_succeeded(
-                    execution, idx, action, result,
+                    execution, current_step_index, action, result,
                 )
-        # All steps done — mark completed.
+            current_step_index = self._natural_next_step_index(
+                current_step_index, terminal_ranges,
+                main_range=main_range,
+            )
+        # All steps done — mark completed (with optional terminal
+        # branch metadata for audit).
         await self._complete(execution)
+
+    # -- Spec 4 cursor / step-index helpers ----------------------------
+
+    def _build_action_by_index(
+        self, wf: Workflow,
+    ) -> dict[int, ActionDescriptor]:
+        """Map global step_index → ActionDescriptor for main +
+        terminal_branches. step_index is assigned by validate_workflow.
+        """
+        result: dict[int, ActionDescriptor] = {}
+        for action in wf.action_sequence:
+            if action.step_index >= 0:
+                result[action.step_index] = action
+        for branch_actions in wf.terminal_branches.values():
+            for action in branch_actions:
+                if action.step_index >= 0:
+                    result[action.step_index] = action
+        return result
+
+    def _build_terminal_branch_ranges(
+        self, wf: Workflow,
+    ) -> dict[str, tuple[int, int]]:
+        """Map terminal branch name → (first_step_index, last_step_index)
+        inclusive. Used for cursor-in-branch detection.
+        """
+        ranges: dict[str, tuple[int, int]] = {}
+        for branch_name, branch_actions in wf.terminal_branches.items():
+            if not branch_actions:
+                continue
+            indices = [a.step_index for a in branch_actions if a.step_index >= 0]
+            if indices:
+                ranges[branch_name] = (min(indices), max(indices))
+        return ranges
+
+    def _build_main_range(
+        self, wf: Workflow,
+    ) -> tuple[int, int] | None:
+        """Return (first_step_index, last_step_index) for the main
+        action_sequence. Used to detect end-of-main so the engine
+        doesn't fall through into terminal branches.
+        """
+        indices = [a.step_index for a in wf.action_sequence if a.step_index >= 0]
+        if not indices:
+            return None
+        return (min(indices), max(indices))
+
+    def _terminal_branch_for_step(
+        self,
+        step_index: int,
+        ranges: dict[str, tuple[int, int]],
+    ) -> str:
+        """Return branch_name if step_index falls within a terminal
+        branch's range; empty string otherwise.
+        """
+        for branch_name, (lo, hi) in ranges.items():
+            if lo <= step_index <= hi:
+                return branch_name
+        return ""
+
+    def _natural_next_step_index(
+        self,
+        current: int,
+        ranges: dict[str, tuple[int, int]],
+        *,
+        main_range: tuple[int, int] | None = None,
+    ) -> int | None:
+        """Compute the natural next global step_index after ``current``.
+
+        Three cases:
+        - ``current`` in a terminal branch range: advance within the
+          branch; end-of-branch → None (terminal branches don't fall
+          back to main sequence).
+        - ``current`` in main range: advance within main;
+          end-of-main → None (main sequence doesn't fall through into
+          terminal branches — those are only reachable via branch
+          verb routing).
+        - Otherwise: defensive None (unknown position).
+        """
+        for lo, hi in ranges.values():
+            if lo <= current <= hi:
+                if current == hi:
+                    return None
+                return current + 1
+        if main_range is not None:
+            lo, hi = main_range
+            if lo <= current <= hi:
+                if current == hi:
+                    return None
+                return current + 1
+        return None
+
+    def _resolve_next_step_index(
+        self, execution: WorkflowExecution, wf: Workflow,
+    ) -> int:
+        """At workflow start AND after restart-resume, decide the first
+        step to run.
+
+        Codex round-1 Blocker 1 (durable branch): if next_step_index
+        is set on the execution row (>= 0), use it — a branch
+        decision was persisted. Otherwise default to
+        action_index_completed + 1.
+        """
+        if execution.next_step_index >= 0:
+            return execution.next_step_index
+        return max(0, execution.action_index_completed + 1)
+
+    def _resolve_branch_target_to_global(
+        self,
+        target_id: str,
+        action_by_index: dict[int, ActionDescriptor],
+        wf: Workflow,
+        terminal_ranges: dict[str, tuple[int, int]],
+    ) -> int | None:
+        """Map a branch verb's target_step_id to its global step_index.
+
+        Bare ``<step_id>``: look up in any registered action.
+        ``terminal:<branch_name>:<step_id>``: walk the named branch.
+        """
+        if not isinstance(target_id, str) or not target_id:
+            return None
+        if target_id.startswith("terminal:"):
+            parts = target_id.split(":", 2)
+            if len(parts) != 3:
+                return None
+            _, branch_name, step_id = parts
+            for action in wf.terminal_branches.get(branch_name, []):
+                if action.id == step_id and action.step_index >= 0:
+                    return action.step_index
+            return None
+        # Bare step ID — search all registered actions.
+        for action in action_by_index.values():
+            if action.id == target_id:
+                return action.step_index
+        return None
+
+    async def _build_resolution_context(
+        self,
+        execution: WorkflowExecution,
+        pending_gate_nonce: str,
+        *,
+        mode: str = "parameter",
+    ) -> ResolutionContext:
+        """Construct the resolver context for the current step.
+
+        Loads step + gate outputs from workflow_step_outputs so
+        references against earlier-completed steps resolve.
+        ``pending_gate_nonce`` shadows ``execution.gate_nonce`` for
+        ``{workflow.gate_nonce}`` resolution (matches the original
+        ``_interpolate_params`` semantics where the minted nonce is
+        the value the gated action's payload carries).
+        """
+        assert self._db is not None
+        step_outputs, gate_outputs = await load_workflow_outputs(
+            self._db, execution.instance_id, execution.execution_id,
+        )
+        return ResolutionContext(
+            execution=execution,
+            trigger_payload=execution.trigger_event_payload or {},
+            step_outputs=step_outputs,
+            gate_outputs=gate_outputs,
+            pending_gate_nonce=pending_gate_nonce,
+            mode=mode,
+        )
 
     # -- Decision 6 per-outcome wrappers -------------------------------
 
@@ -830,24 +1206,88 @@ class ExecutionEngine:
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
         )
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 2: per-outcome
+        # capture matrix — non-gated success envelope.
+        envelope = build_output_envelope(
+            success=True, value=result.value,
+            error=None, receipt=result.receipt,
+        )
         if record is None:
-            # Codex round-2-impl High 3: audit-record build failure
-            # MUST NOT skip the workflow state mutation. Advance the
-            # cursor without the record so the workflow can continue.
+            # Codex round-2-impl High 3 (Spec 3): audit-build failure
+            # still advances cursor; skips the record AND skips the
+            # step output capture (Decision 11 consistency invariant).
             await self._run_workflow_txn(
                 lambda db: _advance_cursor_only(
                     db, execution.execution_id, step_index=idx,
                 ),
             )
             execution.action_index_completed = idx
+            execution.next_step_index = -1
             return
         await self._run_workflow_txn(
             lambda db: _append_and_advance(
                 db, sink, record,
                 step_index=idx, action_type=action.action_type,
+                step_output_envelope=envelope, step_id=action.id,
             ),
         )
         execution.action_index_completed = idx
+        execution.next_step_index = -1
+
+    async def _append_branch_and_advance(
+        self,
+        execution: WorkflowExecution,
+        sink: WorkflowExecutionActionSink,
+        idx: int,
+        action: ActionDescriptor,
+        result: ActionResult,
+        *,
+        next_step_index: int,
+    ) -> None:
+        """WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 5 + 9 /
+        Codex round-1 Blocker 1: branch verb's atomic boundary.
+        Persists next_step_index in the same transaction as the
+        record append so restart-resume honors the branch decision
+        durably.
+        """
+        record = _safe_build_record(
+            execution=execution, step_index=idx, action=action,
+            execution_state="completed", result=result,
+            tool_lookup=self._action_sink._tool_lookup
+            if self._action_sink is not None else None,
+        )
+        envelope = build_output_envelope(
+            success=True, value=result.value,
+            error=None, receipt=result.receipt,
+        )
+        if record is None:
+            # Audit-build failed — still advance cursor + persist
+            # next_step_index so the branch is honored on restart.
+            async def _body(db):
+                await db.execute(
+                    "UPDATE workflow_executions "
+                    "SET action_index_completed = ?, next_step_index = ?, "
+                    "last_heartbeat = ? "
+                    "WHERE execution_id = ? AND action_index_completed < ?",
+                    (
+                        idx, next_step_index, _now(),
+                        execution.execution_id, idx,
+                    ),
+                )
+            await self._run_workflow_txn(_body)
+            execution.action_index_completed = idx
+            execution.next_step_index = next_step_index
+            return
+        await self._run_workflow_txn(
+            lambda db: _append_and_advance_with_branch(
+                db, sink, record,
+                step_index=idx, action_type=action.action_type,
+                next_step_index=next_step_index,
+                step_output_envelope=envelope, step_id=action.id,
+            ),
+        )
+        execution.action_index_completed = idx
+        execution.next_step_index = next_step_index
 
     async def _append_success_and_persist_gate_nonce(
         self,
@@ -865,10 +1305,11 @@ class ExecutionEngine:
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
         )
+        envelope = build_output_envelope(
+            success=True, value=result.value,
+            error=None, receipt=result.receipt,
+        )
         if record is None:
-            # Codex round-2-impl High 3: persist the gate_nonce even
-            # when audit fails. Otherwise the gate wait could never
-            # match an incoming approval event (no nonce on the row).
             await self._run_workflow_txn(
                 lambda db: _persist_gate_nonce_only(
                     db, execution.execution_id, gate_nonce=gate_nonce,
@@ -880,6 +1321,7 @@ class ExecutionEngine:
                 db, sink, record,
                 step_index=idx, action_type=action.action_type,
                 gate_nonce=gate_nonce,
+                step_output_envelope=envelope, step_id=action.id,
             ),
         )
 
@@ -898,23 +1340,29 @@ class ExecutionEngine:
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
         )
+        # Per-outcome envelope for continue-on-failure (Decision 2 v2).
+        envelope = build_output_envelope(
+            success=False, value=None, error=error,
+            receipt={},
+        )
         if record is None:
-            # Codex round-2-impl High 3: still advance cursor on
-            # continue-on-failure even when audit build fails.
             await self._run_workflow_txn(
                 lambda db: _advance_cursor_only(
                     db, execution.execution_id, step_index=idx,
                 ),
             )
             execution.action_index_completed = idx
+            execution.next_step_index = -1
             return
         inserted = await self._run_workflow_txn(
             lambda db: _append_and_advance(
                 db, sink, record,
                 step_index=idx, action_type=action.action_type,
+                step_output_envelope=envelope, step_id=action.id,
             ),
         )
         execution.action_index_completed = idx
+        execution.next_step_index = -1
         if inserted:
             await self._post_commit_friction(sink, record, idx, action)
 
@@ -934,11 +1382,12 @@ class ExecutionEngine:
             tool_lookup=self._action_sink._tool_lookup
             if self._action_sink is not None else None,
         )
+        # Per-outcome envelope for aborting failure (Decision 2 v2).
+        envelope = build_output_envelope(
+            success=False, value=None, error=error,
+            receipt={},
+        )
         if record is None:
-            # Codex round-2-impl High 3: still transition execution
-            # to aborted state when audit build fails. Use the
-            # state-only helper so the caller's _emit_terminated_aborted
-            # path handles emission (no double-emit).
             await self._run_workflow_txn(
                 lambda db: _abort_state_only(
                     db, execution.execution_id,
@@ -954,6 +1403,7 @@ class ExecutionEngine:
                 db, sink, record,
                 step_index=idx, action_type=action.action_type,
                 aborted_reason=aborted_reason,
+                step_output_envelope=envelope, step_id=action.id,
             ),
         )
         execution.state = "aborted"
@@ -995,16 +1445,21 @@ class ExecutionEngine:
 
     async def _await_gate(
         self, execution: WorkflowExecution, gate: ApprovalGate,
-    ) -> bool:
+    ) -> tuple[bool, dict | None]:
         """Pause until an approval event matches the gate predicate AND
         carries the engine-minted gate_nonce + execution_id, or timeout.
-        Returns True if the engine should continue with the next
-        action, False if it aborted the execution.
+
+        WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 6 (Codex round-1
+        High 5): returns ``(continue, matched_event_payload)`` so
+        the caller can thread the payload into
+        ``_clear_gate_and_advance`` for atomic capture. Returns
+        ``(False, None)`` if the gate timed out and the timeout
+        handler chose abort; ``(True, synthesized_payload)`` if the
+        timeout chose ``auto_proceed_with_default``;
+        ``(True, matched_payload)`` on real approval.
 
         WLP-GATE-SCOPING C1: emits ``workflow.execution_paused_at_gate``
-        with the full gate descriptor + the engine-minted gate_nonce
-        so downstream agents (owner UI, AgentInbox listeners) know
-        what fields to compose into a valid approval response.
+        with the full gate descriptor + the engine-minted gate_nonce.
         """
         await event_stream.emit(
             execution.instance_id, "workflow.execution_paused_at_gate",
@@ -1026,6 +1481,7 @@ class ExecutionEngine:
         # post-flush match logic can verify both, not just the
         # descriptor predicate.
         self._gate_nonces[execution.execution_id] = execution.gate_nonce
+        nonce_for_cache = execution.gate_nonce
         try:
             await asyncio.wait_for(ev.wait(), timeout=gate.timeout_seconds)
         except asyncio.TimeoutError:
@@ -1033,19 +1489,43 @@ class ExecutionEngine:
             self._gate_predicates.pop(execution.execution_id, None)
             self._gate_event_types.pop(execution.execution_id, None)
             self._gate_nonces.pop(execution.execution_id, None)
-            return await self._handle_gate_timeout(execution, gate)
+            self._gate_release_payloads.pop(execution.execution_id, None)
+            self._predicate_resolution_cache.pop(
+                (execution.execution_id, nonce_for_cache), None,
+            )
+            cont = await self._handle_gate_timeout(execution, gate)
+            if not cont:
+                return False, None
+            # auto_proceed_with_default: synthesize a payload so
+            # subsequent steps' references to {gate.<name>.output.*}
+            # still resolve. The synthesized payload carries the
+            # gate's default_value plus a timed_out flag.
+            return True, {
+                "timed_out": True,
+                "default_value": gate.default_value,
+                "gate_name": gate.gate_name,
+            }
         finally:
             self._gate_waiters.pop(execution.execution_id, None)
             self._gate_predicates.pop(execution.execution_id, None)
             self._gate_event_types.pop(execution.execution_id, None)
             self._gate_nonces.pop(execution.execution_id, None)
+            self._predicate_resolution_cache.pop(
+                (execution.execution_id, nonce_for_cache), None,
+            )
+        # Read + pop the matched event payload that the post-flush
+        # match logic wrote before signalling the waiter (Decision 6 /
+        # Codex round-1 High 5).
+        matched_payload = self._gate_release_payloads.pop(
+            execution.execution_id, None,
+        )
         await event_stream.emit(
             execution.instance_id, "workflow.execution_resumed",
             {"execution_id": execution.execution_id,
              "gate_name": gate.gate_name},
             correlation_id=execution.correlation_id,
         )
-        return True
+        return True, matched_payload
 
     async def _handle_gate_timeout(
         self, execution: WorkflowExecution, gate: ApprovalGate,
@@ -1091,6 +1571,18 @@ class ExecutionEngine:
             expected_nonce = self._gate_nonces.get(execution_id)
             if event_type is None or predicate is None or not expected_nonce:
                 continue
+            # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 8: resolve
+            # template references in the predicate's value: fields
+            # via the resolver. Cache per (execution_id, gate_nonce).
+            resolved_predicate = await self._resolve_predicate_for_gate(
+                execution_id, expected_nonce, predicate,
+            )
+            if resolved_predicate is None:
+                # Reference resolution failed (e.g., referenced step
+                # output not yet present). Predicate evaluation returns
+                # False; gate stays paused; this evaluation pass skips
+                # the gate. Subsequent passes will re-try.
+                continue
             for event in batch:
                 if event.event_type != event_type:
                     continue
@@ -1102,11 +1594,73 @@ class ExecutionEngine:
                     continue
                 # Descriptor predicate (author-controlled).
                 try:
-                    if evaluate_predicate(predicate, event):
+                    if evaluate_predicate(resolved_predicate, event):
+                        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1
+                        # Decision 6 / Codex round-1 High 5: write
+                        # the matched event payload to the buffer
+                        # BEFORE signalling the waiter so
+                        # _await_gate can read it on wake-up.
+                        self._gate_release_payloads[execution_id] = dict(payload)
                         waiter.set()
                         break
                 except Exception:
                     pass
+
+    async def _resolve_predicate_for_gate(
+        self,
+        execution_id: str,
+        gate_nonce: str,
+        predicate: dict,
+    ) -> dict | None:
+        """Decision 8: resolve template references inside a predicate
+        AST's ``value:`` fields. Cached per (execution_id,
+        gate_nonce).
+
+        Returns the resolved AST (suitable for evaluate_predicate),
+        OR None if any reference couldn't resolve — caller treats
+        None as "no match this evaluation pass".
+        """
+        cache_key = (execution_id, gate_nonce)
+        if cache_key in self._predicate_resolution_cache:
+            return self._predicate_resolution_cache[cache_key]
+        # Build a ResolutionContext for predicate evaluation. Mode
+        # 'predicate' makes the resolver return _NOT_FOUND instead of
+        # raising on unresolved references.
+        execution = await self._fetch_execution_row(execution_id)
+        if execution is None:
+            return None
+        try:
+            assert self._db is not None
+            step_outputs, gate_outputs = await load_workflow_outputs(
+                self._db, execution.instance_id, execution.execution_id,
+            )
+        except Exception:
+            return None
+        ctx = ResolutionContext(
+            execution=execution,
+            trigger_payload=execution.trigger_event_payload or {},
+            step_outputs=step_outputs,
+            gate_outputs=gate_outputs,
+            mode="predicate",
+        )
+        resolved = _resolve_predicate_ast(predicate, ctx)
+        if resolved is None:
+            return None
+        self._predicate_resolution_cache[cache_key] = resolved
+        return resolved
+
+    async def _fetch_execution_row(
+        self, execution_id: str,
+    ) -> WorkflowExecution | None:
+        assert self._db is not None
+        async with self._db.execute(
+            "SELECT * FROM workflow_executions WHERE execution_id = ? LIMIT 1",
+            (execution_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        return WorkflowExecution.from_row(row)
 
     # -- workflow_db transactional helper -------------------------------
 
@@ -1440,6 +1994,9 @@ class ExecutionEngine:
 
     async def _clear_gate_and_advance(
         self, execution: WorkflowExecution, idx: int,
+        *,
+        gate_name: str = "",
+        gate_output_payload: dict | None = None,
     ) -> None:
         """Codex round-2-impl Blocker 2: atomic gate release. Clear
         gate_nonce AND advance action_index_completed in one BEGIN
@@ -1450,16 +2007,26 @@ class ExecutionEngine:
         Defensive nonce-guard: the WHERE clause includes the
         expected gate_nonce so two concurrent gate resolutions for
         the same execution can't both advance.
+
+        WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 6 (Codex round
+        1 High 5): when ``gate_name`` + ``gate_output_payload`` are
+        supplied, atomically capture the satisfying event's payload
+        into workflow_step_outputs (output_kind='gate'). The capture
+        + the gate release land in the same transaction.
         """
         expected_nonce = execution.gate_nonce
         await self._run_workflow_txn(
             lambda db: _clear_gate_nonce_and_advance(
                 db, execution.execution_id,
                 step_index=idx, expected_nonce=expected_nonce,
+                gate_name=gate_name,
+                gate_output_payload=gate_output_payload,
+                instance_id=execution.instance_id,
             ),
         )
         execution.gate_nonce = ""
         execution.action_index_completed = idx
+        execution.next_step_index = -1
 
     async def _clear_gate_nonce(
         self, execution: WorkflowExecution,

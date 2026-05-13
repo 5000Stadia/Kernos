@@ -133,7 +133,16 @@ class ContinuationRules:
 
 @dataclass
 class ActionDescriptor:
-    """A single step in a workflow's action sequence."""
+    """A single step in a workflow's action sequence.
+
+    WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 0:
+    - ``id`` is the human-readable identifier (required iff this
+      step is a reference target; optional otherwise).
+    - ``step_index`` is the globally-assigned monotonic ordinal
+      assigned by validate_workflow at registration time.
+      Across main action_sequence + terminal_branches the indices
+      are unique; Spec 3's workflow_action_records PK composes.
+    """
 
     action_type: str
     parameters: dict = field(default_factory=dict)
@@ -141,6 +150,8 @@ class ActionDescriptor:
     continuation_rules: ContinuationRules = field(default_factory=ContinuationRules)
     gate_ref: str | None = None
     resume_safe: bool = False
+    id: str = ""
+    step_index: int = -1  # assigned by validate_workflow
 
 
 @dataclass
@@ -177,6 +188,10 @@ class Workflow:
     created_at: str = ""
     status: str = "active"
     instance_local: bool = False
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 7: optional named
+    # terminal action sequences reachable only via the ``branch`` verb
+    # using the ``terminal:<branch_name>:<step_id>`` target syntax.
+    terminal_branches: dict[str, list[ActionDescriptor]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +301,179 @@ def validate_workflow(wf: Workflow) -> None:
         validate_predicate(wf.trigger.predicate)
         if not wf.trigger.event_type:
             raise WorkflowError("trigger.event_type is required")
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 extensions: step IDs +
+    # terminal branches + global step ordinal + branch verb + ID
+    # grammar + reference well-formedness.
+    _validate_workflow_orchestration_extensions(wf)
+
+
+def _validate_workflow_orchestration_extensions(wf: Workflow) -> None:
+    """Spec 4 (Decision 0 + Decision 5 + Decision 7) validation:
+
+      * step IDs match grammar; unique across main + terminal_branches.
+      * terminal branch names match grammar; non-empty action lists.
+      * gate names match grammar.
+      * action_type within terminal_branches is in KNOWN_ACTION_TYPES;
+        continuation_rules.on_failure is valid; gate_ref resolves.
+      * branch verb's parameters resolve to existing step IDs.
+      * static template references (`{step.<id>...}`,
+        `{gate.<name>...}`) resolve to existing IDs / names.
+      * global step ordinal assigned to every ActionDescriptor's
+        ``step_index`` field (mutating side effect).
+    """
+    # Lazy import to avoid cyclic dependency at module load.
+    from kernos.kernel.workflows.refs import (
+        IdentifierGrammarError,
+        extract_references_in_value,
+        parse_reference_head,
+        validate_identifier,
+    )
+
+    # Collect step IDs across main + terminal branches.
+    seen_ids: dict[str, str] = {}  # id → location ("main" or "terminal:<name>")
+
+    def _register_id(idx_in_seq: int, action: ActionDescriptor, location: str) -> None:
+        if not action.id:
+            return
+        try:
+            validate_identifier(action.id, ctx=f"{location}[{idx_in_seq}].id")
+        except IdentifierGrammarError as exc:
+            raise WorkflowError(str(exc)) from exc
+        if action.id in seen_ids:
+            raise WorkflowError(
+                f"duplicate step id {action.id!r} found in {location}; "
+                f"already declared in {seen_ids[action.id]}"
+            )
+        seen_ids[action.id] = location
+
+    # Gate names grammar.
+    for gate in wf.approval_gates:
+        try:
+            validate_identifier(gate.gate_name, ctx="approval_gate.gate_name")
+        except IdentifierGrammarError as exc:
+            raise WorkflowError(str(exc)) from exc
+
+    # Main sequence: register IDs.
+    for idx, action in enumerate(wf.action_sequence):
+        _register_id(idx, action, "main")
+
+    # Terminal branches: name grammar + non-empty + register IDs.
+    for branch_name, branch_actions in wf.terminal_branches.items():
+        try:
+            validate_identifier(
+                branch_name, ctx="terminal_branches.<branch_name>",
+            )
+        except IdentifierGrammarError as exc:
+            raise WorkflowError(str(exc)) from exc
+        if not branch_actions:
+            raise WorkflowError(
+                f"terminal_branches[{branch_name!r}] must be non-empty"
+            )
+        for idx, action in enumerate(branch_actions):
+            if action.action_type not in KNOWN_ACTION_TYPES:
+                raise WorkflowError(
+                    f"terminal_branches[{branch_name!r}][{idx}].action_type "
+                    f"{action.action_type!r} is not a known verb"
+                )
+            if action.continuation_rules.on_failure not in VALID_CONTINUATION_ON_FAILURE:
+                raise WorkflowError(
+                    f"terminal_branches[{branch_name!r}][{idx}]."
+                    f"continuation_rules.on_failure invalid"
+                )
+            _register_id(idx, action, f"terminal:{branch_name}")
+
+    # Global step ordinal assignment: main first, then terminal
+    # branches in insertion order. This is the substrate ordinal
+    # Spec 3's workflow_action_records PK uses.
+    next_ordinal = 0
+    for action in wf.action_sequence:
+        action.step_index = next_ordinal
+        next_ordinal += 1
+    for branch_name in wf.terminal_branches:
+        for action in wf.terminal_branches[branch_name]:
+            action.step_index = next_ordinal
+            next_ordinal += 1
+
+    # Build the step_id → step_index map for branch / reference
+    # target resolution.
+    id_to_index: dict[str, int] = {}
+    for action in wf.action_sequence:
+        if action.id:
+            id_to_index[action.id] = action.step_index
+    for branch_name, branch_actions in wf.terminal_branches.items():
+        for action in branch_actions:
+            if action.id:
+                id_to_index[action.id] = action.step_index
+
+    # Branch verb validation: branch_on_true / branch_on_false
+    # targets must resolve to existing step IDs (bare) or
+    # terminal:<name>:<id> (composed).
+    def _resolve_branch_target(target: str) -> bool:
+        if not isinstance(target, str) or not target:
+            return False
+        if target.startswith("terminal:"):
+            parts = target.split(":", 2)
+            if len(parts) != 3:
+                return False
+            _, branch_name, step_id = parts
+            if branch_name not in wf.terminal_branches:
+                return False
+            for action in wf.terminal_branches[branch_name]:
+                if action.id == step_id:
+                    return True
+            return False
+        return target in id_to_index
+
+    all_actions = list(wf.action_sequence)
+    for branch_actions in wf.terminal_branches.values():
+        all_actions.extend(branch_actions)
+    for action in all_actions:
+        if action.action_type != "branch":
+            continue
+        params = action.parameters or {}
+        target_true = params.get("branch_on_true")
+        target_false = params.get("branch_on_false")
+        if not target_true or not target_false:
+            raise WorkflowError(
+                f"branch verb step (id={action.id!r}, "
+                f"step_index={action.step_index}) requires both "
+                f"branch_on_true and branch_on_false parameters"
+            )
+        if not _resolve_branch_target(target_true):
+            raise WorkflowError(
+                f"branch verb step (id={action.id!r}, "
+                f"step_index={action.step_index}) branch_on_true "
+                f"{target_true!r} does not resolve to a declared step"
+            )
+        if not _resolve_branch_target(target_false):
+            raise WorkflowError(
+                f"branch verb step (id={action.id!r}, "
+                f"step_index={action.step_index}) branch_on_false "
+                f"{target_false!r} does not resolve to a declared step"
+            )
+
+    # Reference well-formedness: every {step.<id>...} or
+    # {gate.<name>...} in any parameter must resolve to a declared
+    # step ID / gate name.
+    known_gate_names = {g.gate_name for g in wf.approval_gates}
+    for action in all_actions:
+        refs = extract_references_in_value(action.parameters)
+        for reference in refs:
+            namespace, target = parse_reference_head(reference)
+            if namespace == "step":
+                if target and target not in id_to_index:
+                    raise WorkflowError(
+                        f"action (id={action.id!r}, "
+                        f"step_index={action.step_index}) references "
+                        f"unknown step {target!r} in template {reference!r}"
+                    )
+            elif namespace == "gate":
+                if target and target not in known_gate_names:
+                    raise WorkflowError(
+                        f"action (id={action.id!r}, "
+                        f"step_index={action.step_index}) references "
+                        f"unknown gate {target!r} in template {reference!r}"
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -382,8 +570,36 @@ def _workflow_descriptor_blob(wf: Workflow) -> str:
         "trigger": asdict(wf.trigger) if wf.trigger else None,
         "metadata": wf.metadata,
         "instance_local": wf.instance_local,
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 7: persist
+        # terminal_branches so the deserialized workflow can be
+        # consumed by the engine's branch-target resolution path.
+        "terminal_branches": {
+            branch_name: [asdict(a) for a in branch_actions]
+            for branch_name, branch_actions in wf.terminal_branches.items()
+        },
     }
     return json.dumps(body)
+
+
+def _action_descriptor_from_raw(a: dict) -> ActionDescriptor:
+    """Build an ActionDescriptor from a stored JSON descriptor.
+
+    WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 0: preserve
+    ``id`` + ``step_index`` from the persisted descriptor so engine
+    lookups via the global step ordinal find the action.
+    """
+    return ActionDescriptor(
+        action_type=a["action_type"],
+        parameters=a.get("parameters") or {},
+        per_action_expectation=a.get("per_action_expectation", ""),
+        continuation_rules=ContinuationRules(
+            **(a.get("continuation_rules") or {})
+        ),
+        gate_ref=a.get("gate_ref"),
+        resume_safe=a.get("resume_safe", False),
+        id=a.get("id", ""),
+        step_index=int(a.get("step_index", -1)),
+    )
 
 
 def _workflow_from_row(row) -> Workflow:
@@ -391,21 +607,21 @@ def _workflow_from_row(row) -> Workflow:
     bounds = Bounds(**body["bounds"])
     verifier = Verifier(**body["verifier"])
     action_sequence = [
-        ActionDescriptor(
-            action_type=a["action_type"],
-            parameters=a.get("parameters") or {},
-            per_action_expectation=a.get("per_action_expectation", ""),
-            continuation_rules=ContinuationRules(
-                **(a.get("continuation_rules") or {})
-            ),
-            gate_ref=a.get("gate_ref"),
-            resume_safe=a.get("resume_safe", False),
-        )
-        for a in body["action_sequence"]
+        _action_descriptor_from_raw(a) for a in body["action_sequence"]
     ]
     approval_gates = [ApprovalGate(**g) for g in body.get("approval_gates", [])]
     trigger_body = body.get("trigger")
     trigger = TriggerDescriptor(**trigger_body) if trigger_body else None
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 7: terminal_branches
+    # block preservation across serialization.
+    terminal_raw = body.get("terminal_branches") or {}
+    terminal_branches: dict[str, list[ActionDescriptor]] = {}
+    if isinstance(terminal_raw, dict):
+        for branch_name, branch_actions in terminal_raw.items():
+            if isinstance(branch_actions, list):
+                terminal_branches[branch_name] = [
+                    _action_descriptor_from_raw(a) for a in branch_actions
+                ]
     return Workflow(
         workflow_id=row["workflow_id"],
         instance_id=row["instance_id"],
@@ -421,6 +637,7 @@ def _workflow_from_row(row) -> Workflow:
         trigger=trigger,
         metadata=body.get("metadata") or {},
         created_at=row["created_at"],
+        terminal_branches=terminal_branches,
         instance_local=body.get("instance_local", False),
     )
 

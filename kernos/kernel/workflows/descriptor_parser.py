@@ -303,12 +303,12 @@ def _build_predicate(raw: Any, *, ctx: str) -> dict:
     return raw
 
 
-def _build_action(idx: int, raw: dict) -> ActionDescriptor:
+def _build_action(idx: int, raw: dict, *, ctx: str = "action_sequence") -> ActionDescriptor:
     if not isinstance(raw, dict):
-        raise DescriptorError(f"action_sequence[{idx}] must be a mapping")
+        raise DescriptorError(f"{ctx}[{idx}] must be a mapping")
     cont_raw = raw.get("continuation_rules") or {}
     return ActionDescriptor(
-        action_type=_require(raw, "action_type", f"action_sequence[{idx}]"),
+        action_type=_require(raw, "action_type", f"{ctx}[{idx}]"),
         parameters=raw.get("parameters") or {},
         per_action_expectation=raw.get("per_action_expectation", ""),
         continuation_rules=ContinuationRules(
@@ -317,6 +317,14 @@ def _build_action(idx: int, raw: dict) -> ActionDescriptor:
         ),
         gate_ref=raw.get("gate_ref"),
         resume_safe=raw.get("resume_safe", False),
+        # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 0: optional
+        # human-readable step ID for reference targets. step_index is
+        # ASSIGNED at registration time by validate_workflow, but
+        # workflow loading from JSON descriptors must preserve the
+        # assigned value so engine lookups via _build_action_by_index
+        # find the action by global ordinal.
+        id=raw.get("id", ""),
+        step_index=int(raw.get("step_index", -1)),
     )
 
 
@@ -380,6 +388,24 @@ def _build_workflow(body: dict, *, narrative_description: str = "") -> Workflow:
     trigger_raw = body.get("trigger")
     trigger = _build_trigger(trigger_raw) if trigger_raw else None
     description = body.get("description", "") or narrative_description
+    # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 7: terminal_branches
+    # is an optional top-level descriptor block; each entry is a named
+    # action sub-sequence reachable only via the ``branch`` verb.
+    terminal_raw = body.get("terminal_branches") or {}
+    if not isinstance(terminal_raw, dict):
+        raise DescriptorError("terminal_branches must be a mapping")
+    terminal_branches: dict[str, list[ActionDescriptor]] = {}
+    for branch_name, branch_actions_raw in terminal_raw.items():
+        if not isinstance(branch_actions_raw, list):
+            raise DescriptorError(
+                f"terminal_branches[{branch_name!r}] must be a list"
+            )
+        terminal_branches[branch_name] = [
+            _build_action(
+                i, a, ctx=f"terminal_branches[{branch_name!r}]",
+            )
+            for i, a in enumerate(branch_actions_raw)
+        ]
     return Workflow(
         workflow_id=body.get("workflow_id", "") or str(uuid.uuid4()),
         instance_id=_require(body, "instance_id"),
@@ -395,6 +421,7 @@ def _build_workflow(body: dict, *, narrative_description: str = "") -> Workflow:
         metadata=body.get("metadata") or {},
         instance_local=instance_local,
         status=body.get("status", "active"),
+        terminal_branches=terminal_branches,
     )
 
 

@@ -30,7 +30,13 @@ DIRECT_EFFECT_VERBS = frozenset({
     "append_to_ledger",
 })
 
-KNOWN_ACTION_TYPES = WORLD_EFFECT_VERBS | DIRECT_EFFECT_VERBS
+# WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 5 / Codex round 1
+# Medium 7: branch is a control-flow verb (mutates next_step_index;
+# no world effect). operation_class=mutate; risk_level=medium per
+# Spec 3's derivation table.
+CONTROL_FLOW_VERBS = frozenset({"branch"})
+
+KNOWN_ACTION_TYPES = WORLD_EFFECT_VERBS | DIRECT_EFFECT_VERBS | CONTROL_FLOW_VERBS
 
 
 def is_irreversible(action_type: str, parameters: dict | None = None) -> bool:
@@ -60,10 +66,14 @@ def is_irreversible(action_type: str, parameters: dict | None = None) -> bool:
         return False
     if action_type == "append_to_ledger":
         return False
+    if action_type == "branch":
+        # Pure control flow; no world effect. Reversible by replay.
+        return False
     raise ValueError(f"unknown action_type: {action_type!r}")
 
 
 __all__ = [
+    "CONTROL_FLOW_VERBS",
     "DIRECT_EFFECT_VERBS",
     "KNOWN_ACTION_TYPES",
     "WORLD_EFFECT_VERBS",
