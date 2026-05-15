@@ -630,6 +630,16 @@ class ExecutionEngine:
         # transaction within a transaction". The lock is acquired
         # inside ``_run_workflow_txn``.
         self._workflow_db_write_lock = asyncio.Lock()
+        # Spec 6 V7.2 implementation note: production-assembly-owned
+        # emitters register here so their lifecycle is bounded by the
+        # engine's stop(). The engine does NOT start emitters — that
+        # responsibility lives in bring_up_substrate so emitters can
+        # launch AFTER the WTC trigger predicates exist (Spec 6 B3
+        # ordering). Asymmetric but operationally clean: production
+        # assembly owns start; engine owns stop via assembly's
+        # registration. Generic ``Any`` type because emitters share
+        # only a ``stop()`` async method (duck-typed).
+        self._emitters: dict[str, Any] = {}
 
     # -- lifecycle ------------------------------------------------------
 
@@ -698,7 +708,38 @@ class ExecutionEngine:
             self._worker(), name="workflow_execution_engine",
         )
 
+    def register_emitter(self, name: str, emitter: Any) -> None:
+        """Spec 6 V7.2: production-assembly registers emitters with
+        the engine so their lifecycle is bounded by ``stop()``.
+
+        The engine does NOT call ``emitter.start()`` — that happens in
+        ``bring_up_substrate`` AFTER the WTC trigger predicates exist
+        (Spec 6 B3 ordering: emitters launch after helper success).
+        The engine DOES call ``emitter.stop()`` from its own ``stop()``
+        so a single shutdown path tears everything down deterministically.
+
+        ``emitter`` must expose an async ``stop()`` method. The duck-typed
+        contract keeps this surface decoupled from any specific emitter
+        class.
+        """
+        self._emitters[name] = emitter
+
     async def stop(self) -> None:
+        # Spec 6 V7.2 / B3 fold: stop registered emitters BEFORE
+        # tearing down the engine's own worker + DB. Each emitter's
+        # stop() is wrapped in try/except so one bad emitter doesn't
+        # leak resources on the others. Stop order doesn't matter
+        # (emitters are independent producers); insertion order is
+        # used for stable shutdown logs.
+        for name, emitter in list(self._emitters.items()):
+            try:
+                await emitter.stop()
+            except Exception as exc:
+                logger.warning(
+                    "WORKFLOW_EMITTER_STOP_FAILED name=%s error=%s",
+                    name, exc,
+                )
+        self._emitters.clear()
         if self._stop_event is not None:
             self._stop_event.set()
         if self._worker_task is not None:

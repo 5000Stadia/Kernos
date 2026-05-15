@@ -355,6 +355,16 @@ class FrictionPattern:
     resolved_by_spec: str = ""
     reactivated_at: str = ""
     created_at: str = ""
+    # Spec 6: instance-scoped monotonic counter incremented when the
+    # pattern enters an active-class state (ACTIVE on creation or
+    # archived-revival; REACTIVATED via record_recurrence threshold or
+    # operator path). Emitters (FrictionPatternFrequencyEmitter) use
+    # this to dedupe: if a fired event's active_epoch matches the
+    # pattern's current active_epoch, the emitter knows it's the same
+    # activation episode and can decide whether to re-fire. The epoch
+    # is per-instance (MAX+1 over the instance's friction_pattern rows)
+    # so emitters can persist a "last fired epoch" cursor.
+    active_epoch: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +388,7 @@ CREATE TABLE IF NOT EXISTS friction_pattern (
     resolved_at         TEXT NOT NULL DEFAULT '',
     resolved_by_spec    TEXT NOT NULL DEFAULT '',
     reactivated_at      TEXT NOT NULL DEFAULT '',
+    active_epoch        INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL,
     PRIMARY KEY (instance_id, pattern_id),
     CHECK (lifecycle_state IN (
@@ -448,6 +459,12 @@ def _row_to_pattern(row: aiosqlite.Row) -> FrictionPattern:
         aliases = tuple(json.loads(row["aliases"]) or [])
     except Exception:
         aliases = ()
+    # Spec 6: active_epoch may be absent on pre-migration rows / row
+    # shims that don't surface the column; default to 0.
+    try:
+        active_epoch = int(row["active_epoch"] or 0)
+    except (KeyError, IndexError, TypeError, ValueError):
+        active_epoch = 0
     return FrictionPattern(
         instance_id=row["instance_id"],
         pattern_id=row["pattern_id"],
@@ -464,6 +481,7 @@ def _row_to_pattern(row: aiosqlite.Row) -> FrictionPattern:
         resolved_by_spec=row["resolved_by_spec"],
         reactivated_at=row["reactivated_at"],
         created_at=row["created_at"],
+        active_epoch=active_epoch,
     )
 
 
@@ -526,6 +544,21 @@ class FrictionPatternStore:
             except aiosqlite.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+        # Spec 6: active_epoch column migration. Same idempotent ALTER
+        # pattern as workflow_resolvable. Existing pre-Spec-6 rows get
+        # active_epoch=0 by default — emitters interpret 0 as "epoch
+        # not yet recorded for this row" and either backfill on first
+        # event or treat as pre-history (acceptable because pre-Spec-6
+        # patterns predate the autonomy loop entirely).
+        if "active_epoch" not in cols:
+            try:
+                await self._db.execute(
+                    "ALTER TABLE friction_pattern "
+                    "ADD COLUMN active_epoch INTEGER NOT NULL DEFAULT 0"
+                )
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     async def ensure_schema(self, data_dir: str) -> None:
         """Alias for ``start``. Mirrors the API name the spec uses."""
@@ -543,6 +576,31 @@ class FrictionPatternStore:
     def db(self) -> aiosqlite.Connection:
         assert self._db is not None, "FrictionPatternStore not started"
         return self._db
+
+    # --- Active-epoch helper (Spec 6) ---------------------------------
+
+    async def _next_active_epoch(
+        self, db: aiosqlite.Connection, instance_id: str,
+    ) -> int:
+        """Spec 6: compute MAX(active_epoch)+1 across the instance.
+        Called inside _run_in_immediate_txn bodies so the read +
+        subsequent INSERT/UPDATE are serialized under the same write
+        lock as other lifecycle changes — no race window where two
+        transitions race for the same epoch.
+
+        Returns 1 for the first activation in an instance (empty
+        table). Pre-Spec-6 rows have active_epoch=0 from the ALTER
+        TABLE default; MAX over a mixed set (0s + assigned epochs)
+        still gives a monotonic next value.
+        """
+        async with db.execute(
+            "SELECT COALESCE(MAX(active_epoch), 0) FROM friction_pattern "
+            "WHERE instance_id = ?",
+            (instance_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        current_max = int(row[0]) if row else 0
+        return current_max + 1
 
     # --- Transaction discipline ---------------------------------------
 
@@ -673,17 +731,23 @@ class FrictionPatternStore:
                 suffix += 1
 
             now = utc_now()
+            # Spec 6: new pattern enters ACTIVE → first activation
+            # episode for this instance + pattern, so increment the
+            # instance-scoped active_epoch counter.
+            active_epoch = await self._next_active_epoch(db, instance_id)
             await db.execute(
                 "INSERT INTO friction_pattern "
                 "(instance_id, pattern_id, parent_pattern_id, display_name, "
                 " description, signal_type_keys, aliases, lifecycle_state, "
                 " occurrence_count, first_observed_at, last_observed_at, "
-                " resolved_at, resolved_by_spec, reactivated_at, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " resolved_at, resolved_by_spec, reactivated_at, "
+                " active_epoch, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     instance_id, pattern_id, parent_pattern_id, display_name,
                     description, json.dumps(sig_keys), json.dumps([]),
-                    LIFECYCLE_ACTIVE, 0, "", "", "", "", "", now,
+                    LIFECYCLE_ACTIVE, 0, "", "", "", "", "",
+                    active_epoch, now,
                 ),
             )
             return FrictionPattern(
@@ -695,6 +759,7 @@ class FrictionPatternStore:
                 aliases=(),
                 parent_pattern_id=parent_pattern_id,
                 lifecycle_state=LIFECYCLE_ACTIVE,
+                active_epoch=active_epoch,
                 created_at=now,
             )
 
@@ -862,13 +927,24 @@ class FrictionPatternStore:
                 )
 
             now = utc_now()
-            updates = {"lifecycle_state": new_state}
+            updates: dict[str, Any] = {"lifecycle_state": new_state}
             if new_state == LIFECYCLE_RESOLVED:
                 updates["resolved_at"] = now
                 if resolved_by_spec:
                     updates["resolved_by_spec"] = resolved_by_spec
             elif new_state == LIFECYCLE_REACTIVATED:
                 updates["reactivated_at"] = now
+            # Spec 6: increment active_epoch when entering an
+            # active-class state (ACTIVE via RESOLVED→ACTIVE manual
+            # reactivation or ARCHIVED→ACTIVE revival; REACTIVATED via
+            # this operator path). The increment happens inside the
+            # same _run_in_immediate_txn body so the read+write are
+            # serialized and no other transition can race for the
+            # same epoch.
+            if new_state in (LIFECYCLE_ACTIVE, LIFECYCLE_REACTIVATED):
+                updates["active_epoch"] = await self._next_active_epoch(
+                    db, instance_id,
+                )
 
             set_clause = ", ".join(f"{k} = ?" for k in updates)
             params = list(updates.values()) + [instance_id, pattern_id]
@@ -1091,11 +1167,19 @@ class FrictionPatternStore:
 
             if count >= threshold:
                 now = utc_now()
+                # Spec 6: reactivation is an active-class state
+                # transition; increment instance-scoped active_epoch.
+                # Same _do txn body serializes the read+write.
+                new_epoch = await self._next_active_epoch(db, instance_id)
                 await db.execute(
                     "UPDATE friction_pattern SET "
-                    "lifecycle_state = ?, reactivated_at = ? "
+                    "lifecycle_state = ?, reactivated_at = ?, "
+                    "active_epoch = ? "
                     "WHERE instance_id = ? AND pattern_id = ?",
-                    (LIFECYCLE_REACTIVATED, now, instance_id, pattern_id),
+                    (
+                        LIFECYCLE_REACTIVATED, now, new_epoch,
+                        instance_id, pattern_id,
+                    ),
                 )
                 triggered_reactivation = True
                 reactivation_event = {

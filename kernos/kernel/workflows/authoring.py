@@ -77,8 +77,19 @@ logger = logging.getLogger(__name__)
 ACTOR_KERNOS = "kernos"
 ACTOR_ARCHITECT = "architect"
 ACTOR_SYSTEM = "system"
+# Spec 6: operator actor kind. Carries substrate-tier authority for
+# specific autonomy-loop tools (transition_friction_pattern_lifecycle,
+# record_friction_pattern_recurrence, emit_autonomy_loop_event) while
+# remaining distinct from architect — operators run the production
+# assembly (bring-up, autonomy loop) but cannot ratify new workflows
+# at activation time. Identity is set via ``KERNOS_OPERATOR_ACTOR_ID``
+# env var (parallel to KERNOS_ARCHITECT_ACTOR_ID for fail-closed
+# semantics when unset).
+ACTOR_OPERATOR = "operator"
 
-VALID_ACTOR_KINDS = frozenset({ACTOR_KERNOS, ACTOR_ARCHITECT, ACTOR_SYSTEM})
+VALID_ACTOR_KINDS = frozenset({
+    ACTOR_KERNOS, ACTOR_ARCHITECT, ACTOR_SYSTEM, ACTOR_OPERATOR,
+})
 
 
 @dataclass(frozen=True)
@@ -92,16 +103,23 @@ class AuthoringContext:
     actor_id: the concrete actor identifier (member_id for Kernos,
         operator_id for architect-via-operator, "system" for
         engine-internal calls).
-    actor_kind: discriminator. "kernos" | "architect" | "system".
-        "system" is used for engine-internal calls during workflow
-        execution; system actors still require architect
-        ratification at activation.
+    actor_kind: discriminator. "kernos" | "architect" | "system" |
+        "operator". "system" is used for engine-internal calls
+        during workflow execution; system actors still require
+        architect ratification at activation. "operator" (Spec 6) is
+        the production-assembly actor kind — substrate-tier authority
+        for autonomy-loop tools (transition_friction_pattern_lifecycle,
+        record_friction_pattern_recurrence, emit_autonomy_loop_event)
+        but cannot ratify workflows at activation.
     """
     actor_id: str
     actor_kind: str
 
     def is_architect(self) -> bool:
         return self.actor_kind == ACTOR_ARCHITECT
+
+    def is_operator(self) -> bool:
+        return self.actor_kind == ACTOR_OPERATOR
 
 
 # ---------------------------------------------------------------------------
@@ -161,16 +179,36 @@ def _is_architect(ctx: AuthoringContext) -> bool:
     return ctx.actor_kind == ACTOR_ARCHITECT and ctx.actor_id == expected
 
 
+def _is_operator(ctx: AuthoringContext) -> bool:
+    """Operator-only tools (Spec 6 substrate-tier autonomy-loop tools)
+    call this. Fail-closed semantics: if KERNOS_OPERATOR_ACTOR_ID is
+    unset, NO actor passes the check — matches the architect
+    discipline so misconfigured environments don't accidentally grant
+    operator authority."""
+    expected = os.environ.get("KERNOS_OPERATOR_ACTOR_ID", "")
+    if not expected:
+        return False
+    return ctx.actor_kind == ACTOR_OPERATOR and ctx.actor_id == expected
+
+
 def derive_actor_kind(actor_id: str) -> str:
     """Helper for tool dispatchers: derive actor_kind from actor_id
-    based on the env-var-set architect identity. Empty actor_id
-    falls back to "system".
+    based on the env-var-set architect / operator identities. Empty
+    actor_id falls back to "system".
+
+    Resolution order: architect identity wins over operator identity
+    when both env vars happen to match the same actor_id (defensive;
+    in practice they should be distinct). Otherwise: architect →
+    operator → default Kernos.
     """
     if not actor_id:
         return ACTOR_SYSTEM
     architect_id = os.environ.get("KERNOS_ARCHITECT_ACTOR_ID", "")
     if architect_id and actor_id == architect_id:
         return ACTOR_ARCHITECT
+    operator_id = os.environ.get("KERNOS_OPERATOR_ACTOR_ID", "")
+    if operator_id and actor_id == operator_id:
+        return ACTOR_OPERATOR
     return ACTOR_KERNOS
 
 
@@ -1664,6 +1702,7 @@ async def _emit_authoring_record(
 __all__ = [
     "ACTOR_ARCHITECT",
     "ACTOR_KERNOS",
+    "ACTOR_OPERATOR",
     "ACTOR_SYSTEM",
     "AuthoringContext",
     "AuthoringResult",

@@ -524,6 +524,179 @@ class TestBackgroundExecution:
 
 
 # ===========================================================================
+# Spec 6: ExecutionEngine.register_emitter() + stop() composition
+# ===========================================================================
+#
+# Pins the V7.2 implementation note: production-assembly-owned emitters
+# register with the engine so their stop() runs deterministically when
+# the engine tears down. Engine does NOT start emitters — that
+# responsibility lives in bring_up_substrate (B3 ordering).
+
+
+class TestSpec6EmitterRegistration:
+    """V7.2: register_emitter + stop() composition. Substrate-plumbing
+    primitive that lets production assembly register emitters whose
+    lifecycle is bounded by the engine's stop()."""
+
+    async def test_register_emitter_stores_under_name(self, stack):
+        """Unit pin: registered emitter is observable in _emitters
+        dict under its name key."""
+        engine = stack["engine"]
+
+        class _StubEmitter:
+            def __init__(self):
+                self.stopped = False
+
+            async def stop(self):
+                self.stopped = True
+
+        emitter = _StubEmitter()
+        engine.register_emitter("test_stub", emitter)
+        assert "test_stub" in engine._emitters
+        assert engine._emitters["test_stub"] is emitter
+
+    async def test_engine_stop_invokes_emitter_stop(self, tmp_path):
+        """Functional pin (user-feedback request): mechanic exercised
+        under expected use. Register an emitter; stop the engine;
+        verify the emitter's stop() was invoked. This is the lifecycle
+        contract the production assembly relies on — emitters are torn
+        down deterministically as part of engine shutdown."""
+        from kernos.kernel.workflows.action_library import (
+            ActionLibrary, MarkStateAction,
+        )
+        from kernos.kernel.workflows.execution_engine import ExecutionEngine
+        from kernos.kernel.workflows.ledger import WorkflowLedger
+        from kernos.kernel.workflows.trigger_registry import (
+            TriggerRegistry,
+            _reset_for_tests as _reset_trig,
+        )
+        from kernos.kernel.workflows.workflow_registry import WorkflowRegistry
+
+        await event_stream._reset_for_tests()
+        await event_stream.start_writer(str(tmp_path))
+        trig = TriggerRegistry()
+        await trig.start(str(tmp_path))
+        wfr = WorkflowRegistry()
+        await wfr.start(str(tmp_path), trig)
+        lib = ActionLibrary()
+
+        async def _set(*, key, value, scope, instance_id):
+            pass
+
+        async def _get(*, key, scope, instance_id):
+            return None
+
+        lib.register(MarkStateAction(state_store_set=_set, state_store_get=_get))
+        ledger = WorkflowLedger(str(tmp_path))
+        engine = ExecutionEngine()
+        await engine.start(str(tmp_path), trig, wfr, lib, ledger)
+
+        stop_log: list[str] = []
+
+        class _RealisticEmitter:
+            def __init__(self, name):
+                self.name = name
+                self.stopped = False
+
+            async def stop(self):
+                self.stopped = True
+                stop_log.append(self.name)
+
+        a = _RealisticEmitter("emitter_a")
+        b = _RealisticEmitter("emitter_b")
+        engine.register_emitter("a", a)
+        engine.register_emitter("b", b)
+
+        try:
+            await engine.stop()
+        finally:
+            await wfr.stop()
+            await _reset_trig(trig)
+            await event_stream._reset_for_tests()
+
+        # Functional pin: BOTH emitters were stopped (lifecycle
+        # contract honored end-to-end).
+        assert a.stopped is True
+        assert b.stopped is True
+        # Substrate state pin: insertion-order shutdown log captured.
+        assert stop_log == ["emitter_a", "emitter_b"]
+        # Post-stop, _emitters is cleared so a restart wouldn't try
+        # to stop the same instances twice.
+        assert engine._emitters == {}
+
+    async def test_engine_stop_tolerates_emitter_stop_failure(
+        self, tmp_path, caplog,
+    ):
+        """One bad emitter's stop() raising doesn't leak resources on
+        the others. The engine logs and continues."""
+        import logging
+
+        from kernos.kernel.workflows.action_library import (
+            ActionLibrary, MarkStateAction,
+        )
+        from kernos.kernel.workflows.execution_engine import ExecutionEngine
+        from kernos.kernel.workflows.ledger import WorkflowLedger
+        from kernos.kernel.workflows.trigger_registry import (
+            TriggerRegistry,
+            _reset_for_tests as _reset_trig,
+        )
+        from kernos.kernel.workflows.workflow_registry import WorkflowRegistry
+
+        await event_stream._reset_for_tests()
+        await event_stream.start_writer(str(tmp_path))
+        trig = TriggerRegistry()
+        await trig.start(str(tmp_path))
+        wfr = WorkflowRegistry()
+        await wfr.start(str(tmp_path), trig)
+        lib = ActionLibrary()
+
+        async def _set(*, key, value, scope, instance_id):
+            pass
+
+        async def _get(*, key, scope, instance_id):
+            return None
+
+        lib.register(MarkStateAction(state_store_set=_set, state_store_get=_get))
+        ledger = WorkflowLedger(str(tmp_path))
+        engine = ExecutionEngine()
+        await engine.start(str(tmp_path), trig, wfr, lib, ledger)
+
+        class _BadEmitter:
+            async def stop(self):
+                raise RuntimeError("intentional emitter failure")
+
+        class _GoodEmitter:
+            def __init__(self):
+                self.stopped = False
+
+            async def stop(self):
+                self.stopped = True
+
+        bad = _BadEmitter()
+        good = _GoodEmitter()
+        engine.register_emitter("bad", bad)
+        engine.register_emitter("good", good)
+
+        try:
+            with caplog.at_level(logging.WARNING):
+                await engine.stop()
+        finally:
+            await wfr.stop()
+            await _reset_trig(trig)
+            await event_stream._reset_for_tests()
+
+        # Functional pin: the GOOD emitter was still stopped even
+        # though the bad one raised.
+        assert good.stopped is True
+        # Substrate-trace pin: failure was logged loudly (not silent).
+        assert any(
+            "WORKFLOW_EMITTER_STOP_FAILED" in rec.message
+            and "bad" in rec.message
+            for rec in caplog.records
+        )
+
+
+# ===========================================================================
 # Helpers
 # ===========================================================================
 
