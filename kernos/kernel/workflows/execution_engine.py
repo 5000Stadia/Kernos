@@ -127,6 +127,20 @@ if False:  # TYPE_CHECKING — avoid circular import at module load
 logger = logging.getLogger(__name__)
 
 
+# Spec 5 15th amendment B2 fold: execute_workflow's activation gate
+# returns this sentinel string when a workflow registered via the
+# authoring layer (Spec 5) is dispatched while its activation_state
+# is not 'active'. Callers (currently the unified trigger runtime via
+# wlp_dispatch) can compare against the constant to distinguish
+# "deliberately skipped" from "dispatched normally" without a magic
+# string match. The legacy in-process ``_on_trigger_match`` path
+# already gates via ``_is_authoring_workflow_inactive`` and silently
+# returns; the WTC outbox-driven ``execute_workflow`` path uses this
+# sentinel because the caller needs a non-error signal that dispatch
+# was deliberately skipped (vs raising, which would trigger retry).
+EXECUTE_SKIPPED_AUTHORING_INACTIVE = "skipped:authoring_inactive"
+
+
 # Active-space resolver. The engine calls this to populate the
 # synthetic CohortContext.active_spaces tuple. Real implementations
 # read ContextSpace by instance_id; tests inject a stub.
@@ -2412,6 +2426,23 @@ class ExecutionEngine:
         if existing is not None:
             return existing
 
+        # Spec 5 15th amendment B2 fold: activation gate. If the
+        # workflow is registered via the authoring layer (Spec 5
+        # registered_workflows row exists) AND its activation_state
+        # is not 'active', return the EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # sentinel without creating a workflow_executions row.
+        # Sequenced AFTER the fire_id idempotency check so a workflow
+        # deactivated between two execute_workflow calls with the same
+        # fire_id still returns the existing execution_id (the prior
+        # dispatch is the canonical winner; new dispatches are gated).
+        if await self._is_authoring_workflow_inactive(workflow_id):
+            logger.info(
+                "WORKFLOW_EXECUTE_SKIPPED workflow_id=%s fire_id=%s "
+                "reason=authoring_inactive",
+                workflow_id, fire_id,
+            )
+            return EXECUTE_SKIPPED_AUTHORING_INACTIVE
+
         execution = WorkflowExecution(
             execution_id=str(uuid.uuid4()),
             workflow_id=workflow_id,
@@ -2535,6 +2566,7 @@ class _ContextBuildError(RuntimeError):
 
 __all__ = [
     "ActiveSpaceResolver",
+    "EXECUTE_SKIPPED_AUTHORING_INACTIVE",
     "ExecutionEngine",
     "WorkflowExecution",
 ]

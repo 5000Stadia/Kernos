@@ -1799,3 +1799,206 @@ class TestFourteenthAmendmentH1Activate:
             stack["engine"], _architect_ctx(), "wf-h1-no-triggers-key",
         )
         assert result.success is True, f"errors: {result.errors}"
+
+
+# ===========================================================================
+# Spec 5 15th amendment B2 fold (execute_workflow activation gate)
+# ===========================================================================
+#
+# B2 wires the activation gate into ExecutionEngine.execute_workflow
+# (the WTC outbox-driven dispatch path). Inactive workflows receive
+# the EXECUTE_SKIPPED_AUTHORING_INACTIVE sentinel string instead of an
+# execution_id; no workflow_executions row is created. The legacy
+# in-process _on_trigger_match path already had its gate via Codex
+# Blocker 3; B2 closes the parallel gap on the cross-process path.
+
+
+class TestFifteenthAmendmentB2:
+    """B2: execute_workflow returns the
+    ``EXECUTE_SKIPPED_AUTHORING_INACTIVE`` sentinel for workflows that
+    are registered via the authoring layer but not active."""
+
+    async def test_inactive_workflow_returns_sentinel(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        # Register but do NOT activate — workflow sits in
+        # registered_not_activated.
+        descriptor = _descriptor(workflow_id="wf-b2-inactive")
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Direct execute_workflow call: gate fires; sentinel returned.
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_1",
+            workflow_id="wf-b2-inactive",
+            instance_id="inst_a",
+            trigger_event_payload={},
+            trigger_event_id="evt_1",
+        )
+        assert execution_id == EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Substrate state pin: NO workflow_executions row created.
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id FROM workflow_executions "
+            "WHERE workflow_id = ?",
+            ("wf-b2-inactive",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is None
+
+    async def test_active_workflow_dispatches_normally(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-b2-active")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-active",
+        )
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_2",
+            workflow_id="wf-b2-active",
+            instance_id="inst_a",
+            trigger_event_payload={},
+            trigger_event_id="evt_2",
+        )
+        # Real execution_id, not the sentinel.
+        assert execution_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        assert execution_id  # non-empty UUID
+        # Substrate state pin: workflow_executions row created with
+        # the matching fire_id.
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id, fire_id FROM workflow_executions "
+            "WHERE workflow_id = ?",
+            ("wf-b2-active",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["fire_id"] == "fire_b2_2"
+        assert row["execution_id"] == execution_id
+
+    async def test_idempotent_fire_id_wins_over_gate(
+        self, stack, architect_env,
+    ):
+        """Sequencing pin: the fire_id idempotency check runs BEFORE
+        the activation gate. A workflow that dispatched while active
+        and then got deactivated should still return its original
+        execution_id when re-called with the same fire_id (the prior
+        dispatch is the canonical winner; the gate only affects NEW
+        dispatches)."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-b2-race")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-race",
+        )
+        # First dispatch while active: creates the row.
+        first_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_race",
+            workflow_id="wf-b2-race",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert first_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Deactivate the workflow.
+        deact = await deactivate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-race",
+            reason="testing race",
+        )
+        assert deact.success is True
+        # Re-dispatch with same fire_id: idempotent check returns
+        # the original execution_id; the gate doesn't run.
+        replay_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_race",
+            workflow_id="wf-b2-race",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert replay_id == first_id
+
+    async def test_legacy_non_authoring_workflow_unaffected(
+        self, stack, architect_env,
+    ):
+        """Workflows NOT registered via the Spec 5 authoring layer
+        (no registered_workflows row) dispatch unconditionally — the
+        gate's _is_authoring_workflow_inactive returns False when the
+        row is absent."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        # Insert directly into workflows table only — bypass authoring.
+        # The execute_workflow path doesn't actually require a
+        # workflows row to create a workflow_executions row (the FK
+        # constraint may not be set; let me check).
+        # Simpler approach: just use a workflow_id that's not in
+        # registered_workflows. The engine's _is_authoring_workflow_inactive
+        # returns False (legacy / non-authoring) → dispatch proceeds.
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_legacy",
+            workflow_id="wf-legacy-no-authoring",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert execution_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # The execution row was created.
+        async with stack["engine"]._db.execute(
+            "SELECT fire_id FROM workflow_executions WHERE execution_id = ?",
+            (execution_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["fire_id"] == "fire_b2_legacy"
+
+    async def test_sentinel_exported_for_callers(self):
+        """B2 callers (the WTC trigger runtime) need a non-magic
+        comparison target. The sentinel is exported via __all__."""
+        from kernos.kernel.workflows import execution_engine
+
+        assert "EXECUTE_SKIPPED_AUTHORING_INACTIVE" in execution_engine.__all__
+        assert (
+            execution_engine.EXECUTE_SKIPPED_AUTHORING_INACTIVE
+            == "skipped:authoring_inactive"
+        )
+
+    async def test_deactivated_workflow_returns_sentinel(
+        self, stack, architect_env,
+    ):
+        """Deactivated state (post-activate, post-deactivate) is also
+        not 'active' so the gate fires for a NEW fire_id."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-b2-deactivated")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-deactivated",
+        )
+        await deactivate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-deactivated",
+            reason="testing deactivated gate",
+        )
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_deactivated_new",
+            workflow_id="wf-b2-deactivated",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert execution_id == EXECUTE_SKIPPED_AUTHORING_INACTIVE
