@@ -946,15 +946,19 @@ class MessageHandler:
 
         # Friction observer — post-turn diagnostics.
         # FRICTION-PATTERN-STABLE-IDS-V1: optional FrictionPatternStore
-        # injection wires the catalog's auto-classifier. Disabled by
-        # default until KERNOS_FRICTION_PATTERN_STORE=1 turns it on so
-        # legacy deployments stay unchanged; the store opens its own
-        # sqlite connection lazily on first use via ensure_schema().
+        # injection wires the catalog's auto-classifier. Spec 6 commit 6
+        # flipped the default from "0" to "1" so the autonomy loop's
+        # friction-pattern lifecycle path is active in production by
+        # default. Explicit opt-out via KERNOS_FRICTION_PATTERN_STORE=0
+        # keeps legacy deployments unchanged for one release window;
+        # opt-in via KERNOS_FRICTION_PATTERN_STORE=1 was the prior
+        # default. The store opens its own sqlite connection lazily
+        # on first use via ensure_schema().
         from kernos.kernel.friction import FrictionObserver
         from kernos.kernel.friction_patterns import FrictionPatternStore
 
         self._friction_pattern_store: FrictionPatternStore | None = None
-        if os.getenv("KERNOS_FRICTION_PATTERN_STORE", "0") == "1":
+        if os.getenv("KERNOS_FRICTION_PATTERN_STORE", "1") == "1":
             self._friction_pattern_store = FrictionPatternStore()
 
         async def _emit_friction_pattern_event(
