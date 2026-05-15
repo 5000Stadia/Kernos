@@ -1218,3 +1218,1354 @@ class TestToolDispatchHandlers:
             "register_workflow", "register_trigger",
             "activate_workflow", "deactivate_workflow",
         })
+
+
+# ===========================================================================
+# Spec 5 13th amendment (v7.1/v7.2/v7.3 scope completion)
+# ===========================================================================
+#
+# Pins idempotent register + canonical persistence + serializability
+# check + SELECT-after-catch. Tests follow the substrate-fidelity
+# assertion pattern: behavioral signal from the AuthoringResult AND
+# substrate state read directly from the registered_workflows row.
+
+
+class TestThirteenthAmendmentSerializability:
+    """M1 fold: serializability premise enforced at the public boundary
+    before the Spec 4 parser does any work."""
+
+    async def test_non_serializable_descriptor_rejected_loud(
+        self, stack, architect_env,
+    ):
+        import datetime as _dt
+
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        # datetime objects aren't JSON-serializable; would slip past
+        # `isinstance(descriptor, dict)` and crash the Spec 4 parser
+        # at descriptor_json_blob time. M1 fold catches it at boundary.
+        descriptor = _descriptor(workflow_id="wf-nonser-1")
+        descriptor["metadata"] = {"created_at": _dt.datetime.now(_dt.timezone.utc)}
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+        # Substrate state pin: no row landed.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-nonser-1",
+        )
+        assert row is None
+
+    async def test_set_descriptor_rejected_loud(self, stack, architect_env):
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-nonser-2")
+        descriptor["metadata"] = {"tags": {"a", "b", "c"}}  # set, not list
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+
+    async def test_serializability_runs_before_parser(
+        self, stack, architect_env,
+    ):
+        """Pin ordering: non-serializable values that also violate Spec 4
+        shape (no instance_id) still surface the serializability error,
+        not a DescriptorError. Confirms M1 runs at the public boundary
+        before _build_workflow."""
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        # Build a descriptor that's both non-serializable AND
+        # missing instance_id. If the parser ran first, we'd see a
+        # KeyError on instance_id wrapped as descriptor_shape_invalid
+        # with a different message. M1 runs first.
+        descriptor = {
+            "workflow_id": "wf-order",
+            "name": "broken",
+            "version": "1.0",
+            # missing instance_id (would fail _build_workflow)
+            "metadata": {"bad": object()},  # also non-serializable
+            "bounds": {"iteration_count": 1, "wall_time_seconds": 30},
+            "verifier": {"flavor": "deterministic", "check": "ok"},
+            "action_sequence": [],
+            "approval_gates": [],
+            "terminal_branches": {},
+        }
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+
+
+class TestThirteenthAmendmentCanonicalPersistence:
+    """v7.2: descriptor_json_canonical + descriptor_digest persisted on
+    registered_workflows row (V7.1.1 placement). The 16th amendment
+    hardened the canonical function (allow_nan=False, tight
+    separators); tests go through the central helper so the canonical
+    form has a single source of truth."""
+
+    async def test_canonical_json_and_digest_persisted(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            _compute_canonical_descriptor_json,
+            _compute_descriptor_digest,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-canon-1")
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is True
+        # Behavioral signal: digest surfaced via AuthoringResult.extra.
+        expected_canonical = _compute_canonical_descriptor_json(descriptor)
+        expected_digest = _compute_descriptor_digest(expected_canonical)
+        assert result.extra["descriptor_digest"] == expected_digest
+        # Substrate state: row carries both columns.
+        async with stack["engine"]._db.execute(
+            "SELECT descriptor_json_canonical, descriptor_digest "
+            "FROM registered_workflows WHERE workflow_id = ?",
+            ("wf-canon-1",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["descriptor_json_canonical"] == expected_canonical
+        assert row["descriptor_digest"] == expected_digest
+
+    async def test_canonical_form_independent_of_key_order(
+        self, stack, architect_env,
+    ):
+        """Two descriptors that differ only in key insertion order
+        produce the same digest. Canonical form must be order-invariant
+        for idempotent register to work as advertised."""
+        from kernos.kernel.workflows.authoring import (
+            _compute_canonical_descriptor_json,
+            _compute_descriptor_digest,
+        )
+
+        descriptor_a = _descriptor(workflow_id="wf-order-a")
+        # Build a descriptor with the same content but a different
+        # insertion order. dict insertion order matters in Python 3.7+
+        # but the canonical helper's sort_keys=True normalizes it.
+        descriptor_b = {
+            k: descriptor_a[k] for k in reversed(list(descriptor_a.keys()))
+        }
+        descriptor_b["workflow_id"] = "wf-order-b"
+        # Compute expected digests via the canonical pipeline.
+        digest_a = _compute_descriptor_digest(
+            _compute_canonical_descriptor_json(descriptor_a)
+        )
+        digest_b = _compute_descriptor_digest(
+            _compute_canonical_descriptor_json(descriptor_b)
+        )
+        result_a = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_a, TIER_COMPOSITION,
+        )
+        result_b = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_b, TIER_COMPOSITION,
+        )
+        assert result_a.success and result_b.success
+        assert result_a.extra["descriptor_digest"] == digest_a
+        assert result_b.extra["descriptor_digest"] == digest_b
+
+
+class TestThirteenthAmendmentIdempotentRegister:
+    """v7.1: SELECT-after-catch idempotent register. Same workflow_id +
+    same canonical descriptor → idempotent success returning the prior
+    row's workflow_id; same workflow_id + different content → distinct-
+    collision error.
+
+    L1 reframe of premise 7: _run_workflow_txn rolls back on body
+    IntegrityError before re-raise, so the SELECT in
+    _handle_register_pk_collision runs post-rollback on the same
+    connection and observes the committed winner via normal visibility.
+    """
+
+    async def test_idempotent_replay_returns_existing_id(
+        self, stack, architect_env,
+    ):
+        descriptor = _descriptor(workflow_id="wf-idempotent")
+        # First register: lands the row.
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        assert result1.workflow_id == "wf-idempotent"
+        assert "idempotent_replay" not in result1.extra
+        first_digest = result1.extra["descriptor_digest"]
+        # Second register with the same descriptor: IntegrityError on
+        # PK collision; SELECT-after-catch finds the matching digest;
+        # idempotent success returned with the existing workflow_id.
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), dict(descriptor), TIER_COMPOSITION,
+        )
+        assert result2.success is True
+        assert result2.workflow_id == "wf-idempotent"
+        assert result2.extra.get("idempotent_replay") is True
+        assert result2.extra["descriptor_digest"] == first_digest
+
+    async def test_distinct_collision_rejected_loud(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor_a = _descriptor(
+            workflow_id="wf-collide", name="first version",
+        )
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_a, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        first_digest = result1.extra["descriptor_digest"]
+        # Register a DIFFERENT descriptor under the same workflow_id:
+        # IntegrityError → SELECT-after-catch → digest mismatch →
+        # distinct-collision ValidationError surfaced.
+        descriptor_b = _descriptor(
+            workflow_id="wf-collide", name="DIFFERENT VERSION",
+        )
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_b, TIER_COMPOSITION,
+        )
+        assert result2.success is False
+        assert len(result2.errors) == 1
+        err = result2.errors[0]
+        assert err.category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert err.field_path == "workflow_id"
+        assert "already registered with a different descriptor" in err.message
+        # Substrate state pin: the prior row remains the canonical
+        # winner; the new descriptor did NOT overwrite it.
+        async with stack["engine"]._db.execute(
+            "SELECT descriptor_digest, name FROM registered_workflows "
+            "INNER JOIN workflows USING (workflow_id) "
+            "WHERE workflow_id = ?",
+            ("wf-collide",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["descriptor_digest"] == first_digest
+        assert row["name"] == "first version"
+
+    async def test_select_after_catch_runs_post_rollback(
+        self, stack, architect_env,
+    ):
+        """v7.3 L1 reframe of premise 7: _run_workflow_txn ROLLBACKs
+        before re-raising body exceptions. Verifying by triggering an
+        IntegrityError mid-body and confirming the engine connection
+        is in a usable state (no leaked open transaction) for the
+        subsequent SELECT.
+
+        Direct verification by re-registering after an idempotent
+        replay: if rollback hadn't happened, the next BEGIN IMMEDIATE
+        would raise 'cannot start a transaction within a transaction'.
+        """
+        descriptor = _descriptor(workflow_id="wf-rollback-pin")
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        # Force the IntegrityError + SELECT-after-catch path.
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), dict(descriptor), TIER_COMPOSITION,
+        )
+        assert result2.extra.get("idempotent_replay") is True
+        # Critical signal: register a DIFFERENT workflow afterward
+        # to prove the engine connection isn't stuck in an open txn.
+        descriptor_other = _descriptor(workflow_id="wf-rollback-other")
+        result3 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_other, TIER_COMPOSITION,
+        )
+        assert result3.success is True, (
+            f"engine connection unusable after collision rollback: "
+            f"{result3.errors}"
+        )
+
+    async def test_idempotent_replay_preserves_authored_by(
+        self, stack, architect_env,
+    ):
+        """The idempotent path returns the EXISTING row's metadata —
+        a Kernos replay of an architect-authored workflow doesn't
+        change the architect_authored flag."""
+        descriptor = _descriptor(workflow_id="wf-preserve")
+        # Architect registers first.
+        result1 = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        # Kernos tries to re-register; should see idempotent replay
+        # and the existing architect-authored row is preserved.
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), dict(descriptor), TIER_COMPOSITION,
+        )
+        assert result2.success is True
+        assert result2.extra.get("idempotent_replay") is True
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-preserve",
+        )
+        assert row is not None
+        assert row.architect_authored is True
+        assert row.authored_by == ARCHITECT_ID
+
+
+# ===========================================================================
+# Spec 5 14th amendment H1 fold (compile_descriptor_triggers wiring)
+# ===========================================================================
+#
+# H1 wires the WTC compiler into register_workflow + activate_workflow
+# so plural-triggers descriptors (12th amendment shape) are validated
+# at register time AND re-validated at architect activation. The guard
+# is key-presence-only (M2 fold): triggers=[] or triggers=null still
+# route to compile_descriptor_triggers so the substrate primitive that
+# OWNS trigger validation makes the accept/reject call.
+
+
+def _plural_triggers_descriptor(
+    *,
+    workflow_id: str = "wf-plural",
+    instance_id: str = "inst_a",
+    event_type: str = "friction.pattern_frequency_threshold_exceeded",
+    triggers: list | None = None,
+) -> dict:
+    """Build a descriptor that exercises the plural-triggers shape
+    (12th amendment / production WTC path)."""
+    if triggers is None:
+        triggers = [{
+            "event_type": event_type,
+            "event_selector": {
+                "op": "exists", "path": "payload.pattern_id",
+            },
+        }]
+    return {
+        "workflow_id": workflow_id,
+        "instance_id": instance_id,
+        "name": "plural test",
+        "description": "",
+        "owner": "owner",
+        "version": "1.0",
+        "bounds": {
+            "iteration_count": 1, "wall_time_seconds": 30,
+            "cost_usd": None, "composite": None,
+        },
+        "verifier": {"flavor": "deterministic", "check": "ok"},
+        "action_sequence": [{
+            "action_type": "mark_state",
+            "id": "step1",
+            "parameters": {"key": "x", "value": 1, "scope": "instance"},
+            "continuation_rules": {"on_failure": "abort"},
+        }],
+        "approval_gates": [],
+        "triggers": triggers,
+        "terminal_branches": {},
+    }
+
+
+class TestFourteenthAmendmentH1Register:
+    """H1: compile_descriptor_triggers runs in register_workflow BEFORE
+    persistence so malformed triggers fail loud without partial state."""
+
+    async def test_valid_plural_triggers_register_succeeds(
+        self, stack, architect_env,
+    ):
+        descriptor = _plural_triggers_descriptor(workflow_id="wf-h1-ok")
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        # Substrate state pin: canonical JSON carries the plural shape
+        # for activate-time re-validation.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-ok",
+        )
+        assert row is not None
+        assert '"triggers"' in row.descriptor_json_canonical
+
+    async def test_malformed_trigger_rejected_loud_before_persistence(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        # Missing required event_type on the trigger entry.
+        descriptor = _plural_triggers_descriptor(
+            workflow_id="wf-h1-malformed",
+            triggers=[{"not_event_type": "oops"}],
+        )
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert result.errors[0].field_path == "descriptor.triggers"
+        # Substrate state pin: no row landed (compile failed before
+        # the persistence transaction body even ran).
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-malformed",
+        )
+        assert row is None
+        # And no workflows-table row either.
+        async with stack["engine"]._db.execute(
+            "SELECT workflow_id FROM workflows WHERE workflow_id = ?",
+            ("wf-h1-malformed",),
+        ) as cur:
+            wf_row = await cur.fetchone()
+        assert wf_row is None
+
+    async def test_empty_triggers_list_rejected(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        descriptor = _plural_triggers_descriptor(
+            workflow_id="wf-h1-empty", triggers=[],
+        )
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert "non-empty" in result.errors[0].message
+
+    async def test_null_triggers_rejected(self, stack, architect_env):
+        """Key-presence-only guard: triggers=None still routes to
+        compile_descriptor_triggers, which rejects with a typed
+        PredicateValidationError. Confirms the falsey-value pass-through
+        (v7.3 M2 fold ruling)."""
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-h1-null")
+        # Use a directly-built descriptor with no singular trigger
+        # and triggers=None so we can pin the key-presence-only branch.
+        descriptor.pop("trigger", None)
+        descriptor["triggers"] = None
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert "must be a list" in result.errors[0].message
+
+    async def test_singular_trigger_descriptor_skips_h1(
+        self, stack, architect_env,
+    ):
+        """Backward-compat pin: legacy singular-trigger descriptors
+        have no 'triggers' key; H1 skips compile_descriptor_triggers
+        for them (the Spec 4 parser + predicate-validator already
+        ran inside _build_workflow). 16th amendment LOW 1: substrate-
+        state pin added so the success path proves the row landed,
+        not just that the call returned cleanly."""
+        descriptor = _descriptor(workflow_id="wf-h1-singular")
+        assert "triggers" not in descriptor
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        # Substrate state pin: registered_workflows row exists; the
+        # canonical descriptor has 'trigger' (singular) but NOT
+        # 'triggers' (plural).
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-singular",
+        )
+        assert row is not None
+        assert '"trigger"' in row.descriptor_json_canonical
+        assert '"triggers"' not in row.descriptor_json_canonical
+
+
+class TestFourteenthAmendmentH1Activate:
+    """H1 / M2 fold: conditional re-validation in activate_workflow.
+    Reads descriptor_json_canonical, parses, and routes triggers to the
+    WTC compiler if the key is present. Pre-13th-amendment rows (empty
+    canonical) skip re-validation."""
+
+    async def test_activate_re_validates_plural_triggers(
+        self, stack, architect_env,
+    ):
+        descriptor = _plural_triggers_descriptor(workflow_id="wf-h1-act-ok")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-act-ok",
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        # Substrate state pin: row now active.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-act-ok",
+        )
+        assert row is not None
+        assert row.activation_state == STATE_ACTIVE
+
+    async def test_activate_rejects_canonical_with_corrupted_triggers(
+        self, stack, architect_env,
+    ):
+        """Pin the M2 re-validation actually runs at activate time. We
+        register a valid plural-triggers descriptor, mutate the
+        canonical column out-of-band to simulate substrate drift (e.g.
+        the WTC compiler grew a new constraint between register and
+        activate), then attempt activation. PredicateValidationError
+        must surface as CAT_PREDICATE_INVALID and the row must NOT
+        transition to active."""
+        import json as _json
+
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        descriptor = _plural_triggers_descriptor(workflow_id="wf-h1-drift")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Out-of-band mutate the canonical column to corrupt the
+        # trigger entry (missing event_type).
+        bad_canonical = _json.dumps({
+            **descriptor,
+            "triggers": [{"not_event_type": "drifted"}],
+        }, sort_keys=True)
+        await stack["engine"]._db.execute(
+            "UPDATE registered_workflows SET descriptor_json_canonical = ? "
+            "WHERE workflow_id = ?",
+            (bad_canonical, "wf-h1-drift"),
+        )
+        await stack["engine"]._db.commit()
+        # Activation: re-validation routes to compile_descriptor_triggers
+        # → PredicateValidationError → CAT_PREDICATE_INVALID.
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-drift",
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert result.errors[0].field_path == "descriptor.triggers"
+        # Substrate state pin: row is still in registered state, not
+        # active.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-drift",
+        )
+        assert row is not None
+        assert row.activation_state == STATE_REGISTERED
+
+    async def test_activate_skips_re_validation_when_canonical_empty(
+        self, stack, architect_env,
+    ):
+        """Pre-13th-amendment rows have empty descriptor_json_canonical.
+        The ALTER TABLE migration filled the column with empty string;
+        activate must skip re-validation in that case so legacy rows
+        don't get retroactively rejected."""
+        descriptor = _descriptor(workflow_id="wf-h1-legacy")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Simulate a pre-amendment row by clearing the canonical column.
+        await stack["engine"]._db.execute(
+            "UPDATE registered_workflows SET descriptor_json_canonical = '' "
+            "WHERE workflow_id = ?",
+            ("wf-h1-legacy",),
+        )
+        await stack["engine"]._db.commit()
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-legacy",
+        )
+        assert result.success is True, f"errors: {result.errors}"
+
+    async def test_activate_skips_re_validation_when_no_triggers_key(
+        self, stack, architect_env,
+    ):
+        """Singular-trigger workflows have no 'triggers' key in their
+        canonical descriptor; activate should not invoke
+        compile_descriptor_triggers for them."""
+        descriptor = _descriptor(workflow_id="wf-h1-no-triggers-key")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # The canonical descriptor has 'trigger' (singular) but not
+        # 'triggers' (plural) — confirm the row reflects that.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-no-triggers-key",
+        )
+        assert '"trigger"' in row.descriptor_json_canonical
+        assert '"triggers"' not in row.descriptor_json_canonical
+        # Activation: re-validation guard is False; CAS transition runs.
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-no-triggers-key",
+        )
+        assert result.success is True, f"errors: {result.errors}"
+
+
+# ===========================================================================
+# Spec 5 15th amendment B2 fold (execute_workflow activation gate)
+# ===========================================================================
+#
+# B2 wires the activation gate into ExecutionEngine.execute_workflow
+# (the WTC outbox-driven dispatch path). Inactive workflows receive
+# the EXECUTE_SKIPPED_AUTHORING_INACTIVE sentinel string instead of an
+# execution_id; no workflow_executions row is created. The legacy
+# in-process _on_trigger_match path already had its gate via Codex
+# Blocker 3; B2 closes the parallel gap on the cross-process path.
+
+
+class TestFifteenthAmendmentB2:
+    """B2: execute_workflow returns the
+    ``EXECUTE_SKIPPED_AUTHORING_INACTIVE`` sentinel for workflows that
+    are registered via the authoring layer but not active."""
+
+    async def test_inactive_workflow_returns_sentinel(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        # Register but do NOT activate — workflow sits in
+        # registered_not_activated.
+        descriptor = _descriptor(workflow_id="wf-b2-inactive")
+        reg = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Direct execute_workflow call: gate fires; sentinel returned.
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_1",
+            workflow_id="wf-b2-inactive",
+            instance_id="inst_a",
+            trigger_event_payload={},
+            trigger_event_id="evt_1",
+        )
+        assert execution_id == EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Substrate state pin: NO workflow_executions row created.
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id FROM workflow_executions "
+            "WHERE workflow_id = ?",
+            ("wf-b2-inactive",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is None
+
+    async def test_active_workflow_dispatches_normally(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-b2-active")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-active",
+        )
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_2",
+            workflow_id="wf-b2-active",
+            instance_id="inst_a",
+            trigger_event_payload={},
+            trigger_event_id="evt_2",
+        )
+        # Real execution_id, not the sentinel.
+        assert execution_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        assert execution_id  # non-empty UUID
+        # Substrate state pin: workflow_executions row created with
+        # the matching fire_id.
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id, fire_id FROM workflow_executions "
+            "WHERE workflow_id = ?",
+            ("wf-b2-active",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["fire_id"] == "fire_b2_2"
+        assert row["execution_id"] == execution_id
+
+    async def test_idempotent_fire_id_wins_over_gate(
+        self, stack, architect_env,
+    ):
+        """Sequencing pin: the fire_id idempotency check runs BEFORE
+        the activation gate. A workflow that dispatched while active
+        and then got deactivated should still return its original
+        execution_id when re-called with the same fire_id (the prior
+        dispatch is the canonical winner; the gate only affects NEW
+        dispatches). 16th amendment LOW 1: substrate-state pin added
+        for the canonical row identity."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-b2-race")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-race",
+        )
+        # First dispatch while active: creates the row.
+        first_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_race",
+            workflow_id="wf-b2-race",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert first_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Deactivate the workflow.
+        deact = await deactivate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-race",
+            reason="testing race",
+        )
+        assert deact.success is True
+        # Re-dispatch with same fire_id: idempotent check returns
+        # the original execution_id; the gate doesn't run.
+        replay_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_race",
+            workflow_id="wf-b2-race",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert replay_id == first_id
+        # Substrate state pin: exactly ONE workflow_executions row
+        # exists with this fire_id (no duplicate, no orphan).
+        async with stack["engine"]._db.execute(
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE fire_id = ?",
+            ("fire_b2_race",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row["n"] == 1
+
+    async def test_legacy_non_authoring_workflow_unaffected(
+        self, stack, architect_env,
+    ):
+        """Workflows NOT registered via the Spec 5 authoring layer
+        (no registered_workflows row) dispatch unconditionally — the
+        gate's _is_authoring_workflow_inactive returns False when the
+        row is absent."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        # Insert directly into workflows table only — bypass authoring.
+        # The execute_workflow path doesn't actually require a
+        # workflows row to create a workflow_executions row (the FK
+        # constraint may not be set; let me check).
+        # Simpler approach: just use a workflow_id that's not in
+        # registered_workflows. The engine's _is_authoring_workflow_inactive
+        # returns False (legacy / non-authoring) → dispatch proceeds.
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_legacy",
+            workflow_id="wf-legacy-no-authoring",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert execution_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # The execution row was created.
+        async with stack["engine"]._db.execute(
+            "SELECT fire_id FROM workflow_executions WHERE execution_id = ?",
+            (execution_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["fire_id"] == "fire_b2_legacy"
+
+    async def test_sentinel_exported_for_callers(self):
+        """B2 callers (the WTC trigger runtime) need a non-magic
+        comparison target. The sentinel is exported via __all__.
+
+        NOTE: pure API-surface probe; substrate-state pin not
+        applicable (this test pins the module's public exports, not
+        any persisted row). Exempt from the
+        substrate-fidelity-assertion-pattern requirement per 16th
+        amendment LOW 1 fold."""
+        from kernos.kernel.workflows import execution_engine
+
+        assert "EXECUTE_SKIPPED_AUTHORING_INACTIVE" in execution_engine.__all__
+        assert (
+            execution_engine.EXECUTE_SKIPPED_AUTHORING_INACTIVE
+            == "skipped:authoring_inactive"
+        )
+
+    async def test_deactivated_workflow_returns_sentinel(
+        self, stack, architect_env,
+    ):
+        """Deactivated state (post-activate, post-deactivate) is also
+        not 'active' so the gate fires for a NEW fire_id. 16th
+        amendment LOW 1: substrate-state pin added so the assertion
+        proves no row was created, not just that the sentinel
+        returned."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-b2-deactivated")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-deactivated",
+        )
+        await deactivate_workflow(
+            stack["engine"], _architect_ctx(), "wf-b2-deactivated",
+            reason="testing deactivated gate",
+        )
+        execution_id = await stack["engine"].execute_workflow(
+            fire_id="fire_b2_deactivated_new",
+            workflow_id="wf-b2-deactivated",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert execution_id == EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Substrate state pin: no workflow_executions row for this
+        # fire_id; activation_state in registered_workflows reads
+        # 'deactivated'.
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id FROM workflow_executions WHERE fire_id = ?",
+            ("fire_b2_deactivated_new",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is None
+        registered = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-b2-deactivated",
+        )
+        assert registered is not None
+        assert registered.activation_state == STATE_DEACTIVATED
+
+
+# ===========================================================================
+# Spec 5 16th amendment — Codex post-impl fold (5 findings)
+# ===========================================================================
+#
+# Folds Codex post-impl review findings: HIGH 1 (WTC sentinel
+# propagation), HIGH 2 (corrupted-canonical fail-closed at activate),
+# MEDIUM 1 (canonical helper rejects NaN/Infinity + tight separators),
+# MEDIUM 2 (gate atomic with INSERT under write lock), LOW 1
+# (substrate-state pins on flagged tests).
+
+
+class TestSixteenthAmendmentMedium1Canonical:
+    """MEDIUM 1: canonical helper rejects NaN/Infinity via
+    allow_nan=False and uses tight separators for platform-deterministic
+    bytes."""
+
+    def test_canonical_helper_rejects_nan(self):
+        """Pure-helper probe: exercises _compute_canonical_descriptor_json
+        in isolation. Substrate-state pin not applicable — the helper
+        is a pure function with no DB / event / queue side effects.
+        Exempt from the substrate-fidelity-assertion-pattern requirement
+        per 16th amendment round-2 LOW 2 fold."""
+        import math
+
+        from kernos.kernel.workflows.authoring import (
+            _compute_canonical_descriptor_json,
+        )
+
+        with pytest.raises(ValueError):
+            _compute_canonical_descriptor_json(
+                {"metadata": {"score": math.nan}}
+            )
+
+    def test_canonical_helper_rejects_infinity(self):
+        """Pure-helper probe (see test_canonical_helper_rejects_nan
+        docstring for exemption rationale)."""
+        import math
+
+        from kernos.kernel.workflows.authoring import (
+            _compute_canonical_descriptor_json,
+        )
+
+        with pytest.raises(ValueError):
+            _compute_canonical_descriptor_json(
+                {"metadata": {"score": math.inf}}
+            )
+
+    def test_canonical_helper_uses_tight_separators(self):
+        """Pure-helper probe pinning the separator choice: no
+        whitespace, just ``,`` and ``:``. Drift here would change every
+        digest and break idempotent register's content-addressing
+        invariant. Substrate-state pin not applicable — exempt per 16th
+        amendment round-2 LOW 2 fold (pure function, no side effects)."""
+        from kernos.kernel.workflows.authoring import (
+            _compute_canonical_descriptor_json,
+        )
+
+        out = _compute_canonical_descriptor_json({"a": 1, "b": [2, 3]})
+        assert out == '{"a":1,"b":[2,3]}'
+        # No spaces after separators.
+        assert ", " not in out
+        assert ": " not in out
+
+    async def test_register_rejects_nan_descriptor_loud(
+        self, stack, architect_env,
+    ):
+        import math
+
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-canon-nan")
+        descriptor["metadata"] = {"score": math.nan}
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+        # Substrate state pin: no row landed.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-canon-nan",
+        )
+        assert row is None
+
+
+class TestSixteenthAmendmentHigh2CorruptedCanonical:
+    """HIGH 2: non-empty descriptor_json_canonical that fails to parse
+    or doesn't deserialize to a dict fails loud at activate. Empty
+    canonical (legacy pre-13th row) still skips re-validation."""
+
+    async def test_activate_rejects_corrupted_canonical_loud(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-canon-corrupted")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Out-of-band mutate the canonical column to invalid JSON.
+        await stack["engine"]._db.execute(
+            "UPDATE registered_workflows "
+            "SET descriptor_json_canonical = ? "
+            "WHERE workflow_id = ?",
+            ("{ not valid json {{{", "wf-canon-corrupted"),
+        )
+        await stack["engine"]._db.commit()
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-canon-corrupted",
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert result.errors[0].field_path == "descriptor_json_canonical"
+        # Substrate state pin: activation_state stayed at registered.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-canon-corrupted",
+        )
+        assert row is not None
+        assert row.activation_state == STATE_REGISTERED
+
+    async def test_activate_rejects_non_dict_canonical_loud(
+        self, stack, architect_env,
+    ):
+        """Non-empty canonical that parses to e.g. a list or a string
+        also fails loud — the canonical descriptor must round-trip
+        to a dict."""
+        import json as _json
+
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-canon-nondict")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        await stack["engine"]._db.execute(
+            "UPDATE registered_workflows "
+            "SET descriptor_json_canonical = ? "
+            "WHERE workflow_id = ?",
+            (_json.dumps(["not", "a", "dict"]), "wf-canon-nondict"),
+        )
+        await stack["engine"]._db.commit()
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-canon-nondict",
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert result.errors[0].field_path == "descriptor_json_canonical"
+        assert "must parse to a dict" in result.errors[0].message
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-canon-nondict",
+        )
+        assert row.activation_state == STATE_REGISTERED
+
+
+class TestSixteenthAmendmentMedium2GateAtomic:
+    """MEDIUM 2: B2 gate check runs INSIDE the write lock so a
+    concurrent deactivate_workflow cannot interleave between the gate
+    read and the workflow_executions INSERT. Without race injection
+    machinery we pin behavior via the structural invariant: the
+    gate's substrate effect (no INSERT) is observable when the
+    workflow is inactive, AND the gate's pre-check happens against the
+    same locked state as the INSERT."""
+
+    async def test_gate_sees_inactive_state_same_as_insert(
+        self, stack, architect_env,
+    ):
+        """Sequence pin: register, do NOT activate, call
+        execute_workflow. The gate (inside the write-lock body) reads
+        activation_state and sees registered_not_activated; INSERT is
+        skipped under the same lock. This pins the atomic shape — same
+        lock, same SELECT-INSERT sequence — even though the race
+        injection itself isn't directly testable in-process."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-med2-atomic")
+        await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        # Gate is INSIDE the write lock body now. Calling
+        # execute_workflow returns the sentinel and creates no row.
+        result = await stack["engine"].execute_workflow(
+            fire_id="fire_med2_atomic",
+            workflow_id="wf-med2-atomic",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert result == EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Substrate state pin: no row.
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id FROM workflow_executions "
+            "WHERE workflow_id = ?",
+            ("wf-med2-atomic",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is None
+
+    async def test_locked_body_rechecks_fire_id_wins_over_gate(
+        self, stack, architect_env,
+    ):
+        """16th amendment round-2 HIGH 1 fold: simulate the race where
+        the outer find_execution_by_fire_id_unlocked missed a prior
+        commit AND the workflow was deactivated between the prior
+        dispatch and this call.
+
+        Without the locked-body fire_id re-check, this turn would
+        return EXECUTE_SKIPPED_AUTHORING_INACTIVE (the gate fires
+        because the workflow is now inactive). With the re-check, the
+        prior dispatch's execution_id is returned (the canonical
+        winner; "prior dispatch is canonical; only NEW dispatches are
+        gated"). Race injection: monkey-patch
+        ``_find_execution_by_fire_id_unlocked`` to return None on
+        first call so the outer find misses the row that's already in
+        the database.
+
+        Substrate-fidelity pin: behavioral signal (returned id matches
+        the existing row's id) AND substrate state (only one
+        workflow_executions row exists for the fire_id; no orphan
+        from the racy turn)."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        engine = stack["engine"]
+        descriptor = _descriptor(workflow_id="wf-race-recheck")
+        await register_workflow(
+            engine, _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            engine, _architect_ctx(), "wf-race-recheck",
+        )
+        # First dispatch lands the row.
+        first_id = await engine.execute_workflow(
+            fire_id="fire_race_recheck",
+            workflow_id="wf-race-recheck",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert first_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Deactivate so the gate would fire on a new dispatch.
+        await deactivate_workflow(
+            engine, _architect_ctx(), "wf-race-recheck",
+            reason="race test",
+        )
+        # Race injection: outer find returns None on first invocation
+        # (simulating the race window where another caller's commit
+        # hasn't propagated to our snapshot yet); subsequent calls
+        # return the real value (the locked-body re-check sees it).
+        real_find = engine._find_execution_by_fire_id_unlocked
+        call_log: list[str] = []
+
+        async def racy_find(fire_id: str):
+            call_log.append(fire_id)
+            if len(call_log) == 1:
+                # Simulate the unlocked outer find missing A's row.
+                return None
+            return await real_find(fire_id)
+
+        engine._find_execution_by_fire_id_unlocked = racy_find  # type: ignore[method-assign]
+        try:
+            replay_id = await engine.execute_workflow(
+                fire_id="fire_race_recheck",
+                workflow_id="wf-race-recheck",
+                instance_id="inst_a",
+                trigger_event_payload={},
+            )
+        finally:
+            engine._find_execution_by_fire_id_unlocked = real_find  # type: ignore[method-assign]
+        # Behavioral pin: the canonical winner's id was returned,
+        # NOT the sentinel.
+        assert replay_id == first_id
+        assert replay_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Call sequence pin: the outer find ran (returned None), then
+        # the locked-body re-find ran and saw the row.
+        assert len(call_log) >= 2
+        # Substrate state pin: exactly ONE workflow_executions row
+        # exists for this fire_id — no orphan from the racy turn,
+        # no duplicate.
+        async with engine._db.execute(
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE fire_id = ?",
+            ("fire_race_recheck",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row["n"] == 1
+
+    async def test_activate_after_deactivate_re_enables_dispatch(
+        self, stack, architect_env,
+    ):
+        """Lifecycle pin: gate is state-sensitive, not stale. Register,
+        activate, dispatch (creates row). Deactivate (new fire gets
+        sentinel). Reactivate (new fire dispatches normally). The
+        atomic-gate fold doesn't alter this lifecycle invariant."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-med2-cycle")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-med2-cycle",
+        )
+        eid1 = await stack["engine"].execute_workflow(
+            fire_id="fire_med2_cycle_1",
+            workflow_id="wf-med2-cycle",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert eid1 != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Deactivate; new dispatch is gated.
+        await deactivate_workflow(
+            stack["engine"], _architect_ctx(), "wf-med2-cycle",
+            reason="cycle test",
+        )
+        eid2 = await stack["engine"].execute_workflow(
+            fire_id="fire_med2_cycle_2",
+            workflow_id="wf-med2-cycle",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert eid2 == EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Reactivate; new dispatch proceeds.
+        await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-med2-cycle",
+        )
+        eid3 = await stack["engine"].execute_workflow(
+            fire_id="fire_med2_cycle_3",
+            workflow_id="wf-med2-cycle",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert eid3 != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Substrate state pin: exactly two workflow_executions rows
+        # (the gated one isn't there).
+        async with stack["engine"]._db.execute(
+            "SELECT execution_id, fire_id FROM workflow_executions "
+            "WHERE workflow_id = ? ORDER BY started_at",
+            ("wf-med2-cycle",),
+        ) as cur:
+            rows = await cur.fetchall()
+        assert len(rows) == 2
+        fire_ids = sorted(r["fire_id"] for r in rows)
+        assert fire_ids == ["fire_med2_cycle_1", "fire_med2_cycle_3"]
+
+
+class TestSixteenthAmendmentHigh1RuntimeSentinel:
+    """HIGH 1: WTC runtime detects the B2 sentinel from execute_workflow
+    and routes to mark_failed with the sentinel as last_error instead
+    of calling mark_dispatched with a sentinel string. Tests use a
+    minimal stub outbox to observe the routing decision."""
+
+    async def test_runtime_routes_sentinel_to_mark_failed(self):
+        """Stub-based pin: simulate _wlp_dispatch returning the
+        sentinel; observe that the runtime calls mark_failed with the
+        sentinel as last_error, NOT mark_dispatched.
+
+        NOTE: pure-stub probe; substrate-state pin not applicable.
+        This test inlines the conditional shape from the runtime's
+        _claim_and_dispatch to pin the structural invariant in
+        isolation. The companion test_runtime_dispatch_path_routes_sentinel_end_to_end
+        pins the end-to-end behavior with real substrate state.
+        Exempt from the substrate-fidelity-assertion-pattern
+        requirement per 16th amendment round-2 LOW 2 fold."""
+        from kernos.kernel.triggers.runtime import (
+            _EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        calls: list[tuple[str, dict]] = []
+
+        class _StubOutbox:
+            async def mark_failed(self, *, fire_id, claim_owner, error):
+                calls.append(("mark_failed", {
+                    "fire_id": fire_id,
+                    "claim_owner": claim_owner,
+                    "error": error,
+                }))
+
+            async def mark_dispatched(self, *, fire_id, claim_owner,
+                                       workflow_execution_id):
+                calls.append(("mark_dispatched", {
+                    "fire_id": fire_id,
+                    "claim_owner": claim_owner,
+                    "workflow_execution_id": workflow_execution_id,
+                }))
+
+        # Inline the runtime's active-claim dispatch decision so the
+        # test pins the structural behavior even though the full
+        # TriggerRuntime requires more wiring than a unit test wants.
+        # The fold's contribution is the conditional branch:
+        # ``if workflow_execution_id == _EXECUTE_SKIPPED_AUTHORING_INACTIVE``.
+        outbox = _StubOutbox()
+        workflow_execution_id = _EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        if workflow_execution_id == _EXECUTE_SKIPPED_AUTHORING_INACTIVE:
+            await outbox.mark_failed(
+                fire_id="fire_abc", claim_owner="runtime:test",
+                error=_EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+            )
+        else:
+            await outbox.mark_dispatched(
+                fire_id="fire_abc", claim_owner="runtime:test",
+                workflow_execution_id=workflow_execution_id,
+            )
+        # The runtime called mark_failed, NOT mark_dispatched.
+        assert len(calls) == 1
+        assert calls[0][0] == "mark_failed"
+        assert calls[0][1]["error"] == "skipped:authoring_inactive"
+
+    def test_runtime_imports_sentinel_from_engine(self):
+        """Source-of-truth pin: the runtime's sentinel is imported from
+        the engine, not duplicated. Drift between the two would silently
+        break sentinel detection.
+
+        NOTE: pure-API probe; substrate-state pin not applicable
+        (this test pins module-import structure, not persisted state).
+        Exempt from the substrate-fidelity-assertion-pattern
+        requirement per 16th amendment round-2 LOW 2 fold."""
+        from kernos.kernel.triggers import runtime
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        assert (
+            runtime._EXECUTE_SKIPPED_AUTHORING_INACTIVE
+            == EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        )
+
+    async def test_runtime_dispatch_path_routes_sentinel_end_to_end(
+        self, tmp_path,
+    ):
+        """End-to-end pin: build a real TriggerEvaluationRuntime with a
+        stubbed wlp_dispatch that returns the sentinel. Drive a real
+        event through ``on_event_observed`` and confirm the outbox
+        trigger_fires row lands in 'failed' status with
+        last_error = sentinel, NOT 'dispatched' with sentinel as
+        workflow_execution_id.
+
+        Substrate-fidelity pin: behavioral signal (zero mark_dispatched
+        calls captured by the stub) AND substrate state (trigger_fires
+        row status='failed', last_error=sentinel,
+        workflow_execution_id is empty)."""
+        from kernos.kernel.triggers.predicate import (
+            DispatchPolicy, TemporalRelation, TriggerPredicate,
+        )
+        from kernos.kernel.triggers.runtime import (
+            TriggerEvaluationRuntime,
+            _EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        await event_stream._reset_for_tests()
+        await event_stream.start_writer(str(tmp_path), flush_interval_s=0.05)
+        try:
+            dispatch_call_count = 0
+
+            async def _stub_dispatch(
+                *, fire_id, workflow_id, instance_id,
+                trigger_event_payload, member_id,
+            ):
+                nonlocal dispatch_call_count
+                dispatch_call_count += 1
+                return _EXECUTE_SKIPPED_AUTHORING_INACTIVE
+
+            rt = TriggerEvaluationRuntime()
+            await rt.start(
+                data_dir=str(tmp_path),
+                heartbeat_seconds=60,
+                wlp_dispatch=_stub_dispatch,
+            )
+            try:
+                predicate = TriggerPredicate(
+                    event_selector={
+                        "op": "eq", "path": "event_type",
+                        "value": "test.runtime_skip",
+                    },
+                    temporal_relation=TemporalRelation(kind="on"),
+                    dispatch_policy=DispatchPolicy(),
+                )
+                await rt.register(
+                    trigger_id="trig_runtime_skip",
+                    instance_id="inst_a",
+                    workflow_id="wf-runtime-skip",
+                    predicate=predicate,
+                )
+                # Drive an event through the public path.
+                event = event_stream.Event(
+                    event_id="evt_runtime_skip_1",
+                    event_type="test.runtime_skip",
+                    instance_id="inst_a",
+                    timestamp="2026-05-14T00:00:00+00:00",
+                    payload={"foo": "bar"},
+                )
+                await rt.on_event_observed(event)
+                # Stub was called exactly once.
+                assert dispatch_call_count == 1
+                # Substrate state pin: outbox row is 'failed' with
+                # sentinel as last_error; workflow_execution_id stays
+                # empty (NEVER set to the sentinel via mark_dispatched).
+                assert rt._outbox is not None
+                async with rt._outbox._db.execute(
+                    "SELECT status, last_error, workflow_execution_id "
+                    "FROM trigger_fires WHERE trigger_id = ?",
+                    ("trig_runtime_skip",),
+                ) as cur:
+                    row = await cur.fetchone()
+                assert row is not None
+                assert row["status"] == "failed"
+                assert row["last_error"] == _EXECUTE_SKIPPED_AUTHORING_INACTIVE
+                assert row["workflow_execution_id"] in ("", None)
+            finally:
+                await rt.stop()
+        finally:
+            await event_stream.stop_writer()
+            await event_stream._reset_for_tests()

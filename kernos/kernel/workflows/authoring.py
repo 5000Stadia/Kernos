@@ -35,6 +35,8 @@ Architect's three calls on Spec 5 v2 open questions:
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -100,6 +102,53 @@ class AuthoringContext:
 
     def is_architect(self) -> bool:
         return self.actor_kind == ACTOR_ARCHITECT
+
+
+# ---------------------------------------------------------------------------
+# Canonical-descriptor helpers (Spec 5 13th + 16th amendment hardening)
+# ---------------------------------------------------------------------------
+
+
+def _compute_canonical_descriptor_json(descriptor: dict) -> str:
+    """Single source of truth for the canonical-form computation.
+
+    Spec 5 13th amendment introduced canonical persistence; the 16th
+    amendment (Codex MEDIUM 1) tightens the canonical function so the
+    digest is deterministic across Python versions and platforms and
+    rejects non-JSON values that Python's default ``json.dumps`` would
+    emit as ``NaN`` / ``Infinity`` tokens.
+
+      * ``sort_keys=True`` — key-order invariance.
+      * ``allow_nan=False`` — NaN/Infinity raise ``ValueError`` so the
+        serializability check at the public register boundary catches
+        them. NaN/Infinity are not valid JSON per RFC 7159; emitting
+        them produces non-portable, non-deterministic strings.
+      * ``separators=(",", ":")`` — the tightest separators (no
+        whitespace) so the canonical bytes are minimal and identical
+        whether the source dict was built by hand, parsed from YAML,
+        or round-tripped through json.loads. Whitespace from Python's
+        default separators (``", "`` / ``": "``) would otherwise drift
+        if the json module's defaults ever changed.
+
+    Callers MUST go through this helper for both write-time
+    canonicalization (register_workflow) and read-side digest
+    comparison (idempotent-replay detection, tests). Inlining
+    ``json.dumps(..., sort_keys=True)`` elsewhere is a correctness
+    regression.
+    """
+    return json.dumps(
+        descriptor,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
+def _compute_descriptor_digest(canonical_json: str) -> str:
+    """SHA-256 hex digest of the canonical bytes. Pairs with
+    :func:`_compute_canonical_descriptor_json` — the two together are
+    the canonical-fingerprint pipeline."""
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 def _is_architect(ctx: AuthoringContext) -> bool:
@@ -433,6 +482,30 @@ async def register_workflow(
     Architect Q1: Kernos cannot claim substrate_tier. The
     classifier walks the descriptor; mismatched claims are
     rejected with structured ValidationErrors.
+
+    Spec 5 13th amendment (v7.1/v7.2/v7.3 scope completion):
+
+      * **Serializability check (M1 fold).** ``json.dumps`` runs
+        against the descriptor at the public boundary BEFORE the
+        Spec 4 parser touches it. Non-JSON-serializable values
+        (datetime, set, custom objects from a yaml.safe_load tree
+        that bypassed coercion, etc.) surface as a structured
+        ValidationError with category ``CAT_DESCRIPTOR_SHAPE_INVALID``
+        (V7.3.1: ValidationError, not AuthoringError — the latter
+        doesn't exist in this module).
+      * **Canonical persistence (v7.2).** The sorted-keys JSON form
+        + its SHA-256 digest are persisted on the
+        ``registered_workflows`` row alongside governance metadata
+        (V7.1.1 placement).
+      * **Idempotent register / SELECT-after-catch (v7.1).** On a
+        body exception, ``_run_workflow_txn`` has already rolled
+        back (v7.3 L1 premise 7 reframe: rollback-before-select,
+        not post-IntegrityError visibility). The caller then
+        SELECTs the existing ``registered_workflows`` row by
+        ``workflow_id`` and compares digests. Match → idempotent
+        success returning the prior row's ``workflow_id``;
+        mismatch → distinct collision error (same workflow_id,
+        different content); absent → original failure path.
     """
     # Lazy imports to avoid circular dependencies.
     from kernos.kernel.workflows.descriptor_parser import (
@@ -468,6 +541,26 @@ async def register_workflow(
                 ),
             )],
         )
+    # Spec 5 13th amendment M1 + 16th amendment MEDIUM 1: canonical
+    # form computed via the central helper so allow_nan=False rejects
+    # NaN/Infinity (which Python's default json.dumps emits as
+    # non-standard tokens) and tight separators keep the bytes
+    # platform-deterministic. Non-JSON-serializable values raise
+    # TypeError (datetime, set, custom classes); NaN/Infinity raise
+    # ValueError under allow_nan=False; both route to the same
+    # CAT_DESCRIPTOR_SHAPE_INVALID surface.
+    try:
+        canonical_json = _compute_canonical_descriptor_json(descriptor)
+    except (TypeError, ValueError) as exc:
+        return AuthoringResult(
+            success=False,
+            errors=[ValidationError(
+                field_path="descriptor",
+                category=CAT_DESCRIPTOR_SHAPE_INVALID,
+                message=f"descriptor not JSON-serializable: {exc}",
+            )],
+        )
+    descriptor_digest = _compute_descriptor_digest(canonical_json)
     # Build Workflow dataclass via Spec 4 parser.
     try:
         wf = _build_workflow(descriptor)
@@ -489,6 +582,31 @@ async def register_workflow(
             success=False,
             errors=[_workflow_error_to_validation_error(exc)],
         )
+    # Spec 5 14th amendment H1 fold: compile plural-triggers shape
+    # at register time so a malformed descriptor.triggers list fails
+    # loud BEFORE any persistence work. Key-presence-only guard
+    # (v7.3 M2-fold semantics): pre-12th-amendment legacy descriptors
+    # that use singular ``trigger:`` (Spec 4 shape) skip this path;
+    # plural-triggers descriptors (production WTC path) get validated
+    # here. PredicateValidationError per V7.3.2 (not TriggerError).
+    if "triggers" in descriptor:
+        from kernos.kernel.triggers import (
+            PredicateValidationError,
+            compile_descriptor_triggers,
+        )
+        try:
+            compile_descriptor_triggers(
+                workflow_id=wf.workflow_id, descriptor=descriptor,
+            )
+        except PredicateValidationError as exc:
+            return AuthoringResult(
+                success=False,
+                errors=[ValidationError(
+                    field_path="descriptor.triggers",
+                    category=CAT_PREDICATE_INVALID,
+                    message=str(exc),
+                )],
+            )
     # Spec 5 governance-tier classification.
     computed_tier = classify_governance_tier(wf)
     is_architect = _is_architect(ctx)
@@ -539,9 +657,25 @@ async def register_workflow(
             computed_tier=computed_tier,
             authored_by=ctx.actor_id,
             architect_authored=is_architect,
+            descriptor_json_canonical=canonical_json,
+            descriptor_digest=descriptor_digest,
         )
     try:
         await engine._run_workflow_txn(_body)
+    except aiosqlite.IntegrityError as exc:
+        # 13th amendment SELECT-after-catch: post-rollback collision
+        # disambiguation. The body's ROLLBACK already ran inside
+        # _run_workflow_txn before re-raise (premise 7 reframe), so
+        # this SELECT sees the prior committed winner without
+        # transaction-visibility ambiguity.
+        return await _handle_register_pk_collision(
+            engine=engine,
+            workflow_id=wf.workflow_id,
+            new_digest=descriptor_digest,
+            effective_tier=effective_tier,
+            computed_tier=computed_tier,
+            integrity_error=exc,
+        )
     except Exception as exc:
         return AuthoringResult(
             success=False,
@@ -557,7 +691,94 @@ async def register_workflow(
         extra={
             "governance_tier": effective_tier,
             "computed_tier": computed_tier,
+            "descriptor_digest": descriptor_digest,
         },
+    )
+
+
+async def _handle_register_pk_collision(
+    *,
+    engine: "ExecutionEngine",
+    workflow_id: str,
+    new_digest: str,
+    effective_tier: str,
+    computed_tier: str,
+    integrity_error: BaseException,
+) -> AuthoringResult:
+    """Disambiguate a post-rollback IntegrityError on register.
+
+    v7.3 L1 reframe of premise 7: ``_run_workflow_txn`` rolls back
+    on body exception before re-raising. Reads on the same
+    connection AFTER rollback observe the committed winner via
+    SQLite's normal visibility rules — no special "post-IntegrityError
+    transaction visibility" semantics required.
+
+    Outcomes:
+
+      * **Match.** Prior digest equals ``new_digest`` → register call
+        is idempotent. Return success with the existing row's
+        ``workflow_id``; ``extra['idempotent_replay']`` flags the
+        replay so callers/audits can see the dedupe happened.
+      * **Mismatch.** Same ``workflow_id``, different canonical
+        content → distinct collision; return
+        ``CAT_DESCRIPTOR_SHAPE_INVALID`` so the caller treats this
+        as a workflow-id reuse bug (deterministic IDs must derive
+        from content).
+      * **Absent.** ``workflow_id`` present in ``workflows`` but
+        not in ``registered_workflows`` (or a non-PK IntegrityError
+        surfaced via the same path) → preserve the original
+        persistence-failure error so the surprise propagates.
+    """
+    assert engine._db is not None
+    try:
+        existing = await get_registered_workflow(
+            engine._db, workflow_id=workflow_id,
+        )
+    except Exception as lookup_exc:
+        # Lookup itself failed; treat as the original persistence
+        # error rather than masking it.
+        logger.warning(
+            "REGISTER_COLLISION_LOOKUP_FAILED workflow_id=%s error=%s",
+            workflow_id, lookup_exc,
+        )
+        existing = None
+    if existing is None:
+        return AuthoringResult(
+            success=False,
+            errors=[ValidationError(
+                field_path="descriptor",
+                category=CAT_DESCRIPTOR_SHAPE_INVALID,
+                message=f"persistence failure: {integrity_error}",
+            )],
+        )
+    if existing.descriptor_digest and existing.descriptor_digest == new_digest:
+        # Idempotent replay: same content, same workflow_id.
+        return AuthoringResult(
+            success=True,
+            workflow_id=existing.workflow_id,
+            extra={
+                "governance_tier": existing.governance_tier,
+                "computed_tier": existing.computed_tier or computed_tier,
+                "descriptor_digest": existing.descriptor_digest,
+                "idempotent_replay": True,
+            },
+        )
+    # Either the digest differs or it's empty (pre-amendment row
+    # the caller is trying to re-register with new content). Either
+    # way, this is a distinct-collision: same workflow_id, different
+    # content. Caller should derive a content-addressed workflow_id.
+    return AuthoringResult(
+        success=False,
+        errors=[ValidationError(
+            field_path="workflow_id",
+            category=CAT_DESCRIPTOR_SHAPE_INVALID,
+            message=(
+                f"workflow_id {workflow_id!r} is already registered with a "
+                f"different descriptor (existing digest={existing.descriptor_digest!r}, "
+                f"new digest={new_digest!r}); choose a content-addressed "
+                f"workflow_id or deactivate + re-author with a new id"
+            ),
+        )],
     )
 
 
@@ -575,8 +796,6 @@ async def _register_workflow_uncommitted_in_txn(
     minus the validate / atomic-commit boundary (validation already
     ran in the caller; commit happens at the txn body's COMMIT).
     """
-    import json
-    from dataclasses import asdict
     from kernos.kernel.workflows.workflow_registry import (
         _workflow_descriptor_blob,
     )
@@ -829,6 +1048,68 @@ async def activate_workflow(
             success=False,
             errors=[_workflow_error_to_validation_error(exc)],
         )
+    # Spec 5 14th amendment H1/M2 fold + 16th amendment HIGH 2 fold:
+    # conditional re-validation of plural triggers from the canonical
+    # descriptor blob.
+    #
+    # Semantics:
+    #   * Empty canonical → legacy pre-13th-amendment row; skip
+    #     re-validation (those rows predate the plural-triggers shape
+    #     entirely; failing them would retroactively block activation).
+    #   * Non-empty canonical that fails json.loads OR parses to a
+    #     non-dict → fail-closed at the architect safety boundary.
+    #     A corrupted canonical blob is not skippable; it's a substrate
+    #     integrity violation that warrants architect attention.
+    #     Activation_state stays unchanged.
+    #   * Parsed dict with "triggers" key → route to
+    #     compile_descriptor_triggers per v7.3 M2 (key-presence-only;
+    #     falsey values like triggers=[] / triggers=null still route
+    #     so the substrate primitive owns accept/reject).
+    if registered.descriptor_json_canonical:
+        try:
+            stored_descriptor = json.loads(registered.descriptor_json_canonical)
+        except (ValueError, TypeError) as exc:
+            return AuthoringResult(
+                success=False,
+                errors=[ValidationError(
+                    field_path="descriptor_json_canonical",
+                    category=CAT_DESCRIPTOR_SHAPE_INVALID,
+                    message=(
+                        f"persisted canonical descriptor failed to parse "
+                        f"as JSON: {exc}"
+                    ),
+                )],
+            )
+        if not isinstance(stored_descriptor, dict):
+            return AuthoringResult(
+                success=False,
+                errors=[ValidationError(
+                    field_path="descriptor_json_canonical",
+                    category=CAT_DESCRIPTOR_SHAPE_INVALID,
+                    message=(
+                        f"persisted canonical descriptor must parse to a "
+                        f"dict; got {type(stored_descriptor).__name__}"
+                    ),
+                )],
+            )
+        if "triggers" in stored_descriptor:
+            from kernos.kernel.triggers import (
+                PredicateValidationError,
+                compile_descriptor_triggers,
+            )
+            try:
+                compile_descriptor_triggers(
+                    workflow_id=workflow_id, descriptor=stored_descriptor,
+                )
+            except PredicateValidationError as exc:
+                return AuthoringResult(
+                    success=False,
+                    errors=[ValidationError(
+                        field_path="descriptor.triggers",
+                        category=CAT_PREDICATE_INVALID,
+                        message=str(exc),
+                    )],
+                )
     # Spec 5 post-impl Codex High 4: re-run governance classifier.
     # If the classifier now sees substrate-modification surfaces that
     # weren't present at registration (substrate-tool-id list grew;

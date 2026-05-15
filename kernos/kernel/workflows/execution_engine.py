@@ -127,6 +127,26 @@ if False:  # TYPE_CHECKING — avoid circular import at module load
 logger = logging.getLogger(__name__)
 
 
+# Spec 5 15th amendment B2 fold: execute_workflow's activation gate
+# returns this sentinel string when a workflow registered via the
+# authoring layer (Spec 5) is dispatched while its activation_state
+# is not 'active'. Callers (currently the unified trigger runtime via
+# wlp_dispatch) can compare against the constant to distinguish
+# "deliberately skipped" from "dispatched normally" without a magic
+# string match. The legacy in-process ``_on_trigger_match`` path
+# already gates via ``_is_authoring_workflow_inactive`` and silently
+# returns; the WTC outbox-driven ``execute_workflow`` path uses this
+# sentinel because the caller needs a non-error signal that dispatch
+# was deliberately skipped (vs raising, which would trigger retry).
+EXECUTE_SKIPPED_AUTHORING_INACTIVE = "skipped:authoring_inactive"
+
+# Internal marker used by execute_workflow's gated-INSERT body to
+# signal "the activation gate fired" back to the caller without
+# leaking through the queue. Distinct identity object so equality
+# checks are unambiguous; not exported via __all__.
+_GATE_SKIPPED_SENTINEL = object()
+
+
 # Active-space resolver. The engine calls this to populate the
 # synthetic CohortContext.active_spaces tuple. Real implementations
 # read ContextSpace by instance_id; tests inject a stub.
@@ -2424,23 +2444,62 @@ class ExecutionEngine:
             member_id=member_id,
             fire_id=fire_id,
         )
+
+        # Spec 5 16th amendment fold composes two checks inside the
+        # write-lock body:
+        #
+        #   1. Re-check fire_id (round-2 HIGH 1): a concurrent
+        #      execute_workflow caller that committed BETWEEN our
+        #      outer find_execution_by_fire_id_unlocked and our
+        #      acquisition of the lock is the canonical winner. The
+        #      lock-held re-find observes it; the body returns the
+        #      existing execution_id so the caller treats this as
+        #      idempotent. Without this re-check, the racy interleave
+        #      "outer find misses → deactivate commits → gate fires"
+        #      returned EXECUTE_SKIPPED_AUTHORING_INACTIVE instead of
+        #      the prior dispatch's id, violating the documented
+        #      "prior dispatch is canonical; only NEW dispatches are
+        #      gated" rule.
+        #
+        #   2. Re-check activation state (MEDIUM 2): only for
+        #      genuinely-new dispatches. A concurrent
+        #      deactivate_workflow (which acquires the same lock via
+        #      _run_workflow_txn) cannot interleave between the gate
+        #      read and the INSERT once we're inside the lock.
+        #
+        # Body return shape:
+        #   - str (existing execution_id): caller returns it
+        #     (idempotent winner via the race-recheck path).
+        #   - _GATE_SKIPPED_SENTINEL: caller returns the public
+        #     EXECUTE_SKIPPED_AUTHORING_INACTIVE sentinel.
+        #   - None: INSERT happened; caller queues the execution.
+        async def _gated_insert(db: aiosqlite.Connection) -> Any:
+            existing_locked = await self._find_execution_by_fire_id_unlocked(
+                fire_id,
+            )
+            if existing_locked is not None:
+                return existing_locked
+            if await self._is_authoring_workflow_inactive(workflow_id):
+                return _GATE_SKIPPED_SENTINEL
+            await db.execute(
+                "INSERT INTO workflow_executions ("
+                " execution_id, workflow_id, instance_id, correlation_id,"
+                " state, action_index_completed, intermediate_state,"
+                " last_heartbeat, aborted_reason, started_at, terminated_at,"
+                " trigger_event_payload, trigger_event_id, member_id,"
+                " gate_nonce, fire_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                execution.to_row(),
+            )
+            return None
+
         try:
             # Codex round-2-impl High 4: route through the engine
             # write-lock so a concurrent _run_workflow_txn body
             # can't commit this INSERT along with unrelated step
-            # work.
-            await self._run_workflow_write(
-                lambda db: db.execute(
-                    "INSERT INTO workflow_executions ("
-                    " execution_id, workflow_id, instance_id, correlation_id,"
-                    " state, action_index_completed, intermediate_state,"
-                    " last_heartbeat, aborted_reason, started_at, terminated_at,"
-                    " trigger_event_payload, trigger_event_id, member_id,"
-                    " gate_nonce, fire_id"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    execution.to_row(),
-                ),
-            )
+            # work. 16th amendment: the gate check rides this same
+            # lock.
+            body_result = await self._run_workflow_write(_gated_insert)
         except aiosqlite.IntegrityError as exc:
             # Partial-unique-index race: another caller won the
             # INSERT. Re-fetch and return their execution_id.
@@ -2455,6 +2514,21 @@ class ExecutionEngine:
                     "the unique index but no row visible on re-read"
                 ) from exc
             return existing
+
+        if body_result is _GATE_SKIPPED_SENTINEL:
+            logger.info(
+                "WORKFLOW_EXECUTE_SKIPPED workflow_id=%s fire_id=%s "
+                "reason=authoring_inactive",
+                workflow_id, fire_id,
+            )
+            return EXECUTE_SKIPPED_AUTHORING_INACTIVE
+
+        # round-2 HIGH 1 fold: the locked-body re-check found an
+        # existing execution_id (race-recheck path). Return that
+        # canonical winner; do NOT enqueue our local ``execution``
+        # instance (no row was inserted for it).
+        if isinstance(body_result, str):
+            return body_result
 
         self._queue.put_nowait(execution)
         return execution.execution_id
@@ -2535,6 +2609,7 @@ class _ContextBuildError(RuntimeError):
 
 __all__ = [
     "ActiveSpaceResolver",
+    "EXECUTE_SKIPPED_AUTHORING_INACTIVE",
     "ExecutionEngine",
     "WorkflowExecution",
 ]

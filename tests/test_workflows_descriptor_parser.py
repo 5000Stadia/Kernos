@@ -357,3 +357,126 @@ class TestMissingFile:
     def test_missing_file(self, tmp_path):
         with pytest.raises(DescriptorError, match="not found"):
             parse_descriptor(tmp_path / "nope.workflow.yaml")
+
+
+class TestPluralTriggers:
+    """SELF-IMPROVEMENT-WORKFLOW-V1 12th amendment (Spec 6 v6.2).
+
+    `_build_workflow` accepts either singular `trigger:` (Spec 4 legacy) or
+    plural `triggers:` (production WTC path). Mixing both is rejected.
+    Plural triggers leave `Workflow.trigger = None`; the descriptor.triggers
+    list is compiled by WTC at production-wiring time.
+    """
+
+    def _plural_yaml(self) -> str:
+        return textwrap.dedent("""
+            workflow_id: self-improve
+            instance_id: inst_a
+            name: self_improve
+            version: "1"
+            owner: owner
+            instance_local: true
+            bounds:
+              wall_time_seconds: 30
+            verifier:
+              flavor: deterministic
+              check: terminated
+            action_sequence:
+              - action_type: mark_state
+                parameters: {key: x, value: 1, scope: instance}
+            triggers:
+              - event_type: friction.pattern_frequency_threshold_exceeded
+                event_selector:
+                  op: AND
+                  operands:
+                    - {op: eq, path: instance_id, value: inst_a}
+                    - {op: exists, path: payload.pattern_id}
+        """).lstrip()
+
+    def test_plural_triggers_accepted(self, tmp_path):
+        path = tmp_path / "wf.workflow.yaml"
+        path.write_text(self._plural_yaml())
+        wf = parse_descriptor(path)
+        assert wf.trigger is None
+        assert wf.workflow_id == "self-improve"
+
+    def test_singular_trigger_still_accepted(self, tmp_path):
+        path = tmp_path / "wf.workflow.yaml"
+        path.write_text(_yaml_workflow_text())
+        wf = parse_descriptor(path)
+        assert wf.trigger is not None
+        assert wf.trigger.event_type == "time.tick"
+
+    def test_no_trigger_accepted(self, tmp_path):
+        text = textwrap.dedent("""
+            workflow_id: notrig
+            instance_id: inst_a
+            name: notrig
+            version: "1"
+            owner: owner
+            instance_local: true
+            bounds:
+              wall_time_seconds: 30
+            verifier:
+              flavor: deterministic
+              check: terminated
+            action_sequence:
+              - action_type: mark_state
+                parameters: {key: x, value: 1, scope: instance}
+        """).lstrip()
+        path = tmp_path / "wf.workflow.yaml"
+        path.write_text(text)
+        wf = parse_descriptor(path)
+        assert wf.trigger is None
+
+    def test_mixing_singular_and_plural_rejected(self, tmp_path):
+        text = textwrap.dedent("""
+            workflow_id: mix
+            instance_id: inst_a
+            name: mix
+            version: "1"
+            owner: owner
+            instance_local: true
+            bounds:
+              wall_time_seconds: 30
+            verifier:
+              flavor: deterministic
+              check: terminated
+            action_sequence:
+              - action_type: mark_state
+                parameters: {key: x, value: 1, scope: instance}
+            trigger:
+              event_type: time.tick
+              predicate: {op: eq, path: payload.cadence, value: daily}
+            triggers:
+              - event_type: friction.pattern_frequency_threshold_exceeded
+                event_selector: {op: eq, path: event_type, value: friction.pattern_frequency_threshold_exceeded}
+        """).lstrip()
+        path = tmp_path / "wf.workflow.yaml"
+        path.write_text(text)
+        with pytest.raises(DescriptorError, match="both 'trigger'"):
+            parse_descriptor(path)
+
+    def test_triggers_must_be_list(self, tmp_path):
+        text = textwrap.dedent("""
+            workflow_id: notlist
+            instance_id: inst_a
+            name: notlist
+            version: "1"
+            owner: owner
+            instance_local: true
+            bounds:
+              wall_time_seconds: 30
+            verifier:
+              flavor: deterministic
+              check: terminated
+            action_sequence:
+              - action_type: mark_state
+                parameters: {key: x, value: 1, scope: instance}
+            triggers:
+              event_type: oops_a_dict_not_a_list
+        """).lstrip()
+        path = tmp_path / "wf.workflow.yaml"
+        path.write_text(text)
+        with pytest.raises(DescriptorError, match="triggers must be a list"):
+            parse_descriptor(path)
