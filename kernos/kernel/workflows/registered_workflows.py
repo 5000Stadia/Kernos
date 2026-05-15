@@ -6,31 +6,42 @@ captures the authoring-side metadata that doesn't fit on Spec 4's
 ``workflows`` table: governance tier (substrate vs composition),
 activation state machine, who authored it.
 
-Schema (per Decision 1 v2):
+Schema (per Decision 1 v2 + Spec 5 13th amendment v7.1/v7.2/v7.3):
 
     registered_workflows(
-        workflow_id          TEXT PRIMARY KEY,
-        instance_id          TEXT NOT NULL,
-        governance_tier      TEXT NOT NULL CHECK(
+        workflow_id              TEXT PRIMARY KEY,
+        instance_id              TEXT NOT NULL,
+        governance_tier          TEXT NOT NULL CHECK(
             governance_tier IN ('composition_tier', 'substrate_tier')
         ),
-        activation_state     TEXT NOT NULL DEFAULT 'registered_not_activated'
-                              CHECK(activation_state IN (
-                                  'registered_not_activated',
-                                  'active',
-                                  'deactivated'
-                              )),
-        authored_by          TEXT NOT NULL DEFAULT '',
-        architect_authored   INTEGER NOT NULL DEFAULT 0,
-        computed_tier        TEXT NOT NULL DEFAULT 'composition_tier',
-        deactivation_reason  TEXT NOT NULL DEFAULT '',
-        created_at           TEXT NOT NULL,
-        activated_at         TEXT NOT NULL DEFAULT '',
-        deactivated_at       TEXT NOT NULL DEFAULT '',
-        last_transition_at   TEXT NOT NULL DEFAULT '',
+        activation_state         TEXT NOT NULL DEFAULT 'registered_not_activated'
+                                  CHECK(activation_state IN (
+                                      'registered_not_activated',
+                                      'active',
+                                      'deactivated'
+                                  )),
+        authored_by              TEXT NOT NULL DEFAULT '',
+        architect_authored       INTEGER NOT NULL DEFAULT 0,
+        computed_tier            TEXT NOT NULL DEFAULT 'composition_tier',
+        deactivation_reason      TEXT NOT NULL DEFAULT '',
+        descriptor_json_canonical TEXT NOT NULL DEFAULT '',
+        descriptor_digest         TEXT NOT NULL DEFAULT '',
+        created_at               TEXT NOT NULL,
+        activated_at             TEXT NOT NULL DEFAULT '',
+        deactivated_at           TEXT NOT NULL DEFAULT '',
+        last_transition_at       TEXT NOT NULL DEFAULT '',
         FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
             ON DELETE RESTRICT
     )
+
+13th amendment columns (v7.1.1 placement on registered_workflows, NOT
+workflows): ``descriptor_json_canonical`` carries the
+``json.dumps(descriptor, sort_keys=True)`` form of the registration-
+time descriptor; ``descriptor_digest`` is its SHA-256 hex digest. The
+pair powers idempotent register: on a PK collision the caller compares
+the new digest against the persisted digest and either treats the
+prior row as the canonical winner (idempotent success) or surfaces a
+distinct-collision error (same workflow_id, different content).
 
 State machine (Decision 3 v2):
 
@@ -75,25 +86,39 @@ VALID_GOVERNANCE_TIERS = frozenset({TIER_COMPOSITION, TIER_SUBSTRATE})
 
 _REGISTERED_WORKFLOWS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS registered_workflows (
-    workflow_id          TEXT PRIMARY KEY,
-    instance_id          TEXT NOT NULL,
-    governance_tier      TEXT NOT NULL CHECK(governance_tier IN ('composition_tier', 'substrate_tier')),
-    activation_state     TEXT NOT NULL DEFAULT 'registered_not_activated'
-                          CHECK(activation_state IN ('registered_not_activated', 'active', 'deactivated')),
-    authored_by          TEXT NOT NULL DEFAULT '',
-    architect_authored   INTEGER NOT NULL DEFAULT 0,
-    computed_tier        TEXT NOT NULL DEFAULT 'composition_tier',
-    deactivation_reason  TEXT NOT NULL DEFAULT '',
-    created_at           TEXT NOT NULL,
-    activated_at         TEXT NOT NULL DEFAULT '',
-    deactivated_at       TEXT NOT NULL DEFAULT '',
-    last_transition_at   TEXT NOT NULL DEFAULT '',
+    workflow_id               TEXT PRIMARY KEY,
+    instance_id               TEXT NOT NULL,
+    governance_tier           TEXT NOT NULL CHECK(governance_tier IN ('composition_tier', 'substrate_tier')),
+    activation_state          TEXT NOT NULL DEFAULT 'registered_not_activated'
+                               CHECK(activation_state IN ('registered_not_activated', 'active', 'deactivated')),
+    authored_by               TEXT NOT NULL DEFAULT '',
+    architect_authored        INTEGER NOT NULL DEFAULT 0,
+    computed_tier             TEXT NOT NULL DEFAULT 'composition_tier',
+    deactivation_reason       TEXT NOT NULL DEFAULT '',
+    descriptor_json_canonical TEXT NOT NULL DEFAULT '',
+    descriptor_digest         TEXT NOT NULL DEFAULT '',
+    created_at                TEXT NOT NULL,
+    activated_at              TEXT NOT NULL DEFAULT '',
+    deactivated_at            TEXT NOT NULL DEFAULT '',
+    last_transition_at        TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_registered_workflows_state
     ON registered_workflows (instance_id, activation_state);
 """
+
+
+# Columns added by Spec 5 13th amendment. Existing instance.db files
+# created before the amendment lack these columns; we ALTER TABLE
+# ADD COLUMN them in-place. ``ADD COLUMN`` is idempotent only via
+# pre-flight inspection — SQLite raises ``OperationalError: duplicate
+# column name`` when a column already exists, so we read PRAGMA
+# table_info(...) and only add what's missing.
+_MIGRATION_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("descriptor_json_canonical", "TEXT NOT NULL DEFAULT ''"),
+    ("descriptor_digest", "TEXT NOT NULL DEFAULT ''"),
+)
 
 
 async def ensure_registered_workflows_schema(
@@ -104,12 +129,32 @@ async def ensure_registered_workflows_schema(
     Idempotent on re-call. PRAGMA foreign_keys=ON is required for
     the FK to workflows(workflow_id) to enforce referential
     integrity.
+
+    Spec 5 13th amendment: idempotent ALTER TABLE migration for the
+    canonical-descriptor columns. Inspecting ``PRAGMA table_info``
+    before each ADD COLUMN keeps re-call safe on freshly created and
+    pre-amendment databases alike.
     """
     await db.execute("PRAGMA foreign_keys=ON")
     for stmt in _REGISTERED_WORKFLOWS_SCHEMA.split(";"):
         stmt = stmt.strip()
         if stmt:
             await db.execute(stmt)
+    # Migration for pre-amendment databases.
+    existing_columns: set[str] = set()
+    async with db.execute(
+        "PRAGMA table_info(registered_workflows)"
+    ) as cur:
+        async for row in cur:
+            # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
+            existing_columns.add(row[1])
+    for column_name, column_decl in _MIGRATION_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        await db.execute(
+            f"ALTER TABLE registered_workflows "
+            f"ADD COLUMN {column_name} {column_decl}"
+        )
 
 
 @dataclass(frozen=True)
@@ -128,9 +173,25 @@ class RegisteredWorkflow:
     activated_at: str
     deactivated_at: str
     last_transition_at: str
+    descriptor_json_canonical: str = ""
+    descriptor_digest: str = ""
 
 
 def _row_to_registered_workflow(row: aiosqlite.Row) -> RegisteredWorkflow:
+    # Spec 5 13th amendment: descriptor_json_canonical + descriptor_digest
+    # were added in v7.3. Pre-amendment rows lack the columns; the
+    # ALTER TABLE migration fills them with the empty-string default so
+    # row[...] is safe. We still guard via index/key error for the
+    # legacy in-memory backend whose Row shim may not surface the new
+    # keys yet.
+    try:
+        canonical = row["descriptor_json_canonical"] or ""
+    except (KeyError, IndexError):
+        canonical = ""
+    try:
+        digest = row["descriptor_digest"] or ""
+    except (KeyError, IndexError):
+        digest = ""
     return RegisteredWorkflow(
         workflow_id=row["workflow_id"],
         instance_id=row["instance_id"],
@@ -144,6 +205,8 @@ def _row_to_registered_workflow(row: aiosqlite.Row) -> RegisteredWorkflow:
         activated_at=row["activated_at"] or "",
         deactivated_at=row["deactivated_at"] or "",
         last_transition_at=row["last_transition_at"] or "",
+        descriptor_json_canonical=canonical,
+        descriptor_digest=digest,
     )
 
 
@@ -160,22 +223,32 @@ async def insert_registered_workflow_within_txn(
     computed_tier: str,
     authored_by: str,
     architect_authored: bool,
+    descriptor_json_canonical: str = "",
+    descriptor_digest: str = "",
 ) -> None:
     """INSERT a new registered_workflows row inside the caller's
     transaction. Used by the authoring layer's _run_authoring_txn
     helper (Spec 5 v2 Decision 1 / Codex Blocker 2) so the workflows
     + registered_workflows inserts land atomically.
+
+    Spec 5 13th amendment: ``descriptor_json_canonical`` is the
+    sorted-keys JSON form of the registration-time descriptor;
+    ``descriptor_digest`` is its SHA-256 hex digest. Both are stored
+    so post-rollback collision detection can compare digests without
+    re-canonicalising the persisted blob.
     """
     now = _now()
     await db.execute(
         "INSERT INTO registered_workflows ("
         " workflow_id, instance_id, governance_tier, activation_state,"
-        " authored_by, architect_authored, computed_tier, created_at"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        " authored_by, architect_authored, computed_tier,"
+        " descriptor_json_canonical, descriptor_digest, created_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             workflow_id, instance_id, governance_tier, STATE_REGISTERED,
             authored_by, 1 if architect_authored else 0,
-            computed_tier, now,
+            computed_tier,
+            descriptor_json_canonical, descriptor_digest, now,
         ),
     )
 

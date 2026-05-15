@@ -1218,3 +1218,304 @@ class TestToolDispatchHandlers:
             "register_workflow", "register_trigger",
             "activate_workflow", "deactivate_workflow",
         })
+
+
+# ===========================================================================
+# Spec 5 13th amendment (v7.1/v7.2/v7.3 scope completion)
+# ===========================================================================
+#
+# Pins idempotent register + canonical persistence + serializability
+# check + SELECT-after-catch. Tests follow the substrate-fidelity
+# assertion pattern: behavioral signal from the AuthoringResult AND
+# substrate state read directly from the registered_workflows row.
+
+
+class TestThirteenthAmendmentSerializability:
+    """M1 fold: serializability premise enforced at the public boundary
+    before the Spec 4 parser does any work."""
+
+    async def test_non_serializable_descriptor_rejected_loud(
+        self, stack, architect_env,
+    ):
+        import datetime as _dt
+
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        # datetime objects aren't JSON-serializable; would slip past
+        # `isinstance(descriptor, dict)` and crash the Spec 4 parser
+        # at descriptor_json_blob time. M1 fold catches it at boundary.
+        descriptor = _descriptor(workflow_id="wf-nonser-1")
+        descriptor["metadata"] = {"created_at": _dt.datetime.now(_dt.timezone.utc)}
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+        # Substrate state pin: no row landed.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-nonser-1",
+        )
+        assert row is None
+
+    async def test_set_descriptor_rejected_loud(self, stack, architect_env):
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-nonser-2")
+        descriptor["metadata"] = {"tags": {"a", "b", "c"}}  # set, not list
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+
+    async def test_serializability_runs_before_parser(
+        self, stack, architect_env,
+    ):
+        """Pin ordering: non-serializable values that also violate Spec 4
+        shape (no instance_id) still surface the serializability error,
+        not a DescriptorError. Confirms M1 runs at the public boundary
+        before _build_workflow."""
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        # Build a descriptor that's both non-serializable AND
+        # missing instance_id. If the parser ran first, we'd see a
+        # KeyError on instance_id wrapped as descriptor_shape_invalid
+        # with a different message. M1 runs first.
+        descriptor = {
+            "workflow_id": "wf-order",
+            "name": "broken",
+            "version": "1.0",
+            # missing instance_id (would fail _build_workflow)
+            "metadata": {"bad": object()},  # also non-serializable
+            "bounds": {"iteration_count": 1, "wall_time_seconds": 30},
+            "verifier": {"flavor": "deterministic", "check": "ok"},
+            "action_sequence": [],
+            "approval_gates": [],
+            "terminal_branches": {},
+        }
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert "not JSON-serializable" in result.errors[0].message
+
+
+class TestThirteenthAmendmentCanonicalPersistence:
+    """v7.2: descriptor_json_canonical + descriptor_digest persisted on
+    registered_workflows row (V7.1.1 placement)."""
+
+    async def test_canonical_json_and_digest_persisted(
+        self, stack, architect_env,
+    ):
+        import hashlib
+        import json as _json
+
+        descriptor = _descriptor(workflow_id="wf-canon-1")
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is True
+        # Behavioral signal: digest surfaced via AuthoringResult.extra.
+        expected_canonical = _json.dumps(descriptor, sort_keys=True)
+        expected_digest = hashlib.sha256(
+            expected_canonical.encode("utf-8")
+        ).hexdigest()
+        assert result.extra["descriptor_digest"] == expected_digest
+        # Substrate state: row carries both columns.
+        async with stack["engine"]._db.execute(
+            "SELECT descriptor_json_canonical, descriptor_digest "
+            "FROM registered_workflows WHERE workflow_id = ?",
+            ("wf-canon-1",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["descriptor_json_canonical"] == expected_canonical
+        assert row["descriptor_digest"] == expected_digest
+
+    async def test_canonical_form_independent_of_key_order(
+        self, stack, architect_env,
+    ):
+        """Two descriptors that differ only in key insertion order
+        produce the same digest. Canonical form must be order-invariant
+        for idempotent register to work as advertised."""
+        import hashlib
+        import json as _json
+
+        descriptor_a = _descriptor(workflow_id="wf-order-a")
+        # Build a descriptor with the same content but a different
+        # insertion order. dict insertion order matters in Python 3.7+
+        # but json.dumps(sort_keys=True) normalizes it.
+        descriptor_b = {
+            k: descriptor_a[k] for k in reversed(list(descriptor_a.keys()))
+        }
+        descriptor_b["workflow_id"] = "wf-order-b"
+        # Compute expected digests via the same canonical path.
+        digest_a = hashlib.sha256(
+            _json.dumps(descriptor_a, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        digest_b = hashlib.sha256(
+            _json.dumps(descriptor_b, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        # workflow_id differs, so digests differ. The relevant signal
+        # is that both register paths produce a digest that's a
+        # deterministic function of canonical JSON, not of insertion
+        # order. Register both and confirm both produce that exact
+        # digest.
+        result_a = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_a, TIER_COMPOSITION,
+        )
+        result_b = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_b, TIER_COMPOSITION,
+        )
+        assert result_a.success and result_b.success
+        assert result_a.extra["descriptor_digest"] == digest_a
+        assert result_b.extra["descriptor_digest"] == digest_b
+
+
+class TestThirteenthAmendmentIdempotentRegister:
+    """v7.1: SELECT-after-catch idempotent register. Same workflow_id +
+    same canonical descriptor → idempotent success returning the prior
+    row's workflow_id; same workflow_id + different content → distinct-
+    collision error.
+
+    L1 reframe of premise 7: _run_workflow_txn rolls back on body
+    IntegrityError before re-raise, so the SELECT in
+    _handle_register_pk_collision runs post-rollback on the same
+    connection and observes the committed winner via normal visibility.
+    """
+
+    async def test_idempotent_replay_returns_existing_id(
+        self, stack, architect_env,
+    ):
+        descriptor = _descriptor(workflow_id="wf-idempotent")
+        # First register: lands the row.
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        assert result1.workflow_id == "wf-idempotent"
+        assert "idempotent_replay" not in result1.extra
+        first_digest = result1.extra["descriptor_digest"]
+        # Second register with the same descriptor: IntegrityError on
+        # PK collision; SELECT-after-catch finds the matching digest;
+        # idempotent success returned with the existing workflow_id.
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), dict(descriptor), TIER_COMPOSITION,
+        )
+        assert result2.success is True
+        assert result2.workflow_id == "wf-idempotent"
+        assert result2.extra.get("idempotent_replay") is True
+        assert result2.extra["descriptor_digest"] == first_digest
+
+    async def test_distinct_collision_rejected_loud(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+
+        descriptor_a = _descriptor(
+            workflow_id="wf-collide", name="first version",
+        )
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_a, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        first_digest = result1.extra["descriptor_digest"]
+        # Register a DIFFERENT descriptor under the same workflow_id:
+        # IntegrityError → SELECT-after-catch → digest mismatch →
+        # distinct-collision ValidationError surfaced.
+        descriptor_b = _descriptor(
+            workflow_id="wf-collide", name="DIFFERENT VERSION",
+        )
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_b, TIER_COMPOSITION,
+        )
+        assert result2.success is False
+        assert len(result2.errors) == 1
+        err = result2.errors[0]
+        assert err.category == CAT_DESCRIPTOR_SHAPE_INVALID
+        assert err.field_path == "workflow_id"
+        assert "already registered with a different descriptor" in err.message
+        # Substrate state pin: the prior row remains the canonical
+        # winner; the new descriptor did NOT overwrite it.
+        async with stack["engine"]._db.execute(
+            "SELECT descriptor_digest, name FROM registered_workflows "
+            "INNER JOIN workflows USING (workflow_id) "
+            "WHERE workflow_id = ?",
+            ("wf-collide",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["descriptor_digest"] == first_digest
+        assert row["name"] == "first version"
+
+    async def test_select_after_catch_runs_post_rollback(
+        self, stack, architect_env,
+    ):
+        """v7.3 L1 reframe of premise 7: _run_workflow_txn ROLLBACKs
+        before re-raising body exceptions. Verifying by triggering an
+        IntegrityError mid-body and confirming the engine connection
+        is in a usable state (no leaked open transaction) for the
+        subsequent SELECT.
+
+        Direct verification by re-registering after an idempotent
+        replay: if rollback hadn't happened, the next BEGIN IMMEDIATE
+        would raise 'cannot start a transaction within a transaction'.
+        """
+        descriptor = _descriptor(workflow_id="wf-rollback-pin")
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        # Force the IntegrityError + SELECT-after-catch path.
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), dict(descriptor), TIER_COMPOSITION,
+        )
+        assert result2.extra.get("idempotent_replay") is True
+        # Critical signal: register a DIFFERENT workflow afterward
+        # to prove the engine connection isn't stuck in an open txn.
+        descriptor_other = _descriptor(workflow_id="wf-rollback-other")
+        result3 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_other, TIER_COMPOSITION,
+        )
+        assert result3.success is True, (
+            f"engine connection unusable after collision rollback: "
+            f"{result3.errors}"
+        )
+
+    async def test_idempotent_replay_preserves_authored_by(
+        self, stack, architect_env,
+    ):
+        """The idempotent path returns the EXISTING row's metadata —
+        a Kernos replay of an architect-authored workflow doesn't
+        change the architect_authored flag."""
+        descriptor = _descriptor(workflow_id="wf-preserve")
+        # Architect registers first.
+        result1 = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        # Kernos tries to re-register; should see idempotent replay
+        # and the existing architect-authored row is preserved.
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), dict(descriptor), TIER_COMPOSITION,
+        )
+        assert result2.success is True
+        assert result2.extra.get("idempotent_replay") is True
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-preserve",
+        )
+        assert row is not None
+        assert row.architect_authored is True
+        assert row.authored_by == ARCHITECT_ID
