@@ -71,6 +71,32 @@ VALID_INVESTIGATION_OUTCOMES = frozenset({
     "completed", "partial", "unable_to_investigate",
 })
 
+# Canonical normalization for investigation_outcome. Used by BOTH
+# the bridge's response-read path AND the Spec 6 autonomy-loop
+# workflow wrapper (handle_read_coding_session_response_for_workflow)
+# so the event_stream event payload and the workflow's
+# emit_outcome ledger entry agree for every input case (missing,
+# empty, valid, invalid).
+#
+#   missing / empty → "completed" (the bridge's documented default;
+#       a coding-session response that arrives without an explicit
+#       outcome is treated as a successful consultation).
+#   valid value     → unchanged.
+#   invalid value   → "unable_to_investigate" (loud-fail over
+#       silent-degradation: an unknown outcome value can't pollute
+#       the canonical enum that the autonomy_loop_outcomes ledger
+#       uses for before/after pattern measurement).
+def normalize_investigation_outcome(raw) -> str:
+    """Canonical normalization for investigation_outcome (Spec 6
+    Codex round-2 MEDIUM 2 fold). See module-level comment above
+    for semantics."""
+    if not raw:
+        return "completed"
+    raw_str = str(raw)
+    if raw_str not in VALID_INVESTIGATION_OUTCOMES:
+        return "unable_to_investigate"
+    return raw_str
+
 # Request-id allowable shape: UUID-like (hex + hyphens) plus underscores.
 # Anything else is rejected by _safe_request_id so path traversal via
 # the request_id parameter cannot escape the bridge directory.
@@ -357,13 +383,21 @@ async def _emit_response_received_once(
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
 
+    # Codex round-2 MEDIUM 2 fold: route the event payload's
+    # investigation_outcome through the same canonical normalization
+    # the read-side uses. response_payload may be the bridge's own
+    # normalized response_data dict (in which case this is a no-op
+    # lookup) OR an externally-supplied dict (operator-direct emit
+    # paths) — running normalize_investigation_outcome here makes
+    # the event payload consistent regardless of which surface
+    # constructed response_payload.
     payload = {
         "request_id": request_id,
         "originating_kernos_instance": originating_kernos_instance,
         "originating_member_id": originating_member_id,
         "target": target,
-        "investigation_outcome": response_payload.get(
-            "investigation_outcome", "",
+        "investigation_outcome": normalize_investigation_outcome(
+            response_payload.get("investigation_outcome"),
         ),
     }
     # Spec 6 commit 7: forward Spec 4 gate-scoping fields when the
@@ -732,14 +766,20 @@ async def handle_read_coding_session_response(
                 ),
             )
 
-        outcome_raw = str(response_data.get("investigation_outcome", "completed"))
-        if outcome_raw not in VALID_INVESTIGATION_OUTCOMES:
+        # Codex round-2 MEDIUM 2 fold: centralized normalization.
+        # Materialize the canonical value into response_data so the
+        # event payload emission at _emit_response_received_once
+        # (which uses response_data.get(...) without a default) sees
+        # the same value the bridge's own summary line reads.
+        raw_outcome_in = response_data.get("investigation_outcome")
+        normalized = normalize_investigation_outcome(raw_outcome_in)
+        if raw_outcome_in is not None and str(raw_outcome_in) != normalized:
             logger.warning(
-                "CODING_SESSION_BRIDGE: response %s has unknown "
-                "investigation_outcome=%r; treating as 'unable_to_investigate'",
-                request_id, outcome_raw,
+                "CODING_SESSION_BRIDGE: response %s investigation_outcome "
+                "normalized from %r to %r",
+                request_id, raw_outcome_in, normalized,
             )
-            response_data["investigation_outcome"] = "unable_to_investigate"
+        response_data["investigation_outcome"] = normalized
 
         # Idempotent event emission.
         await _emit_response_received_once(

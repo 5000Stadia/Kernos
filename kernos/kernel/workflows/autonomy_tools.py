@@ -694,19 +694,17 @@ async def handle_read_coding_session_response_for_workflow(
     )
     # If the bridge accepted the response, read the response file
     # again to surface investigation_outcome to the workflow.
-    # Codex round-1 M1 fold: the bridge's emit-once path
-    # normalizes invalid outcomes to "unable_to_investigate" before
-    # event emission; this workflow wrapper applies the SAME
-    # normalization (against VALID_INVESTIGATION_OUTCOMES) so the
-    # downstream emit_outcome step receives a canonical value that
-    # round-trips through the autonomy_loop_outcomes ledger as-is.
-    # Centralizing normalization at both surfaces keeps the audit
-    # trail consistent — an arbitrary string in the response file
-    # cannot pollute the canonical outcome enum in the ledger.
+    # Codex round-1 M1 fold + round-2 MEDIUM 2 fold: both surfaces
+    # (bridge event_stream emission + workflow ledger entry) route
+    # through the SAME normalize_investigation_outcome helper so
+    # the autonomy_loop_outcomes ledger entry and the
+    # coding_consult.response_received event payload always agree
+    # on the canonical outcome for every input case (missing,
+    # empty, valid, invalid).
     investigation_outcome = ""
     if record.execution_state == "completed":
         from kernos.kernel.coding_session_bridge import (
-            VALID_INVESTIGATION_OUTCOMES,
+            normalize_investigation_outcome,
         )
         response_path = (
             _Path(data_dir) / instance_id / "coding_session_bridge"
@@ -715,22 +713,15 @@ async def handle_read_coding_session_response_for_workflow(
         try:
             with response_path.open("r", encoding="utf-8") as fp:
                 response_data = _json.load(fp)
-            raw_outcome = (
-                response_data.get("investigation_outcome", "") or ""
+            investigation_outcome = normalize_investigation_outcome(
+                response_data.get("investigation_outcome"),
             )
-            if raw_outcome in VALID_INVESTIGATION_OUTCOMES:
-                investigation_outcome = raw_outcome
-            else:
-                # Mirror the bridge's normalization (centralized at
-                # the bridge's emit path; same fallback applied here
-                # so the workflow's ledger entry agrees with the
-                # event_stream event payload).
-                investigation_outcome = "unable_to_investigate"
         except (FileNotFoundError, _json.JSONDecodeError, OSError):
             # Best-effort: if the file is unreadable here (rare —
-            # the bridge just read it), surface the same fallback
-            # the bridge uses for unknown outcomes.
-            investigation_outcome = "unable_to_investigate"
+            # the bridge just read it), pass the missing-value
+            # sentinel through normalization for the canonical
+            # fallback ("completed" per the helper's contract).
+            investigation_outcome = normalize_investigation_outcome(None)
     return {
         "success": record.execution_state in ("attempted", "completed"),
         "request_id": request_id,

@@ -88,20 +88,35 @@ class FrictionPatternFrequencyEmitter:
         self._hook_registered = False
         # Test introspection: number of translated emissions.
         self._emit_count = 0
-        # Spec 6 commit 7 Codex round-1 B2 fold: per-pattern dedup by
-        # active_epoch. The substrate's reactivation increments
-        # active_epoch monotonically per instance (Spec 6 commit 1);
-        # the emitter tracks the last epoch translated per
-        # (instance_id, pattern_id) and only emits when the observed
-        # epoch is strictly greater. This closes the v1 closure
-        # invariant: one activation episode → one autonomy-loop turn.
-        # Multiple friction.pattern_reactivated events for the same
-        # episode (replay, reentrant emission, restart-rehydration)
-        # collapse to the canonical first emission. In-memory state
-        # for v1; restart clears it and the first post-restart event
-        # per pattern is treated as the canonical fire — operational
-        # evidence will inform whether durable persistence is needed
-        # for v2 per the V1 operational verification scope discipline.
+        # Spec 6 commit 7 Codex round-1 B2 fold + round-2 LOW 1
+        # documentation: per-pattern dedup by active_epoch.
+        #
+        # SAME-PROCESS semantics. The substrate's reactivation
+        # increments active_epoch monotonically per instance
+        # (Spec 6 commit 1); the emitter tracks the last epoch
+        # translated per (instance_id, pattern_id) and only emits
+        # when the observed epoch is strictly greater. This closes
+        # the v1 closure invariant: one activation episode → one
+        # autonomy-loop turn. Same-process duplicate
+        # friction.pattern_reactivated events for the same episode
+        # (reentrant emission, post-flush hook re-firing, in-process
+        # replay) collapse to the canonical first emission.
+        #
+        # ACROSS-RESTART semantics — explicit no-replay assumption.
+        # event_stream's post-flush hook does NOT replay
+        # already-persisted batches at startup; the InternalEventAdapter
+        # only sees freshly-flushed events. Without a replay source
+        # that re-emits historical friction.pattern_reactivated
+        # events post-restart, this in-memory dedup is sufficient
+        # for v1 — the WTC fire_id idempotency at the runtime
+        # protects against duplicate dispatch within a single
+        # cluster of post-flush-hook invocations.
+        # If a replay source is later introduced (e.g., an
+        # event-stream catch-up mode), durable persistence of
+        # ``_last_emitted_epoch`` becomes load-bearing. Per the V1
+        # operational verification scope discipline, the lift to
+        # durable state folds in alongside the replay source's spec
+        # rather than upfront.
         self._last_emitted_epoch: dict[str, int] = {}
 
     async def start(self) -> None:
@@ -175,7 +190,6 @@ class FrictionPatternFrequencyEmitter:
                     pattern_id, pattern.active_epoch, last_epoch,
                 )
                 continue
-            self._last_emitted_epoch[pattern_id] = pattern.active_epoch
             translated_payload = {
                 "pattern_id": pattern_id,
                 "active_epoch": pattern.active_epoch,
@@ -190,19 +204,33 @@ class FrictionPatternFrequencyEmitter:
                 ),
                 "source_event_id": event.event_id,
             }
+            # Codex round-2 MEDIUM 1 fold: update dedup state only
+            # AFTER the emit succeeds. Previously the epoch was
+            # claimed before emit, so a transient emit failure
+            # would permanently dedupe the epoch in-process and
+            # drop the autonomy trigger until the next reactivation.
+            # event_stream.emit is currently fire-and-forget (the
+            # writer flushes batches in the background) so failures
+            # here are rare, but the order matters for retry
+            # semantics regardless.
             try:
                 await event_stream.emit(
                     self._instance_id,
                     "friction.pattern_frequency_threshold_exceeded",
                     translated_payload,
                 )
-                self._emit_count += 1
             except Exception as exc:
                 logger.warning(
                     "FRICTION_PATTERN_FREQUENCY_EMITTER_EMIT_FAILED "
                     "pattern_id=%s error=%s",
                     pattern_id, exc,
                 )
+                # Don't update dedup state; next same-epoch event for
+                # this pattern can retry.
+                continue
+            # Emit succeeded — claim the dedup slot.
+            self._last_emitted_epoch[pattern_id] = pattern.active_epoch
+            self._emit_count += 1
 
 
 # ---------------------------------------------------------------------------

@@ -251,6 +251,79 @@ class TestFrictionPatternFrequencyEmitter:
         finally:
             await emitter.stop()
 
+    async def test_emit_failure_does_not_claim_dedup_slot(
+        self, event_stream_writer, pattern_store, monkeypatch,
+    ):
+        """Codex round-2 MEDIUM 1 pin: when event_stream.emit raises,
+        the per-pattern dedup slot is NOT claimed — a subsequent
+        same-epoch event for the same pattern can retry the
+        translation. Previously the dedup slot was claimed BEFORE
+        the emit, so a transient failure permanently silenced the
+        autonomy trigger until the next active_epoch increment.
+
+        Substrate state pin: emitter._last_emitted_epoch[pattern_id]
+        is unset after the failed emit; second attempt sees the
+        same epoch as a fresh emission target."""
+        emitter = FrictionPatternFrequencyEmitter(
+            instance_id="inst_a", pattern_store=pattern_store,
+        )
+        # Create a pattern so the emitter's get_pattern lookup
+        # finds a row with a real active_epoch.
+        p = await pattern_store.create_pattern(
+            instance_id="inst_a", description="emit-fail test",
+            signal_type_keys=["kemitfail"],
+        )
+        # Monkey-patch event_stream.emit to raise on the FIRST call
+        # for the translated event_type and succeed on subsequent.
+        # Other emits (the source friction.pattern_reactivated)
+        # still need to flow through, so we filter by event_type.
+        from kernos.kernel import event_stream as _es
+
+        real_emit = _es.emit
+        call_log: list[str] = []
+
+        async def _flaky_emit(instance_id, event_type, payload=None, **kw):
+            call_log.append(event_type)
+            if event_type == "friction.pattern_frequency_threshold_exceeded":
+                # First call fails; subsequent succeed.
+                count_for_this_type = sum(
+                    1 for t in call_log if t == event_type
+                )
+                if count_for_this_type == 1:
+                    raise RuntimeError("simulated emit failure")
+            return await real_emit(instance_id, event_type, payload, **kw)
+
+        monkeypatch.setattr(_es, "emit", _flaky_emit)
+        await emitter.start()
+        try:
+            # First friction.pattern_reactivated emission — emitter
+            # tries to translate, emit raises, dedup slot is NOT
+            # claimed.
+            await real_emit(
+                "inst_a", "friction.pattern_reactivated",
+                {"pattern_id": p.pattern_id, "reactivated_at": _now()},
+            )
+            await event_stream.flush_now()
+            await event_stream.flush_now()
+            assert p.pattern_id not in emitter._last_emitted_epoch, (
+                f"dedup slot was claimed despite emit failure; "
+                f"_last_emitted_epoch={emitter._last_emitted_epoch}"
+            )
+            assert emitter._emit_count == 0
+            # Second friction.pattern_reactivated emission — emitter
+            # retries the translation; this time emit succeeds, dedup
+            # slot is claimed.
+            await real_emit(
+                "inst_a", "friction.pattern_reactivated",
+                {"pattern_id": p.pattern_id, "reactivated_at": _now()},
+            )
+            await event_stream.flush_now()
+            await event_stream.flush_now()
+            assert emitter._last_emitted_epoch.get(p.pattern_id) == p.active_epoch
+            assert emitter._emit_count == 1
+        finally:
+            await emitter.stop()
+
 
 # ===========================================================================
 # CodingSessionBridgeResponseEmitter

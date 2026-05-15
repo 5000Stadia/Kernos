@@ -693,6 +693,28 @@ class TestEndToEndAutonomyLoop:
                 f"expected exactly one mark_resolved step output; "
                 f"got {len(mr_rows)}"
             )
+            # Codex round-2 LOW 2 fold: substrate cardinality pins so
+            # an extra duplicate workflow execution that aborts
+            # before mark_resolved would still be caught.
+            async with stack["engine"]._db.execute(
+                "SELECT COUNT(*) AS n FROM workflow_executions "
+                "WHERE workflow_id = 'self_improvement'",
+            ) as cur:
+                exec_count_row = await cur.fetchone()
+            assert exec_count_row["n"] == 1, (
+                f"expected exactly one workflow_executions row for "
+                f"self_improvement; got {exec_count_row['n']}"
+            )
+            async with stack["runtime"]._outbox._db.execute(
+                "SELECT COUNT(*) AS n FROM trigger_fires "
+                "WHERE instance_id = ?",
+                (TEST_INSTANCE_ID,),
+            ) as cur:
+                fire_count_row = await cur.fetchone()
+            assert fire_count_row["n"] == 1, (
+                f"expected exactly one trigger_fires row for "
+                f"instance {TEST_INSTANCE_ID}; got {fire_count_row['n']}"
+            )
         finally:
             await response_emitter.stop()
             await freq_emitter.stop()
