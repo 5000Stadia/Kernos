@@ -2064,6 +2064,11 @@ class TestSixteenthAmendmentMedium1Canonical:
     bytes."""
 
     def test_canonical_helper_rejects_nan(self):
+        """Pure-helper probe: exercises _compute_canonical_descriptor_json
+        in isolation. Substrate-state pin not applicable — the helper
+        is a pure function with no DB / event / queue side effects.
+        Exempt from the substrate-fidelity-assertion-pattern requirement
+        per 16th amendment round-2 LOW 2 fold."""
         import math
 
         from kernos.kernel.workflows.authoring import (
@@ -2076,6 +2081,8 @@ class TestSixteenthAmendmentMedium1Canonical:
             )
 
     def test_canonical_helper_rejects_infinity(self):
+        """Pure-helper probe (see test_canonical_helper_rejects_nan
+        docstring for exemption rationale)."""
         import math
 
         from kernos.kernel.workflows.authoring import (
@@ -2088,9 +2095,11 @@ class TestSixteenthAmendmentMedium1Canonical:
             )
 
     def test_canonical_helper_uses_tight_separators(self):
-        """Pin the separator choice: no whitespace, just ``,`` and
-        ``:``. Drift here would change every digest and break idempotent
-        register's content-addressing invariant."""
+        """Pure-helper probe pinning the separator choice: no
+        whitespace, just ``,`` and ``:``. Drift here would change every
+        digest and break idempotent register's content-addressing
+        invariant. Substrate-state pin not applicable — exempt per 16th
+        amendment round-2 LOW 2 fold (pure function, no side effects)."""
         from kernos.kernel.workflows.authoring import (
             _compute_canonical_descriptor_json,
         )
@@ -2244,6 +2253,94 @@ class TestSixteenthAmendmentMedium2GateAtomic:
             row = await cur.fetchone()
         assert row is None
 
+    async def test_locked_body_rechecks_fire_id_wins_over_gate(
+        self, stack, architect_env,
+    ):
+        """16th amendment round-2 HIGH 1 fold: simulate the race where
+        the outer find_execution_by_fire_id_unlocked missed a prior
+        commit AND the workflow was deactivated between the prior
+        dispatch and this call.
+
+        Without the locked-body fire_id re-check, this turn would
+        return EXECUTE_SKIPPED_AUTHORING_INACTIVE (the gate fires
+        because the workflow is now inactive). With the re-check, the
+        prior dispatch's execution_id is returned (the canonical
+        winner; "prior dispatch is canonical; only NEW dispatches are
+        gated"). Race injection: monkey-patch
+        ``_find_execution_by_fire_id_unlocked`` to return None on
+        first call so the outer find misses the row that's already in
+        the database.
+
+        Substrate-fidelity pin: behavioral signal (returned id matches
+        the existing row's id) AND substrate state (only one
+        workflow_executions row exists for the fire_id; no orphan
+        from the racy turn)."""
+        from kernos.kernel.workflows.execution_engine import (
+            EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+        )
+
+        engine = stack["engine"]
+        descriptor = _descriptor(workflow_id="wf-race-recheck")
+        await register_workflow(
+            engine, _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        await activate_workflow(
+            engine, _architect_ctx(), "wf-race-recheck",
+        )
+        # First dispatch lands the row.
+        first_id = await engine.execute_workflow(
+            fire_id="fire_race_recheck",
+            workflow_id="wf-race-recheck",
+            instance_id="inst_a",
+            trigger_event_payload={},
+        )
+        assert first_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Deactivate so the gate would fire on a new dispatch.
+        await deactivate_workflow(
+            engine, _architect_ctx(), "wf-race-recheck",
+            reason="race test",
+        )
+        # Race injection: outer find returns None on first invocation
+        # (simulating the race window where another caller's commit
+        # hasn't propagated to our snapshot yet); subsequent calls
+        # return the real value (the locked-body re-check sees it).
+        real_find = engine._find_execution_by_fire_id_unlocked
+        call_log: list[str] = []
+
+        async def racy_find(fire_id: str):
+            call_log.append(fire_id)
+            if len(call_log) == 1:
+                # Simulate the unlocked outer find missing A's row.
+                return None
+            return await real_find(fire_id)
+
+        engine._find_execution_by_fire_id_unlocked = racy_find  # type: ignore[method-assign]
+        try:
+            replay_id = await engine.execute_workflow(
+                fire_id="fire_race_recheck",
+                workflow_id="wf-race-recheck",
+                instance_id="inst_a",
+                trigger_event_payload={},
+            )
+        finally:
+            engine._find_execution_by_fire_id_unlocked = real_find  # type: ignore[method-assign]
+        # Behavioral pin: the canonical winner's id was returned,
+        # NOT the sentinel.
+        assert replay_id == first_id
+        assert replay_id != EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # Call sequence pin: the outer find ran (returned None), then
+        # the locked-body re-find ran and saw the row.
+        assert len(call_log) >= 2
+        # Substrate state pin: exactly ONE workflow_executions row
+        # exists for this fire_id — no orphan from the racy turn,
+        # no duplicate.
+        async with engine._db.execute(
+            "SELECT COUNT(*) AS n FROM workflow_executions WHERE fire_id = ?",
+            ("fire_race_recheck",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row["n"] == 1
+
     async def test_activate_after_deactivate_re_enables_dispatch(
         self, stack, architect_env,
     ):
@@ -2314,7 +2411,15 @@ class TestSixteenthAmendmentHigh1RuntimeSentinel:
     async def test_runtime_routes_sentinel_to_mark_failed(self):
         """Stub-based pin: simulate _wlp_dispatch returning the
         sentinel; observe that the runtime calls mark_failed with the
-        sentinel as last_error, NOT mark_dispatched."""
+        sentinel as last_error, NOT mark_dispatched.
+
+        NOTE: pure-stub probe; substrate-state pin not applicable.
+        This test inlines the conditional shape from the runtime's
+        _claim_and_dispatch to pin the structural invariant in
+        isolation. The companion test_runtime_dispatch_path_routes_sentinel_end_to_end
+        pins the end-to-end behavior with real substrate state.
+        Exempt from the substrate-fidelity-assertion-pattern
+        requirement per 16th amendment round-2 LOW 2 fold."""
         from kernos.kernel.triggers.runtime import (
             _EXECUTE_SKIPPED_AUTHORING_INACTIVE,
         )
@@ -2362,7 +2467,12 @@ class TestSixteenthAmendmentHigh1RuntimeSentinel:
     def test_runtime_imports_sentinel_from_engine(self):
         """Source-of-truth pin: the runtime's sentinel is imported from
         the engine, not duplicated. Drift between the two would silently
-        break sentinel detection."""
+        break sentinel detection.
+
+        NOTE: pure-API probe; substrate-state pin not applicable
+        (this test pins module-import structure, not persisted state).
+        Exempt from the substrate-fidelity-assertion-pattern
+        requirement per 16th amendment round-2 LOW 2 fold."""
         from kernos.kernel.triggers import runtime
         from kernos.kernel.workflows.execution_engine import (
             EXECUTE_SKIPPED_AUTHORING_INACTIVE,

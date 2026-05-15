@@ -99,9 +99,14 @@ logger = logging.getLogger(__name__)
 
 # Async callable matching ExecutionEngine.execute_workflow's
 # keyword-only kwargs subset the runtime cares about. The C1a WLP
-# substrate already exposes this signature; the runtime imports
-# the engine at wiring time, not at module-import time, so the
-# triggers module doesn't depend structurally on WLP internals.
+# substrate already exposes this signature; the dispatch HOOK itself
+# is wired via runtime.start(wlp_dispatch=...) at bring-up time, so
+# the triggers module doesn't depend structurally on WLP internals
+# through this hook. The Spec 5 15th amendment added a small
+# module-load-time import above for the ``EXECUTE_SKIPPED_AUTHORING_INACTIVE``
+# sentinel — that's a single value constant, not a structural dependency,
+# and execution_engine does not import from kernos.kernel.triggers at
+# module-load time so no circular hazard.
 WLPDispatchHook = Callable[..., Awaitable[str]]
 
 

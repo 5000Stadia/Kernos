@@ -2445,20 +2445,40 @@ class ExecutionEngine:
             fire_id=fire_id,
         )
 
-        # Spec 5 16th amendment MEDIUM 2 fold: re-check the activation
-        # state INSIDE the write lock so a concurrent
-        # deactivate_workflow (which acquires the same lock via
-        # _run_workflow_txn) cannot interleave between the gate read
-        # and the workflow_executions INSERT. Before this fold the gate
-        # check sat outside the lock, leaving a race window where a
-        # workflow could be marked deactivated AFTER the gate read and
-        # BEFORE the INSERT — producing a workflow_executions row for
-        # a non-active workflow.
+        # Spec 5 16th amendment fold composes two checks inside the
+        # write-lock body:
         #
-        # Body returns _GATE_SKIPPED_SENTINEL when the gate fires so
-        # the caller routes to EXECUTE_SKIPPED_AUTHORING_INACTIVE
-        # without leaking the internal marker through the queue.
+        #   1. Re-check fire_id (round-2 HIGH 1): a concurrent
+        #      execute_workflow caller that committed BETWEEN our
+        #      outer find_execution_by_fire_id_unlocked and our
+        #      acquisition of the lock is the canonical winner. The
+        #      lock-held re-find observes it; the body returns the
+        #      existing execution_id so the caller treats this as
+        #      idempotent. Without this re-check, the racy interleave
+        #      "outer find misses → deactivate commits → gate fires"
+        #      returned EXECUTE_SKIPPED_AUTHORING_INACTIVE instead of
+        #      the prior dispatch's id, violating the documented
+        #      "prior dispatch is canonical; only NEW dispatches are
+        #      gated" rule.
+        #
+        #   2. Re-check activation state (MEDIUM 2): only for
+        #      genuinely-new dispatches. A concurrent
+        #      deactivate_workflow (which acquires the same lock via
+        #      _run_workflow_txn) cannot interleave between the gate
+        #      read and the INSERT once we're inside the lock.
+        #
+        # Body return shape:
+        #   - str (existing execution_id): caller returns it
+        #     (idempotent winner via the race-recheck path).
+        #   - _GATE_SKIPPED_SENTINEL: caller returns the public
+        #     EXECUTE_SKIPPED_AUTHORING_INACTIVE sentinel.
+        #   - None: INSERT happened; caller queues the execution.
         async def _gated_insert(db: aiosqlite.Connection) -> Any:
+            existing_locked = await self._find_execution_by_fire_id_unlocked(
+                fire_id,
+            )
+            if existing_locked is not None:
+                return existing_locked
             if await self._is_authoring_workflow_inactive(workflow_id):
                 return _GATE_SKIPPED_SENTINEL
             await db.execute(
@@ -2502,6 +2522,13 @@ class ExecutionEngine:
                 workflow_id, fire_id,
             )
             return EXECUTE_SKIPPED_AUTHORING_INACTIVE
+
+        # round-2 HIGH 1 fold: the locked-body re-check found an
+        # existing execution_id (race-recheck path). Return that
+        # canonical winner; do NOT enqueue our local ``execution``
+        # instance (no row was inserted for it).
+        if isinstance(body_result, str):
+            return body_result
 
         self._queue.put_nowait(execution)
         return execution.execution_id
