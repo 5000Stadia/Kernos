@@ -935,3 +935,97 @@ class TestDispatchIntegration:
         assert record.operation_class == "mutate"
         assert record.execution_state == "attempted"
         assert len(record.receipt_refs) == 1
+
+
+# ===========================================================================
+# Spec 6 round-3 fold — normalize_investigation_outcome edge cases
+# ===========================================================================
+#
+# Pins the canonical normalization helper's behavior for every
+# input class (None, empty string, valid, invalid, non-string falsy).
+# Round-3 MEDIUM 2 distinguished None/empty (→ "completed", the
+# missing-default) from other falsy JSON values (→ "unable_to_investigate",
+# treating False/0/[]/{} as invalid outcomes that shouldn't pollute
+# the canonical enum).
+
+
+class TestNormalizeInvestigationOutcome:
+
+    def test_none_returns_completed(self):
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert normalize_investigation_outcome(None) == "completed"
+
+    def test_empty_string_returns_completed(self):
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert normalize_investigation_outcome("") == "completed"
+
+    def test_valid_values_unchanged(self):
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert normalize_investigation_outcome("completed") == "completed"
+        assert normalize_investigation_outcome("partial") == "partial"
+        assert (
+            normalize_investigation_outcome("unable_to_investigate")
+            == "unable_to_investigate"
+        )
+
+    def test_invalid_string_returns_unable_to_investigate(self):
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert (
+            normalize_investigation_outcome("made_up_outcome")
+            == "unable_to_investigate"
+        )
+
+    def test_boolean_false_returns_unable_to_investigate(self):
+        """Round-3 MEDIUM 2 pin: False is NOT a missing value; it's
+        an invalid JSON payload. Normalize to unable_to_investigate
+        so the canonical enum doesn't get a non-string."""
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert (
+            normalize_investigation_outcome(False)
+            == "unable_to_investigate"
+        )
+
+    def test_integer_zero_returns_unable_to_investigate(self):
+        """Round-3 MEDIUM 2 pin: 0 is not "missing", it's an
+        invalid type. Normalize to unable_to_investigate."""
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert (
+            normalize_investigation_outcome(0)
+            == "unable_to_investigate"
+        )
+
+    def test_empty_list_returns_unable_to_investigate(self):
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert (
+            normalize_investigation_outcome([])
+            == "unable_to_investigate"
+        )
+
+    def test_empty_dict_returns_unable_to_investigate(self):
+        from kernos.kernel.coding_session_bridge import (
+            normalize_investigation_outcome,
+        )
+        assert (
+            normalize_investigation_outcome({})
+            == "unable_to_investigate"
+        )
+
+    def test_helper_in_all_for_cross_module_import(self):
+        """Round-3 LOW 1 pin: the helper is exported via __all__ so
+        autonomy_tools.py and other consumers can import it cleanly."""
+        from kernos.kernel import coding_session_bridge as csb
+        assert "normalize_investigation_outcome" in csb.__all__

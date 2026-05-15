@@ -87,12 +87,26 @@ VALID_INVESTIGATION_OUTCOMES = frozenset({
 #       the canonical enum that the autonomy_loop_outcomes ledger
 #       uses for before/after pattern measurement).
 def normalize_investigation_outcome(raw) -> str:
-    """Canonical normalization for investigation_outcome (Spec 6
-    Codex round-2 MEDIUM 2 fold). See module-level comment above
-    for semantics."""
-    if not raw:
+    """Canonical normalization for investigation_outcome.
+
+    Spec 6 Codex round-2 MEDIUM 2 fold (centralized helper) +
+    round-3 MEDIUM 2 fold (only None / empty-string map to the
+    "missing" default; other falsy JSON values like ``False``,
+    ``0``, ``[]``, ``{}`` are invalid outcomes and normalize to
+    ``"unable_to_investigate"``).
+
+    See module-level comment above for full semantics. The
+    distinction matters because a coding-session response file
+    that explicitly carries ``false`` or ``0`` is malformed —
+    treating it as "completed" would silently let an invalid
+    payload pollute the canonical autonomy_loop_outcomes ledger
+    enum.
+    """
+    if raw is None:
         return "completed"
     raw_str = str(raw)
+    if raw_str == "":
+        return "completed"
     if raw_str not in VALID_INVESTIGATION_OUTCOMES:
         return "unable_to_investigate"
     return raw_str
@@ -903,4 +917,5 @@ __all__ = [
     "VALID_INVESTIGATION_OUTCOMES",
     "handle_ask_coding_session",
     "handle_read_coding_session_response",
+    "normalize_investigation_outcome",
 ]

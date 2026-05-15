@@ -251,6 +251,69 @@ class TestFrictionPatternFrequencyEmitter:
         finally:
             await emitter.stop()
 
+    async def test_concurrent_same_epoch_flush_emits_once(
+        self, event_stream_writer, pattern_store,
+    ):
+        """Codex round-3 MEDIUM 1 pin: two concurrent _on_flush
+        invocations for the same (pattern_id, active_epoch) cannot
+        both observe no claim and both emit — the emitter's
+        ``_dedup_lock`` serializes the check → emit → claim window.
+
+        Substrate state pin: only one
+        friction.pattern_frequency_threshold_exceeded event lands
+        in the stream even though two batches each carry a
+        friction.pattern_reactivated event for the same pattern."""
+        emitter = FrictionPatternFrequencyEmitter(
+            instance_id="inst_a", pattern_store=pattern_store,
+        )
+        p = await pattern_store.create_pattern(
+            instance_id="inst_a", description="concurrent test",
+            signal_type_keys=["kconcurrent"],
+        )
+        await emitter.start()
+        try:
+            # Build two identical event batches (same source event
+            # for the same pattern + epoch). Run their _on_flush
+            # processing concurrently via asyncio.gather.
+            from kernos.kernel.event_stream import Event
+
+            def _make_event(idx: int) -> Event:
+                return Event(
+                    event_id=f"evt_concurrent_{idx}",
+                    instance_id="inst_a",
+                    timestamp=_now(),
+                    event_type="friction.pattern_reactivated",
+                    payload={
+                        "pattern_id": p.pattern_id,
+                        "reactivated_at": _now(),
+                    },
+                )
+
+            batch_a = [_make_event(0)]
+            batch_b = [_make_event(1)]
+            await asyncio.gather(
+                emitter._on_flush(batch_a),
+                emitter._on_flush(batch_b),
+            )
+            # The emitter saw two source events but should have
+            # emitted the translated event exactly once.
+            assert emitter._emit_count == 1, (
+                f"expected exactly one translation despite concurrent "
+                f"same-epoch flush; got {emitter._emit_count}"
+            )
+            # Substrate state pin: only one translated event in the
+            # stream.
+            await event_stream.flush_now()
+            await event_stream.flush_now()
+            all_events = await _fetch_all_events("inst_a")
+            translated = [
+                e for e in all_events
+                if e.event_type == "friction.pattern_frequency_threshold_exceeded"
+            ]
+            assert len(translated) == 1
+        finally:
+            await emitter.stop()
+
     async def test_emit_failure_does_not_claim_dedup_slot(
         self, event_stream_writer, pattern_store, monkeypatch,
     ):

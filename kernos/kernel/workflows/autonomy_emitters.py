@@ -118,6 +118,18 @@ class FrictionPatternFrequencyEmitter:
         # durable state folds in alongside the replay source's spec
         # rather than upfront.
         self._last_emitted_epoch: dict[str, int] = {}
+        # Codex round-3 MEDIUM 1 fold: serialize the check → emit →
+        # claim sequence across concurrent post-flush hook
+        # invocations. event_stream's post-flush hook can fire from
+        # multiple _flush_once() entry points without a global hook-
+        # serialization lock; two concurrent invocations for the
+        # same (pattern_id, active_epoch) could both observe no
+        # claim, both emit, then both claim. A per-emitter
+        # asyncio.Lock around the critical section closes that race.
+        # Held only for the small dict-read + emit + dict-write
+        # window; the per-event work inside _on_flush is otherwise
+        # unaffected.
+        self._dedup_lock = asyncio.Lock()
 
     async def start(self) -> None:
         """Register the post-flush hook. Idempotent."""
@@ -177,19 +189,13 @@ class FrictionPatternFrequencyEmitter:
                     self._instance_id, pattern_id,
                 )
                 continue
-            # B2 dedup: only emit when active_epoch strictly increased
-            # for this pattern. Same-epoch re-fires (replay, reentrant
-            # emission) collapse to the canonical first emission so
-            # downstream workflow executions are 1:1 with activation
-            # episodes.
-            last_epoch = self._last_emitted_epoch.get(pattern_id, 0)
-            if pattern.active_epoch <= last_epoch:
-                logger.debug(
-                    "FRICTION_PATTERN_FREQUENCY_EMITTER_DEDUPED "
-                    "pattern_id=%s active_epoch=%d last_emitted=%d",
-                    pattern_id, pattern.active_epoch, last_epoch,
-                )
-                continue
+            # B2 dedup + round-3 concurrency: serialize the check →
+            # emit → claim sequence per emitter so concurrent
+            # post-flush hook invocations for the same (pattern_id,
+            # active_epoch) cannot both observe no claim and both
+            # emit. The lock is per-emitter (one instance per
+            # bring-up); per-pattern locks would be a future
+            # refinement if throughput becomes a concern.
             translated_payload = {
                 "pattern_id": pattern_id,
                 "active_epoch": pattern.active_epoch,
@@ -204,33 +210,42 @@ class FrictionPatternFrequencyEmitter:
                 ),
                 "source_event_id": event.event_id,
             }
-            # Codex round-2 MEDIUM 1 fold: update dedup state only
-            # AFTER the emit succeeds. Previously the epoch was
-            # claimed before emit, so a transient emit failure
-            # would permanently dedupe the epoch in-process and
-            # drop the autonomy trigger until the next reactivation.
-            # event_stream.emit is currently fire-and-forget (the
-            # writer flushes batches in the background) so failures
-            # here are rare, but the order matters for retry
-            # semantics regardless.
-            try:
-                await event_stream.emit(
-                    self._instance_id,
-                    "friction.pattern_frequency_threshold_exceeded",
-                    translated_payload,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "FRICTION_PATTERN_FREQUENCY_EMITTER_EMIT_FAILED "
-                    "pattern_id=%s error=%s",
-                    pattern_id, exc,
-                )
-                # Don't update dedup state; next same-epoch event for
-                # this pattern can retry.
-                continue
-            # Emit succeeded — claim the dedup slot.
-            self._last_emitted_epoch[pattern_id] = pattern.active_epoch
-            self._emit_count += 1
+            async with self._dedup_lock:
+                # Re-check inside the lock (compare-and-set
+                # semantics).
+                last_epoch = self._last_emitted_epoch.get(pattern_id, 0)
+                if pattern.active_epoch <= last_epoch:
+                    logger.debug(
+                        "FRICTION_PATTERN_FREQUENCY_EMITTER_DEDUPED "
+                        "pattern_id=%s active_epoch=%d "
+                        "last_emitted=%d",
+                        pattern_id, pattern.active_epoch, last_epoch,
+                    )
+                    continue
+                # Codex round-2 MEDIUM 1 fold: update dedup state
+                # only AFTER the emit succeeds. Held inside the
+                # lock for round-3 MEDIUM 1's compare-and-set
+                # serialization. event_stream.emit is currently
+                # fire-and-forget so it's quick; for v1 the
+                # serialization overhead is negligible.
+                try:
+                    await event_stream.emit(
+                        self._instance_id,
+                        "friction.pattern_frequency_threshold_exceeded",
+                        translated_payload,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "FRICTION_PATTERN_FREQUENCY_EMITTER_EMIT_FAILED "
+                        "pattern_id=%s error=%s",
+                        pattern_id, exc,
+                    )
+                    # Don't update dedup state; next same-epoch
+                    # event for this pattern can retry.
+                    continue
+                # Emit succeeded — claim the dedup slot.
+                self._last_emitted_epoch[pattern_id] = pattern.active_epoch
+                self._emit_count += 1
 
 
 # ---------------------------------------------------------------------------
