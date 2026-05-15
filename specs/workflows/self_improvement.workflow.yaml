@@ -52,6 +52,17 @@ triggers:
     event_selector:
       op: AND
       operands:
+        # The top-level event_type filter narrows the trigger to ONLY
+        # fire on the canonical autonomy-loop entry event. Without
+        # it the composite selector lands in the runtime's unfiltered
+        # bucket and matches any event with the AND-tail predicates
+        # satisfied (the audit-event payloads also carry pattern_id;
+        # the substrate-emitted friction.pattern_reactivated event
+        # also matches). Including event_type here keeps the trigger
+        # 1:1 with the emitter's translation output.
+        - op: eq
+          path: event_type
+          value: friction.pattern_frequency_threshold_exceeded
         - op: eq
           path: instance_id
           value: '{installer.instance_id}'

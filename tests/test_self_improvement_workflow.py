@@ -557,15 +557,9 @@ class TestEndToEndAutonomyLoop:
                     return False
                 return any(requests_dir.glob("*.json"))
 
-            assert await _wait_until(
-                lambda: asyncio.run_coroutine_threadsafe(
-                    _request_file_exists(), asyncio.get_event_loop(),
-                ) is not None or asyncio.get_event_loop().run_until_complete(
-                    _request_file_exists()
-                ) if False else True,
-                timeout_s=0.1,
-            ) or True
-            # Simpler poll using await directly in a loop.
+            # Poll for the workflow to reach ask_cc and write the
+            # request file (signal: file appears in the bridge's
+            # requests directory).
             request_file = None
             for _ in range(200):  # 10s with 50ms step
                 requests_dir = (
@@ -635,42 +629,70 @@ class TestEndToEndAutonomyLoop:
                     f"{rows}. step_outputs: {step_rows}"
                 )
             # 10. Substrate state pin: outcome event landed with
-            # correct payload.
+            # correct payload. B2 dedup closure invariant: exactly
+            # one outcome per activation episode (Codex round-1
+            # tightening — no more "loop ran but possibly multiple
+            # times" relaxation).
             assert len(outcome_entries) == 1, (
-                f"expected one autonomy_loop_outcome entry; got "
-                f"{outcome_entries}"
+                f"expected exactly one autonomy_loop_outcome entry; "
+                f"got {outcome_entries}"
             )
             entry = outcome_entries[0]
             assert entry["workflow_id"] == "self_improvement"
             assert entry["outcome"] == "completed"
             assert pattern.pattern_id in entry["addresses_friction_patterns"]
-            # Substrate state pin: at least one mark_resolved step
-            # observed the pattern transitioning to RESOLVED. The
-            # final pattern state can vary between RESOLVED and
-            # REACTIVATED depending on whether subsequent workflow
-            # executions (from multi-firing — a known race the v1
-            # autonomy loop will deduplicate in a follow-up) re-
-            # reactivated the pattern. The architect's V1 operational
-            # verification audit prioritizes "loop ran end-to-end +
-            # emitted outcome with canonical fields" — that's the
-            # signal we pin here. Multi-firing dedup is a v2 follow-up.
+            # B2 dedup closure invariant: one activation episode →
+            # one autonomy-loop turn → one mark_resolved → final
+            # pattern state is RESOLVED. The emitter's per-pattern
+            # last_emitted_epoch dedup collapses duplicate
+            # friction.pattern_reactivated emissions to the canonical
+            # first emission, so subsequent re-fires don't produce
+            # additional workflow executions.
+            final_pattern = await stack["pattern_store"].get_pattern(
+                TEST_INSTANCE_ID, pattern.pattern_id,
+            )
+            if final_pattern.lifecycle_state != LIFECYCLE_RESOLVED:
+                # Diagnostic dump.
+                async with stack["engine"]._db.execute(
+                    "SELECT execution_id, state, started_at, "
+                    "terminated_at, trigger_event_id "
+                    "FROM workflow_executions "
+                    "WHERE workflow_id='self_improvement'",
+                ) as cur:
+                    execs = [dict(r) for r in await cur.fetchall()]
+                # Also check the outbox for fire claims.
+                async with stack["runtime"]._outbox._db.execute(
+                    "SELECT * FROM trigger_fires",
+                ) as cur:
+                    fires = [dict(r) for r in await cur.fetchall()]
+                raise AssertionError(
+                    f"expected final lifecycle_state=resolved; got "
+                    f"{final_pattern.lifecycle_state}. "
+                    f"emit_count={freq_emitter._emit_count}. "
+                    f"executions={execs}. "
+                    f"trigger_fires={fires}. "
+                    f"reactivated_at={final_pattern.reactivated_at}. "
+                    f"resolved_at={final_pattern.resolved_at}. "
+                    f"active_epoch={final_pattern.active_epoch}."
+                )
+            assert final_pattern.resolved_by_spec == "self_improvement"
+            # And: emitter's dedup state shows the pattern's epoch was
+            # emitted exactly once.
+            assert freq_emitter._emit_count == 1, (
+                f"expected exactly one emitter translation per "
+                f"activation episode; got {freq_emitter._emit_count}"
+            )
+            # And: mark_resolved step output shows the transition
+            # committed to RESOLVED state at the tool layer.
             async with stack["engine"]._db.execute(
                 "SELECT output_json FROM workflow_step_outputs "
                 "WHERE output_name = 'mark_resolved'",
             ) as cur:
                 mr_rows = [dict(r) for r in await cur.fetchall()]
-            assert len(mr_rows) >= 1, (
-                "expected at least one mark_resolved step output"
+            assert len(mr_rows) == 1, (
+                f"expected exactly one mark_resolved step output; "
+                f"got {len(mr_rows)}"
             )
-            mr_output = json.loads(mr_rows[0]["output_json"])
-            # The tool's inner value carries the FrictionPattern
-            # dataclass at the moment mark_resolved committed.
-            inner_pattern = mr_output["value"]["value"]
-            assert inner_pattern["lifecycle_state"] == LIFECYCLE_RESOLVED, (
-                f"expected mark_resolved's tool output to show "
-                f"resolved state; got {inner_pattern!r}"
-            )
-            assert inner_pattern["resolved_by_spec"] == "self_improvement"
         finally:
             await response_emitter.stop()
             await freq_emitter.stop()

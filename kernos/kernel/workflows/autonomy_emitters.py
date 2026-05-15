@@ -88,6 +88,21 @@ class FrictionPatternFrequencyEmitter:
         self._hook_registered = False
         # Test introspection: number of translated emissions.
         self._emit_count = 0
+        # Spec 6 commit 7 Codex round-1 B2 fold: per-pattern dedup by
+        # active_epoch. The substrate's reactivation increments
+        # active_epoch monotonically per instance (Spec 6 commit 1);
+        # the emitter tracks the last epoch translated per
+        # (instance_id, pattern_id) and only emits when the observed
+        # epoch is strictly greater. This closes the v1 closure
+        # invariant: one activation episode → one autonomy-loop turn.
+        # Multiple friction.pattern_reactivated events for the same
+        # episode (replay, reentrant emission, restart-rehydration)
+        # collapse to the canonical first emission. In-memory state
+        # for v1; restart clears it and the first post-restart event
+        # per pattern is treated as the canonical fire — operational
+        # evidence will inform whether durable persistence is needed
+        # for v2 per the V1 operational verification scope discipline.
+        self._last_emitted_epoch: dict[str, int] = {}
 
     async def start(self) -> None:
         """Register the post-flush hook. Idempotent."""
@@ -147,6 +162,20 @@ class FrictionPatternFrequencyEmitter:
                     self._instance_id, pattern_id,
                 )
                 continue
+            # B2 dedup: only emit when active_epoch strictly increased
+            # for this pattern. Same-epoch re-fires (replay, reentrant
+            # emission) collapse to the canonical first emission so
+            # downstream workflow executions are 1:1 with activation
+            # episodes.
+            last_epoch = self._last_emitted_epoch.get(pattern_id, 0)
+            if pattern.active_epoch <= last_epoch:
+                logger.debug(
+                    "FRICTION_PATTERN_FREQUENCY_EMITTER_DEDUPED "
+                    "pattern_id=%s active_epoch=%d last_emitted=%d",
+                    pattern_id, pattern.active_epoch, last_epoch,
+                )
+                continue
+            self._last_emitted_epoch[pattern_id] = pattern.active_epoch
             translated_payload = {
                 "pattern_id": pattern_id,
                 "active_epoch": pattern.active_epoch,

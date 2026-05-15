@@ -468,7 +468,23 @@ async def bring_up_substrate(
     _architect_actor_id_si = _os_si.environ.get(
         "KERNOS_ARCHITECT_ACTOR_ID", "",
     )
-    if _architect_actor_id_si:
+    _operator_actor_id_si = _os_si.environ.get(
+        "KERNOS_OPERATOR_ACTOR_ID", "",
+    )
+    if _architect_actor_id_si and _operator_actor_id_si:
+        # Spec 6 commit 7 Codex round-1 H1 fold: BOTH architect and
+        # operator identities required before announcing the autonomy
+        # loop live. The operator actor authorizes the workflow's
+        # autonomy-tool calls at execution time (autonomy_tools'
+        # _is_operator gate); without operator, the workflow would
+        # register + activate cleanly but every record_recurrence /
+        # mark_resolved / emit_outcome call would fail at execute
+        # time with CAT_AUTONOMY_NOT_AUTHORIZED. Skipping bring-up
+        # entirely when operator is unset preserves the "no
+        # half-initialised autonomy loop" invariant (v7 H3 fail-loud
+        # pattern composes with v1 operational scope discipline:
+        # the loop is either fully wireable or skipped with a clear
+        # log).
         from kernos.kernel.workflows.authoring import (
             ACTOR_ARCHITECT as _ACTOR_ARCHITECT_SI,
             AuthoringContext as _AuthoringContext_si,
@@ -479,9 +495,6 @@ async def bring_up_substrate(
         _architect_ctx_si = _AuthoringContext_si(
             actor_id=_architect_actor_id_si,
             actor_kind=_ACTOR_ARCHITECT_SI,
-        )
-        _operator_actor_id_si = _os_si.environ.get(
-            "KERNOS_OPERATOR_ACTOR_ID", "",
         )
         try:
             _si_workflow_id = await register_self_improvement_workflow(
@@ -528,9 +541,8 @@ async def bring_up_substrate(
             )
             logger.info(
                 "SELF_IMPROVEMENT_AUTONOMY_LOOP_LIVE workflow_id=%s "
-                "instance_id=%s operator_set=%s",
+                "instance_id=%s",
                 _si_workflow_id, _substrate_instance_id,
-                "yes" if _operator_actor_id_si else "no",
             )
         except Exception as _exc_si:
             logger.warning(
@@ -538,6 +550,14 @@ async def bring_up_substrate(
                 "— continuing without autonomy loop",
                 _exc_si,
             )
+    elif _architect_actor_id_si and not _operator_actor_id_si:
+        logger.info(
+            "SELF_IMPROVEMENT_AUTONOMY_LOOP_SKIPPED: "
+            "KERNOS_OPERATOR_ACTOR_ID not set; the autonomy loop's "
+            "tool calls require an operator identity at execution "
+            "time. Set both KERNOS_ARCHITECT_ACTOR_ID and "
+            "KERNOS_OPERATOR_ACTOR_ID to enable the loop."
+        )
     else:
         logger.info(
             "SELF_IMPROVEMENT_AUTONOMY_LOOP_SKIPPED: "
@@ -646,7 +666,9 @@ def _register_all_actions(
         registry=agent_registry,
     ))
     library.register(CallToolAction(
-        tool_dispatch_fn=_call_tool_adapter(handler),
+        tool_dispatch_fn=_call_tool_adapter(
+            handler, workflow_ledger, data_dir,
+        ),
     ))
     library.register(PostToServiceAction(
         service_post_fn=_unwired_stub("post_to_service"),
@@ -715,15 +737,105 @@ def _canvas_read_adapter(handler: Any):
     return _read
 
 
-def _call_tool_adapter(handler: Any):
-    async def _dispatch(**kwargs):
+def _call_tool_adapter(
+    handler: Any,
+    workflow_ledger: "WorkflowLedger",
+    data_dir: str,
+):
+    """Production tool-dispatch adapter for CallToolAction.
+
+    Spec 6 commit 7 (Codex round-1 B1 fold): routes the five
+    autonomy-loop tool_ids to autonomy_tools handlers directly,
+    threading the production substrate (pattern_store from the
+    handler, workflow_ledger from bring-up, data_dir from bring-up).
+    Other tool_ids fall through to ``handler.reasoning.execute_tool``
+    via the kwargs-adaptation path.
+
+    The autonomy-loop workflow's action_sequence calls
+    ``call_tool`` with one of the five tool_ids; without the
+    direct routing here, the workflow would crash on the first
+    record_recurrence step because reasoning.execute_tool's
+    signature is ``(tool_name, tool_input, request)`` — a
+    different shape from the kwargs CallToolAction passes
+    (``tool_id``, ``args``, ``instance_id``, ``member_id``).
+    """
+    autonomy_tool_ids = frozenset({
+        "transition_friction_pattern_lifecycle",
+        "record_friction_pattern_recurrence",
+        "emit_autonomy_loop_event",
+        "ask_coding_session_for_workflow",
+        "read_coding_session_response_for_workflow",
+    })
+
+    async def _dispatch(*, tool_id: str, args: dict,
+                        instance_id: str, member_id: str):
+        # Spec 6 autonomy tools route directly to the autonomy_tools
+        # handlers with real substrate (pattern_store from the
+        # handler; ledger + data_dir from bring-up closure).
+        if tool_id in autonomy_tool_ids:
+            from kernos.kernel.workflows.autonomy_tools import (
+                handle_ask_coding_session_for_workflow,
+                handle_emit_autonomy_loop_event_tool,
+                handle_read_coding_session_response_for_workflow,
+                handle_record_friction_pattern_recurrence_tool,
+                handle_transition_friction_pattern_lifecycle_tool,
+            )
+            pattern_store = getattr(handler, "_friction_pattern_store", None)
+            if tool_id == "transition_friction_pattern_lifecycle":
+                if pattern_store is None:
+                    raise RuntimeError(
+                        "transition_friction_pattern_lifecycle requires "
+                        "handler._friction_pattern_store"
+                    )
+                return await handle_transition_friction_pattern_lifecycle_tool(
+                    pattern_store=pattern_store,
+                    instance_id=instance_id, member_id=member_id, args=args,
+                )
+            if tool_id == "record_friction_pattern_recurrence":
+                if pattern_store is None:
+                    raise RuntimeError(
+                        "record_friction_pattern_recurrence requires "
+                        "handler._friction_pattern_store"
+                    )
+                return await handle_record_friction_pattern_recurrence_tool(
+                    pattern_store=pattern_store,
+                    instance_id=instance_id, member_id=member_id, args=args,
+                )
+            if tool_id == "emit_autonomy_loop_event":
+                return await handle_emit_autonomy_loop_event_tool(
+                    ledger=workflow_ledger,
+                    instance_id=instance_id, member_id=member_id, args=args,
+                )
+            if tool_id == "ask_coding_session_for_workflow":
+                return await handle_ask_coding_session_for_workflow(
+                    instance_id=instance_id, member_id=member_id,
+                    args=args, data_dir=data_dir,
+                )
+            if tool_id == "read_coding_session_response_for_workflow":
+                return await handle_read_coding_session_response_for_workflow(
+                    instance_id=instance_id, member_id=member_id,
+                    args=args, data_dir=data_dir,
+                )
+        # Non-autonomy tools: adapt kwargs to reasoning.execute_tool's
+        # signature (tool_name, tool_input, request). The CallToolAction
+        # kwargs (tool_id, args, instance_id, member_id) don't map
+        # cleanly to ReasoningRequest, so for now we surface a clear
+        # error — bring this surface up alongside the agent-side
+        # workflow authoring follow-up that registers
+        # KERNEL_AUTHORING_TOOL_NAMES in reasoning.py.
         reasoning = getattr(handler, "reasoning", None)
         if reasoning is None or not hasattr(reasoning, "execute_tool"):
             raise RuntimeError(
                 "CallToolAction invoked but handler.reasoning.execute_tool "
                 "is unavailable — bringup-stub gap"
             )
-        return await reasoning.execute_tool(**kwargs)
+        raise RuntimeError(
+            f"CallToolAction tool_id={tool_id!r} is not in the autonomy-loop "
+            f"set and the legacy reasoning.execute_tool kwarg-adaptation "
+            f"path is not yet wired. See Spec 5 deferral / follow-up: "
+            f"agent-side workflow tool dispatch (KERNEL_AUTHORING_TOOL_NAMES "
+            f"registration)."
+        )
     return _dispatch
 
 
