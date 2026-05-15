@@ -453,6 +453,98 @@ async def bring_up_substrate(
             "lazily via hash-mismatch-on-retrieval; non-blocking"
         )
 
+    # Spec 6 commit 7 / B3 fold: register the self_improvement
+    # workflow + launch the autonomy-loop emitters in B3 order
+    # (helper success BEFORE emitters launch so trigger predicates
+    # exist before friction.pattern_frequency_threshold_exceeded
+    # events fire).
+    #
+    # Conditional on KERNOS_ARCHITECT_ACTOR_ID being set (required
+    # for the architect-only authoring path). When unset, the
+    # autonomy loop bring-up is skipped with a clear log line; the
+    # rest of the substrate operates normally so the bring-up isn't
+    # blocked on autonomy-loop optionality.
+    import os as _os_si
+    _architect_actor_id_si = _os_si.environ.get(
+        "KERNOS_ARCHITECT_ACTOR_ID", "",
+    )
+    if _architect_actor_id_si:
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_ARCHITECT as _ACTOR_ARCHITECT_SI,
+            AuthoringContext as _AuthoringContext_si,
+        )
+        from kernos.kernel.workflows.self_improvement_helper import (
+            register_self_improvement_workflow,
+        )
+        _architect_ctx_si = _AuthoringContext_si(
+            actor_id=_architect_actor_id_si,
+            actor_kind=_ACTOR_ARCHITECT_SI,
+        )
+        _operator_actor_id_si = _os_si.environ.get(
+            "KERNOS_OPERATOR_ACTOR_ID", "",
+        )
+        try:
+            _si_workflow_id = await register_self_improvement_workflow(
+                engine=execution_engine,
+                architect_ctx=_architect_ctx_si,
+                instance_id=_substrate_instance_id,
+                trigger_runtime=runtime,
+                operator_actor_id=_operator_actor_id_si,
+            )
+            # B3 fold: emitters launch AFTER helper success.
+            # FrictionPatternFrequencyEmitter needs a started pattern
+            # store; CodingSessionBridgeResponseEmitter needs only
+            # the data_dir + instance_id.
+            from kernos.kernel.friction_patterns import (
+                FrictionPatternStore as _FrictionPatternStore_si,
+            )
+            from kernos.kernel.workflows.autonomy_emitters import (
+                CodingSessionBridgeResponseEmitter,
+                FrictionPatternFrequencyEmitter,
+            )
+            # Reuse the handler's store when available so the autonomy
+            # loop observes the same friction patterns the handler's
+            # FrictionObserver records. Otherwise construct + start a
+            # fresh store. Either way ensure_schema is idempotent.
+            _si_pattern_store = getattr(handler, "_friction_pattern_store", None)
+            if _si_pattern_store is None:
+                _si_pattern_store = _FrictionPatternStore_si()
+            await _si_pattern_store.ensure_schema(data_dir)
+            _freq_emitter_si = FrictionPatternFrequencyEmitter(
+                instance_id=_substrate_instance_id,
+                pattern_store=_si_pattern_store,
+            )
+            await _freq_emitter_si.start()
+            execution_engine.register_emitter(
+                "friction_pattern_frequency", _freq_emitter_si,
+            )
+            _response_emitter_si = CodingSessionBridgeResponseEmitter(
+                instance_id=_substrate_instance_id,
+                data_dir=data_dir,
+            )
+            await _response_emitter_si.start()
+            execution_engine.register_emitter(
+                "coding_session_response", _response_emitter_si,
+            )
+            logger.info(
+                "SELF_IMPROVEMENT_AUTONOMY_LOOP_LIVE workflow_id=%s "
+                "instance_id=%s operator_set=%s",
+                _si_workflow_id, _substrate_instance_id,
+                "yes" if _operator_actor_id_si else "no",
+            )
+        except Exception as _exc_si:
+            logger.warning(
+                "SELF_IMPROVEMENT_AUTONOMY_LOOP_BRINGUP_FAILED error=%s "
+                "— continuing without autonomy loop",
+                _exc_si,
+            )
+    else:
+        logger.info(
+            "SELF_IMPROVEMENT_AUTONOMY_LOOP_SKIPPED: "
+            "KERNOS_ARCHITECT_ACTOR_ID not set; helper requires "
+            "architect identity at bring-up"
+        )
+
     logger.info(
         "WTC v1 C5c-bringup: substrate live — runtime=%s engine=%s "
         "verbs=%d crb=ready reference=ready",

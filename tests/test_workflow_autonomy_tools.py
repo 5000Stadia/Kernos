@@ -606,7 +606,11 @@ class TestDispatchHandlers:
                 "resolved_by_spec": "self_improvement",
             },
         )
-        assert result.success is True
+        # Spec 6 commit 7: dispatch handlers return JSON-serializable
+        # dicts (not AutonomyToolResult) so workflow step output
+        # envelopes serialize cleanly. The dict mirrors the dataclass
+        # fields: success, tool, value, errors, extra.
+        assert result["success"] is True
         loaded = await store.get_pattern("inst_a", p.pattern_id)
         assert loaded.lifecycle_state == LIFECYCLE_RESOLVED
 
@@ -636,8 +640,8 @@ class TestDispatchHandlers:
                 "classified_by": CLASSIFIED_AUTO_SIGNAL_TYPE,
             },
         )
-        assert result.success is True
-        assert result.value is True  # triggered reactivation
+        assert result["success"] is True
+        assert result["value"] is True  # triggered reactivation
 
     async def test_handle_emit_via_dispatch_shape(
         self, ledger, operator_env,
@@ -652,7 +656,7 @@ class TestDispatchHandlers:
                 "addresses_friction_patterns": ["pattern-z"],
             },
         )
-        assert result.success is True
+        assert result["success"] is True
         entries = await ledger.read_all("inst_a", "autonomy_loop_outcomes")
         assert len(entries) == 1
         assert entries[0]["addresses_friction_patterns"] == ["pattern-z"]
@@ -676,8 +680,8 @@ class TestDispatchHandlers:
                 "new_state": LIFECYCLE_RESOLVED,
             },
         )
-        assert result.success is False
-        assert result.errors[0].category == CAT_AUTONOMY_NOT_AUTHORIZED
+        assert result["success"] is False
+        assert result["errors"][0]["category"] == CAT_AUTONOMY_NOT_AUTHORIZED
 
 
 # ===========================================================================

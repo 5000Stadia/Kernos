@@ -366,6 +366,32 @@ async def _emit_response_received_once(
             "investigation_outcome", "",
         ),
     }
+    # Spec 6 commit 7: forward Spec 4 gate-scoping fields when the
+    # request context carries them. The workflow primitive's gate
+    # match logic (_on_post_flush_for_gates) enforces a binding
+    # between the response event and the paused execution via these
+    # two engine-injected fields; without them the response event
+    # would never wake the autonomy-loop workflow's await_cc_response
+    # gate. The workflow YAML passes ``_workflow_execution_id`` +
+    # ``_workflow_gate_nonce`` via the ask_cc step's context dict
+    # (resolved from ``{workflow.execution_id}`` and
+    # ``{workflow.gate_nonce}``). Bridge consumers other than the
+    # autonomy loop (member-facing direct ask_coding_session) pass
+    # no such context fields and the response event simply omits
+    # them — backward-compatible.
+    try:
+        request_context = request_data.get("context") or {}
+        gate_exec_id = request_context.get("_workflow_execution_id", "")
+        gate_nonce = request_context.get("_workflow_gate_nonce", "")
+        if gate_exec_id:
+            payload["execution_id"] = gate_exec_id
+        if gate_nonce:
+            payload["gate_nonce"] = gate_nonce
+    except (AttributeError, NameError):
+        # request_data may have been unavailable above (path missing
+        # / unreadable); the empty-payload branch already covers the
+        # absent-context case.
+        pass
 
     if emit_event is not None:
         try:

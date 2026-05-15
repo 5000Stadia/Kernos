@@ -217,32 +217,95 @@ async def record_friction_pattern_recurrence(
                 ),
             )],
         )
-    if not instance_id or not pattern_id or not observed_at:
+    if not instance_id or not pattern_id:
         return AutonomyToolResult(
             success=False,
             tool="record_friction_pattern_recurrence",
             errors=[AutonomyToolError(
                 category=CAT_AUTONOMY_INVALID_ARGS,
                 message=(
-                    f"instance_id, pattern_id, and observed_at are all "
-                    f"required (got "
+                    f"instance_id and pattern_id are required (got "
                     f"instance_id={instance_id!r}, "
-                    f"pattern_id={pattern_id!r}, "
-                    f"observed_at={observed_at!r})"
+                    f"pattern_id={pattern_id!r})"
                 ),
             )],
         )
+    # Spec 6 commit 7: when caller omits observed_at (the autonomy
+    # loop's workflow YAML doesn't carry a timestamp ref under the
+    # canonical Spec 4 ref grammar), default to current UTC. Caller-
+    # supplied observed_at still wins for explicit-timestamp paths.
+    if not observed_at:
+        from datetime import datetime, timezone
+        observed_at = datetime.now(timezone.utc).isoformat()
+    # Spec 6 commit 7: state-aware routing. The substrate primitives
+    # are state-specific (record_recurrence works on RESOLVED;
+    # record_occurrence works on ACTIVE / REACTIVATED). The autonomy-
+    # loop workflow fires AFTER the substrate has already reactivated
+    # the pattern (the trigger event ``friction.pattern_frequency_
+    # threshold_exceeded`` is downstream of the substrate's
+    # threshold-crossing reactivation). At workflow-execution time
+    # the pattern is in ACTIVE / REACTIVATED state, not RESOLVED —
+    # the autonomy tool routes to record_occurrence accordingly so
+    # the workflow's "log the recurrence observation that triggered
+    # us" semantic intent works regardless of substrate state.
+    from kernos.kernel.friction_patterns import (
+        LIFECYCLE_ACTIVE,
+        LIFECYCLE_REACTIVATED,
+        LIFECYCLE_RESOLVED,
+    )
     try:
-        triggered = await pattern_store.record_recurrence(
-            instance_id=instance_id,
-            pattern_id=pattern_id,
-            observed_at=observed_at,
-            report_path=report_path,
-            classifier_score=classifier_score,
-            classified_by=classified_by,
-            space_id=space_id,
-            member_id=member_id,
-        )
+        current = await pattern_store.get_pattern(instance_id, pattern_id)
+        if current is None:
+            return AutonomyToolResult(
+                success=False,
+                tool="record_friction_pattern_recurrence",
+                errors=[AutonomyToolError(
+                    category=CAT_AUTONOMY_SUBSTRATE_ERROR,
+                    message=(
+                        f"pattern {pattern_id!r} not found in instance "
+                        f"{instance_id!r}"
+                    ),
+                )],
+            )
+        if current.lifecycle_state == LIFECYCLE_RESOLVED:
+            triggered = await pattern_store.record_recurrence(
+                instance_id=instance_id,
+                pattern_id=pattern_id,
+                observed_at=observed_at,
+                report_path=report_path,
+                classifier_score=classifier_score,
+                classified_by=classified_by,
+                space_id=space_id,
+                member_id=member_id,
+            )
+        elif current.lifecycle_state in (LIFECYCLE_ACTIVE, LIFECYCLE_REACTIVATED):
+            await pattern_store.record_occurrence(
+                instance_id=instance_id,
+                pattern_id=pattern_id,
+                observed_at=observed_at,
+                report_path=report_path,
+                classifier_score=classifier_score,
+                classified_by=classified_by,
+                space_id=space_id,
+                member_id=member_id,
+            )
+            triggered = False  # already-reactivated patterns can't
+            # re-trigger reactivation via this path; the autonomy loop
+            # records the observation but the substrate state is
+            # unchanged.
+        else:
+            return AutonomyToolResult(
+                success=False,
+                tool="record_friction_pattern_recurrence",
+                errors=[AutonomyToolError(
+                    category=CAT_AUTONOMY_SUBSTRATE_ERROR,
+                    message=(
+                        f"pattern {pattern_id!r} is "
+                        f"{current.lifecycle_state}; cannot record "
+                        f"recurrence/occurrence"
+                    ),
+                )],
+            )
     except Exception as exc:
         return AutonomyToolResult(
             success=False,
@@ -419,18 +482,56 @@ async def _emit_autonomy_action_record(
 # ``call_tool`` with one of the three tool_ids route through here.
 
 
+def _result_to_dict(result: AutonomyToolResult) -> dict:
+    """Convert an ``AutonomyToolResult`` to a JSON-serializable dict
+    for return through CallToolAction. The workflow's step-output
+    envelope serializes the return value via ``json.dumps``; a
+    dataclass would fail serialization and break downstream
+    ``{step.X.value.field}`` refs.
+
+    ``value`` is stringified when it's a FrictionPattern dataclass
+    (transition_lifecycle return); for primitive ``value`` types
+    (bool from record_recurrence; dict from emit_autonomy_loop_event)
+    the raw value is preserved."""
+    raw_value = result.value
+    if hasattr(raw_value, "__dict__") and not isinstance(raw_value, dict):
+        # Dataclass / object — convert to dict via __dict__ for JSON
+        # compatibility. Tuple fields convert to lists for the
+        # canonical JSON shape.
+        value_dict = {
+            k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in raw_value.__dict__.items()
+        }
+    else:
+        value_dict = raw_value
+    return {
+        "success": result.success,
+        "tool": result.tool,
+        "value": value_dict,
+        "errors": [
+            {"category": e.category, "message": e.message}
+            for e in result.errors
+        ],
+        "extra": dict(result.extra) if result.extra else {},
+    }
+
+
 async def handle_transition_friction_pattern_lifecycle_tool(
     *,
     pattern_store: "FrictionPatternStore",
     instance_id: str,
     member_id: str,
     args: dict,
-) -> AutonomyToolResult:
-    """Dispatch wrapper for ``transition_friction_pattern_lifecycle``."""
+) -> dict:
+    """Dispatch wrapper for ``transition_friction_pattern_lifecycle``.
+
+    Returns a JSON-serializable dict (not ``AutonomyToolResult``)
+    so the workflow step output envelope serializes cleanly.
+    """
     ctx = AuthoringContext(
         actor_id=member_id, actor_kind=derive_actor_kind(member_id),
     )
-    return await transition_friction_pattern_lifecycle(
+    result = await transition_friction_pattern_lifecycle(
         ctx=ctx,
         pattern_store=pattern_store,
         instance_id=instance_id,
@@ -438,6 +539,7 @@ async def handle_transition_friction_pattern_lifecycle_tool(
         new_state=args.get("new_state", ""),
         resolved_by_spec=args.get("resolved_by_spec", ""),
     )
+    return _result_to_dict(result)
 
 
 async def handle_record_friction_pattern_recurrence_tool(
@@ -446,12 +548,12 @@ async def handle_record_friction_pattern_recurrence_tool(
     instance_id: str,
     member_id: str,
     args: dict,
-) -> AutonomyToolResult:
+) -> dict:
     """Dispatch wrapper for ``record_friction_pattern_recurrence``."""
     ctx = AuthoringContext(
         actor_id=member_id, actor_kind=derive_actor_kind(member_id),
     )
-    return await record_friction_pattern_recurrence(
+    result = await record_friction_pattern_recurrence(
         ctx=ctx,
         pattern_store=pattern_store,
         instance_id=instance_id,
@@ -463,6 +565,7 @@ async def handle_record_friction_pattern_recurrence_tool(
         space_id=args.get("space_id", ""),
         member_id=args.get("member_id", ""),
     )
+    return _result_to_dict(result)
 
 
 async def handle_emit_autonomy_loop_event_tool(
@@ -471,12 +574,12 @@ async def handle_emit_autonomy_loop_event_tool(
     instance_id: str,
     member_id: str,
     args: dict,
-) -> AutonomyToolResult:
+) -> dict:
     """Dispatch wrapper for ``emit_autonomy_loop_event``."""
     ctx = AuthoringContext(
         actor_id=member_id, actor_kind=derive_actor_kind(member_id),
     )
-    return await emit_autonomy_loop_event(
+    result = await emit_autonomy_loop_event(
         ctx=ctx,
         ledger=ledger,
         instance_id=instance_id,
@@ -487,6 +590,7 @@ async def handle_emit_autonomy_loop_event_tool(
         ),
         extra_payload=args.get("extra_payload") or None,
     )
+    return _result_to_dict(result)
 
 
 # ---------------------------------------------------------------------------
@@ -567,13 +671,17 @@ async def handle_read_coding_session_response_for_workflow(
       * ``request_id``: the request_id returned by ask_coding_session_for_workflow.
 
     Returns workflow-friendly dict: ``{"success": bool,
-    "request_id": str, "summary": str, "execution_state": str}``.
-    The workflow's verifier reads ``execution_state == "completed"``
-    to know the response has arrived; ``"attempted"`` means
-    still-waiting (workflow continues to next step or re-polls);
-    ``"failed"`` means timeout or missing request (workflow aborts
-    or branches).
+    "request_id": str, "summary": str, "execution_state": str,
+    "investigation_outcome": str}``. The autonomy-loop workflow's
+    emit_outcome step refs ``{step.read_response.value.investigation_outcome}``
+    so the canonical outcome from the coding session's response file
+    flows into the autonomy_loop_outcomes ledger (architect's v7.3
+    dynamic-outcome modification — capture CC's actual outcome in the
+    audit trail, not a hardcoded "completed").
     """
+    import json as _json
+    from pathlib import Path as _Path
+
     from kernos.kernel.coding_session_bridge import (
         handle_read_coding_session_response,
     )
@@ -584,11 +692,35 @@ async def handle_read_coding_session_response_for_workflow(
         data_dir=data_dir,
         request_id=request_id,
     )
+    # If the bridge accepted the response, read the response file
+    # again to surface investigation_outcome to the workflow. The
+    # bridge's emit-once path normalizes invalid outcomes to
+    # "unable_to_investigate"; we surface the normalized value so the
+    # downstream emit_outcome step receives a value that round-trips
+    # through the autonomy_loop_outcomes ledger as-is.
+    investigation_outcome = ""
+    if record.execution_state == "completed":
+        response_path = (
+            _Path(data_dir) / instance_id / "coding_session_bridge"
+            / "responses" / f"{request_id}.json"
+        )
+        try:
+            with response_path.open("r", encoding="utf-8") as fp:
+                response_data = _json.load(fp)
+            investigation_outcome = (
+                response_data.get("investigation_outcome", "") or ""
+            )
+        except (FileNotFoundError, _json.JSONDecodeError, OSError):
+            # Best-effort: if the file is unreadable here (rare —
+            # the bridge just read it), surface empty outcome so the
+            # workflow can branch / log rather than crash.
+            investigation_outcome = ""
     return {
         "success": record.execution_state in ("attempted", "completed"),
         "request_id": request_id,
         "summary": summary,
         "execution_state": record.execution_state,
+        "investigation_outcome": investigation_outcome,
     }
 
 
