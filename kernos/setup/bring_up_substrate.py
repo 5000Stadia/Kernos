@@ -173,14 +173,19 @@ async def bring_up_substrate(
     await workflow_registry.start(data_dir, trigger_registry)
     workflow_registry.wire_agent_registry(agent_registry)
 
+    # --- WorkflowLedger -----------------------------------------------
+    # Constructed BEFORE action library so AppendToLedgerAction can be
+    # wired with the real ledger surface (Spec 6 commit 5 production
+    # wiring; replaces the prior _unwired_stub).
+    from kernos.kernel.workflows.ledger import WorkflowLedger
+    workflow_ledger = WorkflowLedger(data_dir)
+
     # --- ActionLibrary + register all 7 verbs -------------------------
     from kernos.kernel.workflows.action_library import ActionLibrary
     action_library = ActionLibrary()
-    _register_all_actions(action_library, handler, agent_registry)
-
-    # --- WorkflowLedger -----------------------------------------------
-    from kernos.kernel.workflows.ledger import WorkflowLedger
-    workflow_ledger = WorkflowLedger(data_dir)
+    _register_all_actions(
+        action_library, handler, agent_registry, workflow_ledger,
+    )
 
     # --- ExecutionEngine ----------------------------------------------
     from kernos.kernel.workflows.execution_engine import ExecutionEngine
@@ -510,6 +515,7 @@ def _register_all_actions(
     library: "ActionLibrary",
     handler: Any,
     agent_registry: "AgentRegistry",
+    workflow_ledger: "WorkflowLedger",
 ) -> None:
     """Register every Action class shipped in the action library.
 
@@ -517,6 +523,12 @@ def _register_all_actions(
     handler.reasoning.execute_tool, etc.), wire them. Where infra
     isn't yet available in production, register with a clear-error
     stub that surfaces the gap when invoked rather than at startup.
+
+    Spec 6 commit 5: AppendToLedgerAction wired with WorkflowLedger
+    (replaces prior _unwired_stub). The action library's verb-shape
+    contract for ledger_append_fn / ledger_read_last_fn uses kwargs
+    (workflow_id=, entry=, instance_id=); the adapters bridge to
+    WorkflowLedger's positional shape (instance_id, workflow_id, ...).
     """
     from kernos.kernel.workflows.action_library import (
         AppendToLedgerAction,
@@ -552,8 +564,8 @@ def _register_all_actions(
         state_store_get=_state_get_adapter(handler),
     ))
     library.register(AppendToLedgerAction(
-        ledger_append_fn=_unwired_stub("append_to_ledger"),
-        ledger_read_last_fn=_unwired_stub("append_to_ledger.read_last"),
+        ledger_append_fn=_workflow_ledger_append_adapter(workflow_ledger),
+        ledger_read_last_fn=_workflow_ledger_read_last_adapter(workflow_ledger),
     ))
 
 
@@ -652,10 +664,14 @@ def _state_get_adapter(handler: Any):
 def _unwired_stub(verb: str):
     """Return a callable that raises a clear NotImplementedError when
     invoked. Used for verbs whose production callables aren't available
-    yet (e.g., PostToServiceAction's workshop service registry, the
-    AppendToLedgerAction's ledger-write surface). Registration with
-    this stub keeps the verb in the library so descriptors that
-    reference it parse cleanly; invocation surfaces the gap."""
+    yet (e.g., PostToServiceAction's workshop service registry).
+    Registration with this stub keeps the verb in the library so
+    descriptors that reference it parse cleanly; invocation surfaces
+    the gap.
+
+    Spec 6 commit 5 wired AppendToLedgerAction with WorkflowLedger;
+    only PostToServiceAction (workshop registry) remains stubbed.
+    """
     async def _stub(*args, **kwargs):
         raise NotImplementedError(
             f"Action verb {verb!r} is registered but its production "
@@ -663,6 +679,23 @@ def _unwired_stub(verb: str):
             f"a follow-up if you need this verb."
         )
     return _stub
+
+
+def _workflow_ledger_append_adapter(workflow_ledger: "WorkflowLedger"):
+    """Spec 6 commit 5: adapt WorkflowLedger.append's positional
+    (instance_id, workflow_id, entry) signature to the
+    AppendToLedgerAction's kwargs shape
+    (workflow_id=, entry=, instance_id=)."""
+    async def _append(*, workflow_id: str, entry: dict, instance_id: str = ""):
+        await workflow_ledger.append(instance_id, workflow_id, entry)
+    return _append
+
+
+def _workflow_ledger_read_last_adapter(workflow_ledger: "WorkflowLedger"):
+    """Companion adapter for AppendToLedgerAction's verifier path."""
+    async def _read_last(*, workflow_id: str, instance_id: str = ""):
+        return await workflow_ledger.read_last(instance_id, workflow_id)
+    return _read_last
 
 
 __all__ = [

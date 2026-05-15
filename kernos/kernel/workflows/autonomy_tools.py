@@ -489,6 +489,109 @@ async def handle_emit_autonomy_loop_event_tool(
     )
 
 
+# ---------------------------------------------------------------------------
+# Spec 6 parallel workflow handlers: bridge ask/read for workflow callers
+# ---------------------------------------------------------------------------
+#
+# The self_improvement workflow's action_sequence calls into the
+# coding-session bridge to consult a coding session (typically CC) and
+# wait for the response. The bridge's existing handlers
+# (``handle_ask_coding_session`` / ``handle_read_coding_session_response``)
+# are member-facing — they take ``member_id`` + ``active_space_id``
+# arguments shaped for the conversational caller. Workflows have a
+# synthetic execution context with no real "member" or "active space";
+# the for_workflow wrappers normalize that context so the workflow's
+# ``call_tool`` action can route through without re-deriving the
+# member-facing arg shape.
+
+
+async def handle_ask_coding_session_for_workflow(
+    *,
+    instance_id: str,
+    member_id: str,
+    args: dict,
+    data_dir: str,
+) -> dict:
+    """Workflow-facing wrapper for ``handle_ask_coding_session``.
+
+    Args dict shape (workflow's call_tool ``args`` parameter):
+      * ``target``: which coding session to consult ("cc", etc.)
+      * ``question``: the question to ask
+      * ``context``: optional dict of extra context fields
+      * ``active_space_id``: optional; defaults to empty
+
+    Returns a workflow-friendly dict shape: ``{"success": bool,
+    "request_id": str, "summary": str, "execution_state": str}``.
+    The ``request_id`` is the load-bearing field the workflow's next
+    step (read_coding_session_response_for_workflow) consumes.
+    """
+    from kernos.kernel.coding_session_bridge import handle_ask_coding_session
+
+    target = args.get("target", "")
+    question = args.get("question", "")
+    context = args.get("context") or {}
+    active_space_id = args.get("active_space_id", "")
+    summary, record = await handle_ask_coding_session(
+        instance_id=instance_id,
+        member_id=member_id,
+        active_space_id=active_space_id,
+        data_dir=data_dir,
+        target=target,
+        question=question,
+        context=context,
+    )
+    # Extract request_id from the receipt_refs (the bridge embeds it
+    # there per its existing contract). Fall back to empty string if
+    # the call failed before request_id assignment.
+    request_id = ""
+    if record.receipt_refs:
+        request_id = record.receipt_refs[0]
+    return {
+        "success": record.execution_state in ("attempted", "completed"),
+        "request_id": request_id,
+        "summary": summary,
+        "execution_state": record.execution_state,
+    }
+
+
+async def handle_read_coding_session_response_for_workflow(
+    *,
+    instance_id: str,
+    member_id: str,
+    args: dict,
+    data_dir: str,
+) -> dict:
+    """Workflow-facing wrapper for ``handle_read_coding_session_response``.
+
+    Args dict shape:
+      * ``request_id``: the request_id returned by ask_coding_session_for_workflow.
+
+    Returns workflow-friendly dict: ``{"success": bool,
+    "request_id": str, "summary": str, "execution_state": str}``.
+    The workflow's verifier reads ``execution_state == "completed"``
+    to know the response has arrived; ``"attempted"`` means
+    still-waiting (workflow continues to next step or re-polls);
+    ``"failed"`` means timeout or missing request (workflow aborts
+    or branches).
+    """
+    from kernos.kernel.coding_session_bridge import (
+        handle_read_coding_session_response,
+    )
+
+    request_id = args.get("request_id", "")
+    summary, record = await handle_read_coding_session_response(
+        instance_id=instance_id,
+        data_dir=data_dir,
+        request_id=request_id,
+    )
+    return {
+        "success": record.execution_state in ("attempted", "completed"),
+        "request_id": request_id,
+        "summary": summary,
+        "execution_state": record.execution_state,
+    }
+
+
 __all__ = [
     "AutonomyToolError",
     "AutonomyToolResult",
@@ -497,7 +600,9 @@ __all__ = [
     "CAT_AUTONOMY_SUBSTRATE_ERROR",
     "VALID_AUTONOMY_TOOL_NAMES",
     "emit_autonomy_loop_event",
+    "handle_ask_coding_session_for_workflow",
     "handle_emit_autonomy_loop_event_tool",
+    "handle_read_coding_session_response_for_workflow",
     "handle_record_friction_pattern_recurrence_tool",
     "handle_transition_friction_pattern_lifecycle_tool",
     "record_friction_pattern_recurrence",
