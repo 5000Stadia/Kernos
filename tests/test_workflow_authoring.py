@@ -1519,3 +1519,283 @@ class TestThirteenthAmendmentIdempotentRegister:
         assert row is not None
         assert row.architect_authored is True
         assert row.authored_by == ARCHITECT_ID
+
+
+# ===========================================================================
+# Spec 5 14th amendment H1 fold (compile_descriptor_triggers wiring)
+# ===========================================================================
+#
+# H1 wires the WTC compiler into register_workflow + activate_workflow
+# so plural-triggers descriptors (12th amendment shape) are validated
+# at register time AND re-validated at architect activation. The guard
+# is key-presence-only (M2 fold): triggers=[] or triggers=null still
+# route to compile_descriptor_triggers so the substrate primitive that
+# OWNS trigger validation makes the accept/reject call.
+
+
+def _plural_triggers_descriptor(
+    *,
+    workflow_id: str = "wf-plural",
+    instance_id: str = "inst_a",
+    event_type: str = "friction.pattern_frequency_threshold_exceeded",
+    triggers: list | None = None,
+) -> dict:
+    """Build a descriptor that exercises the plural-triggers shape
+    (12th amendment / production WTC path)."""
+    if triggers is None:
+        triggers = [{
+            "event_type": event_type,
+            "event_selector": {
+                "op": "exists", "path": "payload.pattern_id",
+            },
+        }]
+    return {
+        "workflow_id": workflow_id,
+        "instance_id": instance_id,
+        "name": "plural test",
+        "description": "",
+        "owner": "owner",
+        "version": "1.0",
+        "bounds": {
+            "iteration_count": 1, "wall_time_seconds": 30,
+            "cost_usd": None, "composite": None,
+        },
+        "verifier": {"flavor": "deterministic", "check": "ok"},
+        "action_sequence": [{
+            "action_type": "mark_state",
+            "id": "step1",
+            "parameters": {"key": "x", "value": 1, "scope": "instance"},
+            "continuation_rules": {"on_failure": "abort"},
+        }],
+        "approval_gates": [],
+        "triggers": triggers,
+        "terminal_branches": {},
+    }
+
+
+class TestFourteenthAmendmentH1Register:
+    """H1: compile_descriptor_triggers runs in register_workflow BEFORE
+    persistence so malformed triggers fail loud without partial state."""
+
+    async def test_valid_plural_triggers_register_succeeds(
+        self, stack, architect_env,
+    ):
+        descriptor = _plural_triggers_descriptor(workflow_id="wf-h1-ok")
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        # Substrate state pin: canonical JSON carries the plural shape
+        # for activate-time re-validation.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-ok",
+        )
+        assert row is not None
+        assert '"triggers"' in row.descriptor_json_canonical
+
+    async def test_malformed_trigger_rejected_loud_before_persistence(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        # Missing required event_type on the trigger entry.
+        descriptor = _plural_triggers_descriptor(
+            workflow_id="wf-h1-malformed",
+            triggers=[{"not_event_type": "oops"}],
+        )
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert len(result.errors) == 1
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert result.errors[0].field_path == "descriptor.triggers"
+        # Substrate state pin: no row landed (compile failed before
+        # the persistence transaction body even ran).
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-malformed",
+        )
+        assert row is None
+        # And no workflows-table row either.
+        async with stack["engine"]._db.execute(
+            "SELECT workflow_id FROM workflows WHERE workflow_id = ?",
+            ("wf-h1-malformed",),
+        ) as cur:
+            wf_row = await cur.fetchone()
+        assert wf_row is None
+
+    async def test_empty_triggers_list_rejected(
+        self, stack, architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        descriptor = _plural_triggers_descriptor(
+            workflow_id="wf-h1-empty", triggers=[],
+        )
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert "non-empty" in result.errors[0].message
+
+    async def test_null_triggers_rejected(self, stack, architect_env):
+        """Key-presence-only guard: triggers=None still routes to
+        compile_descriptor_triggers, which rejects with a typed
+        PredicateValidationError. Confirms the falsey-value pass-through
+        (v7.3 M2 fold ruling)."""
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-h1-null")
+        # Use a directly-built descriptor with no singular trigger
+        # and triggers=None so we can pin the key-presence-only branch.
+        descriptor.pop("trigger", None)
+        descriptor["triggers"] = None
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert "must be a list" in result.errors[0].message
+
+    async def test_singular_trigger_descriptor_skips_h1(
+        self, stack, architect_env,
+    ):
+        """Backward-compat pin: legacy singular-trigger descriptors
+        have no 'triggers' key; H1 skips compile_descriptor_triggers
+        for them (the Spec 4 parser + predicate-validator already
+        ran inside _build_workflow)."""
+        descriptor = _descriptor(workflow_id="wf-h1-singular")
+        assert "triggers" not in descriptor
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is True, f"errors: {result.errors}"
+
+
+class TestFourteenthAmendmentH1Activate:
+    """H1 / M2 fold: conditional re-validation in activate_workflow.
+    Reads descriptor_json_canonical, parses, and routes triggers to the
+    WTC compiler if the key is present. Pre-13th-amendment rows (empty
+    canonical) skip re-validation."""
+
+    async def test_activate_re_validates_plural_triggers(
+        self, stack, architect_env,
+    ):
+        descriptor = _plural_triggers_descriptor(workflow_id="wf-h1-act-ok")
+        await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-act-ok",
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        # Substrate state pin: row now active.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-act-ok",
+        )
+        assert row is not None
+        assert row.activation_state == STATE_ACTIVE
+
+    async def test_activate_rejects_canonical_with_corrupted_triggers(
+        self, stack, architect_env,
+    ):
+        """Pin the M2 re-validation actually runs at activate time. We
+        register a valid plural-triggers descriptor, mutate the
+        canonical column out-of-band to simulate substrate drift (e.g.
+        the WTC compiler grew a new constraint between register and
+        activate), then attempt activation. PredicateValidationError
+        must surface as CAT_PREDICATE_INVALID and the row must NOT
+        transition to active."""
+        import json as _json
+
+        from kernos.kernel.workflows.authoring import (
+            CAT_PREDICATE_INVALID,
+        )
+
+        descriptor = _plural_triggers_descriptor(workflow_id="wf-h1-drift")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Out-of-band mutate the canonical column to corrupt the
+        # trigger entry (missing event_type).
+        bad_canonical = _json.dumps({
+            **descriptor,
+            "triggers": [{"not_event_type": "drifted"}],
+        }, sort_keys=True)
+        await stack["engine"]._db.execute(
+            "UPDATE registered_workflows SET descriptor_json_canonical = ? "
+            "WHERE workflow_id = ?",
+            (bad_canonical, "wf-h1-drift"),
+        )
+        await stack["engine"]._db.commit()
+        # Activation: re-validation routes to compile_descriptor_triggers
+        # → PredicateValidationError → CAT_PREDICATE_INVALID.
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-drift",
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_PREDICATE_INVALID
+        assert result.errors[0].field_path == "descriptor.triggers"
+        # Substrate state pin: row is still in registered state, not
+        # active.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-drift",
+        )
+        assert row is not None
+        assert row.activation_state == STATE_REGISTERED
+
+    async def test_activate_skips_re_validation_when_canonical_empty(
+        self, stack, architect_env,
+    ):
+        """Pre-13th-amendment rows have empty descriptor_json_canonical.
+        The ALTER TABLE migration filled the column with empty string;
+        activate must skip re-validation in that case so legacy rows
+        don't get retroactively rejected."""
+        descriptor = _descriptor(workflow_id="wf-h1-legacy")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # Simulate a pre-amendment row by clearing the canonical column.
+        await stack["engine"]._db.execute(
+            "UPDATE registered_workflows SET descriptor_json_canonical = '' "
+            "WHERE workflow_id = ?",
+            ("wf-h1-legacy",),
+        )
+        await stack["engine"]._db.commit()
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-legacy",
+        )
+        assert result.success is True, f"errors: {result.errors}"
+
+    async def test_activate_skips_re_validation_when_no_triggers_key(
+        self, stack, architect_env,
+    ):
+        """Singular-trigger workflows have no 'triggers' key in their
+        canonical descriptor; activate should not invoke
+        compile_descriptor_triggers for them."""
+        descriptor = _descriptor(workflow_id="wf-h1-no-triggers-key")
+        reg = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert reg.success is True
+        # The canonical descriptor has 'trigger' (singular) but not
+        # 'triggers' (plural) — confirm the row reflects that.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-h1-no-triggers-key",
+        )
+        assert '"trigger"' in row.descriptor_json_canonical
+        assert '"triggers"' not in row.descriptor_json_canonical
+        # Activation: re-validation guard is False; CAS transition runs.
+        result = await activate_workflow(
+            stack["engine"], _architect_ctx(), "wf-h1-no-triggers-key",
+        )
+        assert result.success is True, f"errors: {result.errors}"

@@ -531,6 +531,31 @@ async def register_workflow(
             success=False,
             errors=[_workflow_error_to_validation_error(exc)],
         )
+    # Spec 5 14th amendment H1 fold: compile plural-triggers shape
+    # at register time so a malformed descriptor.triggers list fails
+    # loud BEFORE any persistence work. Key-presence-only guard
+    # (v7.3 M2-fold semantics): pre-12th-amendment legacy descriptors
+    # that use singular ``trigger:`` (Spec 4 shape) skip this path;
+    # plural-triggers descriptors (production WTC path) get validated
+    # here. PredicateValidationError per V7.3.2 (not TriggerError).
+    if "triggers" in descriptor:
+        from kernos.kernel.triggers import (
+            PredicateValidationError,
+            compile_descriptor_triggers,
+        )
+        try:
+            compile_descriptor_triggers(
+                workflow_id=wf.workflow_id, descriptor=descriptor,
+            )
+        except PredicateValidationError as exc:
+            return AuthoringResult(
+                success=False,
+                errors=[ValidationError(
+                    field_path="descriptor.triggers",
+                    category=CAT_PREDICATE_INVALID,
+                    message=str(exc),
+                )],
+            )
     # Spec 5 governance-tier classification.
     computed_tier = classify_governance_tier(wf)
     is_architect = _is_architect(ctx)
@@ -972,6 +997,39 @@ async def activate_workflow(
             success=False,
             errors=[_workflow_error_to_validation_error(exc)],
         )
+    # Spec 5 14th amendment H1/M2 fold: conditional re-validation of
+    # plural triggers from the canonical descriptor blob. v7.3 M2
+    # ruling: key-presence-only check (falsey values like triggers=[]
+    # or triggers=null still route to compile_descriptor_triggers so
+    # the substrate primitive owns accept/reject — composes with the
+    # substrate-fidelity-at-the-owning-primitive lesson).
+    #
+    # Pre-13th-amendment rows lack descriptor_json_canonical (the
+    # ALTER TABLE default is empty string); they skip this re-validation
+    # since they predate the plural-triggers shape entirely.
+    if registered.descriptor_json_canonical:
+        try:
+            stored_descriptor = json.loads(registered.descriptor_json_canonical)
+        except (ValueError, TypeError):
+            stored_descriptor = None
+        if isinstance(stored_descriptor, dict) and "triggers" in stored_descriptor:
+            from kernos.kernel.triggers import (
+                PredicateValidationError,
+                compile_descriptor_triggers,
+            )
+            try:
+                compile_descriptor_triggers(
+                    workflow_id=workflow_id, descriptor=stored_descriptor,
+                )
+            except PredicateValidationError as exc:
+                return AuthoringResult(
+                    success=False,
+                    errors=[ValidationError(
+                        field_path="descriptor.triggers",
+                        category=CAT_PREDICATE_INVALID,
+                        message=str(exc),
+                    )],
+                )
     # Spec 5 post-impl Codex High 4: re-run governance classifier.
     # If the classifier now sees substrate-modification surfaces that
     # weren't present at registration (substrate-tool-id list grew;
