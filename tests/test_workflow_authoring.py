@@ -776,11 +776,20 @@ class TestActorKindDerivation:
         kind = derive_actor_kind("")
         assert kind == ACTOR_SYSTEM
 
-    def test_substrate_tool_ids_narrow_v1(self):
-        # Architect Q1 ruling: narrow list for v1.
+    def test_substrate_tool_ids_narrow_v1_plus_spec6_autonomy(self):
+        """Spec 5 originally pinned 4 authoring tools as substrate-tier
+        (architect Q1 narrow-list ruling). Spec 6 commit 2 extends with
+        the 3 autonomy-loop substrate-tier tools that mutate
+        friction-pattern lifecycle / autonomy_loop_outcomes ledger —
+        deliberate architect amendment via the v7.3 ratification."""
         assert SUBSTRATE_TOOL_IDS == {
+            # Spec 5 authoring tools.
             "register_workflow", "register_trigger",
             "activate_workflow", "deactivate_workflow",
+            # Spec 6 autonomy-loop substrate-tier tools.
+            "transition_friction_pattern_lifecycle",
+            "record_friction_pattern_recurrence",
+            "emit_autonomy_loop_event",
         }
 
 
@@ -2691,6 +2700,57 @@ class TestSpec6OperatorActor:
             actor_id="op_kernos_autonomy", actor_kind=ACTOR_KERNOS,
         )
         assert _is_operator(ctx) is False
+
+    async def test_kernos_cannot_author_workflow_calling_autonomy_tool(
+        self, stack, architect_env,
+    ):
+        """Functional pin: a workflow that calls one of the Spec 6
+        autonomy-loop tools (e.g., transition_friction_pattern_lifecycle)
+        is classified substrate_tier by the governance classifier.
+        Kernos attempting to register it as composition_tier is
+        rejected with CAT_GOVERNANCE_TIER_VIOLATION; only architect (or
+        architect-over-classified substrate) may author such workflows.
+        Substrate state pin: no row landed in registered_workflows."""
+        descriptor = _descriptor(
+            workflow_id="wf-autonomy-tool-kernos",
+            action_type="call_tool",
+            params={"tool_id": "transition_friction_pattern_lifecycle"},
+        )
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        # Should surface the governance tier violation.
+        categories = {err.category for err in result.errors}
+        assert CAT_GOVERNANCE_TIER_VIOLATION in categories
+        # Substrate state pin: no row landed.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-autonomy-tool-kernos",
+        )
+        assert row is None
+
+    async def test_architect_can_author_workflow_calling_autonomy_tool(
+        self, stack, architect_env,
+    ):
+        """Companion functional pin: architect CAN author the same
+        workflow shape (substrate_tier registration succeeds).
+        Substrate state pin: registered_workflows row exists with
+        governance_tier=substrate_tier and architect_authored=True."""
+        descriptor = _descriptor(
+            workflow_id="wf-autonomy-tool-architect",
+            action_type="call_tool",
+            params={"tool_id": "record_friction_pattern_recurrence"},
+        )
+        result = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_SUBSTRATE,
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-autonomy-tool-architect",
+        )
+        assert row is not None
+        assert row.governance_tier == TIER_SUBSTRATE
+        assert row.architect_authored is True
 
     async def test_operator_cannot_activate_workflow(
         self, stack, architect_env, operator_env,

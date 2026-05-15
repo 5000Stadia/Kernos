@@ -268,11 +268,21 @@ SUBSTRATE_TOOL_IDS: frozenset[str] = frozenset({
     # Authoring layer (this spec's own tools)
     "register_workflow", "register_trigger",
     "activate_workflow", "deactivate_workflow",
+    # Spec 6 autonomy-loop substrate-tier tools. These mutate
+    # autonomy-loop substrate (friction pattern lifecycle,
+    # autonomy_loop_outcomes ledger) and are operator-only:
+    # workflows that call them MUST be architect-authored or
+    # registered as substrate_tier (architect over-classification
+    # path). Kernos cannot author workflows that call these tools.
+    "transition_friction_pattern_lifecycle",
+    "record_friction_pattern_recurrence",
+    "emit_autonomy_loop_event",
     # NOTE: workflow primitive (Spec 4) has no production tools that
     # modify substrate; descriptor changes happen via deactivate +
     # register new.
     # NOTE: friction-pattern catalog (Spec 1) has no production tools
-    # currently exposed for substrate modification.
+    # currently exposed for substrate modification BEYOND the three
+    # Spec 6 autonomy-loop tools listed above.
     # NOTE: bridge primitive (Spec 2) has no production tools that
     # modify substrate.
 })
