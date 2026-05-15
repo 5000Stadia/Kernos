@@ -78,6 +78,17 @@ from kernos.kernel.triggers.predicate import (
     fire_window_key_for_every,
     validate_predicate,
 )
+# Spec 5 15th amendment B2 sentinel — engine returns this from
+# execute_workflow when the workflow is registered_not_activated /
+# deactivated. The runtime detects it in both the active-claim and
+# recovery-sweep dispatch paths and routes to terminal-skip via
+# mark_failed (with sentinel as last_error) so an authoring-inactive
+# workflow doesn't leave a dispatched row pointing at a non-existent
+# execution. No structural circular: execution_engine does not
+# import from kernos.kernel.triggers at module-load time.
+from kernos.kernel.workflows.execution_engine import (
+    EXECUTE_SKIPPED_AUTHORING_INACTIVE as _EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -695,6 +706,29 @@ class TriggerEvaluationRuntime:
                 )
                 continue
 
+            # Spec 5 15th amendment B2 sentinel: WLP returned without
+            # raising but the workflow is registered_not_activated /
+            # deactivated. Route to terminal-skip via mark_failed with
+            # the sentinel as the last_error so operators can filter
+            # ``last_error LIKE 'skipped:%'`` to distinguish from
+            # genuine dispatch failure. Non-retryable — keep returning
+            # True to leave the retry loop.
+            if workflow_execution_id == _EXECUTE_SKIPPED_AUTHORING_INACTIVE:
+                logger.info(
+                    "WTC v1 dispatch skipped (authoring inactive): "
+                    "trigger=%s fire_id=%s",
+                    record.trigger_id, claim.fire_id,
+                )
+                try:
+                    await self._outbox.mark_failed(
+                        fire_id=claim.fire_id,
+                        claim_owner=self._claim_owner,
+                        error=_EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+                    )
+                except StaleClaimError:
+                    pass
+                return True
+
             try:
                 await self._outbox.mark_dispatched(
                     fire_id=claim.fire_id,
@@ -820,6 +854,26 @@ class TriggerEvaluationRuntime:
                     "WTC v1 recover: redispatch failed fire_id=%s: %s",
                     record.fire_id, exc,
                 )
+                continue
+
+            # B2 sentinel handling in the recovery sweep, mirroring
+            # the active-claim path: skip mark_dispatched; route to
+            # mark_failed with the sentinel as last_error.
+            if workflow_execution_id == _EXECUTE_SKIPPED_AUTHORING_INACTIVE:
+                logger.info(
+                    "WTC v1 recover: redispatch skipped (authoring "
+                    "inactive) fire_id=%s",
+                    record.fire_id,
+                )
+                try:
+                    await self._outbox.mark_failed(
+                        fire_id=record.fire_id,
+                        claim_owner=self._claim_owner,
+                        error=_EXECUTE_SKIPPED_AUTHORING_INACTIVE,
+                    )
+                    recovered += 1
+                except StaleClaimError:
+                    pass
                 continue
 
             try:

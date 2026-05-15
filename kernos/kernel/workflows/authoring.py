@@ -104,6 +104,53 @@ class AuthoringContext:
         return self.actor_kind == ACTOR_ARCHITECT
 
 
+# ---------------------------------------------------------------------------
+# Canonical-descriptor helpers (Spec 5 13th + 16th amendment hardening)
+# ---------------------------------------------------------------------------
+
+
+def _compute_canonical_descriptor_json(descriptor: dict) -> str:
+    """Single source of truth for the canonical-form computation.
+
+    Spec 5 13th amendment introduced canonical persistence; the 16th
+    amendment (Codex MEDIUM 1) tightens the canonical function so the
+    digest is deterministic across Python versions and platforms and
+    rejects non-JSON values that Python's default ``json.dumps`` would
+    emit as ``NaN`` / ``Infinity`` tokens.
+
+      * ``sort_keys=True`` — key-order invariance.
+      * ``allow_nan=False`` — NaN/Infinity raise ``ValueError`` so the
+        serializability check at the public register boundary catches
+        them. NaN/Infinity are not valid JSON per RFC 7159; emitting
+        them produces non-portable, non-deterministic strings.
+      * ``separators=(",", ":")`` — the tightest separators (no
+        whitespace) so the canonical bytes are minimal and identical
+        whether the source dict was built by hand, parsed from YAML,
+        or round-tripped through json.loads. Whitespace from Python's
+        default separators (``", "`` / ``": "``) would otherwise drift
+        if the json module's defaults ever changed.
+
+    Callers MUST go through this helper for both write-time
+    canonicalization (register_workflow) and read-side digest
+    comparison (idempotent-replay detection, tests). Inlining
+    ``json.dumps(..., sort_keys=True)`` elsewhere is a correctness
+    regression.
+    """
+    return json.dumps(
+        descriptor,
+        sort_keys=True,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
+def _compute_descriptor_digest(canonical_json: str) -> str:
+    """SHA-256 hex digest of the canonical bytes. Pairs with
+    :func:`_compute_canonical_descriptor_json` — the two together are
+    the canonical-fingerprint pipeline."""
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
 def _is_architect(ctx: AuthoringContext) -> bool:
     """Architect-only tools call this. Fail-closed semantics: if
     KERNOS_ARCHITECT_ACTOR_ID is unset, NO actor passes the check.
@@ -494,12 +541,16 @@ async def register_workflow(
                 ),
             )],
         )
-    # Spec 5 13th amendment M1: serializability premise enforced at
-    # the public boundary, before the Spec 4 parser does any work.
-    # Non-JSON-serializable values raise TypeError (datetime, set,
-    # custom classes) or ValueError (NaN with allow_nan=False, etc.).
+    # Spec 5 13th amendment M1 + 16th amendment MEDIUM 1: canonical
+    # form computed via the central helper so allow_nan=False rejects
+    # NaN/Infinity (which Python's default json.dumps emits as
+    # non-standard tokens) and tight separators keep the bytes
+    # platform-deterministic. Non-JSON-serializable values raise
+    # TypeError (datetime, set, custom classes); NaN/Infinity raise
+    # ValueError under allow_nan=False; both route to the same
+    # CAT_DESCRIPTOR_SHAPE_INVALID surface.
     try:
-        canonical_json = json.dumps(descriptor, sort_keys=True)
+        canonical_json = _compute_canonical_descriptor_json(descriptor)
     except (TypeError, ValueError) as exc:
         return AuthoringResult(
             success=False,
@@ -509,7 +560,7 @@ async def register_workflow(
                 message=f"descriptor not JSON-serializable: {exc}",
             )],
         )
-    descriptor_digest = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+    descriptor_digest = _compute_descriptor_digest(canonical_json)
     # Build Workflow dataclass via Spec 4 parser.
     try:
         wf = _build_workflow(descriptor)
@@ -997,22 +1048,51 @@ async def activate_workflow(
             success=False,
             errors=[_workflow_error_to_validation_error(exc)],
         )
-    # Spec 5 14th amendment H1/M2 fold: conditional re-validation of
-    # plural triggers from the canonical descriptor blob. v7.3 M2
-    # ruling: key-presence-only check (falsey values like triggers=[]
-    # or triggers=null still route to compile_descriptor_triggers so
-    # the substrate primitive owns accept/reject — composes with the
-    # substrate-fidelity-at-the-owning-primitive lesson).
+    # Spec 5 14th amendment H1/M2 fold + 16th amendment HIGH 2 fold:
+    # conditional re-validation of plural triggers from the canonical
+    # descriptor blob.
     #
-    # Pre-13th-amendment rows lack descriptor_json_canonical (the
-    # ALTER TABLE default is empty string); they skip this re-validation
-    # since they predate the plural-triggers shape entirely.
+    # Semantics:
+    #   * Empty canonical → legacy pre-13th-amendment row; skip
+    #     re-validation (those rows predate the plural-triggers shape
+    #     entirely; failing them would retroactively block activation).
+    #   * Non-empty canonical that fails json.loads OR parses to a
+    #     non-dict → fail-closed at the architect safety boundary.
+    #     A corrupted canonical blob is not skippable; it's a substrate
+    #     integrity violation that warrants architect attention.
+    #     Activation_state stays unchanged.
+    #   * Parsed dict with "triggers" key → route to
+    #     compile_descriptor_triggers per v7.3 M2 (key-presence-only;
+    #     falsey values like triggers=[] / triggers=null still route
+    #     so the substrate primitive owns accept/reject).
     if registered.descriptor_json_canonical:
         try:
             stored_descriptor = json.loads(registered.descriptor_json_canonical)
-        except (ValueError, TypeError):
-            stored_descriptor = None
-        if isinstance(stored_descriptor, dict) and "triggers" in stored_descriptor:
+        except (ValueError, TypeError) as exc:
+            return AuthoringResult(
+                success=False,
+                errors=[ValidationError(
+                    field_path="descriptor_json_canonical",
+                    category=CAT_DESCRIPTOR_SHAPE_INVALID,
+                    message=(
+                        f"persisted canonical descriptor failed to parse "
+                        f"as JSON: {exc}"
+                    ),
+                )],
+            )
+        if not isinstance(stored_descriptor, dict):
+            return AuthoringResult(
+                success=False,
+                errors=[ValidationError(
+                    field_path="descriptor_json_canonical",
+                    category=CAT_DESCRIPTOR_SHAPE_INVALID,
+                    message=(
+                        f"persisted canonical descriptor must parse to a "
+                        f"dict; got {type(stored_descriptor).__name__}"
+                    ),
+                )],
+            )
+        if "triggers" in stored_descriptor:
             from kernos.kernel.triggers import (
                 PredicateValidationError,
                 compile_descriptor_triggers,

@@ -140,6 +140,12 @@ logger = logging.getLogger(__name__)
 # was deliberately skipped (vs raising, which would trigger retry).
 EXECUTE_SKIPPED_AUTHORING_INACTIVE = "skipped:authoring_inactive"
 
+# Internal marker used by execute_workflow's gated-INSERT body to
+# signal "the activation gate fired" back to the caller without
+# leaking through the queue. Distinct identity object so equality
+# checks are unambiguous; not exported via __all__.
+_GATE_SKIPPED_SENTINEL = object()
+
 
 # Active-space resolver. The engine calls this to populate the
 # synthetic CohortContext.active_spaces tuple. Real implementations
@@ -2426,23 +2432,6 @@ class ExecutionEngine:
         if existing is not None:
             return existing
 
-        # Spec 5 15th amendment B2 fold: activation gate. If the
-        # workflow is registered via the authoring layer (Spec 5
-        # registered_workflows row exists) AND its activation_state
-        # is not 'active', return the EXECUTE_SKIPPED_AUTHORING_INACTIVE
-        # sentinel without creating a workflow_executions row.
-        # Sequenced AFTER the fire_id idempotency check so a workflow
-        # deactivated between two execute_workflow calls with the same
-        # fire_id still returns the existing execution_id (the prior
-        # dispatch is the canonical winner; new dispatches are gated).
-        if await self._is_authoring_workflow_inactive(workflow_id):
-            logger.info(
-                "WORKFLOW_EXECUTE_SKIPPED workflow_id=%s fire_id=%s "
-                "reason=authoring_inactive",
-                workflow_id, fire_id,
-            )
-            return EXECUTE_SKIPPED_AUTHORING_INACTIVE
-
         execution = WorkflowExecution(
             execution_id=str(uuid.uuid4()),
             workflow_id=workflow_id,
@@ -2455,23 +2444,42 @@ class ExecutionEngine:
             member_id=member_id,
             fire_id=fire_id,
         )
+
+        # Spec 5 16th amendment MEDIUM 2 fold: re-check the activation
+        # state INSIDE the write lock so a concurrent
+        # deactivate_workflow (which acquires the same lock via
+        # _run_workflow_txn) cannot interleave between the gate read
+        # and the workflow_executions INSERT. Before this fold the gate
+        # check sat outside the lock, leaving a race window where a
+        # workflow could be marked deactivated AFTER the gate read and
+        # BEFORE the INSERT — producing a workflow_executions row for
+        # a non-active workflow.
+        #
+        # Body returns _GATE_SKIPPED_SENTINEL when the gate fires so
+        # the caller routes to EXECUTE_SKIPPED_AUTHORING_INACTIVE
+        # without leaking the internal marker through the queue.
+        async def _gated_insert(db: aiosqlite.Connection) -> Any:
+            if await self._is_authoring_workflow_inactive(workflow_id):
+                return _GATE_SKIPPED_SENTINEL
+            await db.execute(
+                "INSERT INTO workflow_executions ("
+                " execution_id, workflow_id, instance_id, correlation_id,"
+                " state, action_index_completed, intermediate_state,"
+                " last_heartbeat, aborted_reason, started_at, terminated_at,"
+                " trigger_event_payload, trigger_event_id, member_id,"
+                " gate_nonce, fire_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                execution.to_row(),
+            )
+            return None
+
         try:
             # Codex round-2-impl High 4: route through the engine
             # write-lock so a concurrent _run_workflow_txn body
             # can't commit this INSERT along with unrelated step
-            # work.
-            await self._run_workflow_write(
-                lambda db: db.execute(
-                    "INSERT INTO workflow_executions ("
-                    " execution_id, workflow_id, instance_id, correlation_id,"
-                    " state, action_index_completed, intermediate_state,"
-                    " last_heartbeat, aborted_reason, started_at, terminated_at,"
-                    " trigger_event_payload, trigger_event_id, member_id,"
-                    " gate_nonce, fire_id"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    execution.to_row(),
-                ),
-            )
+            # work. 16th amendment: the gate check rides this same
+            # lock.
+            body_result = await self._run_workflow_write(_gated_insert)
         except aiosqlite.IntegrityError as exc:
             # Partial-unique-index race: another caller won the
             # INSERT. Re-fetch and return their execution_id.
@@ -2486,6 +2494,14 @@ class ExecutionEngine:
                     "the unique index but no row visible on re-read"
                 ) from exc
             return existing
+
+        if body_result is _GATE_SKIPPED_SENTINEL:
+            logger.info(
+                "WORKFLOW_EXECUTE_SKIPPED workflow_id=%s fire_id=%s "
+                "reason=authoring_inactive",
+                workflow_id, fire_id,
+            )
+            return EXECUTE_SKIPPED_AUTHORING_INACTIVE
 
         self._queue.put_nowait(execution)
         return execution.execution_id
