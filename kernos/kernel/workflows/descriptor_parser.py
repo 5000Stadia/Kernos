@@ -385,7 +385,24 @@ def _build_workflow(body: dict, *, narrative_description: str = "") -> Workflow:
     if not isinstance(gates_raw, list):
         raise DescriptorError("approval_gates must be a list")
     approval_gates = [_build_gate(i, g) for i, g in enumerate(gates_raw)]
+    # SELF-IMPROVEMENT-WORKFLOW-V1 12th amendment (Spec 6 v6.2): accept either
+    # singular ``trigger:`` (Spec 4 legacy) or plural ``triggers:`` (production
+    # WTC path that compiles via ``compile_descriptor_triggers``). Reject mixing
+    # for descriptor-ambiguity defense. When plural is present, ``Workflow.trigger``
+    # stays ``None``; the descriptor.triggers list lives in the descriptor JSON
+    # blob and is re-compiled by the production-wiring helper at every bring-up
+    # (v6.2 V6.2.2 architect call: helper re-execution is the canonical re-hydration
+    # path; Workflow dataclass intentionally does not roundtrip plural triggers).
     trigger_raw = body.get("trigger")
+    triggers_raw = body.get("triggers")
+    if trigger_raw is not None and triggers_raw is not None:
+        raise DescriptorError(
+            "descriptor specifies both 'trigger' (singular) and 'triggers' "
+            "(plural); specify exactly one. Plural is the production WTC shape; "
+            "singular is the legacy Spec 4 shape."
+        )
+    if triggers_raw is not None and not isinstance(triggers_raw, list):
+        raise DescriptorError("triggers must be a list")
     trigger = _build_trigger(trigger_raw) if trigger_raw else None
     description = body.get("description", "") or narrative_description
     # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 7: terminal_branches
