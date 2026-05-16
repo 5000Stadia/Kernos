@@ -184,7 +184,7 @@ async def bring_up_substrate(
     from kernos.kernel.workflows.action_library import ActionLibrary
     action_library = ActionLibrary()
     _register_all_actions(
-        action_library, handler, agent_registry, workflow_ledger,
+        action_library, handler, agent_registry, workflow_ledger, data_dir,
     )
 
     # --- ExecutionEngine ----------------------------------------------
@@ -628,6 +628,7 @@ def _register_all_actions(
     handler: Any,
     agent_registry: "AgentRegistry",
     workflow_ledger: "WorkflowLedger",
+    data_dir: str,
 ) -> None:
     """Register every Action class shipped in the action library.
 
