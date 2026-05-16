@@ -39,8 +39,9 @@ the per-step / per-tier audit events.
 
 from __future__ import annotations
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
@@ -681,11 +682,23 @@ class EnactmentService:
         envelope: ActionEnvelope,
         trace: ExecutionTrace,
         reassembly_budget: ReassemblyBudget,
+        enactment_results: list[dict[str, str]] | None = None,
     ) -> EnactmentOutcome:
         """Execute every step of `plan`. On tier-4 reassemble, this
         method is called recursively with the new plan; reassembly
         budget decrements across the recursion.
+
+        ``enactment_results`` accumulates per-step serialized dispatch
+        outcomes (ACTION-RESULT-FORWARDING-V1) so they reach the
+        terminal renderer's briefing — without it, full-machinery
+        tool outputs (e.g. execute_code stdout) vanish between the
+        dispatcher returning a StepDispatchResult and EnactmentService
+        rendering the unmodified original briefing. The list is
+        threaded through tier-4 reassemble recursion so results from
+        the original plan's executed steps survive the rebuild.
         """
+        if enactment_results is None:
+            enactment_results = []
         for step in plan.steps:
             outcome = await self._run_step_with_tiers(
                 step=step,
@@ -694,6 +707,7 @@ class EnactmentService:
                 envelope=envelope,
                 trace=trace,
                 reassembly_budget=reassembly_budget,
+                enactment_results=enactment_results,
             )
             if outcome is not None:
                 # Step terminated the loop. If it's a reassemble
@@ -712,7 +726,10 @@ class EnactmentService:
         # Audit subtype is SUCCESS_FULL_MACHINERY (the design review re-review: keep
         # full-machinery completions distinct from thin-path
         # completions for diagnostic clarity in audit-trail filters).
-        result = await self._presence.render(briefing)
+        render_briefing = _briefing_with_enactment_results(
+            briefing, enactment_results,
+        )
+        result = await self._presence.render(render_briefing)
         await self._emit_terminated(
             briefing,
             TerminationSubtype.SUCCESS_FULL_MACHINERY,
@@ -734,6 +751,7 @@ class EnactmentService:
         envelope: ActionEnvelope,
         trace: ExecutionTrace,
         reassembly_budget: ReassemblyBudget,
+        enactment_results: list[dict[str, str]],
     ) -> EnactmentOutcome | None:
         """Execute one step + three-question check + tier handling.
 
@@ -769,6 +787,14 @@ class EnactmentService:
             )
             trace.record_step_outcome(
                 _step_outcome_summary(current_step, dispatch_result)
+            )
+            # ACTION-RESULT-FORWARDING-V1: capture every attempt's
+            # outcome so the terminal renderer's briefing carries it.
+            # Recorded per attempt (not just final) so retry/modify
+            # chains stay visible to the model — the agent sees what
+            # was tried, not just what eventually worked.
+            enactment_results.append(
+                _serialise_step_result(current_step, dispatch_result)
             )
 
             # Three-question check.
@@ -996,13 +1022,17 @@ class EnactmentService:
                     )
 
                 # Execute the new plan from step 1; consume one
-                # reassembly slot.
+                # reassembly slot. Forward accumulated enactment
+                # results so the rebuild's terminal render still
+                # sees what the original plan attempted before
+                # reassembly was triggered.
                 return await self._execute_plan(
                     plan=new_plan,
                     briefing=briefing,
                     envelope=envelope,
                     trace=trace,
                     reassembly_budget=reassembly_budget.consumed(),
+                    enactment_results=enactment_results,
                 )
 
             if routing is TierRouting.TIER_5_SURFACE_B1:
@@ -1444,6 +1474,62 @@ def _step_outcome_summary(
         f"step {step.step_id} ({step.tool_id}.{step.operation_name}): "
         f"{outcome}"
     )
+
+
+def _serialise_step_result(
+    step: Step, dispatch_result: StepDispatchResult,
+) -> dict[str, str]:
+    """Serialise a per-step enactment dispatch outcome for
+    forwarding to the terminal renderer (ACTION-RESULT-FORWARDING-V1).
+
+    The renderer's existing forwarded-tool-results infrastructure
+    (``presence_renderer._format_forwarded_tool_results``) expects
+    ``{tool_name: str, result: str}``. The full dispatch result —
+    completion flag, output dict, failure classification, error
+    summary, corrective signal, duration — is JSON-serialised into
+    the ``result`` field so the model sees structured outcomes for
+    every attempt, including failures, not just successes.
+
+    ``tool_name`` uses the step's tool_id (the actual surface the
+    LLM emitted a tool_use for); the operation_name is folded into
+    the JSON payload so the model can distinguish overloaded
+    surfaces. Default=str on json.dumps catches the rare non-JSON
+    values that could appear in tool output payloads (Path, datetime,
+    etc.) without breaking the forward.
+    """
+    payload = {
+        "operation_name": step.operation_name,
+        "completed": dispatch_result.completed,
+        "output": dispatch_result.output,
+        "failure_kind": dispatch_result.failure_kind.value,
+        "error_summary": dispatch_result.error_summary,
+        "corrective_signal": dispatch_result.corrective_signal,
+        "duration_ms": dispatch_result.duration_ms,
+    }
+    return {
+        "tool_name": step.tool_id,
+        "result": json.dumps(payload, default=str),
+    }
+
+
+def _briefing_with_enactment_results(
+    briefing: Briefing, results: list[dict[str, str]],
+) -> Briefing:
+    """Return a Briefing copy whose audit_trace carries the accumulated
+    enactment-tier dispatch results in ``tool_results_during_enactment``.
+
+    No-op when ``results`` is empty (returns the original briefing
+    unchanged). Otherwise constructs a new AuditTrace with the
+    extended field via ``dataclasses.replace`` — preserves every other
+    audit field unchanged.
+    """
+    if not results:
+        return briefing
+    new_audit = replace(
+        briefing.audit_trace,
+        tool_results_during_enactment=tuple(results),
+    )
+    return replace(briefing, audit_trace=new_audit)
 
 
 def _stamp_reassembled(plan: Plan, *, triggering_context_summary: str) -> Plan:
