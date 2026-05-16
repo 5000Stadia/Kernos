@@ -1101,12 +1101,19 @@ def _format_forwarded_tool_results(
 
     Empty inputs (both phases) → ``""``. Capped per-entry
     (``_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP``) and cumulatively
-    (``_FORWARDED_RESULT_TOTAL_CHAR_CAP``) across BOTH phases combined,
-    so a large prep result can't starve enactment results (or vice
-    versa) but the renderer prompt still doesn't balloon. Truncated
-    entries carry an explicit marker so the model knows the result
-    was clipped and can issue a fresh fetch if it truly needs the
-    rest.
+    (``_FORWARDED_RESULT_TOTAL_CHAR_CAP``).
+
+    Budget priority (Codex round-2 finding fold): **enactment renders
+    first**. Prep informed the action decision; enactment is the
+    receipt for what the action just did. If both phases produce
+    large results, the receipt for the just-taken action takes
+    priority over the upstream context that informed the decision —
+    otherwise a large prep block could starve the enactment receipt
+    entirely, which is exactly the gap this spec closes.
+
+    Truncated entries carry an explicit marker so the model knows the
+    result was clipped and can issue a fresh fetch if it truly needs
+    the rest.
     """
     if not prep_results and not enactment_results:
         return ""
@@ -1155,15 +1162,17 @@ def _format_forwarded_tool_results(
                 f"#### {name} ({phase_label})\n{clipped}{truncated_marker}"
             )
 
-    _emit_phase(
-        "### Prior tool results (already fetched this turn)",
-        "prep",
-        prep_results,
-    )
+    # Enactment first — receipt for the just-taken action takes budget
+    # priority over the prep context that informed the decision.
     _emit_phase(
         "### Action results (dispatched this turn)",
         "enactment",
         enactment_results,
+    )
+    _emit_phase(
+        "### Prior tool results (already fetched this turn)",
+        "prep",
+        prep_results,
     )
     return "\n\n".join(sections)
 

@@ -760,6 +760,100 @@ async def test_full_machinery_forwards_enactment_results_to_renderer():
 
 
 @pytest.mark.asyncio
+async def test_b1_termination_forwards_enactment_results_to_renderer():
+    """Pin (Codex round-2 fold): B1 termination still forwards prior
+    enactment results to the renderer. Otherwise the failure-path
+    acknowledgment loses the receipts for what was actually tried
+    before the envelope-violation-on-modify (or other B1 trigger)
+    fired. Tier-2 modify produces an envelope-violating modified step;
+    the original attempt's dispatch_result must still surface to the
+    renderer."""
+    import json
+    bad_modify = _step(step_id="bad-modify", tool_class="slack")
+    envelope = _envelope(allowed_tool_classes=("email",))
+    captured: list[Briefing] = []
+
+    class _CapturingPresence:
+        async def render(self, briefing: Briefing):
+            captured.append(briefing)
+            return PresenceRenderResult(text="b1", streamed=False)
+
+    presence = _CapturingPresence()
+    service, _, _, _ = _full_machinery_service(
+        presence=presence,
+        modified_step=bad_modify,
+        dispatcher_results=[
+            StepDispatchResult(
+                completed=False,
+                output={"error": "transient before modify"},
+                failure_kind=FailureKind.TRANSIENT,
+                error_summary="connection error",
+            ),
+        ],
+        judgments=[
+            DivergenceJudgment(
+                effect_matches_expectation=False,
+                plan_still_valid=True,
+                failure_kind=FailureKind.TRANSIENT,
+            ),
+        ],
+        retry_budget=0,  # force tier-2 modify route
+    )
+    outcome = await service.run(_execute_briefing(envelope=envelope))
+    assert outcome.subtype is TerminationSubtype.B1_ACTION_INVALIDATED
+    # The B1 render saw the briefing — pin that the attempted
+    # dispatch's receipt landed on enactment field, not silently
+    # dropped because termination took the b1 path.
+    assert len(captured) == 1
+    forwarded = captured[-1].audit_trace.tool_results_during_enactment
+    assert len(forwarded) == 1
+    payload = json.loads(forwarded[0]["result"])
+    assert payload["completed"] is False
+    assert payload["failure_kind"] == "transient"
+
+
+@pytest.mark.asyncio
+async def test_b2_termination_forwards_enactment_results_to_renderer():
+    """Pin (Codex round-2 fold): B2 termination's synthetic
+    clarification briefing also carries the prior enactment receipts
+    so the clarification question can ground in what was actually
+    tried, not just what was abstracted away."""
+    import json
+    captured: list[Briefing] = []
+
+    class _CapturingPresence:
+        async def render(self, briefing: Briefing):
+            captured.append(briefing)
+            return PresenceRenderResult(text="b2", streamed=False)
+
+    presence = _CapturingPresence()
+    service, _, _, _ = _full_machinery_service(
+        presence=presence,
+        dispatcher_results=[
+            StepDispatchResult(
+                completed=False, output={"clarify": "needed"},
+                failure_kind=FailureKind.AMBIGUITY_NEEDS_USER,
+            ),
+        ],
+        judgments=[
+            DivergenceJudgment(
+                effect_matches_expectation=False,
+                plan_still_valid=False,
+                failure_kind=FailureKind.AMBIGUITY_NEEDS_USER,
+            ),
+        ],
+    )
+    outcome = await service.run(_execute_briefing())
+    assert outcome.subtype is TerminationSubtype.B2_USER_DISAMBIGUATION_NEEDED
+    assert len(captured) == 1
+    forwarded = captured[-1].audit_trace.tool_results_during_enactment
+    assert len(forwarded) == 1
+    payload = json.loads(forwarded[0]["result"])
+    assert payload["completed"] is False
+    assert payload["failure_kind"] == "ambiguity_needs_user"
+
+
+@pytest.mark.asyncio
 async def test_full_machinery_forwards_every_attempt_including_failures():
     """Pin: tier-1 retry chain — every attempt's dispatch result reaches
     the renderer's briefing, not just the final successful one. The

@@ -174,6 +174,81 @@ async def test_render_prepends_forwarded_tool_results():
 
 
 @pytest.mark.asyncio
+async def test_render_prepends_enactment_results_with_phase_label():
+    """ACTION-RESULT-FORWARDING-V1 (2026-05-16): full-machinery
+    StepDispatcher results flow through the enactment-tier carrier
+    on AuditTrace. The renderer surfaces them under a distinct
+    'Action results' heading with '(enactment)' phase labels so the
+    model can distinguish them from prep-tier (read) results."""
+    captured: dict = {}
+    renderer = PresenceRenderer(
+        chain_caller=_capture_chain(captured=captured),
+    )
+    audit = AuditTrace(
+        tool_results_during_enactment=(
+            {
+                "tool_name": "execute_code",
+                "result": '{"stdout": "hello-from-enact", "completed": true}',
+            },
+        ),
+    )
+    briefing = Briefing(
+        relevant_context=(),
+        filtered_context=(),
+        decided_action=RespondOnly(),
+        presence_directive="render after action",
+        audit_trace=audit,
+        turn_id="turn-x",
+        integration_run_id="run-x",
+    )
+    await renderer.render(briefing)
+
+    user_msg = captured["messages"][0]["content"]
+    assert "Action results (dispatched this turn)" in user_msg
+    assert "execute_code (enactment)" in user_msg
+    assert "hello-from-enact" in user_msg
+
+
+@pytest.mark.asyncio
+async def test_render_enactment_renders_before_prep_for_budget_priority():
+    """Pin (Codex round-2 fold): enactment renders FIRST so the
+    just-taken action's receipt gets char-budget priority over
+    upstream prep context. Pin asserts ordering by checking the
+    enactment heading appears before the prep heading in user_msg.
+    """
+    captured: dict = {}
+    renderer = PresenceRenderer(
+        chain_caller=_capture_chain(captured=captured),
+    )
+    audit = AuditTrace(
+        tool_results_during_prep=(
+            {"tool_name": "read_file", "result": "prep body"},
+        ),
+        tool_results_during_enactment=(
+            {"tool_name": "execute_code", "result": "enact body"},
+        ),
+    )
+    briefing = Briefing(
+        relevant_context=(),
+        filtered_context=(),
+        decided_action=RespondOnly(),
+        presence_directive="render",
+        audit_trace=audit,
+        turn_id="turn-x",
+        integration_run_id="run-x",
+    )
+    await renderer.render(briefing)
+
+    user_msg = captured["messages"][0]["content"]
+    enact_idx = user_msg.index("Action results (dispatched this turn)")
+    prep_idx = user_msg.index("Prior tool results (already fetched this turn)")
+    assert enact_idx < prep_idx, (
+        "enactment block must appear before prep block so it wins "
+        "char-budget priority when both phases produce large results"
+    )
+
+
+@pytest.mark.asyncio
 async def test_render_omits_forward_block_when_no_tool_results():
     """When the integration runner didn't dispatch any tools, no
     forward block is added — the user message is unchanged from

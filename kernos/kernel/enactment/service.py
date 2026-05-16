@@ -877,6 +877,7 @@ class EnactmentService:
                             f"{step_validation.reason}"
                         ),
                         detail=step_validation.detail,
+                        enactment_results=enactment_results,
                     )
                 await self._emit_step_modified(
                     plan=plan,
@@ -916,6 +917,7 @@ class EnactmentService:
                             f"{step_validation.reason}"
                         ),
                         detail=step_validation.detail,
+                        enactment_results=enactment_results,
                     )
                 await self._emit_step_pivoted(
                     plan=plan,
@@ -944,6 +946,7 @@ class EnactmentService:
                             "per-envelope or per-turn reassembly "
                             "budget is exhausted"
                         ),
+                        enactment_results=enactment_results,
                     )
 
                 # Friction ticket on tier-2 exhaustion (transient or
@@ -1019,6 +1022,7 @@ class EnactmentService:
                             f"{new_validation.reason}"
                         ),
                         detail=new_validation.detail,
+                        enactment_results=enactment_results,
                     )
 
                 # Execute the new plan from step 1; consume one
@@ -1062,6 +1066,7 @@ class EnactmentService:
                         f"TIER_5_SURFACE_B1 with failure_kind="
                         f"{failure_kind.value}"
                     ),
+                    enactment_results=enactment_results,
                 )
 
             if routing is TierRouting.TIER_5_SURFACE_B2:
@@ -1075,6 +1080,7 @@ class EnactmentService:
                     failed_step=current_step,
                     dispatch_result=dispatch_result,
                     trace=trace,
+                    enactment_results=enactment_results,
                 )
 
             # Unknown routing → defensive B1.
@@ -1084,6 +1090,7 @@ class EnactmentService:
                 trace=trace,
                 reason="unknown_routing",
                 detail=f"classify_routing returned {routing!r}",
+                enactment_results=enactment_results,
             )
 
     # ----- C6 terminations: B1 + B2 with capped reintegration -----
@@ -1096,6 +1103,7 @@ class EnactmentService:
         trace: ExecutionTrace,
         reason: str,
         detail: str,
+        enactment_results: list[dict[str, str]] | None = None,
     ) -> EnactmentOutcome:
         """B1 surface: action invalidated. Capped reintegration payload
         produced and stored on the EnactmentOutcome for the next turn's
@@ -1106,6 +1114,14 @@ class EnactmentService:
         the presence_renderer with the original briefing — the
         renderer's prompt (tuned in C7) handles the partial-work
         acknowledgment.
+
+        ACTION-RESULT-FORWARDING-V1 (Codex round-2 fold): when steps
+        ran before termination, their dispatch outcomes are forwarded
+        to the renderer so the failure-path acknowledgment can
+        reference what was actually tried — "I tried X and got Y" beats
+        a generic "I discovered an issue." Empty/None means the
+        termination preceded any dispatch (e.g. envelope rejection on
+        the initial plan); the rendered briefing is unchanged.
         """
         # Record audit refs for the trace BEFORE constructing the
         # reintegration so the caps include them.
@@ -1119,7 +1135,10 @@ class EnactmentService:
         # Render terminal acknowledgment via presence_renderer. The
         # renderer can stream — that's "after action complete" per
         # the spec's streaming rule.
-        result = await self._presence.render(briefing)
+        render_briefing = _briefing_with_enactment_results(
+            briefing, enactment_results or [],
+        )
+        result = await self._presence.render(render_briefing)
 
         await self._emit_terminated(
             briefing,
@@ -1151,6 +1170,7 @@ class EnactmentService:
         failed_step: Step,
         dispatch_result: StepDispatchResult,
         trace: ExecutionTrace,
+        enactment_results: list[dict[str, str]] | None = None,
     ) -> EnactmentOutcome:
         """B2 surface: user disambiguation needed.
 
@@ -1194,6 +1214,13 @@ class EnactmentService:
         # presence renderer's interface stays uniform.
         synthetic_briefing = _synthesize_clarification_briefing(
             briefing, clarification
+        )
+        # ACTION-RESULT-FORWARDING-V1 (Codex round-2 fold): the
+        # clarification render also gets the attempted steps' receipts
+        # so the question can ground in what was tried, not just what
+        # was abstracted away.
+        synthetic_briefing = _briefing_with_enactment_results(
+            synthetic_briefing, enactment_results or [],
         )
         result = await self._presence.render(synthetic_briefing)
 
