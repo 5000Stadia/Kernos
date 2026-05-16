@@ -1,0 +1,147 @@
+# SELF-IMPROVEMENT-WORKFLOW-V1 — the v1 autonomy loop workflow definition.
+#
+# Fires when a friction pattern's recurrence threshold is exceeded
+# (substrate-emitted friction.pattern_frequency_threshold_exceeded,
+# produced by FrictionPatternFrequencyEmitter from
+# friction.pattern_reactivated events). Drives the v1 autonomy loop:
+#
+#   1. Record the recurrence on the pattern (audit trail in the
+#      friction_pattern_occurrence table).
+#   2. Ask CC (claude_code coding session) to address the pattern.
+#   3. Pause at approval gate until coding_consult.response_received
+#      arrives carrying CC's investigation outcome.
+#   4. Read the response.
+#   5. Mark the pattern resolved (unconditional in v1 per architect
+#      call; v2 may branch on investigation_outcome).
+#   6. Emit the autonomy-loop outcome event with CC's actual
+#      investigation_outcome — the load-bearing audit-trail signal
+#      that distinguishes completed / partial / unable_to_investigate.
+#
+# Ref grammar (Spec 4 canonical):
+#   - {idea_payload.<path>}        trigger event payload refs
+#   - {step.<step_id>.value.<path>} step value refs
+#   - {workflow.<key>}             fixed placeholders (instance_id, etc.)
+#
+# Trigger event_selector uses top-level instance_id (engine-trusted
+# Event field) + payload.pattern_id (per v7.3 H2 fold).
+# instance_id value is substituted at registration time by
+# register_self_improvement_workflow (helper substitution pattern
+# from v7.3 H2 — top-level instance_id path only).
+
+workflow_id: self_improvement
+instance_id: '{installer.instance_id}'
+name: Self-improvement autonomy loop
+description: |
+  v1 autonomy loop. Trigger fires on friction pattern frequency
+  threshold; workflow records recurrence, asks CC, awaits response,
+  marks resolved, emits outcome.
+version: "1.0"
+owner: architect
+instance_local: true
+
+bounds:
+  iteration_count: 1
+  wall_time_seconds: 90000
+
+verifier:
+  flavor: deterministic
+  check: terminated
+
+triggers:
+  - event_type: friction.pattern_frequency_threshold_exceeded
+    event_selector:
+      op: AND
+      operands:
+        # The top-level event_type filter narrows the trigger to ONLY
+        # fire on the canonical autonomy-loop entry event. Without
+        # it the composite selector lands in the runtime's unfiltered
+        # bucket and matches any event with the AND-tail predicates
+        # satisfied (the audit-event payloads also carry pattern_id;
+        # the substrate-emitted friction.pattern_reactivated event
+        # also matches). Including event_type here keeps the trigger
+        # 1:1 with the emitter's translation output.
+        - op: eq
+          path: event_type
+          value: friction.pattern_frequency_threshold_exceeded
+        - op: eq
+          path: instance_id
+          value: '{installer.instance_id}'
+        - op: exists
+          path: payload.pattern_id
+
+action_sequence:
+  - id: record_recurrence
+    action_type: call_tool
+    parameters:
+      tool_id: record_friction_pattern_recurrence
+      args:
+        pattern_id: '{idea_payload.pattern_id}'
+        classified_by: auto-signal-type
+    continuation_rules:
+      on_failure: abort
+
+  - id: ask_cc
+    action_type: call_tool
+    parameters:
+      tool_id: ask_coding_session_for_workflow
+      args:
+        target: claude_code
+        question: 'Address recurring friction pattern: {idea_payload.pattern_id}'
+        context:
+          # Pattern payload for the coding session itself.
+          pattern_id: '{idea_payload.pattern_id}'
+          # Spec 4 gate-scoping fields. The bridge echoes these to
+          # the coding_consult.response_received event payload so the
+          # engine's gate match (_on_post_flush_for_gates) can verify
+          # the binding between this paused execution and the
+          # response event. Resolved at parameter time:
+          # {workflow.execution_id} → execution row PK;
+          # {workflow.gate_nonce} → engine-minted per-gate nonce.
+          _workflow_execution_id: '{workflow.execution_id}'
+          _workflow_gate_nonce: '{workflow.gate_nonce}'
+    continuation_rules:
+      on_failure: abort
+    gate_ref: await_cc_response
+
+  - id: read_response
+    action_type: call_tool
+    parameters:
+      tool_id: read_coding_session_response_for_workflow
+      args:
+        request_id: '{step.ask_cc.value.request_id}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: mark_resolved
+    action_type: call_tool
+    parameters:
+      tool_id: transition_friction_pattern_lifecycle
+      args:
+        pattern_id: '{idea_payload.pattern_id}'
+        new_state: resolved
+        resolved_by_spec: self_improvement
+    continuation_rules:
+      on_failure: abort
+
+  - id: emit_outcome
+    action_type: call_tool
+    parameters:
+      tool_id: emit_autonomy_loop_event
+      args:
+        workflow_id: self_improvement
+        outcome: '{step.read_response.value.investigation_outcome}'
+        addresses_friction_patterns:
+          - '{idea_payload.pattern_id}'
+    continuation_rules:
+      on_failure: abort
+
+approval_gates:
+  - gate_name: await_cc_response
+    pause_reason: awaiting coding session response
+    approval_event_type: coding_consult.response_received
+    approval_event_predicate:
+      op: eq
+      path: payload.request_id
+      value: '{step.ask_cc.value.request_id}'
+    timeout_seconds: 86400
+    bound_behavior_on_timeout: abort_workflow

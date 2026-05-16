@@ -1252,3 +1252,194 @@ class TestSlugify:
     def test_empty_returns_empty(self):
         assert slugify("") == ""
         assert slugify("!!!") == ""
+
+
+# ===========================================================================
+# Spec 6: FrictionPattern.active_epoch
+# ===========================================================================
+#
+# Pins the instance-scoped monotonic counter that increments when a
+# pattern enters an active-class state (ACTIVE on creation,
+# REACTIVATED via record_recurrence threshold OR via operator
+# transition_lifecycle path). Emitters use the epoch to dedupe
+# notifications across activation episodes.
+
+
+class TestSpec6ActiveEpoch:
+    """Spec 6 substrate plumbing: active_epoch column + increment hooks
+    on create_pattern, transition_lifecycle (entering ACTIVE/REACTIVATED),
+    and record_recurrence (threshold-driven reactivation)."""
+
+    async def test_create_pattern_assigns_epoch_one_for_first_pattern(
+        self, store,
+    ):
+        """First pattern in an instance gets active_epoch=1."""
+        p = await store.create_pattern(
+            instance_id="inst-A",
+            description="first pattern",
+            signal_type_keys=["k1"],
+        )
+        assert p.active_epoch == 1
+        # Substrate state pin: column persisted.
+        async with store.db.execute(
+            "SELECT active_epoch FROM friction_pattern "
+            "WHERE instance_id = ? AND pattern_id = ?",
+            ("inst-A", p.pattern_id),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row["active_epoch"] == 1
+
+    async def test_create_second_pattern_assigns_epoch_two(self, store):
+        """Instance-scoped monotonicity: each new active-class state
+        within an instance increments the epoch."""
+        a = await store.create_pattern(
+            instance_id="inst-A", description="pattern a",
+            signal_type_keys=["ka"],
+        )
+        b = await store.create_pattern(
+            instance_id="inst-A", description="pattern b",
+            signal_type_keys=["kb"],
+        )
+        assert a.active_epoch == 1
+        assert b.active_epoch == 2
+
+    async def test_epoch_is_instance_scoped(self, store):
+        """Different instances have independent epoch counters."""
+        a = await store.create_pattern(
+            instance_id="inst-A", description="pattern a",
+            signal_type_keys=["ka"],
+        )
+        b = await store.create_pattern(
+            instance_id="inst-B", description="pattern b",
+            signal_type_keys=["kb"],
+        )
+        assert a.active_epoch == 1
+        assert b.active_epoch == 1  # inst-B starts at 1, not 2
+
+    async def test_resolved_then_active_increments_epoch(self, store):
+        """Resolved → Active transition is a NEW episode; epoch
+        increments to reflect a new activation."""
+        p = await store.create_pattern(
+            instance_id="inst-A", description="cycle test",
+            signal_type_keys=["kc"],
+        )
+        assert p.active_epoch == 1
+        # Resolve: epoch unchanged.
+        p2 = await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED,
+        )
+        assert p2.active_epoch == 1
+        # Reactivate via the resolved→active operator path:
+        # epoch increments.
+        p3 = await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ACTIVE,
+        )
+        assert p3.active_epoch == 2
+
+    async def test_record_recurrence_threshold_increments_epoch(
+        self, store, monkeypatch,
+    ):
+        """Functional pin (architect's user-feedback request): exercise
+        the threshold path end-to-end. When record_recurrence drives a
+        resolved pattern through the reactivation threshold, the
+        substrate transitions to REACTIVATED AND active_epoch increments
+        — emitters can read the new epoch to know a new activation
+        episode began."""
+        # Lower threshold to 1 recurrence for testable signal.
+        monkeypatch.setenv("KERNOS_FRICTION_REACTIVATION_THRESHOLD", "1")
+        # Wide window so test isn't time-sensitive.
+        monkeypatch.setenv(
+            "KERNOS_FRICTION_REACTIVATION_WINDOW_DAYS", "365",
+        )
+        p = await store.create_pattern(
+            instance_id="inst-A", description="recurrence test",
+            signal_type_keys=["kr"],
+        )
+        epoch_at_create = p.active_epoch
+        # Resolve to get into the recurrence-eligible state.
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED,
+        )
+        # Record recurrence; should trigger reactivation.
+        triggered = await store.record_recurrence(
+            instance_id="inst-A",
+            pattern_id=p.pattern_id,
+            observed_at=_now(),
+            report_path="report-1.md",
+            classified_by=CLASSIFIED_AUTO_SIGNAL_TYPE,
+        )
+        assert triggered is True
+        # Substrate state pin: lifecycle_state AND active_epoch both
+        # advanced. Emitter consumer would observe a new epoch.
+        async with store.db.execute(
+            "SELECT lifecycle_state, active_epoch FROM friction_pattern "
+            "WHERE instance_id = ? AND pattern_id = ?",
+            ("inst-A", p.pattern_id),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row["lifecycle_state"] == LIFECYCLE_REACTIVATED
+        assert row["active_epoch"] > epoch_at_create
+        # Specifically: epoch is 2 (one for original creation, one
+        # for the new reactivation episode).
+        assert row["active_epoch"] == 2
+
+    async def test_resolved_stays_at_epoch(self, store):
+        """Transition to RESOLVED does NOT increment epoch (episode
+        ended, not started)."""
+        p = await store.create_pattern(
+            instance_id="inst-A", description="resolve test",
+            signal_type_keys=["kresolve"],
+        )
+        p2 = await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_RESOLVED,
+        )
+        assert p2.active_epoch == p.active_epoch  # unchanged
+
+    async def test_archived_revival_increments_epoch(self, store):
+        """ARCHIVED → ACTIVE revival is a new episode; epoch
+        increments."""
+        p = await store.create_pattern(
+            instance_id="inst-A", description="archive test",
+            signal_type_keys=["karchive"],
+        )
+        # Archive (allowed from ACTIVE).
+        await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ARCHIVED,
+        )
+        # Revive (ARCHIVED → ACTIVE).
+        revived = await store.transition_lifecycle(
+            "inst-A", p.pattern_id, LIFECYCLE_ACTIVE,
+        )
+        assert revived.active_epoch == 2
+
+    async def test_pre_migration_row_active_epoch_zero(self, tmp_path):
+        """Pre-Spec-6 rows (created before the ALTER TABLE migration)
+        carry active_epoch=0 by default. Emitters interpret 0 as
+        pre-history. Verify migration path: open store, manually
+        INSERT a row using the legacy column set, then re-open and
+        observe active_epoch=0."""
+        # Step 1: bring up store; ALTER TABLE adds active_epoch column.
+        s = FrictionPatternStore()
+        await s.start(str(tmp_path))
+        # Step 2: simulate a legacy row by directly INSERTing with
+        # active_epoch=0 (the ALTER TABLE default).
+        await s.db.execute(
+            "INSERT INTO friction_pattern "
+            "(instance_id, pattern_id, parent_pattern_id, display_name, "
+            " description, signal_type_keys, aliases, lifecycle_state, "
+            " occurrence_count, first_observed_at, last_observed_at, "
+            " resolved_at, resolved_by_spec, reactivated_at, "
+            " active_epoch, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "inst-legacy", "legacy-pattern", "", "",
+                "legacy", "[]", "[]", LIFECYCLE_ACTIVE,
+                0, "", "", "", "", "",
+                0, _now(),
+            ),
+        )
+        # Step 3: read back; active_epoch is 0.
+        p = await s.get_pattern("inst-legacy", "legacy-pattern")
+        assert p is not None
+        assert p.active_epoch == 0
+        await s.stop()

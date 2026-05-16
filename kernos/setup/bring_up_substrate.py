@@ -173,14 +173,19 @@ async def bring_up_substrate(
     await workflow_registry.start(data_dir, trigger_registry)
     workflow_registry.wire_agent_registry(agent_registry)
 
+    # --- WorkflowLedger -----------------------------------------------
+    # Constructed BEFORE action library so AppendToLedgerAction can be
+    # wired with the real ledger surface (Spec 6 commit 5 production
+    # wiring; replaces the prior _unwired_stub).
+    from kernos.kernel.workflows.ledger import WorkflowLedger
+    workflow_ledger = WorkflowLedger(data_dir)
+
     # --- ActionLibrary + register all 7 verbs -------------------------
     from kernos.kernel.workflows.action_library import ActionLibrary
     action_library = ActionLibrary()
-    _register_all_actions(action_library, handler, agent_registry)
-
-    # --- WorkflowLedger -----------------------------------------------
-    from kernos.kernel.workflows.ledger import WorkflowLedger
-    workflow_ledger = WorkflowLedger(data_dir)
+    _register_all_actions(
+        action_library, handler, agent_registry, workflow_ledger,
+    )
 
     # --- ExecutionEngine ----------------------------------------------
     from kernos.kernel.workflows.execution_engine import ExecutionEngine
@@ -448,6 +453,118 @@ async def bring_up_substrate(
             "lazily via hash-mismatch-on-retrieval; non-blocking"
         )
 
+    # Spec 6 commit 7 / B3 fold: register the self_improvement
+    # workflow + launch the autonomy-loop emitters in B3 order
+    # (helper success BEFORE emitters launch so trigger predicates
+    # exist before friction.pattern_frequency_threshold_exceeded
+    # events fire).
+    #
+    # Conditional on KERNOS_ARCHITECT_ACTOR_ID being set (required
+    # for the architect-only authoring path). When unset, the
+    # autonomy loop bring-up is skipped with a clear log line; the
+    # rest of the substrate operates normally so the bring-up isn't
+    # blocked on autonomy-loop optionality.
+    import os as _os_si
+    _architect_actor_id_si = _os_si.environ.get(
+        "KERNOS_ARCHITECT_ACTOR_ID", "",
+    )
+    _operator_actor_id_si = _os_si.environ.get(
+        "KERNOS_OPERATOR_ACTOR_ID", "",
+    )
+    if _architect_actor_id_si and _operator_actor_id_si:
+        # Spec 6 commit 7 Codex round-1 H1 fold: BOTH architect and
+        # operator identities required before announcing the autonomy
+        # loop live. The operator actor authorizes the workflow's
+        # autonomy-tool calls at execution time (autonomy_tools'
+        # _is_operator gate); without operator, the workflow would
+        # register + activate cleanly but every record_recurrence /
+        # mark_resolved / emit_outcome call would fail at execute
+        # time with CAT_AUTONOMY_NOT_AUTHORIZED. Skipping bring-up
+        # entirely when operator is unset preserves the "no
+        # half-initialised autonomy loop" invariant (v7 H3 fail-loud
+        # pattern composes with v1 operational scope discipline:
+        # the loop is either fully wireable or skipped with a clear
+        # log).
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_ARCHITECT as _ACTOR_ARCHITECT_SI,
+            AuthoringContext as _AuthoringContext_si,
+        )
+        from kernos.kernel.workflows.self_improvement_helper import (
+            register_self_improvement_workflow,
+        )
+        _architect_ctx_si = _AuthoringContext_si(
+            actor_id=_architect_actor_id_si,
+            actor_kind=_ACTOR_ARCHITECT_SI,
+        )
+        try:
+            _si_workflow_id = await register_self_improvement_workflow(
+                engine=execution_engine,
+                architect_ctx=_architect_ctx_si,
+                instance_id=_substrate_instance_id,
+                trigger_runtime=runtime,
+                operator_actor_id=_operator_actor_id_si,
+            )
+            # B3 fold: emitters launch AFTER helper success.
+            # FrictionPatternFrequencyEmitter needs a started pattern
+            # store; CodingSessionBridgeResponseEmitter needs only
+            # the data_dir + instance_id.
+            from kernos.kernel.friction_patterns import (
+                FrictionPatternStore as _FrictionPatternStore_si,
+            )
+            from kernos.kernel.workflows.autonomy_emitters import (
+                CodingSessionBridgeResponseEmitter,
+                FrictionPatternFrequencyEmitter,
+            )
+            # Reuse the handler's store when available so the autonomy
+            # loop observes the same friction patterns the handler's
+            # FrictionObserver records. Otherwise construct + start a
+            # fresh store. Either way ensure_schema is idempotent.
+            _si_pattern_store = getattr(handler, "_friction_pattern_store", None)
+            if _si_pattern_store is None:
+                _si_pattern_store = _FrictionPatternStore_si()
+            await _si_pattern_store.ensure_schema(data_dir)
+            _freq_emitter_si = FrictionPatternFrequencyEmitter(
+                instance_id=_substrate_instance_id,
+                pattern_store=_si_pattern_store,
+            )
+            await _freq_emitter_si.start()
+            execution_engine.register_emitter(
+                "friction_pattern_frequency", _freq_emitter_si,
+            )
+            _response_emitter_si = CodingSessionBridgeResponseEmitter(
+                instance_id=_substrate_instance_id,
+                data_dir=data_dir,
+            )
+            await _response_emitter_si.start()
+            execution_engine.register_emitter(
+                "coding_session_response", _response_emitter_si,
+            )
+            logger.info(
+                "SELF_IMPROVEMENT_AUTONOMY_LOOP_LIVE workflow_id=%s "
+                "instance_id=%s",
+                _si_workflow_id, _substrate_instance_id,
+            )
+        except Exception as _exc_si:
+            logger.warning(
+                "SELF_IMPROVEMENT_AUTONOMY_LOOP_BRINGUP_FAILED error=%s "
+                "— continuing without autonomy loop",
+                _exc_si,
+            )
+    elif _architect_actor_id_si and not _operator_actor_id_si:
+        logger.info(
+            "SELF_IMPROVEMENT_AUTONOMY_LOOP_SKIPPED: "
+            "KERNOS_OPERATOR_ACTOR_ID not set; the autonomy loop's "
+            "tool calls require an operator identity at execution "
+            "time. Set both KERNOS_ARCHITECT_ACTOR_ID and "
+            "KERNOS_OPERATOR_ACTOR_ID to enable the loop."
+        )
+    else:
+        logger.info(
+            "SELF_IMPROVEMENT_AUTONOMY_LOOP_SKIPPED: "
+            "KERNOS_ARCHITECT_ACTOR_ID not set; helper requires "
+            "architect identity at bring-up"
+        )
+
     logger.info(
         "WTC v1 C5c-bringup: substrate live — runtime=%s engine=%s "
         "verbs=%d crb=ready reference=ready",
@@ -510,6 +627,7 @@ def _register_all_actions(
     library: "ActionLibrary",
     handler: Any,
     agent_registry: "AgentRegistry",
+    workflow_ledger: "WorkflowLedger",
 ) -> None:
     """Register every Action class shipped in the action library.
 
@@ -517,6 +635,12 @@ def _register_all_actions(
     handler.reasoning.execute_tool, etc.), wire them. Where infra
     isn't yet available in production, register with a clear-error
     stub that surfaces the gap when invoked rather than at startup.
+
+    Spec 6 commit 5: AppendToLedgerAction wired with WorkflowLedger
+    (replaces prior _unwired_stub). The action library's verb-shape
+    contract for ledger_append_fn / ledger_read_last_fn uses kwargs
+    (workflow_id=, entry=, instance_id=); the adapters bridge to
+    WorkflowLedger's positional shape (instance_id, workflow_id, ...).
     """
     from kernos.kernel.workflows.action_library import (
         AppendToLedgerAction,
@@ -542,7 +666,9 @@ def _register_all_actions(
         registry=agent_registry,
     ))
     library.register(CallToolAction(
-        tool_dispatch_fn=_call_tool_adapter(handler),
+        tool_dispatch_fn=_call_tool_adapter(
+            handler, workflow_ledger, data_dir,
+        ),
     ))
     library.register(PostToServiceAction(
         service_post_fn=_unwired_stub("post_to_service"),
@@ -552,8 +678,8 @@ def _register_all_actions(
         state_store_get=_state_get_adapter(handler),
     ))
     library.register(AppendToLedgerAction(
-        ledger_append_fn=_unwired_stub("append_to_ledger"),
-        ledger_read_last_fn=_unwired_stub("append_to_ledger.read_last"),
+        ledger_append_fn=_workflow_ledger_append_adapter(workflow_ledger),
+        ledger_read_last_fn=_workflow_ledger_read_last_adapter(workflow_ledger),
     ))
 
 
@@ -611,15 +737,105 @@ def _canvas_read_adapter(handler: Any):
     return _read
 
 
-def _call_tool_adapter(handler: Any):
-    async def _dispatch(**kwargs):
+def _call_tool_adapter(
+    handler: Any,
+    workflow_ledger: "WorkflowLedger",
+    data_dir: str,
+):
+    """Production tool-dispatch adapter for CallToolAction.
+
+    Spec 6 commit 7 (Codex round-1 B1 fold): routes the five
+    autonomy-loop tool_ids to autonomy_tools handlers directly,
+    threading the production substrate (pattern_store from the
+    handler, workflow_ledger from bring-up, data_dir from bring-up).
+    Other tool_ids fall through to ``handler.reasoning.execute_tool``
+    via the kwargs-adaptation path.
+
+    The autonomy-loop workflow's action_sequence calls
+    ``call_tool`` with one of the five tool_ids; without the
+    direct routing here, the workflow would crash on the first
+    record_recurrence step because reasoning.execute_tool's
+    signature is ``(tool_name, tool_input, request)`` — a
+    different shape from the kwargs CallToolAction passes
+    (``tool_id``, ``args``, ``instance_id``, ``member_id``).
+    """
+    autonomy_tool_ids = frozenset({
+        "transition_friction_pattern_lifecycle",
+        "record_friction_pattern_recurrence",
+        "emit_autonomy_loop_event",
+        "ask_coding_session_for_workflow",
+        "read_coding_session_response_for_workflow",
+    })
+
+    async def _dispatch(*, tool_id: str, args: dict,
+                        instance_id: str, member_id: str):
+        # Spec 6 autonomy tools route directly to the autonomy_tools
+        # handlers with real substrate (pattern_store from the
+        # handler; ledger + data_dir from bring-up closure).
+        if tool_id in autonomy_tool_ids:
+            from kernos.kernel.workflows.autonomy_tools import (
+                handle_ask_coding_session_for_workflow,
+                handle_emit_autonomy_loop_event_tool,
+                handle_read_coding_session_response_for_workflow,
+                handle_record_friction_pattern_recurrence_tool,
+                handle_transition_friction_pattern_lifecycle_tool,
+            )
+            pattern_store = getattr(handler, "_friction_pattern_store", None)
+            if tool_id == "transition_friction_pattern_lifecycle":
+                if pattern_store is None:
+                    raise RuntimeError(
+                        "transition_friction_pattern_lifecycle requires "
+                        "handler._friction_pattern_store"
+                    )
+                return await handle_transition_friction_pattern_lifecycle_tool(
+                    pattern_store=pattern_store,
+                    instance_id=instance_id, member_id=member_id, args=args,
+                )
+            if tool_id == "record_friction_pattern_recurrence":
+                if pattern_store is None:
+                    raise RuntimeError(
+                        "record_friction_pattern_recurrence requires "
+                        "handler._friction_pattern_store"
+                    )
+                return await handle_record_friction_pattern_recurrence_tool(
+                    pattern_store=pattern_store,
+                    instance_id=instance_id, member_id=member_id, args=args,
+                )
+            if tool_id == "emit_autonomy_loop_event":
+                return await handle_emit_autonomy_loop_event_tool(
+                    ledger=workflow_ledger,
+                    instance_id=instance_id, member_id=member_id, args=args,
+                )
+            if tool_id == "ask_coding_session_for_workflow":
+                return await handle_ask_coding_session_for_workflow(
+                    instance_id=instance_id, member_id=member_id,
+                    args=args, data_dir=data_dir,
+                )
+            if tool_id == "read_coding_session_response_for_workflow":
+                return await handle_read_coding_session_response_for_workflow(
+                    instance_id=instance_id, member_id=member_id,
+                    args=args, data_dir=data_dir,
+                )
+        # Non-autonomy tools: adapt kwargs to reasoning.execute_tool's
+        # signature (tool_name, tool_input, request). The CallToolAction
+        # kwargs (tool_id, args, instance_id, member_id) don't map
+        # cleanly to ReasoningRequest, so for now we surface a clear
+        # error — bring this surface up alongside the agent-side
+        # workflow authoring follow-up that registers
+        # KERNEL_AUTHORING_TOOL_NAMES in reasoning.py.
         reasoning = getattr(handler, "reasoning", None)
         if reasoning is None or not hasattr(reasoning, "execute_tool"):
             raise RuntimeError(
                 "CallToolAction invoked but handler.reasoning.execute_tool "
                 "is unavailable — bringup-stub gap"
             )
-        return await reasoning.execute_tool(**kwargs)
+        raise RuntimeError(
+            f"CallToolAction tool_id={tool_id!r} is not in the autonomy-loop "
+            f"set and the legacy reasoning.execute_tool kwarg-adaptation "
+            f"path is not yet wired. See Spec 5 deferral / follow-up: "
+            f"agent-side workflow tool dispatch (KERNEL_AUTHORING_TOOL_NAMES "
+            f"registration)."
+        )
     return _dispatch
 
 
@@ -652,10 +868,14 @@ def _state_get_adapter(handler: Any):
 def _unwired_stub(verb: str):
     """Return a callable that raises a clear NotImplementedError when
     invoked. Used for verbs whose production callables aren't available
-    yet (e.g., PostToServiceAction's workshop service registry, the
-    AppendToLedgerAction's ledger-write surface). Registration with
-    this stub keeps the verb in the library so descriptors that
-    reference it parse cleanly; invocation surfaces the gap."""
+    yet (e.g., PostToServiceAction's workshop service registry).
+    Registration with this stub keeps the verb in the library so
+    descriptors that reference it parse cleanly; invocation surfaces
+    the gap.
+
+    Spec 6 commit 5 wired AppendToLedgerAction with WorkflowLedger;
+    only PostToServiceAction (workshop registry) remains stubbed.
+    """
     async def _stub(*args, **kwargs):
         raise NotImplementedError(
             f"Action verb {verb!r} is registered but its production "
@@ -663,6 +883,23 @@ def _unwired_stub(verb: str):
             f"a follow-up if you need this verb."
         )
     return _stub
+
+
+def _workflow_ledger_append_adapter(workflow_ledger: "WorkflowLedger"):
+    """Spec 6 commit 5: adapt WorkflowLedger.append's positional
+    (instance_id, workflow_id, entry) signature to the
+    AppendToLedgerAction's kwargs shape
+    (workflow_id=, entry=, instance_id=)."""
+    async def _append(*, workflow_id: str, entry: dict, instance_id: str = ""):
+        await workflow_ledger.append(instance_id, workflow_id, entry)
+    return _append
+
+
+def _workflow_ledger_read_last_adapter(workflow_ledger: "WorkflowLedger"):
+    """Companion adapter for AppendToLedgerAction's verifier path."""
+    async def _read_last(*, workflow_id: str, instance_id: str = ""):
+        return await workflow_ledger.read_last(instance_id, workflow_id)
+    return _read_last
 
 
 __all__ = [

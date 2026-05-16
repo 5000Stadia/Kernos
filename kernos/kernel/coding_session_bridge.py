@@ -71,6 +71,46 @@ VALID_INVESTIGATION_OUTCOMES = frozenset({
     "completed", "partial", "unable_to_investigate",
 })
 
+# Canonical normalization for investigation_outcome. Used by BOTH
+# the bridge's response-read path AND the Spec 6 autonomy-loop
+# workflow wrapper (handle_read_coding_session_response_for_workflow)
+# so the event_stream event payload and the workflow's
+# emit_outcome ledger entry agree for every input case (missing,
+# empty, valid, invalid).
+#
+#   missing / empty → "completed" (the bridge's documented default;
+#       a coding-session response that arrives without an explicit
+#       outcome is treated as a successful consultation).
+#   valid value     → unchanged.
+#   invalid value   → "unable_to_investigate" (loud-fail over
+#       silent-degradation: an unknown outcome value can't pollute
+#       the canonical enum that the autonomy_loop_outcomes ledger
+#       uses for before/after pattern measurement).
+def normalize_investigation_outcome(raw) -> str:
+    """Canonical normalization for investigation_outcome.
+
+    Spec 6 Codex round-2 MEDIUM 2 fold (centralized helper) +
+    round-3 MEDIUM 2 fold (only None / empty-string map to the
+    "missing" default; other falsy JSON values like ``False``,
+    ``0``, ``[]``, ``{}`` are invalid outcomes and normalize to
+    ``"unable_to_investigate"``).
+
+    See module-level comment above for full semantics. The
+    distinction matters because a coding-session response file
+    that explicitly carries ``false`` or ``0`` is malformed —
+    treating it as "completed" would silently let an invalid
+    payload pollute the canonical autonomy_loop_outcomes ledger
+    enum.
+    """
+    if raw is None:
+        return "completed"
+    raw_str = str(raw)
+    if raw_str == "":
+        return "completed"
+    if raw_str not in VALID_INVESTIGATION_OUTCOMES:
+        return "unable_to_investigate"
+    return raw_str
+
 # Request-id allowable shape: UUID-like (hex + hyphens) plus underscores.
 # Anything else is rejected by _safe_request_id so path traversal via
 # the request_id parameter cannot escape the bridge directory.
@@ -357,15 +397,49 @@ async def _emit_response_received_once(
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
 
+    # Codex round-2 MEDIUM 2 fold: route the event payload's
+    # investigation_outcome through the same canonical normalization
+    # the read-side uses. response_payload may be the bridge's own
+    # normalized response_data dict (in which case this is a no-op
+    # lookup) OR an externally-supplied dict (operator-direct emit
+    # paths) — running normalize_investigation_outcome here makes
+    # the event payload consistent regardless of which surface
+    # constructed response_payload.
     payload = {
         "request_id": request_id,
         "originating_kernos_instance": originating_kernos_instance,
         "originating_member_id": originating_member_id,
         "target": target,
-        "investigation_outcome": response_payload.get(
-            "investigation_outcome", "",
+        "investigation_outcome": normalize_investigation_outcome(
+            response_payload.get("investigation_outcome"),
         ),
     }
+    # Spec 6 commit 7: forward Spec 4 gate-scoping fields when the
+    # request context carries them. The workflow primitive's gate
+    # match logic (_on_post_flush_for_gates) enforces a binding
+    # between the response event and the paused execution via these
+    # two engine-injected fields; without them the response event
+    # would never wake the autonomy-loop workflow's await_cc_response
+    # gate. The workflow YAML passes ``_workflow_execution_id`` +
+    # ``_workflow_gate_nonce`` via the ask_cc step's context dict
+    # (resolved from ``{workflow.execution_id}`` and
+    # ``{workflow.gate_nonce}``). Bridge consumers other than the
+    # autonomy loop (member-facing direct ask_coding_session) pass
+    # no such context fields and the response event simply omits
+    # them — backward-compatible.
+    try:
+        request_context = request_data.get("context") or {}
+        gate_exec_id = request_context.get("_workflow_execution_id", "")
+        gate_nonce = request_context.get("_workflow_gate_nonce", "")
+        if gate_exec_id:
+            payload["execution_id"] = gate_exec_id
+        if gate_nonce:
+            payload["gate_nonce"] = gate_nonce
+    except (AttributeError, NameError):
+        # request_data may have been unavailable above (path missing
+        # / unreadable); the empty-payload branch already covers the
+        # absent-context case.
+        pass
 
     if emit_event is not None:
         try:
@@ -706,14 +780,20 @@ async def handle_read_coding_session_response(
                 ),
             )
 
-        outcome_raw = str(response_data.get("investigation_outcome", "completed"))
-        if outcome_raw not in VALID_INVESTIGATION_OUTCOMES:
+        # Codex round-2 MEDIUM 2 fold: centralized normalization.
+        # Materialize the canonical value into response_data so the
+        # event payload emission at _emit_response_received_once
+        # (which uses response_data.get(...) without a default) sees
+        # the same value the bridge's own summary line reads.
+        raw_outcome_in = response_data.get("investigation_outcome")
+        normalized = normalize_investigation_outcome(raw_outcome_in)
+        if raw_outcome_in is not None and str(raw_outcome_in) != normalized:
             logger.warning(
-                "CODING_SESSION_BRIDGE: response %s has unknown "
-                "investigation_outcome=%r; treating as 'unable_to_investigate'",
-                request_id, outcome_raw,
+                "CODING_SESSION_BRIDGE: response %s investigation_outcome "
+                "normalized from %r to %r",
+                request_id, raw_outcome_in, normalized,
             )
-            response_data["investigation_outcome"] = "unable_to_investigate"
+        response_data["investigation_outcome"] = normalized
 
         # Idempotent event emission.
         await _emit_response_received_once(
@@ -837,4 +917,5 @@ __all__ = [
     "VALID_INVESTIGATION_OUTCOMES",
     "handle_ask_coding_session",
     "handle_read_coding_session_response",
+    "normalize_investigation_outcome",
 ]

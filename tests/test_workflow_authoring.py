@@ -776,11 +776,20 @@ class TestActorKindDerivation:
         kind = derive_actor_kind("")
         assert kind == ACTOR_SYSTEM
 
-    def test_substrate_tool_ids_narrow_v1(self):
-        # Architect Q1 ruling: narrow list for v1.
+    def test_substrate_tool_ids_narrow_v1_plus_spec6_autonomy(self):
+        """Spec 5 originally pinned 4 authoring tools as substrate-tier
+        (architect Q1 narrow-list ruling). Spec 6 commit 2 extends with
+        the 3 autonomy-loop substrate-tier tools that mutate
+        friction-pattern lifecycle / autonomy_loop_outcomes ledger —
+        deliberate architect amendment via the v7.3 ratification."""
         assert SUBSTRATE_TOOL_IDS == {
+            # Spec 5 authoring tools.
             "register_workflow", "register_trigger",
             "activate_workflow", "deactivate_workflow",
+            # Spec 6 autonomy-loop substrate-tier tools.
+            "transition_friction_pattern_lifecycle",
+            "record_friction_pattern_recurrence",
+            "emit_autonomy_loop_event",
         }
 
 
@@ -2569,3 +2578,212 @@ class TestSixteenthAmendmentHigh1RuntimeSentinel:
         finally:
             await event_stream.stop_writer()
             await event_stream._reset_for_tests()
+
+
+# ===========================================================================
+# Spec 6: AuthoringContext operator extension
+# ===========================================================================
+#
+# Pins the new ACTOR_OPERATOR kind + KERNOS_OPERATOR_ACTOR_ID env var.
+# Operators carry substrate-tier authority for autonomy-loop tools
+# (transition_friction_pattern_lifecycle, etc., landed in commit 3)
+# but cannot ratify workflows at activation — that authority stays
+# exclusively with the architect.
+
+
+@pytest.fixture
+def operator_env(monkeypatch):
+    """Set KERNOS_OPERATOR_ACTOR_ID for the duration of the test."""
+    monkeypatch.setenv("KERNOS_OPERATOR_ACTOR_ID", "op_kernos_autonomy")
+
+
+@pytest.fixture
+def unset_operator_env(monkeypatch):
+    """Ensure KERNOS_OPERATOR_ACTOR_ID is unset."""
+    monkeypatch.delenv("KERNOS_OPERATOR_ACTOR_ID", raising=False)
+
+
+class TestSpec6OperatorActor:
+    """Spec 6 substrate plumbing: ACTOR_OPERATOR actor kind + helpers."""
+
+    def test_actor_operator_constant_exported(self):
+        """Pure-API probe; substrate-state pin not applicable per the
+        substrate-fidelity exemption pattern."""
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_OPERATOR, VALID_ACTOR_KINDS,
+        )
+
+        assert ACTOR_OPERATOR == "operator"
+        assert ACTOR_OPERATOR in VALID_ACTOR_KINDS
+
+    def test_authoring_context_is_operator(self):
+        """Pure-API probe (no substrate; AuthoringContext is a frozen
+        dataclass with no DB side effects)."""
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_OPERATOR, AuthoringContext,
+        )
+
+        ctx = AuthoringContext(
+            actor_id="op_kernos_autonomy", actor_kind=ACTOR_OPERATOR,
+        )
+        assert ctx.is_operator() is True
+        assert ctx.is_architect() is False
+
+    def test_derive_actor_kind_returns_operator_when_env_matches(
+        self, operator_env, unset_architect_env,
+    ):
+        from kernos.kernel.workflows.authoring import ACTOR_OPERATOR
+
+        kind = derive_actor_kind("op_kernos_autonomy")
+        assert kind == ACTOR_OPERATOR
+
+    def test_derive_actor_kind_kernos_when_operator_env_unset(
+        self, unset_operator_env, unset_architect_env,
+    ):
+        # Both env vars unset; arbitrary actor_id falls back to Kernos.
+        kind = derive_actor_kind("op_kernos_autonomy")
+        assert kind == ACTOR_KERNOS
+
+    def test_architect_id_wins_over_operator_id(
+        self, monkeypatch,
+    ):
+        """Defensive: if KERNOS_ARCHITECT_ACTOR_ID and
+        KERNOS_OPERATOR_ACTOR_ID happen to match the same actor_id,
+        the architect kind wins. In practice the env vars should
+        carry distinct values."""
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_ARCHITECT,
+        )
+
+        monkeypatch.setenv("KERNOS_ARCHITECT_ACTOR_ID", "same_id")
+        monkeypatch.setenv("KERNOS_OPERATOR_ACTOR_ID", "same_id")
+        assert derive_actor_kind("same_id") == ACTOR_ARCHITECT
+
+    def test_is_operator_helper_fail_closed_when_env_unset(
+        self, unset_operator_env,
+    ):
+        """Fail-closed semantics: with KERNOS_OPERATOR_ACTOR_ID unset,
+        NO ctx passes _is_operator (matches the architect discipline
+        so misconfigured environments don't accidentally grant
+        operator authority)."""
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_OPERATOR, AuthoringContext, _is_operator,
+        )
+
+        ctx = AuthoringContext(
+            actor_id="anyone", actor_kind=ACTOR_OPERATOR,
+        )
+        assert _is_operator(ctx) is False
+
+    def test_is_operator_helper_passes_when_env_and_kind_match(
+        self, operator_env,
+    ):
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_OPERATOR, AuthoringContext, _is_operator,
+        )
+
+        ctx = AuthoringContext(
+            actor_id="op_kernos_autonomy", actor_kind=ACTOR_OPERATOR,
+        )
+        assert _is_operator(ctx) is True
+
+    def test_is_operator_helper_rejects_wrong_kind(
+        self, operator_env,
+    ):
+        """Actor with matching id but wrong kind doesn't pass — both
+        actor_id AND actor_kind are checked."""
+        from kernos.kernel.workflows.authoring import (
+            AuthoringContext, _is_operator,
+        )
+
+        ctx = AuthoringContext(
+            actor_id="op_kernos_autonomy", actor_kind=ACTOR_KERNOS,
+        )
+        assert _is_operator(ctx) is False
+
+    async def test_kernos_cannot_author_workflow_calling_autonomy_tool(
+        self, stack, architect_env,
+    ):
+        """Functional pin: a workflow that calls one of the Spec 6
+        autonomy-loop tools (e.g., transition_friction_pattern_lifecycle)
+        is classified substrate_tier by the governance classifier.
+        Kernos attempting to register it as composition_tier is
+        rejected with CAT_GOVERNANCE_TIER_VIOLATION; only architect (or
+        architect-over-classified substrate) may author such workflows.
+        Substrate state pin: no row landed in registered_workflows."""
+        descriptor = _descriptor(
+            workflow_id="wf-autonomy-tool-kernos",
+            action_type="call_tool",
+            params={"tool_id": "transition_friction_pattern_lifecycle"},
+        )
+        result = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor, TIER_COMPOSITION,
+        )
+        assert result.success is False
+        # Should surface the governance tier violation.
+        categories = {err.category for err in result.errors}
+        assert CAT_GOVERNANCE_TIER_VIOLATION in categories
+        # Substrate state pin: no row landed.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-autonomy-tool-kernos",
+        )
+        assert row is None
+
+    async def test_architect_can_author_workflow_calling_autonomy_tool(
+        self, stack, architect_env,
+    ):
+        """Companion functional pin: architect CAN author the same
+        workflow shape (substrate_tier registration succeeds).
+        Substrate state pin: registered_workflows row exists with
+        governance_tier=substrate_tier and architect_authored=True."""
+        descriptor = _descriptor(
+            workflow_id="wf-autonomy-tool-architect",
+            action_type="call_tool",
+            params={"tool_id": "record_friction_pattern_recurrence"},
+        )
+        result = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor, TIER_SUBSTRATE,
+        )
+        assert result.success is True, f"errors: {result.errors}"
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-autonomy-tool-architect",
+        )
+        assert row is not None
+        assert row.governance_tier == TIER_SUBSTRATE
+        assert row.architect_authored is True
+
+    async def test_operator_cannot_activate_workflow(
+        self, stack, architect_env, operator_env,
+    ):
+        """Functional pin (architect's user-feedback request): operator
+        actor calls activate_workflow → rejected with CAT_NOT_AUTHORIZED.
+        Activation authority stays exclusively with architect; operator
+        is for substrate-tier autonomy-loop tools, not authoring
+        ratification. The workflow's activation_state stays unchanged
+        (substrate-state pin)."""
+        from kernos.kernel.workflows.authoring import (
+            ACTOR_OPERATOR,
+        )
+
+        descriptor = _descriptor(workflow_id="wf-operator-cannot-activate")
+        # Register via architect (legitimate path).
+        await register_workflow(
+            stack["engine"], _architect_ctx(),
+            descriptor, TIER_COMPOSITION,
+        )
+        # Operator attempts activation → must fail.
+        operator_ctx = AuthoringContext(
+            actor_id="op_kernos_autonomy", actor_kind=ACTOR_OPERATOR,
+        )
+        result = await activate_workflow(
+            stack["engine"], operator_ctx,
+            "wf-operator-cannot-activate",
+        )
+        assert result.success is False
+        assert result.errors[0].category == CAT_NOT_AUTHORIZED
+        # Substrate state pin: activation_state untouched.
+        row = await get_registered_workflow(
+            stack["engine"]._db, workflow_id="wf-operator-cannot-activate",
+        )
+        assert row is not None
+        assert row.activation_state == STATE_REGISTERED
