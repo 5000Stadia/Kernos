@@ -224,7 +224,17 @@ async def _run_native(
     if effective_scope not in VALID_SCOPES:
         effective_scope = "isolated"
 
-    # Resolve the space's working directory
+    # Resolve the space's working directory. MUST be absolute: the
+    # launcher renders these paths as string literals into the
+    # subprocess source, then the subprocess runs with ``cwd=space_dir``.
+    # A relative path resolves once during launcher generation (parent
+    # cwd) and a second time inside the subprocess (cwd=space_dir),
+    # producing a doubled path like ``<abs>/files/data/.../files/...``
+    # that doesn't exist — yielding ``ModuleNotFoundError: sandbox_preamble``
+    # at line 3 of the launcher. Tests use pytest's absolute ``tmp_path``
+    # so this never surfaces in CI; production uses ``./data`` and
+    # silently breaks every isolated-mode execute_code call.
+    data_dir = os.path.abspath(data_dir)
     space_dir = str(
         Path(data_dir) / _safe_name(instance_id) / "spaces" / space_id / "files"
     )
