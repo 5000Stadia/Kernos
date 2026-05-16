@@ -1338,6 +1338,22 @@ class AuditTrace:
     # ``{"tool_name": str, "result": str}`` (serialized result). Empty
     # tuple when no successful tool dispatches happened.
     tool_results_during_prep: tuple[dict[str, str], ...] = ()
+    # ACTION-RESULT-FORWARDING-V1 (2026-05-16): per-step results
+    # captured during FULL-MACHINERY ENACTMENT (StepDispatcher.dispatch
+    # outcomes). Forwarded to the terminal PresenceRenderer so direct
+    # tool outputs (e.g. execute_code stdout) reach the model on its
+    # next turn rather than vanishing between dispatcher → render.
+    # Each entry: ``{"tool_name": str, "result": str}`` (serialized
+    # StepDispatchResult). Empty tuple when no enactment-tier
+    # dispatches happened (thin path, fast-path B1/B2, etc.).
+    #
+    # Phase distinction vs ``tool_results_during_prep``: prep entries
+    # come from the IntegrationRunner's read-tool dispatches during
+    # synthesis (before action decision); enactment entries come from
+    # StepDispatcher's action-tier dispatches (after planning, during
+    # the full-machinery execution loop). Renderer surfaces both with
+    # explicit phase labels so the model can distinguish source.
+    tool_results_during_enactment: tuple[dict[str, str], ...] = ()
     # RESPONSE-FIDELITY-V1 Batch 1 (2026-05-08): structured per-action
     # records bridging substrate truth and renderer language. Each
     # ActionStateRecord captures one action surface event with
@@ -1390,6 +1406,22 @@ class AuditTrace:
             if not isinstance(entry.get("result"), str):
                 raise BriefingValidationError(
                     "AuditTrace.tool_results_during_prep entries must "
+                    "carry a string result"
+                )
+        for entry in self.tool_results_during_enactment:
+            if not isinstance(entry, dict):
+                raise BriefingValidationError(
+                    "AuditTrace.tool_results_during_enactment entries must "
+                    "be dicts with tool_name + result keys"
+                )
+            if not isinstance(entry.get("tool_name"), str):
+                raise BriefingValidationError(
+                    "AuditTrace.tool_results_during_enactment entries must "
+                    "carry a string tool_name"
+                )
+            if not isinstance(entry.get("result"), str):
+                raise BriefingValidationError(
+                    "AuditTrace.tool_results_during_enactment entries must "
                     "carry a string result"
                 )
         for record in self.action_state_records:
@@ -1448,6 +1480,14 @@ class AuditTrace:
                 _audit_reference_for_tool_result(e)
                 for e in self.tool_results_during_prep
             ],
+            # Mirror prep's references-not-dumps contract for enactment
+            # results: serialized form carries tool_name + length +
+            # sha256 only; full result body stays in-memory on the
+            # live AuditTrace so the renderer can consume it.
+            "tool_results_during_enactment": [
+                _audit_reference_for_tool_result(e)
+                for e in self.tool_results_during_enactment
+            ],
             "action_state_records": [
                 r.to_dict() for r in self.action_state_records
             ],
@@ -1473,6 +1513,11 @@ class AuditTrace:
             tool_results_during_prep=tuple(
                 dict(e) for e in (
                     data.get("tool_results_during_prep", []) or []
+                )
+            ),
+            tool_results_during_enactment=tuple(
+                dict(e) for e in (
+                    data.get("tool_results_during_enactment", []) or []
                 )
             ),
             action_state_records=tuple(

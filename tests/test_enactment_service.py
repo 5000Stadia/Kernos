@@ -707,6 +707,199 @@ async def test_full_machinery_happy_path_returns_terminal_render():
     assert reasoner.judge_calls == 1
 
 
+# ----- ACTION-RESULT-FORWARDING-V1 pin -----
+
+
+@pytest.mark.asyncio
+async def test_full_machinery_forwards_enactment_results_to_renderer():
+    """Pin: full-machinery dispatch results reach the terminal renderer
+    via ``briefing.audit_trace.tool_results_during_enactment``.
+
+    Without this forwarding, execute_code stdout (and every other
+    StepDispatcher-routed action-tier tool output) vanishes between
+    the dispatcher returning a StepDispatchResult and EnactmentService
+    rendering the original briefing — the agent then honestly reports
+    "no receipt in render context" on the next turn because the
+    dispatcher's output never reached the LLM.
+
+    This test pins the substrate truth: when StepDispatcher returns
+    output, the PresenceRenderer's briefing carries it. The renderer
+    is responsible for surfacing it; the substrate is responsible for
+    plumbing it. We verify the plumbing.
+    """
+    import json
+    presence = _CapturingPresence(text="action complete")
+    dispatch_output = {"stdout": "hello from execute_code", "exit_code": 0}
+    service, _, dispatcher, _ = _full_machinery_service(
+        presence=presence,
+        dispatcher_results=[
+            StepDispatchResult(completed=True, output=dispatch_output),
+        ],
+    )
+    outcome = await service.run(_execute_briefing())
+    assert outcome.subtype is TerminationSubtype.SUCCESS_FULL_MACHINERY
+    # Substrate-truth assertion: the renderer received a briefing
+    # whose audit_trace carries the dispatch result on the enactment
+    # field — not the original briefing the service was handed.
+    assert len(presence.calls) == 1
+    rendered_briefing = presence.calls[-1]
+    forwarded = rendered_briefing.audit_trace.tool_results_during_enactment
+    assert len(forwarded) == 1, (
+        "expected exactly one forwarded enactment result; "
+        f"got {len(forwarded)}"
+    )
+    entry = forwarded[0]
+    # tool_name surfaces the step's tool_id (the LLM-emitted surface).
+    assert isinstance(entry, dict)
+    assert entry["tool_name"]  # non-empty
+    # The serialised result is JSON; the dispatch output must round-trip.
+    payload = json.loads(entry["result"])
+    assert payload["completed"] is True
+    assert payload["output"] == dispatch_output
+    assert payload["failure_kind"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_b1_termination_forwards_enactment_results_to_renderer():
+    """Pin (Codex round-2 fold): B1 termination still forwards prior
+    enactment results to the renderer. Otherwise the failure-path
+    acknowledgment loses the receipts for what was actually tried
+    before the envelope-violation-on-modify (or other B1 trigger)
+    fired. Tier-2 modify produces an envelope-violating modified step;
+    the original attempt's dispatch_result must still surface to the
+    renderer."""
+    import json
+    bad_modify = _step(step_id="bad-modify", tool_class="slack")
+    envelope = _envelope(allowed_tool_classes=("email",))
+    captured: list[Briefing] = []
+
+    class _CapturingPresence:
+        async def render(self, briefing: Briefing):
+            captured.append(briefing)
+            return PresenceRenderResult(text="b1", streamed=False)
+
+    presence = _CapturingPresence()
+    service, _, _, _ = _full_machinery_service(
+        presence=presence,
+        modified_step=bad_modify,
+        dispatcher_results=[
+            StepDispatchResult(
+                completed=False,
+                output={"error": "transient before modify"},
+                failure_kind=FailureKind.TRANSIENT,
+                error_summary="connection error",
+            ),
+        ],
+        judgments=[
+            DivergenceJudgment(
+                effect_matches_expectation=False,
+                plan_still_valid=True,
+                failure_kind=FailureKind.TRANSIENT,
+            ),
+        ],
+        retry_budget=0,  # force tier-2 modify route
+    )
+    outcome = await service.run(_execute_briefing(envelope=envelope))
+    assert outcome.subtype is TerminationSubtype.B1_ACTION_INVALIDATED
+    # The B1 render saw the briefing — pin that the attempted
+    # dispatch's receipt landed on enactment field, not silently
+    # dropped because termination took the b1 path.
+    assert len(captured) == 1
+    forwarded = captured[-1].audit_trace.tool_results_during_enactment
+    assert len(forwarded) == 1
+    payload = json.loads(forwarded[0]["result"])
+    assert payload["completed"] is False
+    assert payload["failure_kind"] == "transient"
+
+
+@pytest.mark.asyncio
+async def test_b2_termination_forwards_enactment_results_to_renderer():
+    """Pin (Codex round-2 fold): B2 termination's synthetic
+    clarification briefing also carries the prior enactment receipts
+    so the clarification question can ground in what was actually
+    tried, not just what was abstracted away."""
+    import json
+    captured: list[Briefing] = []
+
+    class _CapturingPresence:
+        async def render(self, briefing: Briefing):
+            captured.append(briefing)
+            return PresenceRenderResult(text="b2", streamed=False)
+
+    presence = _CapturingPresence()
+    service, _, _, _ = _full_machinery_service(
+        presence=presence,
+        dispatcher_results=[
+            StepDispatchResult(
+                completed=False, output={"clarify": "needed"},
+                failure_kind=FailureKind.AMBIGUITY_NEEDS_USER,
+            ),
+        ],
+        judgments=[
+            DivergenceJudgment(
+                effect_matches_expectation=False,
+                plan_still_valid=False,
+                failure_kind=FailureKind.AMBIGUITY_NEEDS_USER,
+            ),
+        ],
+    )
+    outcome = await service.run(_execute_briefing())
+    assert outcome.subtype is TerminationSubtype.B2_USER_DISAMBIGUATION_NEEDED
+    assert len(captured) == 1
+    forwarded = captured[-1].audit_trace.tool_results_during_enactment
+    assert len(forwarded) == 1
+    payload = json.loads(forwarded[0]["result"])
+    assert payload["completed"] is False
+    assert payload["failure_kind"] == "ambiguity_needs_user"
+
+
+@pytest.mark.asyncio
+async def test_full_machinery_forwards_every_attempt_including_failures():
+    """Pin: tier-1 retry chain — every attempt's dispatch result reaches
+    the renderer's briefing, not just the final successful one. The
+    agent sees the retry history so it can reason about what was
+    actually tried, not just what eventually worked."""
+    import json
+    presence = _CapturingPresence(text="ok")
+    service, _, dispatcher, _ = _full_machinery_service(
+        presence=presence,
+        dispatcher_results=[
+            StepDispatchResult(
+                completed=False,
+                output={"error": "transient blip"},
+                failure_kind=FailureKind.TRANSIENT,
+                error_summary="connection error",
+            ),
+            StepDispatchResult(completed=True, output={"ok": True}),
+        ],
+        judgments=[
+            DivergenceJudgment(
+                effect_matches_expectation=False,
+                plan_still_valid=True,
+                failure_kind=FailureKind.TRANSIENT,
+            ),
+            DivergenceJudgment(
+                effect_matches_expectation=True,
+                plan_still_valid=True,
+                failure_kind=FailureKind.NONE,
+            ),
+        ],
+    )
+    outcome = await service.run(_execute_briefing())
+    assert outcome.subtype is TerminationSubtype.SUCCESS_FULL_MACHINERY
+    rendered_briefing = presence.calls[-1]
+    forwarded = rendered_briefing.audit_trace.tool_results_during_enactment
+    assert len(forwarded) == 2, (
+        "expected both retry attempts forwarded; "
+        f"got {len(forwarded)}"
+    )
+    first = json.loads(forwarded[0]["result"])
+    second = json.loads(forwarded[1]["result"])
+    assert first["completed"] is False
+    assert first["failure_kind"] == "transient"
+    assert second["completed"] is True
+
+
 # ----- envelope validation rejects invalid plan -----
 
 

@@ -851,8 +851,20 @@ class PresenceRenderer:
         # already fetched (observed kernos-main 2026-05-07: integration
         # read kernos-architecture-audit.md, then renderer re-read it
         # 6s later through the same seam).
+        #
+        # ACTION-RESULT-FORWARDING-V1 (2026-05-16): full-machinery
+        # action-tier dispatches (StepDispatcher results — execute_code
+        # stdout, etc.) come in via tool_results_during_enactment.
+        # Both phases surface here with explicit "Prep" / "Enactment"
+        # labels so the model can distinguish source: prep results
+        # informed the action decision; enactment results are the
+        # tool's actual output from carrying that action out. Without
+        # this forwarding, the agent honestly reports "no receipt in
+        # render context" because the dispatcher's output never reaches
+        # the next turn's input_items.
         forwarded = _format_forwarded_tool_results(
             getattr(briefing.audit_trace, "tool_results_during_prep", ()),
+            getattr(briefing.audit_trace, "tool_results_during_enactment", ()),
         )
         if forwarded:
             user_message = f"{forwarded}\n\n{user_message}"
@@ -1068,55 +1080,100 @@ _FORWARDED_RESULT_TOTAL_CHAR_CAP = 24000
 
 
 def _format_forwarded_tool_results(
-    tool_results: tuple[dict[str, str], ...] | list[dict[str, str]],
+    prep_results: tuple[dict[str, str], ...] | list[dict[str, str]],
+    enactment_results: tuple[dict[str, str], ...] | list[dict[str, str]] = (),
 ) -> str:
-    """Render the integration runner's per-call tool results into a
-    block the renderer's chain prompt prepends to the user message.
+    """Render forwarded tool results into a block the renderer's chain
+    prompt prepends to the user message.
 
-    Empty input → ``""``. Each entry is rendered with its tool name
-    and the serialized result; the model treats this as authoritative
-    content already fetched, so it doesn't redundantly call the same
-    read tool to render content back to the user.
+    Two phases surface, each under an explicit "(prep)" or
+    "(enactment)" label:
 
-    Capped per-entry (``_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP``) and
-    cumulatively (``_FORWARDED_RESULT_TOTAL_CHAR_CAP``) to keep the
-    renderer prompt from ballooning when a tool returned a very large
-    payload. Truncated entries carry an explicit marker so the model
-    knows the result was clipped and can issue a fresh fetch if it
-    truly needs the rest.
+      * **prep** — per-call tool results from the integration runner's
+        synthesis phase (read tools dispatched before the action
+        decision). The model treats these as authoritative content
+        already fetched.
+      * **enactment** — per-step results from StepDispatcher during the
+        full-machinery execution loop (e.g. execute_code stdout). Lets
+        the model see what the action it decided on actually returned,
+        rather than reporting "no receipt" because the dispatcher's
+        output never reached the next turn's input_items.
+
+    Empty inputs (both phases) → ``""``. Capped per-entry
+    (``_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP``) and cumulatively
+    (``_FORWARDED_RESULT_TOTAL_CHAR_CAP``).
+
+    Budget priority (Codex round-2 finding fold): **enactment renders
+    first**. Prep informed the action decision; enactment is the
+    receipt for what the action just did. If both phases produce
+    large results, the receipt for the just-taken action takes
+    priority over the upstream context that informed the decision —
+    otherwise a large prep block could starve the enactment receipt
+    entirely, which is exactly the gap this spec closes.
+
+    Truncated entries carry an explicit marker so the model knows the
+    result was clipped and can issue a fresh fetch if it truly needs
+    the rest.
     """
-    if not tool_results:
+    if not prep_results and not enactment_results:
         return ""
-    sections = ["### Prior tool results (already fetched this turn)"]
+    sections: list[str] = []
     remaining = _FORWARDED_RESULT_TOTAL_CHAR_CAP
-    for entry in tool_results:
-        name = entry.get("tool_name", "")
-        result = entry.get("result", "")
-        if not name and not result:
-            continue
-        clipped = result
-        truncated_marker = ""
-        if len(clipped) > _FORWARDED_RESULT_PER_ENTRY_CHAR_CAP:
-            clipped = clipped[:_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP]
-            truncated_marker = (
-                f"\n[TRUNCATED: {len(result) - len(clipped)} more chars; "
-                f"re-call the tool if you need the full content]"
-            )
-        if remaining <= 0:
+
+    def _emit_phase(
+        heading: str,
+        phase_label: str,
+        entries: tuple[dict[str, str], ...] | list[dict[str, str]],
+    ) -> None:
+        nonlocal remaining
+        if not entries:
+            return
+        sections.append(heading)
+        for entry in entries:
+            name = entry.get("tool_name", "")
+            result = entry.get("result", "")
+            if not name and not result:
+                continue
+            clipped = result
+            truncated_marker = ""
+            if len(clipped) > _FORWARDED_RESULT_PER_ENTRY_CHAR_CAP:
+                clipped = clipped[:_FORWARDED_RESULT_PER_ENTRY_CHAR_CAP]
+                truncated_marker = (
+                    f"\n[TRUNCATED: {len(result) - len(clipped)} more "
+                    f"chars; re-call the tool if you need the full "
+                    f"content]"
+                )
+            if remaining <= 0:
+                sections.append(
+                    f"#### {name} ({phase_label})\n[OMITTED: total "
+                    f"forward budget ({_FORWARDED_RESULT_TOTAL_CHAR_CAP} "
+                    f"chars) exhausted by earlier results; re-call the "
+                    f"tool if needed]"
+                )
+                continue
+            if len(clipped) > remaining:
+                clipped = clipped[:remaining]
+                truncated_marker = (
+                    f"\n[TRUNCATED: total forward budget "
+                    f"({_FORWARDED_RESULT_TOTAL_CHAR_CAP} chars) reached]"
+                )
+            remaining -= len(clipped)
             sections.append(
-                f"#### {name}\n[OMITTED: total forward budget "
-                f"({_FORWARDED_RESULT_TOTAL_CHAR_CAP} chars) exhausted "
-                f"by earlier results; re-call the tool if needed]"
+                f"#### {name} ({phase_label})\n{clipped}{truncated_marker}"
             )
-            continue
-        if len(clipped) > remaining:
-            clipped = clipped[:remaining]
-            truncated_marker = (
-                f"\n[TRUNCATED: total forward budget "
-                f"({_FORWARDED_RESULT_TOTAL_CHAR_CAP} chars) reached]"
-            )
-        remaining -= len(clipped)
-        sections.append(f"#### {name}\n{clipped}{truncated_marker}")
+
+    # Enactment first — receipt for the just-taken action takes budget
+    # priority over the prep context that informed the decision.
+    _emit_phase(
+        "### Action results (dispatched this turn)",
+        "enactment",
+        enactment_results,
+    )
+    _emit_phase(
+        "### Prior tool results (already fetched this turn)",
+        "prep",
+        prep_results,
+    )
     return "\n\n".join(sections)
 
 
