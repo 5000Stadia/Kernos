@@ -496,11 +496,24 @@ async def bring_up_substrate(
             actor_id=_architect_actor_id_si,
             actor_kind=_ACTOR_ARCHITECT_SI,
         )
+        # Self-improvement workflow and its emitters MUST share an
+        # instance namespace with the running handler's FrictionObserver,
+        # otherwise friction.pattern_reactivated events emitted under the
+        # live KERNOS_INSTANCE_ID will be skipped by the frequency
+        # emitter's instance filter (autonomy_emitters.py:167) and the
+        # loop never fires. The substrate-level "default" id is correct
+        # for the reference catalog (single-tenant rows) but wrong for
+        # cross-event subscription where the upstream event carries the
+        # bot's real instance_id. Fall back to "default" only when env
+        # is unset (tests / dev REPLs without an instance configured).
+        _si_instance_id = _os_si.environ.get(
+            "KERNOS_INSTANCE_ID", "",
+        ) or _substrate_instance_id
         try:
             _si_workflow_id = await register_self_improvement_workflow(
                 engine=execution_engine,
                 architect_ctx=_architect_ctx_si,
-                instance_id=_substrate_instance_id,
+                instance_id=_si_instance_id,
                 trigger_runtime=runtime,
                 operator_actor_id=_operator_actor_id_si,
             )
@@ -524,7 +537,7 @@ async def bring_up_substrate(
                 _si_pattern_store = _FrictionPatternStore_si()
             await _si_pattern_store.ensure_schema(data_dir)
             _freq_emitter_si = FrictionPatternFrequencyEmitter(
-                instance_id=_substrate_instance_id,
+                instance_id=_si_instance_id,
                 pattern_store=_si_pattern_store,
             )
             await _freq_emitter_si.start()
@@ -532,7 +545,7 @@ async def bring_up_substrate(
                 "friction_pattern_frequency", _freq_emitter_si,
             )
             _response_emitter_si = CodingSessionBridgeResponseEmitter(
-                instance_id=_substrate_instance_id,
+                instance_id=_si_instance_id,
                 data_dir=data_dir,
             )
             await _response_emitter_si.start()
@@ -542,7 +555,7 @@ async def bring_up_substrate(
             logger.info(
                 "SELF_IMPROVEMENT_AUTONOMY_LOOP_LIVE workflow_id=%s "
                 "instance_id=%s",
-                _si_workflow_id, _substrate_instance_id,
+                _si_workflow_id, _si_instance_id,
             )
         except Exception as _exc_si:
             logger.warning(
