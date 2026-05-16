@@ -158,15 +158,40 @@ def _install_preamble(space_dir: str) -> str:
     return preamble_dir
 
 
+def _resolve_sandbox_extra_read_dirs(data_dir: str) -> list[str]:
+    """Compute the sandbox read allow-list for execute_code subprocesses.
+
+    Default: the bot's ``data_dir`` so Kernos can introspect its own
+    persisted state (instance.db, event stream, canvases, conversation
+    logs) from within an execute_code script. Without this, the agent
+    has no path to self-inspect substrate from a conversation.
+
+    Operators can extend via ``KERNOS_SANDBOX_EXTRA_READ_DIRS``
+    (comma-separated absolute paths). Writes stay strictly
+    scope-confined to the space directory; this allow-list is
+    read-only per :func:`sandbox_preamble.install_scope_wrapper`'s
+    contract.
+    """
+    extras: list[str] = [os.path.abspath(data_dir)]
+    raw = os.getenv("KERNOS_SANDBOX_EXTRA_READ_DIRS", "")
+    for p in raw.split(","):
+        p = p.strip()
+        if p:
+            extras.append(os.path.abspath(p))
+    return extras
+
+
 def _build_launcher(
     space_dir: str, preamble_dir: str, source_path: str,
+    extra_read_dirs: list[str] | None = None,
 ) -> str:
     """Render the launcher body that installs scope and execs the user source."""
+    extras_repr = repr(list(extra_read_dirs or []))
     return (
         "import sys\n"
         f"sys.path.insert(0, {preamble_dir!r})\n"
         "from sandbox_preamble import install_scope_wrapper\n"
-        f"install_scope_wrapper({space_dir!r})\n"
+        f"install_scope_wrapper({space_dir!r}, {extras_repr})\n"
         f"with open({source_path!r}) as _kernos_launcher_f:\n"
         "    _kernos_launcher_src = _kernos_launcher_f.read()\n"
         "exec(\n"
@@ -244,6 +269,7 @@ async def _run_native(
                 space_dir=space_dir,
                 preamble_dir=preamble_dir,
                 source_path=source_path,
+                extra_read_dirs=_resolve_sandbox_extra_read_dirs(data_dir),
             )
             fd, launcher_path = tempfile.mkstemp(
                 prefix="_kernos_launcher_", suffix=".py", dir=space_dir,

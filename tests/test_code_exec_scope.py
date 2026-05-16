@@ -178,6 +178,61 @@ class TestDefaultScope:
         assert "BLOCKED" in result["stdout"]
 
 
+class TestCapabilityFirstSandboxReads:
+    """Data-dir reads are permitted by default so Kernos can introspect
+    its own persisted state (instance.db, event stream, canvases) from
+    within an execute_code script. Writes outside the space remain
+    blocked — the loosening is read-only."""
+
+    async def test_data_dir_read_outside_space_is_permitted(
+        self, tmp_path, isolated_scope,
+    ):
+        # Create a file directly under data_dir (outside the space dir).
+        sibling = tmp_path / "instance.db"
+        sibling.write_text("hello-from-data-dir")
+        code = (
+            "with open(%r) as f:\n"
+            "    print('READ:', f.read())\n"
+        ) % str(sibling)
+        result = await execute_code("t1", "sp1", code, data_dir=str(tmp_path))
+        assert result["success"] is True
+        assert "READ: hello-from-data-dir" in result["stdout"]
+
+    async def test_data_dir_write_outside_space_is_blocked(
+        self, tmp_path, isolated_scope,
+    ):
+        target = tmp_path / "should_not_write.txt"
+        code = (
+            "try:\n"
+            f"    with open({str(target)!r}, 'w') as f:\n"
+            "        f.write('nope')\n"
+            "    print('WROTE')\n"
+            "except PermissionError as e:\n"
+            "    print('BLOCKED:', e)\n"
+        )
+        result = await execute_code("t1", "sp1", code, data_dir=str(tmp_path))
+        assert result["success"] is True
+        assert "BLOCKED" in result["stdout"]
+        assert "WROTE" not in result["stdout"]
+        assert not target.exists()
+
+    async def test_env_extends_read_allow_list(
+        self, tmp_path, isolated_scope, monkeypatch,
+    ):
+        extra = tmp_path.parent / f"extra_read_{tmp_path.name}"
+        extra.mkdir(exist_ok=True)
+        target = extra / "operator_file.txt"
+        target.write_text("operator-allow-list")
+        monkeypatch.setenv("KERNOS_SANDBOX_EXTRA_READ_DIRS", str(extra))
+        code = (
+            "with open(%r) as f:\n"
+            "    print('READ:', f.read())\n"
+        ) % str(target)
+        result = await execute_code("t1", "sp1", code, data_dir=str(tmp_path))
+        assert result["success"] is True
+        assert "READ: operator-allow-list" in result["stdout"]
+
+
 class TestWriteFilePersistenceIsClean:
     """write_file_name'd code should not contain preamble boilerplate."""
 
