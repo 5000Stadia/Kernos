@@ -465,13 +465,22 @@ async def bring_up_substrate(
     # Fail-open: catalog-seed failures log a warning and bring-up
     # continues; the substrate operates without the catalog the way
     # it did pre-spec.
+    # Codex round-1 Fold #1: track ownership so we don't leak a SQLite
+    # connection when seed creates a fresh store. Production usually
+    # has handler._friction_pattern_store (long-lived for the handler's
+    # FrictionObserver lifecycle) so seed shares it; in stub / opt-out
+    # paths where the handler has no store, the seed-only instance
+    # opens its own connection via ensure_schema and must be stopped
+    # here or the connection leaks for the bot's lifetime.
+    _seed_pattern_store = getattr(handler, "_friction_pattern_store", None)
+    _seed_store_owned_here = False
+    if _seed_pattern_store is None:
+        from kernos.kernel.friction_patterns import (
+            FrictionPatternStore as _FrictionPatternStore_seed,
+        )
+        _seed_pattern_store = _FrictionPatternStore_seed()
+        _seed_store_owned_here = True
     try:
-        _seed_pattern_store = getattr(handler, "_friction_pattern_store", None)
-        if _seed_pattern_store is None:
-            from kernos.kernel.friction_patterns import (
-                FrictionPatternStore as _FrictionPatternStore_seed,
-            )
-            _seed_pattern_store = _FrictionPatternStore_seed()
         import os as _os_seed_fp
         _seed_instance_id_fp = _os_seed_fp.environ.get(
             "KERNOS_INSTANCE_ID", "",
@@ -492,6 +501,17 @@ async def bring_up_substrate(
             "the catalog is populated some other way",
             _exc_seed_fp,
         )
+    finally:
+        if _seed_store_owned_here:
+            try:
+                await _seed_pattern_store.stop()
+            except Exception as _exc_close:  # pragma: no cover
+                logger.debug(
+                    "FRICTION_PATTERN_SEED_STORE_CLOSE_FAILED error=%s "
+                    "— non-blocking, store was seed-only and bring-up "
+                    "is complete",
+                    _exc_close,
+                )
 
     # Spec 6 commit 7 / B3 fold: register the self_improvement
     # workflow + launch the autonomy-loop emitters in B3 order

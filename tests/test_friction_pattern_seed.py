@@ -9,6 +9,10 @@ Pins:
   * PROVIDER_ERROR_REPEATED at threshold=2 fires reactivation on the
     SECOND recurrence — the fast-path autonomy-loop demonstration
     target the architect designed the seed to enable
+  * Integration pin (Codex round-1 Fold #2): seeded row drives the
+    full FrictionObserver-equivalent → event_stream →
+    FrictionPatternFrequencyEmitter chain end-to-end and emits the
+    canonical autonomy-loop trigger event.
 """
 from __future__ import annotations
 
@@ -17,11 +21,16 @@ from datetime import datetime, timezone
 
 import pytest
 
+from kernos.kernel import event_stream
 from kernos.kernel.friction_patterns import (
     CLASSIFIED_AUTO_SIGNAL_TYPE,
     LIFECYCLE_ACTIVE,
+    LIFECYCLE_REACTIVATED,
     LIFECYCLE_RESOLVED,
     FrictionPatternStore,
+)
+from kernos.kernel.workflows.autonomy_emitters import (
+    FrictionPatternFrequencyEmitter,
 )
 from kernos.setup.seed_friction_patterns import (
     _STARTER_PATTERNS,
@@ -249,6 +258,131 @@ async def test_higher_threshold_pattern_resists_early_reactivation(
 # ---------------------------------------------------------------------
 # Module-level invariants
 # ---------------------------------------------------------------------
+
+
+@pytest.fixture
+async def event_stream_writer(tmp_path):
+    """Start + tear down the event_stream writer for the integration
+    pin. Mirrors the fixture in test_workflow_autonomy_emitters.py.
+    """
+    await event_stream._reset_for_tests()
+    await event_stream.start_writer(str(tmp_path), flush_interval_s=0.05)
+    yield tmp_path
+    await event_stream.stop_writer()
+    await event_stream._reset_for_tests()
+
+
+async def _fetch_all_events(instance_id: str) -> list:
+    now = datetime.now(timezone.utc)
+    return await event_stream.events_in_window(
+        instance_id,
+        now.replace(year=now.year - 1),
+        now.replace(year=now.year + 1),
+        limit=1000,
+    )
+
+
+async def test_seeded_pattern_drives_full_autonomy_loop_trigger_chain(
+    tmp_path, store, event_stream_writer,
+):
+    """Integration pin (Codex round-1 Fold #2): exercise the full
+    real-path chain end-to-end with a seeded pattern, not an ad-hoc
+    one. The chain:
+
+      seed catalog → resolve provider-error-repeated →
+      record_recurrence (×2, matching seeded threshold=2) →
+      emits friction.pattern_reactivated to event_stream →
+      FrictionPatternFrequencyEmitter post-flush hook fires →
+      translates to friction.pattern_frequency_threshold_exceeded
+      (the canonical autonomy-loop trigger event)
+
+    Without this pin, we only proved seeded rows can drive
+    record_recurrence directly (test_record_recurrence_uses_per_
+    pattern_threshold). This pin proves the SAME seeded row drives
+    the wire-level emit chain that WTC's selector listens on.
+
+    Resolves provider-error-repeated as a substrate operation here
+    (operator-equivalent action, the spec leaves user-facing
+    transitions to the Spec 5 deferral lift). All other lifecycle
+    transitions are real events that actually occurred in the test
+    — no fabricated history (per [[active-with-threshold-over-
+    resolved-at-seed]] discipline applied to test setup too).
+    """
+    # 1. Seed catalog.
+    seed_result = await seed_friction_patterns_on_first_boot(
+        "inst_a", store, data_dir=str(tmp_path),
+    )
+    assert len(seed_result.seeded) == 7
+
+    # 2. Resolve the seeded provider-error-repeated pattern so the
+    # next record_recurrence calls flow through the recurrence path
+    # rather than the occurrence path.
+    await store.transition_lifecycle(
+        "inst_a", "provider-error-repeated", LIFECYCLE_RESOLVED,
+    )
+
+    # 3. Start the emitter — registers its post-flush hook on the
+    # event_stream so flushed friction.pattern_reactivated events
+    # route through it.
+    emitter = FrictionPatternFrequencyEmitter(
+        instance_id="inst_a", pattern_store=store,
+    )
+    await emitter.start()
+    try:
+        # 4. Drive two recurrences (matches seeded threshold=2).
+        # record_recurrence emits friction.pattern_reactivated when
+        # the threshold is crossed; first call records the recurrence,
+        # second crosses the threshold.
+        async def _emit_to_stream(event_type, payload):
+            await event_stream.emit("inst_a", event_type, payload)
+
+        triggered_1 = await store.record_recurrence(
+            instance_id="inst_a",
+            pattern_id="provider-error-repeated",
+            observed_at=_now(),
+            report_path="seed-integration-1.md",
+            classified_by=CLASSIFIED_AUTO_SIGNAL_TYPE,
+            emit_event=_emit_to_stream,
+        )
+        # First recurrence under threshold=2 doesn't yet reactivate.
+        assert triggered_1 is False
+
+        triggered_2 = await store.record_recurrence(
+            instance_id="inst_a",
+            pattern_id="provider-error-repeated",
+            observed_at=_now(),
+            report_path="seed-integration-2.md",
+            classified_by=CLASSIFIED_AUTO_SIGNAL_TYPE,
+            emit_event=_emit_to_stream,
+        )
+        # Second recurrence crosses the seeded threshold=2.
+        assert triggered_2 is True
+
+        # 5. Flush so the post-flush hook fires; the translated emit
+        # then queues for the NEXT flush, so flush twice.
+        await event_stream.flush_now()
+        await event_stream.flush_now()
+
+        # 6. Substrate state pin: the canonical autonomy-loop trigger
+        # event landed in the event stream with the seeded pattern's
+        # id and the post-reactivation active_epoch.
+        all_events = await _fetch_all_events("inst_a")
+        translated = [
+            e for e in all_events
+            if e.event_type == "friction.pattern_frequency_threshold_exceeded"
+        ]
+        assert len(translated) == 1, (
+            f"expected one translated event; got event types: "
+            f"{[e.event_type for e in all_events]}"
+        )
+        evt = translated[0]
+        assert evt.payload["pattern_id"] == "provider-error-repeated"
+        assert evt.payload["lifecycle_state"] == LIFECYCLE_REACTIVATED
+        assert evt.instance_id == "inst_a"
+        # Behavioral signal: emitter advanced its emit counter.
+        assert emitter._emit_count == 1
+    finally:
+        await emitter.stop()
 
 
 def test_starter_patterns_cover_all_seven_signal_types():
