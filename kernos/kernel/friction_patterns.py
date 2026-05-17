@@ -365,6 +365,17 @@ class FrictionPattern:
     # is per-instance (MAX+1 over the instance's friction_pattern rows)
     # so emitters can persist a "last fired epoch" cursor.
     active_epoch: int = 0
+    # FRICTION-PATTERN-SEED-V1 (2026-05-16): per-pattern reactivation
+    # threshold. record_recurrence reads this value (not the global
+    # KERNOS_FRICTION_REACTIVATION_THRESHOLD env) when deciding
+    # whether the recurrence count crosses the threshold to fire a
+    # reactivation. Lets the seed catalog tune thresholds per
+    # signal-class (PROVIDER_ERROR_REPEATED=2, MERGED_MESSAGES_DROPPED=2,
+    # most others=3, TOOL_AVAILABLE_BUT_NOT_USED=5). Env var becomes
+    # the default for newly-created patterns when the caller doesn't
+    # specify an explicit threshold; per-row value wins at
+    # recurrence-check time.
+    reactivation_threshold: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -374,22 +385,23 @@ class FrictionPattern:
 
 _FRICTION_PATTERN_DDL = """
 CREATE TABLE IF NOT EXISTS friction_pattern (
-    instance_id         TEXT NOT NULL,
-    pattern_id          TEXT NOT NULL,
-    parent_pattern_id   TEXT NOT NULL DEFAULT '',
-    display_name        TEXT NOT NULL DEFAULT '',
-    description         TEXT NOT NULL,
-    signal_type_keys    TEXT NOT NULL DEFAULT '[]',
-    aliases             TEXT NOT NULL DEFAULT '[]',
-    lifecycle_state     TEXT NOT NULL DEFAULT 'active',
-    occurrence_count    INTEGER NOT NULL DEFAULT 0,
-    first_observed_at   TEXT NOT NULL DEFAULT '',
-    last_observed_at    TEXT NOT NULL DEFAULT '',
-    resolved_at         TEXT NOT NULL DEFAULT '',
-    resolved_by_spec    TEXT NOT NULL DEFAULT '',
-    reactivated_at      TEXT NOT NULL DEFAULT '',
-    active_epoch        INTEGER NOT NULL DEFAULT 0,
-    created_at          TEXT NOT NULL,
+    instance_id            TEXT NOT NULL,
+    pattern_id             TEXT NOT NULL,
+    parent_pattern_id      TEXT NOT NULL DEFAULT '',
+    display_name           TEXT NOT NULL DEFAULT '',
+    description            TEXT NOT NULL,
+    signal_type_keys       TEXT NOT NULL DEFAULT '[]',
+    aliases                TEXT NOT NULL DEFAULT '[]',
+    lifecycle_state        TEXT NOT NULL DEFAULT 'active',
+    occurrence_count       INTEGER NOT NULL DEFAULT 0,
+    first_observed_at      TEXT NOT NULL DEFAULT '',
+    last_observed_at       TEXT NOT NULL DEFAULT '',
+    resolved_at            TEXT NOT NULL DEFAULT '',
+    resolved_by_spec       TEXT NOT NULL DEFAULT '',
+    reactivated_at         TEXT NOT NULL DEFAULT '',
+    active_epoch           INTEGER NOT NULL DEFAULT 0,
+    reactivation_threshold INTEGER NOT NULL DEFAULT 3,
+    created_at             TEXT NOT NULL,
     PRIMARY KEY (instance_id, pattern_id),
     CHECK (lifecycle_state IN (
         'active', 'resolved', 'reactivated', 'archived'
@@ -465,6 +477,14 @@ def _row_to_pattern(row: aiosqlite.Row) -> FrictionPattern:
         active_epoch = int(row["active_epoch"] or 0)
     except (KeyError, IndexError, TypeError, ValueError):
         active_epoch = 0
+    # FRICTION-PATTERN-SEED-V1: per-pattern reactivation_threshold may
+    # be absent on pre-migration rows; default to the legacy global
+    # default (3) so existing tests / DBs that predate the column
+    # see unchanged behavior until they're rewritten or re-seeded.
+    try:
+        reactivation_threshold = int(row["reactivation_threshold"] or 3)
+    except (KeyError, IndexError, TypeError, ValueError):
+        reactivation_threshold = 3
     return FrictionPattern(
         instance_id=row["instance_id"],
         pattern_id=row["pattern_id"],
@@ -482,6 +502,7 @@ def _row_to_pattern(row: aiosqlite.Row) -> FrictionPattern:
         reactivated_at=row["reactivated_at"],
         created_at=row["created_at"],
         active_epoch=active_epoch,
+        reactivation_threshold=reactivation_threshold,
     )
 
 
@@ -555,6 +576,21 @@ class FrictionPatternStore:
                 await self._db.execute(
                     "ALTER TABLE friction_pattern "
                     "ADD COLUMN active_epoch INTEGER NOT NULL DEFAULT 0"
+                )
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        # FRICTION-PATTERN-SEED-V1: reactivation_threshold column
+        # migration. Pre-spec rows get the legacy global default (3);
+        # post-spec callers can pass an explicit threshold to
+        # create_pattern, otherwise the env-derived default is
+        # persisted to the column at create time.
+        if "reactivation_threshold" not in cols:
+            try:
+                await self._db.execute(
+                    "ALTER TABLE friction_pattern "
+                    "ADD COLUMN reactivation_threshold "
+                    "INTEGER NOT NULL DEFAULT 3"
                 )
             except aiosqlite.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
@@ -700,6 +736,7 @@ class FrictionPatternStore:
         parent_pattern_id: str = "",
         display_name: str = "",
         seed_slug: str = "",
+        reactivation_threshold: int | None = None,
     ) -> FrictionPattern:
         if not description:
             raise ValueError("description is required")
@@ -707,6 +744,17 @@ class FrictionPatternStore:
         sig_keys = list(signal_type_keys or [])
         seed = seed_slug or description
         base_slug = slugify(seed) or f"pattern-{uuid.uuid4().hex[:8]}"
+        # FRICTION-PATTERN-SEED-V1: caller-supplied threshold wins;
+        # otherwise fall back to the legacy env-derived default so
+        # existing tests / call-sites that don't yet pass an explicit
+        # threshold see unchanged behavior. The env path stays alive
+        # as the "default factory" for newly-created patterns; the
+        # per-row value is the source of truth at recurrence-check time.
+        effective_threshold = (
+            int(reactivation_threshold)
+            if reactivation_threshold is not None
+            else _reactivation_threshold()
+        )
 
         async def _do(db: aiosqlite.Connection) -> FrictionPattern:
             # Path A uniqueness invariant: signal_type_keys must not
@@ -741,13 +789,13 @@ class FrictionPatternStore:
                 " description, signal_type_keys, aliases, lifecycle_state, "
                 " occurrence_count, first_observed_at, last_observed_at, "
                 " resolved_at, resolved_by_spec, reactivated_at, "
-                " active_epoch, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " active_epoch, reactivation_threshold, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     instance_id, pattern_id, parent_pattern_id, display_name,
                     description, json.dumps(sig_keys), json.dumps([]),
                     LIFECYCLE_ACTIVE, 0, "", "", "", "", "",
-                    active_epoch, now,
+                    active_epoch, effective_threshold, now,
                 ),
             )
             return FrictionPattern(
@@ -760,6 +808,7 @@ class FrictionPatternStore:
                 parent_pattern_id=parent_pattern_id,
                 lifecycle_state=LIFECYCLE_ACTIVE,
                 active_epoch=active_epoch,
+                reactivation_threshold=effective_threshold,
                 created_at=now,
             )
 
@@ -1142,7 +1191,12 @@ class FrictionPatternStore:
 
             # Reactivation check: count non-backfill recurrences within
             # the configured window since resolved_at.
-            threshold = _reactivation_threshold()
+            # FRICTION-PATTERN-SEED-V1: threshold is now per-pattern
+            # (stored at create_pattern time, defaulted from the legacy
+            # env var when caller didn't specify). Window remains a
+            # global env knob — different concern (operational tuning
+            # of evidence horizon, not per-pattern signal sensitivity).
+            threshold = current.reactivation_threshold
             window_days = _reactivation_window_days()
             window_cutoff_dt = self._compute_window_cutoff(window_days)
             window_cutoff = window_cutoff_dt.isoformat()
