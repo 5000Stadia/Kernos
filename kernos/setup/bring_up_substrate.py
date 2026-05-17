@@ -453,6 +453,66 @@ async def bring_up_substrate(
             "lazily via hash-mismatch-on-retrieval; non-blocking"
         )
 
+    # FRICTION-PATTERN-SEED-V1 (2026-05-16): seed the starter friction
+    # pattern catalog UNCONDITIONALLY. The FrictionObserver itself
+    # isn't gated on the autonomy-loop env vars; it observes every
+    # turn regardless. Without seeded patterns the observer detects
+    # signals but the classifier has nothing to match against, so
+    # signals become "unclassified" reports and never enter the
+    # catalog. Seed must mirror the FrictionObserver's unconditional
+    # posture — patterns are observation infrastructure, useful even
+    # when the autonomy loop's architect+operator env vars aren't set.
+    # Fail-open: catalog-seed failures log a warning and bring-up
+    # continues; the substrate operates without the catalog the way
+    # it did pre-spec.
+    # Codex round-1 Fold #1: track ownership so we don't leak a SQLite
+    # connection when seed creates a fresh store. Production usually
+    # has handler._friction_pattern_store (long-lived for the handler's
+    # FrictionObserver lifecycle) so seed shares it; in stub / opt-out
+    # paths where the handler has no store, the seed-only instance
+    # opens its own connection via ensure_schema and must be stopped
+    # here or the connection leaks for the bot's lifetime.
+    _seed_pattern_store = getattr(handler, "_friction_pattern_store", None)
+    _seed_store_owned_here = False
+    if _seed_pattern_store is None:
+        from kernos.kernel.friction_patterns import (
+            FrictionPatternStore as _FrictionPatternStore_seed,
+        )
+        _seed_pattern_store = _FrictionPatternStore_seed()
+        _seed_store_owned_here = True
+    try:
+        import os as _os_seed_fp
+        _seed_instance_id_fp = _os_seed_fp.environ.get(
+            "KERNOS_INSTANCE_ID", "",
+        ) or _substrate_instance_id
+        from kernos.setup.seed_friction_patterns import (
+            seed_friction_patterns_on_first_boot,
+        )
+        await seed_friction_patterns_on_first_boot(
+            _seed_instance_id_fp,
+            _seed_pattern_store,
+            data_dir=data_dir,
+        )
+    except Exception as _exc_seed_fp:
+        logger.warning(
+            "FRICTION_PATTERN_SEED_BRINGUP_FAILED error=%s — "
+            "substrate continues without the starter catalog; "
+            "autonomy loop will have nothing to react to until "
+            "the catalog is populated some other way",
+            _exc_seed_fp,
+        )
+    finally:
+        if _seed_store_owned_here:
+            try:
+                await _seed_pattern_store.stop()
+            except Exception as _exc_close:  # pragma: no cover
+                logger.debug(
+                    "FRICTION_PATTERN_SEED_STORE_CLOSE_FAILED error=%s "
+                    "— non-blocking, store was seed-only and bring-up "
+                    "is complete",
+                    _exc_close,
+                )
+
     # Spec 6 commit 7 / B3 fold: register the self_improvement
     # workflow + launch the autonomy-loop emitters in B3 order
     # (helper success BEFORE emitters launch so trigger predicates
