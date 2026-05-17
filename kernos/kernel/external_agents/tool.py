@@ -41,22 +41,24 @@ CONSULT_TOOL = {
     "name": "consult",
     "description": (
         "Dispatch work to or get input from an external coding-agent "
-        "CLI (Claude Code, Codex, Gemini). THIS is the channel for: "
-        "(1) IMPLEMENTATION HANDOFFS — when acting as broker for "
-        "spec work, dispatch implementation to claude_code or review "
-        "to codex; each call spawns a real CLI instance with "
-        "--add-dir access to the repo (not a stub); "
-        "(2) ARCHITECTURAL REVIEW — sanity-check before a big spec, "
-        "'have I missed an edge case?', code review on a non-trivial "
-        "change; "
-        "(3) CROSS-DOMAIN PERSPECTIVE — when another agent's training "
-        "gives leverage you lack. "
-        "Don't use for simple lookups, routine bug fixes, or "
-        "user-facing answers. Aider is BUILD-only — use execute_code "
-        "with backend='aider' for task-shaped CLI work. Returns the "
-        "external agent's free-text response. Threading: pass the "
-        "same session_id across calls to preserve context where the "
-        "harness CLI supports it."
+        "CLI (Claude Code, Codex, Gemini). These are full general-"
+        "purpose agentic CLIs with access to the repo via --add-dir: "
+        "they can implement, refactor, debug, architect, review, "
+        "test, document, explore, explain, generate, experiment — "
+        "anything within their capabilities. Each call spawns a real "
+        "CLI instance (not a stub); the agent reasons, uses its own "
+        "tools, and returns a free-text response. Use whenever "
+        "another agent's leverage adds value: when you're acting as "
+        "broker and need to dispatch implementation; when you want "
+        "a second opinion; when you need work done in a domain or "
+        "code area where another agent's perspective fits better; "
+        "when a fresh-context CLI is the right tool for the job. "
+        "Don't use for simple lookups (just grep / read), routine "
+        "bug fixes (just fix it), or user-facing answers (you "
+        "answer directly). Aider is BUILD-only — use execute_code "
+        "with backend='aider' for task-shaped CLI work. Threading: "
+        "pass the same session_id across calls to preserve context "
+        "where the harness CLI supports it."
     ),
     "input_schema": {
         "type": "object",
@@ -65,11 +67,14 @@ CONSULT_TOOL = {
                 "type": "string",
                 "enum": ["claude_code", "codex", "gemini"],
                 "description": (
-                    "Which external CLI to consult. claude_code is "
-                    "best for architectural review + design critique; "
-                    "codex for code review of a specific change + "
-                    "fast iteration; gemini for cross-domain "
-                    "knowledge / different perspective."
+                    "Which external CLI to consult. All three are "
+                    "general-purpose agentic CLIs — they can do any "
+                    "task within their capabilities. Pick based on "
+                    "what fits the work, not on prescribed domains: "
+                    "claude_code and codex are full coding agents "
+                    "with repo access via --add-dir; gemini brings "
+                    "Google's training to the same generality. "
+                    "Threading support varies by harness."
                 ),
             },
             "question": {
