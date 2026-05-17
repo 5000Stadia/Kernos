@@ -40,12 +40,17 @@ logger = logging.getLogger(__name__)
 CONSULT_TOOL = {
     "name": "consult",
     "description": (
-        "Consult an external coding-agent CLI (Claude Code, Codex, "
-        "Gemini) for review, second opinion, or exploratory thinking. "
-        "Use when the value of an external perspective beats the cost "
-        "of latency + tokens: architectural sanity check, "
-        "'have I missed an edge case?' double-check, code review on a "
-        "non-trivial change, cross-checking a tricky implementation. "
+        "Dispatch work to or get input from an external coding-agent "
+        "CLI (Claude Code, Codex, Gemini). THIS is the channel for: "
+        "(1) IMPLEMENTATION HANDOFFS — when acting as broker for "
+        "spec work, dispatch implementation to claude_code or review "
+        "to codex; each call spawns a real CLI instance with "
+        "--add-dir access to the repo (not a stub); "
+        "(2) ARCHITECTURAL REVIEW — sanity-check before a big spec, "
+        "'have I missed an edge case?', code review on a non-trivial "
+        "change; "
+        "(3) CROSS-DOMAIN PERSPECTIVE — when another agent's training "
+        "gives leverage you lack. "
         "Don't use for simple lookups, routine bug fixes, or "
         "user-facing answers. Aider is BUILD-only — use execute_code "
         "with backend='aider' for task-shaped CLI work. Returns the "

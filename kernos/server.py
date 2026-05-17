@@ -1306,15 +1306,37 @@ async def on_message(message):
     if not response_text:  # Merged message — response comes from primary turn
         return
 
-    for chunk in _chunk_response(response_text):
+    _all_chunks = _chunk_response(response_text)
+    _total_chunks = len(_all_chunks)
+    _delivered = 0
+    for chunk in _all_chunks:
         sent = await _send_safely(message.channel, chunk)
         if not sent:
-            # Could not deliver to Discord (e.g., Cloudflare-flagged token).
-            # Response was persisted to conv-log earlier in the persist
-            # phase, so the substrate state is intact — only the user-
-            # visible delivery failed. Stop chunking; further sends will
-            # also fail.
+            # Could not deliver to Discord (e.g., Cloudflare-flagged token
+            # or 429 cool-off). Response was persisted to conv-log
+            # earlier in the persist phase, so the substrate state is
+            # intact — only the user-visible delivery failed. Stop
+            # chunking; further sends will also fail.
+            #
+            # DISCORD-CHUNK-TRUNCATION-INDICATOR: before silently
+            # dropping the remaining chunks, attempt one short
+            # indicator send so the user sees that more was supposed
+            # to come. Previously a 429 mid-chunked-message produced
+            # silent truncation: user saw the first chunk(s) and
+            # assumed the response just ended; the rest was in the
+            # conv-log but invisible. The indicator send may itself
+            # 429 — if so, _send_safely returns False and we accept
+            # silence (don't compound the cool-off with retries).
+            _remaining = _total_chunks - _delivered
+            if _remaining > 0 and _delivered > 0:
+                _truncation_notice = (
+                    f"⚠️ Remainder dropped — Discord rate limit hit "
+                    f"after chunk {_delivered}/{_total_chunks}. Full "
+                    f"response is in the conv-log on disk."
+                )
+                await _send_safely(message.channel, _truncation_notice)
             break
+        _delivered += 1
 
 
 # ---------------------------------------------------------------------------

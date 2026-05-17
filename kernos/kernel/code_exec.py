@@ -78,14 +78,19 @@ EXECUTE_CODE_TOOL = {
             },
             "backend": {
                 "type": "string",
-                "enum": ["native", "aider", "claude-code", "codex"],
+                "enum": ["native", "aider"],
                 "description": (
-                    "Optional: which builder backend to route to. "
-                    "Defaults to KERNOS_BUILDER (typically 'native'). "
-                    "Use 'aider' for task-shaped CLI edits to "
-                    "specific files; 'claude-code' / 'codex' for "
-                    "agentic build loops; 'native' for direct "
-                    "Python execution in the sandbox."
+                    "Optional: which builder backend executes the "
+                    "code. Defaults to KERNOS_BUILDER (typically "
+                    "'native'). 'native' runs the code in a "
+                    "sandboxed Python subprocess. 'aider' routes to "
+                    "the Aider CLI for task-shaped edits to specific "
+                    "files. NOTE: this is sandboxed code execution, "
+                    "not a broker-dispatch channel — to hand off "
+                    "implementation work to Claude Code or Codex "
+                    "(broker role), use the `consult` tool. The "
+                    "'claude-code' and 'codex' execute_code backends "
+                    "are reserved namespace, NOT yet implemented."
                 ),
             },
         },
