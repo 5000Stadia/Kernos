@@ -1055,10 +1055,16 @@ _SEEN_MAX = 200
 import time as _time_module
 
 _DISCORD_PAUSE_SCHEDULE_SEC: list[int] = [
+    # DISCORD-COOL-OFF-SOFTENING (2026-05-17): softened the escalation
+    # schedule. Prior shape was 5/30/120/360 min, which meant a single
+    # 429 hiccup → 5 min, but two in a session → 30 min (a long UX
+    # blackhole). New shape: 5/10/30/120 — second-strike is 10 min
+    # not 30, third-strike is 30 not 120, ceiling stays at 2hr. Single
+    # hiccups stay short; sustained 429-streaks still escalate.
     int(os.getenv("KERNOS_DISCORD_PAUSE_1_SEC", "300")),    # 5 minutes
-    int(os.getenv("KERNOS_DISCORD_PAUSE_2_SEC", "1800")),   # 30 minutes
-    int(os.getenv("KERNOS_DISCORD_PAUSE_3_SEC", "7200")),   # 2 hours
-    int(os.getenv("KERNOS_DISCORD_PAUSE_4_SEC", "21600")),  # 6 hours
+    int(os.getenv("KERNOS_DISCORD_PAUSE_2_SEC", "600")),    # 10 minutes (was 30)
+    int(os.getenv("KERNOS_DISCORD_PAUSE_3_SEC", "1800")),   # 30 minutes (was 120)
+    int(os.getenv("KERNOS_DISCORD_PAUSE_4_SEC", "7200")),   # 2 hours (was 6)
 ]
 
 # Module-level cool-off state. _discord_pause_until is a Unix timestamp
@@ -1309,6 +1315,7 @@ async def on_message(message):
     _all_chunks = _chunk_response(response_text)
     _total_chunks = len(_all_chunks)
     _delivered = 0
+    _chunk_streak_before = _discord_429_streak
     for chunk in _all_chunks:
         sent = await _send_safely(message.channel, chunk)
         if not sent:
@@ -1318,23 +1325,44 @@ async def on_message(message):
             # intact — only the user-visible delivery failed. Stop
             # chunking; further sends will also fail.
             #
-            # DISCORD-CHUNK-TRUNCATION-INDICATOR: before silently
-            # dropping the remaining chunks, attempt one short
-            # indicator send so the user sees that more was supposed
-            # to come. Previously a 429 mid-chunked-message produced
-            # silent truncation: user saw the first chunk(s) and
-            # assumed the response just ended; the rest was in the
-            # conv-log but invisible. The indicator send may itself
-            # 429 — if so, _send_safely returns False and we accept
-            # silence (don't compound the cool-off with retries).
-            _remaining = _total_chunks - _delivered
-            if _remaining > 0 and _delivered > 0:
-                _truncation_notice = (
-                    f"⚠️ Remainder dropped — Discord rate limit hit "
-                    f"after chunk {_delivered}/{_total_chunks}. Full "
-                    f"response is in the conv-log on disk."
-                )
-                await _send_safely(message.channel, _truncation_notice)
+            # DISCORD-CHUNK-TRUNCATION-INDICATOR (refined 2026-05-17):
+            # handle three cases:
+            #   (a) cool-off was already active before this send AND no
+            #       chunks delivered → user has no signal at all. Notice
+            #       send would also be paused; rely on the pause-notice
+            #       fired at on_message::typing_ctx entry instead.
+            #   (b) cool-off just ACTIVATED on a chunk send (streak
+            #       incremented from 0→1 mid-loop) AND no chunks
+            #       delivered → mirror the typing-indicator path's
+            #       pause-notice so the user knows BEFORE the silence
+            #       starts. _send_pause_notice_to_channel is best-
+            #       effort (handles its own 429 fallback).
+            #   (c) some chunks delivered, then 429 mid-message → the
+            #       original truncation-indicator path: try one final
+            #       short indicator send so the user sees that more
+            #       was supposed to come.
+            if (
+                _chunk_streak_before == 0
+                and _discord_429_streak >= 1
+                and _delivered == 0
+            ):
+                # case (b): chunk send just triggered the cool-off
+                await _send_pause_notice_to_channel(message.channel)
+            elif _delivered > 0:
+                # case (c): partial delivery, drop indicator
+                _remaining = _total_chunks - _delivered
+                if _remaining > 0:
+                    _truncation_notice = (
+                        f"⚠️ Remainder dropped — Discord rate limit hit "
+                        f"after chunk {_delivered}/{_total_chunks}. Full "
+                        f"response is in the conv-log on disk."
+                    )
+                    await _send_safely(
+                        message.channel, _truncation_notice,
+                    )
+            # case (a) is implicit: no notice attempt because cool-off
+            # was already active before this turn; pause-notice was
+            # surfaced when cool-off first activated.
             break
         _delivered += 1
 

@@ -242,10 +242,18 @@ async def test_send_safely_reraises_non_429():
 
 
 def test_pause_schedule_escalates():
-    """Cool-off schedule escalates: 5m → 30m → 2h → 6h. Subsequent
-    429 observations extend the pause."""
+    """Cool-off schedule escalates: 5m → 10m → 30m → 2h. Subsequent
+    429 observations extend the pause.
+
+    DISCORD-COOL-OFF-SOFTENING (2026-05-17): schedule softened from
+    5/30/120/360 to 5/10/30/120. Prior shape locked the bot into a
+    30-minute UX blackhole after just two 429s in a session; new
+    shape keeps second-strike at 10min so single hiccups don't
+    monopolize delivery. Sustained 429-streaks still escalate, just
+    less aggressively.
+    """
     from kernos.server import _DISCORD_PAUSE_SCHEDULE_SEC
-    assert _DISCORD_PAUSE_SCHEDULE_SEC == [300, 1800, 7200, 21600]
+    assert _DISCORD_PAUSE_SCHEDULE_SEC == [300, 600, 1800, 7200]
 
 
 def test_register_429_activates_pause(monkeypatch):
