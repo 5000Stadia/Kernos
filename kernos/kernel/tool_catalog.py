@@ -64,6 +64,15 @@ ALWAYS_PINNED: set[str] = {
     "send_relational_message",     # agent-to-agent send (RELATIONAL-MESSAGING)
     "resolve_relational_message",  # agent-to-agent resolution
     "manage_members",              # member + relationship management (catalog-scan misses "declare full-access toward X")
+    # BROKER-ROLE primitives (added 2026-05-17 when Kernos took the
+    # architect/broker handoff). These three are the channels for
+    # dispatching work to / coordinating with external coding-agent
+    # CLIs (CC/Codex/Gemini). Pinned so they're always on the cockpit
+    # panel — the broker role needs them reachable every turn, not
+    # subject to the active-zone selector's dynamic promotion.
+    "consult",                       # autonomous CLI spawn (sync, fresh-context)
+    "ask_coding_session",            # async file-bridge to running session (operator/watcher relay)
+    "read_coding_session_response",  # companion poll for ask_coding_session
 }
 
 # Common MCP tools that get priority in the active window (not pinned, but preferred)
