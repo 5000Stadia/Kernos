@@ -108,6 +108,13 @@ class DispatchGate:
             # REFERENCE-PRIMITIVE-V1 (read_doc retired here; canonical
             # docs reach via request_reference)
             "request_reference",
+            # BROKER-ROLE classifications (2026-05-17): tools that
+            # were surfaced but blocked at the gate because they
+            # weren't in either _KERNEL_READS or _KERNEL_WRITES.
+            # Without these, dispatch returns "unknown" and the
+            # broker role can't actually fire.
+            "read_coding_session_response",  # polls bridge response dir
+            "diagnose_issue",                # reads trace + source + friction reports
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -153,6 +160,21 @@ class DispatchGate:
             # unknown and both live execution seams would refuse the
             # call.
             "note_this",
+            # BROKER-ROLE classifications (2026-05-17):
+            # consult spawns an external CLI subprocess; from Kernos's
+            # POV the side-effects (any code changes the subprocess
+            # makes via its own tools) are external to the substrate
+            # and not directly tracked here, but the call itself is
+            # a paid mutation of broker state. soft_write so the gate
+            # surfaces the dispatch through the standard write path
+            # rather than blocking it as unknown.
+            "consult",
+            # ask_coding_session writes a structured request file to
+            # the coding_session_bridge/requests/ directory; reversible
+            # (request file can be deleted; the relayed work may
+            # produce downstream code changes but those are tracked
+            # downstream, not at this surface).
+            "ask_coding_session",
         }
 
         if tool_name in _KERNEL_READS:
