@@ -486,3 +486,42 @@ def test_wrapper_exhausts_schedule_then_raises(monkeypatch):
     assert sleeps == _DISCORD_429_BACKOFF_SCHEDULE
     # Initial run + one per schedule entry = N+1 total calls.
     assert client.run.call_count == len(_DISCORD_429_BACKOFF_SCHEDULE) + 1
+
+
+# ---------------------------------------------------------------------
+# DISCORD-INTERCHUNK-DELAY pins
+# ---------------------------------------------------------------------
+
+
+def test_interchunk_delay_default_is_nonzero():
+    """Pin: the inter-chunk pause defaults to a nonzero positive value.
+    The whole point of this constant is to give Discord's per-route
+    rate limiter time to refill between chunked sends; a zero default
+    would mean an env-misconfig accidentally re-enables the shotgun
+    pattern that previously triggered 429s + silent truncation.
+    """
+    from kernos.server import DISCORD_INTERCHUNK_DELAY_SEC
+    assert DISCORD_INTERCHUNK_DELAY_SEC > 0, (
+        f"DISCORD_INTERCHUNK_DELAY_SEC must be > 0 to prevent shotgun "
+        f"chunk sends; got {DISCORD_INTERCHUNK_DELAY_SEC}"
+    )
+    # Sanity: should be at least 0.5s (Discord's per-route bucket is
+    # ~5/5s; anything tighter than 1s/chunk is back in the danger zone).
+    assert DISCORD_INTERCHUNK_DELAY_SEC >= 0.5, (
+        f"DISCORD_INTERCHUNK_DELAY_SEC too tight; got "
+        f"{DISCORD_INTERCHUNK_DELAY_SEC}, expected >= 0.5s"
+    )
+
+
+def test_interchunk_delay_env_override(monkeypatch):
+    """Pin: KERNOS_DISCORD_INTERCHUNK_DELAY_SEC env tunes the delay.
+    Operators can tighten (faster delivery) or loosen (more headroom)
+    via env without code changes."""
+    import importlib
+    monkeypatch.setenv("KERNOS_DISCORD_INTERCHUNK_DELAY_SEC", "2.5")
+    import kernos.server as srv
+    importlib.reload(srv)
+    assert srv.DISCORD_INTERCHUNK_DELAY_SEC == 2.5
+    # Restore module to default for other tests.
+    monkeypatch.delenv("KERNOS_DISCORD_INTERCHUNK_DELAY_SEC", raising=False)
+    importlib.reload(srv)
