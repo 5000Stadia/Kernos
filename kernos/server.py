@@ -257,6 +257,68 @@ async def wipe_command(interaction: discord.Interaction) -> None:
 handler: MessageHandler | None = None
 
 
+# ---------------------------------------------------------------------------
+# Zombie-reaper background loop (ZOMBIE-CHILD-PROCESS-REAP-V1)
+# ---------------------------------------------------------------------------
+
+_ZOMBIE_REAPER_INTERVAL_SEC: int = int(
+    os.getenv("KERNOS_ZOMBIE_REAPER_INTERVAL_SEC", "60")
+)
+
+
+async def _zombie_reaper_loop() -> None:
+    """Periodically reap any zombie child processes.
+
+    Belt-and-suspenders defense against subprocess-lifecycle leaks.
+    The primary fix is per-spawn-site discipline (always await
+    proc.wait() after proc.terminate()), but a periodic
+    waitpid(-1, WNOHANG) loop catches anything that path misses
+    without depending on every spawn site doing the right thing.
+
+    Loop discipline:
+      - sleep first so on_ready isn't blocked
+      - reap in a tight inner while-loop until WNOHANG returns 0
+        (handles bursts of multiple zombies cleanly)
+      - log every reap so operational verification is easy
+      - any exception in the loop is logged and the loop continues
+        (don't let a transient OS hiccup kill the reaper)
+
+    Interval tunable via ``KERNOS_ZOMBIE_REAPER_INTERVAL_SEC`` env
+    (default 60s). Well below the observed leak rate (~18/day).
+    """
+    import asyncio
+    while True:
+        try:
+            await asyncio.sleep(_ZOMBIE_REAPER_INTERVAL_SEC)
+            reaped = 0
+            # Loop because a burst of MCP reconnects can leave
+            # multiple zombies queued; one waitpid call reaps one.
+            while True:
+                try:
+                    pid, status = os.waitpid(-1, os.WNOHANG)
+                except ChildProcessError:
+                    # No children at all (unusual but possible
+                    # mid-startup before any subprocess spawn).
+                    break
+                if pid == 0:
+                    # No more reapable children right now.
+                    break
+                reaped += 1
+                logger.info(
+                    "ZOMBIE_REAPED: pid=%d status=%d", pid, status,
+                )
+            if reaped:
+                logger.info(
+                    "ZOMBIE_REAPER_CYCLE: reaped=%d", reaped,
+                )
+        except Exception as exc:
+            # Don't let any unexpected exception kill the reaper.
+            # Log and continue.
+            logger.warning(
+                "ZOMBIE_REAPER_LOOP_ERROR: %s", exc, exc_info=True,
+            )
+
+
 @client.event
 async def on_ready():
     global handler
@@ -887,6 +949,23 @@ async def on_ready():
         _au_asyncio.create_task(scheduled_update_loop(data_dir=data_dir))
     except Exception as exc:
         logger.warning("AUTO_UPDATE_CRON_LAUNCH_FAILED: %s", exc)
+
+    # ZOMBIE-CHILD-PROCESS-REAP-V1 (2026-05-17): belt-and-suspenders
+    # SIGCHLD reaper. MCP server reconnect cycles + auth-flow timeouts
+    # were leaving ~18 defunct child processes per day attached to the
+    # bot (observed: 36 zombies on a 2-day-old process). Per-spawn-
+    # site cleanup discipline is the primary fix (see capability/
+    # client.py:412 + the AsyncExitStack pattern), but a periodic
+    # waitpid(WNOHANG) loop catches anything that path misses without
+    # depending on every spawn site doing the right thing.
+    #
+    # 60-second interval is well below the leak rate; each call costs
+    # one syscall + at most one process-table walk. Fail-safe: any
+    # exception in the loop is logged and the loop continues.
+    try:
+        _au_asyncio.create_task(_zombie_reaper_loop())
+    except Exception as exc:
+        logger.warning("ZOMBIE_REAPER_LAUNCH_FAILED: %s", exc)
 
     # Send pending confirmation from a prior /restart or /wipe
     if _PENDING_CONFIRMATION_PATH.is_file():

@@ -166,6 +166,27 @@ class LiveDescriptorLookup:
             description=getattr(entry, "description", "") or "",
         )
 
+    def known_tool_ids(self) -> set[str]:
+        """CORRECTIVE-SIGNAL-CLOSEST-MATCH (2026-05-17): expose the
+        currently-registered tool names so the dispatcher's
+        tool_not_registered path can suggest closest matches when
+        the model emits an unrecognized name (e.g. hallucinated
+        namespaced variants like ``code_execution.execute_python``
+        instead of ``execute_code``).
+
+        Empty set when the catalog isn't wired yet — dispatcher's
+        suggestion logic is best-effort and handles empty input.
+        """
+        if not self._tool_catalog:
+            return set()
+        try:
+            get_names = getattr(self._tool_catalog, "get_names", None)
+            if callable(get_names):
+                return set(get_names() or [])
+        except Exception:
+            return set()
+        return set()
+
 
 # ===========================================================================
 # 2. LiveExecutor — dispatch-time gate enforcement (Fold 3)

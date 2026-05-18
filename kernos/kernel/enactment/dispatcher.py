@@ -123,7 +123,16 @@ class ToolExecutor(Protocol):
 class ToolDescriptorLookup(Protocol):
     """Resolves a tool_id to its ToolDescriptor for operation-resolution
     + per-operation timeout lookup. Production wiring binds to the
-    workshop registry; tests pass dict-backed stubs."""
+    workshop registry; tests pass dict-backed stubs.
+
+    Optional method ``known_tool_ids()`` returns the set of currently
+    registered tool names. Used by the dispatcher's tool_not_registered
+    path to populate ``corrective_signal`` with closest-match
+    suggestions — preventing the namespace-hallucination retry loops
+    where the model tries ``code_execution.execute_python`` instead
+    of ``execute_code``. Stubs that don't implement it skip the
+    suggestion silently.
+    """
 
     def descriptor_for(self, tool_id: str) -> ToolDescriptor | None: ...
 
@@ -281,6 +290,34 @@ class StepDispatcher:
                 )
             )
             self._fire_on_dispatch_complete()
+            # CORRECTIVE-SIGNAL-CLOSEST-MATCH (2026-05-17): when the
+            # lookup exposes known_tool_ids(), surface 1–3 closest
+            # matches so the model can self-correct on retry rather
+            # than burning more turns inventing namespace variants.
+            # Pattern observed twice: model emitted
+            # `code_execution.execute_python` and
+            # `external_coding_agent_consult.consult` instead of the
+            # flat registered names `execute_code` and `consult`.
+            # Stubs that don't implement known_tool_ids() fall back
+            # to no-suggestion (empty corrective_signal).
+            _corrective = ""
+            try:
+                _known_fn = getattr(self._lookup, "known_tool_ids", None)
+                if callable(_known_fn):
+                    import difflib
+                    _known = list(_known_fn() or [])
+                    _matches = difflib.get_close_matches(
+                        step.tool_id, _known, n=3, cutoff=0.4,
+                    )
+                    if _matches:
+                        _corrective = (
+                            f"tool {step.tool_id!r} is not registered. "
+                            f"Did you mean: {', '.join(_matches)}?"
+                        )
+            except Exception:
+                # Suggestion is best-effort — never let it block
+                # the failure return.
+                pass
             return StepDispatchResult(
                 completed=False,
                 output={},
@@ -289,6 +326,7 @@ class StepDispatcher:
                     f"tool {step.tool_id!r} is not registered with "
                     f"the workshop"
                 ),
+                corrective_signal=_corrective,
                 duration_ms=duration,
             )
 

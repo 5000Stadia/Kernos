@@ -323,6 +323,128 @@ async def test_unknown_tool_id_refuses_dispatch():
 
 
 # ---------------------------------------------------------------------------
+# CORRECTIVE-SIGNAL-CLOSEST-MATCH-V1 pins
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _StubLookupWithKnown:
+    """Extends _StubLookup with the optional known_tool_ids() method
+    that the dispatcher uses to surface closest-match suggestions
+    on tool_not_registered."""
+    descriptors: dict[str, ToolDescriptor] = field(default_factory=dict)
+    known: set[str] = field(default_factory=set)
+
+    def descriptor_for(self, tool_id: str) -> ToolDescriptor | None:
+        return self.descriptors.get(tool_id)
+
+    def known_tool_ids(self) -> set[str]:
+        return self.known
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_id_surfaces_closest_match_in_corrective_signal():
+    """Pin: when the model emits a hallucinated namespaced tool name
+    like `code_execution.execute_python` and the real registered tool
+    is `execute_code`, the dispatcher's failure result should populate
+    corrective_signal with the closest match so the model self-
+    corrects on retry instead of inventing more namespace variants."""
+    lookup = _StubLookupWithKnown(
+        descriptors={},
+        known={
+            "execute_code", "consult", "ask_coding_session",
+            "read_coding_session_response", "diagnose_issue",
+            "remember", "remember_details",
+        },
+    )
+    dispatcher = StepDispatcher(
+        executor=_StubExecutor(ToolExecutionResult(output={})),
+        descriptor_lookup=lookup,
+    )
+    result = await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(tool_id="code_execution.execute_python"),
+            briefing=_briefing(),
+        )
+    )
+    assert result.completed is False
+    assert "execute_code" in result.corrective_signal, (
+        f"expected corrective_signal to suggest 'execute_code'; "
+        f"got: {result.corrective_signal!r}"
+    )
+    assert result.corrective_signal.startswith("tool ")
+
+
+@pytest.mark.asyncio
+async def test_consult_namespace_hallucination_suggests_consult():
+    """Pin: the other observed hallucination —
+    `external_coding_agent_consult.consult` should surface `consult`
+    in the corrective_signal."""
+    lookup = _StubLookupWithKnown(
+        descriptors={},
+        known={
+            "consult", "ask_coding_session",
+            "read_coding_session_response", "execute_code",
+        },
+    )
+    dispatcher = StepDispatcher(
+        executor=_StubExecutor(ToolExecutionResult(output={})),
+        descriptor_lookup=lookup,
+    )
+    result = await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(tool_id="external_coding_agent_consult.consult"),
+            briefing=_briefing(),
+        )
+    )
+    assert "consult" in result.corrective_signal
+
+
+@pytest.mark.asyncio
+async def test_lookup_without_known_tool_ids_falls_back_silently():
+    """Pin: lookups (like _StubLookup) that don't implement
+    known_tool_ids() should produce an empty corrective_signal
+    without raising — best-effort suggestion never blocks failure
+    return."""
+    lookup = _StubLookup({})  # no known_tool_ids() method
+    dispatcher = StepDispatcher(
+        executor=_StubExecutor(ToolExecutionResult(output={})),
+        descriptor_lookup=lookup,
+    )
+    result = await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(tool_id="whatever"),
+            briefing=_briefing(),
+        )
+    )
+    assert result.completed is False
+    assert result.corrective_signal == ""
+
+
+@pytest.mark.asyncio
+async def test_no_close_match_leaves_corrective_signal_empty():
+    """Pin: when no registered tool name is close to the requested
+    one (cutoff=0.4), corrective_signal stays empty — don't surface
+    misleading suggestions."""
+    lookup = _StubLookupWithKnown(
+        descriptors={},
+        known={"alpha", "beta", "gamma"},
+    )
+    dispatcher = StepDispatcher(
+        executor=_StubExecutor(ToolExecutionResult(output={})),
+        descriptor_lookup=lookup,
+    )
+    result = await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(tool_id="totally_unrelated_xyz"),
+            briefing=_briefing(),
+        )
+    )
+    assert result.completed is False
+    assert result.corrective_signal == ""
+
+
+# ---------------------------------------------------------------------------
 # Per-operation timeout
 # ---------------------------------------------------------------------------
 

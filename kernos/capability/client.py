@@ -412,6 +412,25 @@ class MCPClientManager:
                 proc.terminate()
             except Exception:
                 pass
+            # ZOMBIE-CHILD-PROCESS-REAP-V1 (2026-05-17): wait briefly
+            # for the OS to deliver SIGTERM and reap the child.
+            # Without this await, terminate() returns immediately
+            # but the child sits as a zombie until parent exits —
+            # observed accumulating at ~18/day on long-running bots.
+            # 5s ceiling so a stuck child doesn't block the bot; if
+            # SIGTERM doesn't take, escalate to SIGKILL. The periodic
+            # reaper loop in server.py catches anything this misses.
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except (asyncio.TimeoutError, Exception):
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2)
+                except Exception:
+                    pass
             return False
         except Exception as exc:
             logger.warning("TOOL_AUTH_REAUTH: server=%s auth error: %s", server_name, exc)
