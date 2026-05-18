@@ -1054,6 +1054,19 @@ async def on_ready():
 
 DISCORD_MAX_LENGTH = 2000
 
+# DISCORD-INTERCHUNK-DELAY (2026-05-18): pause between consecutive
+# chunks of a single multi-chunk response. Discord's per-route rate
+# limit is ~5 messages / 5 seconds per channel; sending 3+ chunks
+# back-to-back (the "shotgun" pattern) reliably triggers 429s,
+# which then activate the cool-off and produce the silent-
+# truncation UX gap. A 1.2s pause between chunks keeps a 4-chunk
+# response under the limit + leaves headroom for the typing-
+# indicator + other concurrent sends. Env-tunable for operators
+# who want to tighten or loosen. Set to 0 to disable.
+DISCORD_INTERCHUNK_DELAY_SEC: float = float(
+    os.getenv("KERNOS_DISCORD_INTERCHUNK_DELAY_SEC", "1.2")
+)
+
 
 def _chunk_response(text: str) -> list[str]:
     """Split text into chunks that fit Discord's 2000-char limit.
@@ -1395,7 +1408,15 @@ async def on_message(message):
     _total_chunks = len(_all_chunks)
     _delivered = 0
     _chunk_streak_before = _discord_429_streak
-    for chunk in _all_chunks:
+    import asyncio as _chunk_asyncio
+    for _chunk_idx, chunk in enumerate(_all_chunks):
+        # DISCORD-INTERCHUNK-DELAY: pause between chunks (not before
+        # the first, not after the last) so consecutive sends don't
+        # blow through Discord's per-route rate limit. Skipping when
+        # only one chunk exists keeps single-message latency at
+        # baseline.
+        if _chunk_idx > 0 and DISCORD_INTERCHUNK_DELAY_SEC > 0:
+            await _chunk_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
         sent = await _send_safely(message.channel, chunk)
         if not sent:
             # Could not deliver to Discord (e.g., Cloudflare-flagged token
