@@ -52,11 +52,24 @@ class TestConsultToolSchema:
         assert "question" in props
         assert set(schema["required"]) == {"harness", "question"}
 
-    def test_harness_enum_excludes_aider(self):
-        # AC18: aider is build-only, not exposed in the consult tool.
-        enum = CONSULT_TOOL["input_schema"]["properties"]["harness"]["enum"]
-        assert "aider" not in enum
-        assert {"claude_code", "codex", "gemini"} == set(enum)
+    def test_harness_param_is_free_form_string(self):
+        # 2026-05-17 contract change: harness is no longer a hardcoded
+        # enum on the schema. The registry is dynamic / operator-
+        # extensible; the agent passes a free-form string validated at
+        # dispatch time against HarnessRegistry. Unknown names return a
+        # clear error listing currently registered harnesses, so the
+        # agent self-discovers without the schema baking in a closed
+        # list. Aider-blocking still happens at the registry level
+        # (entry.consult_supported=False), not at the schema layer.
+        harness_prop = (
+            CONSULT_TOOL["input_schema"]["properties"]["harness"]
+        )
+        assert harness_prop["type"] == "string"
+        assert "enum" not in harness_prop, (
+            "harness param must NOT carry a hardcoded enum — registry "
+            "is dynamic and the enum would block future-installed "
+            "harnesses from being addressable from the agent surface"
+        )
 
     def test_optional_fields_present(self):
         props = CONSULT_TOOL["input_schema"]["properties"]
