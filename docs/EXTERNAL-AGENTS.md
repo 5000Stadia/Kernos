@@ -166,7 +166,10 @@ kernos/kernel/external_agents/
 ├── reentrancy.py          ← ContextVar-based calling-context gate
 ├── subprocess_substrate.py← shared spawn/capture/scope/sanitize
 ├── errors.py              ← typed hierarchy
-└── harnesses/             ← per-CLI implementations
+├── acpx_adapter.py        ← ACPX dispatch layer (the substrate
+│                            boundary for claude_code/codex/gemini)
+├── bridge_watcher.py      ← outbound + inbound file-bridge loops
+└── harnesses/             ← per-CLI shims (delegate to acpx_adapter)
     ├── claude_code.py
     ├── codex.py
     ├── gemini.py
@@ -176,6 +179,59 @@ kernos/kernel/external_agents/
 `kernos/kernel/builders/` is now a **compatibility facade** —
 re-exports from `external_agents/` so `KERNOS_BUILDER` env var,
 `code_exec`, and existing imports keep working unchanged.
+
+### ACPX integration (2026-05-18)
+
+The `claude_code`, `codex`, and `gemini` harnesses are now thin
+compatibility shims that delegate to `acpx_adapter.dispatch`, which
+shells out to [`openclaw/acpx`](https://www.npmjs.com/package/acpx)
+— a headless CLI implementing the
+[Agent Client Protocol](https://agentclientprotocol.com/) standard.
+ACPX speaks ACP to each backend, so Kernos no longer per-CLI-wrangles
+flags, session IDs, or output formats.
+
+* **One-shot dispatch:** `acpx <agent> exec <prompt>`
+* **Multi-turn:** `acpx <agent> sessions ensure --name <id>` first,
+  then `acpx <agent> -s <id> <prompt>`
+* **Session IDs** derive from substrate coordinates via
+  `derive_session_id(instance_id, target, member_id, conversation_id)`
+  — 16-char SHA-256 prefix, deterministic across processes.
+
+Bring-up env vars:
+
+* `KERNOS_ACPX_AUTO_INSTALL=1` — opt-in `npm i -g acpx@<pinned>`
+  during bot startup. Default is **fail-loud** (log
+  `AGENT_PROTOCOL_UNAVAILABLE`, don't auto-install).
+* `KERNOS_ACPX_VERSION` — override the pinned ACPX version (default
+  matches `acpx_adapter.EXPECTED_ACPX_VERSION`).
+* `KERNOS_INSTANCE_ID` — used by `bridge_watcher` to scope its
+  request/response directories.
+
+### Bridge watcher
+
+`bridge_watcher` runs two background loops launched from
+`server.py` start-up:
+
+| Loop | Reads | Writes | Purpose |
+|------|-------|--------|---------|
+| Outbound | `data/<inst>/coding_session_bridge/requests/` | `…/responses/` | Closes the `ask_coding_session` relay gap — Kernos's agent can ask CC/Codex something via ACPX. |
+| Inbound  | `data/<inst>/cc_inbox/` | `cc_outbox/` | Lets external CLIs (me-as-CC in another session, scripts) ask Kernos to introspect itself. Read-only kinds: `free_text`, `inspect_state`, `read_file`, `list_files`, `sqlite_query`. |
+
+Both loops use `O_CREAT|O_EXCL` sentinel files (`.processing`) for
+atomic claim — concurrent watchers won't double-process. Response
+files are written via `tmp+rename` so the response-emitter watcher
+never sees partial JSON. Stale-lock recovery probes pid liveness via
+`os.kill(pid, 0)` before reclaiming.
+
+The inbound `sqlite_query` enforces SELECT/PRAGMA-only at the
+dispatcher; `read_file` and `list_files` reject path-traversal by
+resolving the requested path and checking it starts with the
+`data_root`. These are hard refusals, not best-effort.
+
+Gemini is wired through the same shim but live testing is gated
+behind `KERNOS_LIVE_AGENT_TESTS=1` plus an authenticated install —
+the shim works the moment `gemini` lands on PATH with creds, no
+additional code change needed.
 
 ## Composition with shipped substrate
 
@@ -196,12 +252,12 @@ re-exports from `external_agents/` so `KERNOS_BUILDER` env var,
 Out of scope for v1, in scope for follow-on specs:
 
 * **MCP transport** for harnesses with MCP server modes (Claude
-  Code's `claude mcp`). v1 ships subprocess; per-harness swap
-  later.
-* **ACP transport** for harnesses with ACP modes.
+  Code's `claude mcp`). v1 ships subprocess + ACPX.
 * **`KERNOS-MCP-SERVER-V1`** — Kernos exposing its own tools as MCP
-  so external agents can consult Kernos. Complementary direction.
-* **Async / streaming consultation.** v1 is sync subprocess.
+  so external agents can consult Kernos. Complementary direction
+  to the inbound watcher's read-only file bridge.
+* **Streaming consultation** surfaced to the Kernos agent (ACPX
+  already streams NDJSON; the shim currently accumulates).
 * **Token-budget enforcement** beyond per-call timeout.
 * **User-facing consultation UI / inspection.**
 
@@ -209,6 +265,12 @@ Out of scope for v1, in scope for follow-on specs:
 
 * Spec: `specs/EXTERNAL-AGENT-CONSULTATION-V1.md`.
 * Agent code: `kernos/kernel/external_agents/`.
-* Tests: `tests/test_external_agents_*.py` and
-  `tests/test_code_exec_backend_param.py`.
+* Tests: `tests/test_external_agents_*.py`,
+  `tests/test_acpx_adapter.py`, `tests/test_bridge_watcher.py`,
+  and `tests/test_code_exec_backend_param.py`.
 * Live tests guarded by `KERNOS_LIVE_AGENT_TESTS=1` env var.
+* ACPX upstream: <https://www.npmjs.com/package/acpx>
+* Agent Client Protocol: <https://agentclientprotocol.com/>
+* Background on why ACP-over-subprocess avoids the hang pattern
+  that bespoke per-CLI subprocess wrangling hits:
+  <https://bighatgroup.com/blog/using-acp-with-openclaw-to-prevent-agent-hangs/>

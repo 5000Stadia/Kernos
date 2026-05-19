@@ -66,92 +66,25 @@ class ClaudeCodeHarness:
         timeout_seconds: int,
         harness_options: dict[str, Any],
     ) -> ConsultResult:
-        if not shutil.which(self._binary):
-            raise HarnessUnavailable(
-                f"claude binary not on PATH; install Claude Code "
-                f"or pass binary= to the harness constructor"
-            )
-        try:
-            prompt = _compose_prompt(question, context)
-        except (TypeError, ValueError) as exc:
-            raise ConsultationFailed(
-                f"claude_code: context not JSON-serializable: {exc}"
-            ) from exc
-        cmd = [
-            self._binary, "--print",
-            "--output-format", "text",
-        ]
-        # Codex spec-review fold: --session-id requires a valid UUID.
-        # Sanitized hex (64 chars) is not a UUID; derive a UUIDv4-shaped
-        # value deterministically from the first 32 hex chars.
-        if session_id:
-            cmd.extend(["--session-id", _hex_to_uuid(session_id)])
-        if workspace_dir:
-            cmd.extend(["--add-dir", str(workspace_dir)])
-        # `--` separates flags from the positional prompt. Without
-        # it, claude treats the prompt as a value for the prior
-        # flag (--add-dir consumed it as a second directory).
-        # Codex spec-review fold (optional hardening, made
-        # mandatory by live-test discovery in C6).
-        cmd.append("--")
-        cmd.append(prompt)
-        # Scrub the parent's Claude Code env vars so the spawned
-        # `claude` doesn't detect a recursive parent and refuse to
-        # run. Discovered during C6 live test sweep: when Kernos's
-        # primary agent runs INSIDE a Claude Code session and the
-        # consult harness invokes `claude --print`, the child sees
-        # `CLAUDECODE=1` etc. on the inherited env and exits 1
-        # silently. Stripping these signals "fresh CLI invocation."
-        scrubbed_env = {
-            k: v for k, v in os.environ.items()
-            if not (
-                k == "CLAUDECODE"
-                or k == "AI_AGENT"
-                or k.startswith("CLAUDE_CODE_")
-                or k == "CLAUDE_PLUGIN_DATA"
-                # ANTHROPIC_API_KEY: claude reads it directly; if the
-                # parent process has a non-functional value (e.g.
-                # "test-key" planted by Kernos's conftest.py for unit
-                # tests), claude tries to use it and silently exits 1.
-                # Scrubbing forces claude back to its own
-                # keychain/oauth/cred file resolution. This lets
-                # consultation work even under pytest's environment
-                # contamination.
-                or k == "ANTHROPIC_API_KEY"
-            )
-        }
-        try:
-            result = await run_subprocess(
-                cmd,
-                cwd=workspace_dir if workspace_dir else None,
-                env=scrubbed_env,
-                timeout_seconds=timeout_seconds,
-            )
-        except (OSError, FileNotFoundError) as exc:
-            raise HarnessUnavailable(
-                f"claude subprocess spawn failed: {exc}"
-            ) from exc
-        if result.timed_out:
-            raise ConsultationTimeout(
-                f"claude consultation timed out after "
-                f"{timeout_seconds}s"
-            )
-        if result.exit_code != 0:
-            raise ConsultationFailed(
-                f"claude exited {result.exit_code}: "
-                f"{(result.stderr or 'no stderr')[:500]}",
-                exit_status=result.exit_code,
-            )
-        return ConsultResult(
-            response=result.stdout,
-            harness=self.name,
+        # ACPX-INTEGRATION-V1 (2026-05-18): this harness is now a thin
+        # compatibility shim — the actual dispatch happens through
+        # acpx_adapter, which speaks the Agent Client Protocol. The
+        # old per-CLI subprocess wrangling (env scrubbing, --session-id
+        # UUID-shaping, --add-dir, --output-format flags, etc.) all
+        # live inside the ACPX `claude` adapter now, not here.
+        #
+        # This shim is kept so existing tests + imports + the
+        # ConsultationOrchestrator path don't break. v2 may collapse
+        # the harness layer entirely once the orchestrator is
+        # rewritten to call acpx_adapter directly.
+        from kernos.kernel.external_agents.acpx_adapter import dispatch
+        prompt = _compose_prompt(question, context)
+        return await dispatch(
+            target=self.name,  # "claude_code"
+            prompt=prompt,
             session_id=session_id,
-            native_session_ref=_hex_to_uuid(session_id) if session_id else "",
-            metadata={
-                "duration_seconds": result.duration_seconds,
-                "exit_status": result.exit_code,
-            },
-            truncated=result.truncated,
+            workspace_dir=str(workspace_dir) if workspace_dir else "",
+            timeout_seconds=timeout_seconds,
         )
 
     async def build(

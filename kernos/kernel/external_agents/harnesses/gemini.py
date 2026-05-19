@@ -73,87 +73,24 @@ class GeminiHarness:
         timeout_seconds: int,
         harness_options: dict[str, Any],
     ) -> ConsultResult:
-        if not shutil.which(self._binary):
-            raise HarnessUnavailable(
-                f"gemini binary not on PATH; install Gemini CLI "
-                f"or pass binary= to the harness constructor"
-            )
-        if session_id:
-            # Codex mid-batch fold: harness boundary enforces sanitized
-            # session_id format. Caller MUST sanitize via
-            # sanitize_session_id() before invoking; raw session_id
-            # could path-traverse otherwise. v1 expects exactly the
-            # 64-char lowercase hex SHA-256 produced by
-            # sanitize_session_id.
-            if not _is_safe_session_id(session_id):
-                raise ConsultationFailed(
-                    f"gemini: session_id {session_id!r} is not in "
-                    f"the sanitized 64-char hex format the harness "
-                    f"requires; orchestrator must call "
-                    f"sanitize_session_id() before invoking"
-                )
-        history_file = self._history_path(session_id) if session_id else None
-        prior_turns = _load_history(history_file) if history_file else []
-
-        try:
-            prompt = _compose_prompt(question, context, prior_turns)
-        except (TypeError, ValueError) as exc:
-            raise ConsultationFailed(
-                f"gemini: context not JSON-serializable: {exc}"
-            ) from exc
-
-        cmd = [
-            self._binary,
-            "--prompt", prompt,
-            "--yolo",  # auto-approve for non-interactive use
-        ]
-        try:
-            result = await run_subprocess(
-                cmd,
-                cwd=workspace_dir if workspace_dir else None,
-                timeout_seconds=timeout_seconds,
-            )
-        except (OSError, FileNotFoundError) as exc:
-            raise HarnessUnavailable(
-                f"gemini subprocess spawn failed: {exc}"
-            ) from exc
-        if result.timed_out:
-            raise ConsultationTimeout(
-                f"gemini consultation timed out after {timeout_seconds}s"
-            )
-        if result.exit_code != 0:
-            raise ConsultationFailed(
-                f"gemini exited {result.exit_code}: "
-                f"{(result.stderr or 'no stderr')[:500]}",
-                exit_status=result.exit_code,
-            )
-
-        if history_file:
-            try:
-                _append_history(
-                    history_file,
-                    user=question, assistant=result.stdout,
-                )
-            except OSError as exc:
-                # History persistence failure is non-fatal — the
-                # consultation succeeded, but threading on the next
-                # call will lose this turn. Log and continue.
-                logger.warning(
-                    "gemini: history append failed for %s: %s",
-                    history_file, exc,
-                )
-
-        return ConsultResult(
-            response=result.stdout,
-            harness=self.name,
+        # ACPX-INTEGRATION-V1 (2026-05-18): thin compatibility shim —
+        # actual dispatch goes through acpx_adapter, which speaks the
+        # Agent Client Protocol. The old per-CLI subprocess wrangling
+        # (gemini --prompt --yolo, history JSONL replay, etc.) all
+        # live inside the ACPX `gemini` adapter now.
+        #
+        # Founder ratified 2026-05-18: skip developing Gemini
+        # integration depth for now. ACPX speaks gemini and that's
+        # the supported path; we don't invest in CLI-specific
+        # Gemini features here.
+        from kernos.kernel.external_agents.acpx_adapter import dispatch
+        prompt = _compose_prompt_for_acpx(question, context)
+        return await dispatch(
+            target=self.name,  # "gemini"
+            prompt=prompt,
             session_id=session_id,
-            native_session_ref=str(history_file) if history_file else "",
-            metadata={
-                "duration_seconds": result.duration_seconds,
-                "exit_status": result.exit_code,
-                "history_replay_turns": len(prior_turns),
-            },
-            truncated=result.truncated,
+            workspace_dir=str(workspace_dir) if workspace_dir else "",
+            timeout_seconds=timeout_seconds,
         )
 
     async def build(self, **_) -> BuildResult:
@@ -175,6 +112,18 @@ def _is_safe_session_id(session_id: str) -> bool:
     if len(session_id) != 64:
         return False
     return all(c in "0123456789abcdef" for c in session_id)
+
+
+def _compose_prompt_for_acpx(question: str, context: dict | str) -> str:
+    """ACPX-INTEGRATION-V1: minimal question+context blend for the
+    ACPX adapter path. ACPX's named sessions handle prior-turn
+    continuity natively, so this shim doesn't need the prior_turns
+    replay the legacy _compose_prompt did."""
+    if not context:
+        return question
+    if isinstance(context, dict):
+        return f"{question}\n\n[Context]\n{json.dumps(context, indent=2)}"
+    return f"{question}\n\n[Context]\n{context}"
 
 
 def _compose_prompt(

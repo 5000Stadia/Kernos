@@ -64,66 +64,19 @@ class CodexHarness:
         timeout_seconds: int,
         harness_options: dict[str, Any],
     ) -> ConsultResult:
-        if not shutil.which(self._binary):
-            raise HarnessUnavailable(
-                f"codex binary not on PATH; install Codex CLI "
-                f"or pass binary= to the harness constructor"
-            )
-        try:
-            prompt = _compose_prompt(question, context)
-        except (TypeError, ValueError) as exc:
-            raise ConsultationFailed(
-                f"codex: context not JSON-serializable: {exc}"
-            ) from exc
-        prior_native_ref = (harness_options or {}).get(
-            "prior_native_session_ref", ""
-        )
-
-        cmd = [
-            self._binary, "exec", "--json",
-            "--skip-git-repo-check",
-        ]
-        if workspace_dir:
-            cmd.extend(["--cd", str(workspace_dir)])
-        if prior_native_ref:
-            # Resume the previously-captured Codex thread.
-            cmd.extend(["resume", prior_native_ref])
-        cmd.append(prompt)
-
-        try:
-            result = await run_subprocess(
-                cmd,
-                cwd=workspace_dir if workspace_dir else None,
-                timeout_seconds=timeout_seconds,
-            )
-        except (OSError, FileNotFoundError) as exc:
-            raise HarnessUnavailable(
-                f"codex subprocess spawn failed: {exc}"
-            ) from exc
-        if result.timed_out:
-            raise ConsultationTimeout(
-                f"codex consultation timed out after {timeout_seconds}s"
-            )
-        if result.exit_code != 0:
-            raise ConsultationFailed(
-                f"codex exited {result.exit_code}: "
-                f"{(result.stderr or 'no stderr')[:500]}",
-                exit_status=result.exit_code,
-            )
-
-        thread_id, response_text, usage = _parse_codex_jsonl(result.stdout)
-
-        return ConsultResult(
-            response=response_text,
-            harness=self.name,
+        # ACPX-INTEGRATION-V1 (2026-05-18): thin compatibility shim —
+        # actual dispatch goes through acpx_adapter, which speaks the
+        # Agent Client Protocol. The old per-CLI subprocess wrangling
+        # (codex exec --json, JSONL parsing, thread-id capture, etc.)
+        # all live inside the ACPX `codex` adapter now.
+        from kernos.kernel.external_agents.acpx_adapter import dispatch
+        prompt = _compose_prompt(question, context)
+        return await dispatch(
+            target=self.name,  # "codex"
+            prompt=prompt,
             session_id=session_id,
-            native_session_ref=thread_id,
-            metadata={
-                "duration_seconds": result.duration_seconds,
-                "exit_status": result.exit_code,
-                "usage": usage,
-            },
-            truncated=result.truncated,
+            workspace_dir=str(workspace_dir) if workspace_dir else "",
+            timeout_seconds=timeout_seconds,
         )
 
     async def build(self, **_) -> BuildResult:

@@ -627,6 +627,60 @@ When setup instructions surface for a paste-capable platform, the agent is given
 
 ---
 
+## 14b. External Agents (ACPX Integration)
+
+Kernos talks to other CLI agents (Claude Code, Codex, Gemini) through the [Agent Client Protocol](https://agentclientprotocol.com/) via [openclaw/acpx](https://www.npmjs.com/package/acpx), a headless ACP CLI. The bespoke per-CLI subprocess wrangling that v1 shipped with is now collapsed behind one dispatch boundary.
+
+### Dispatch path
+
+**File:** `kernos/kernel/external_agents/acpx_adapter.py`
+
+`dispatch(target, prompt, session_id, workspace_dir, timeout_seconds) -> ConsultResult` — single async entry point. One-shot mode uses `acpx <agent> exec <prompt>`; multi-turn uses `acpx <agent> sessions ensure --name <id>` then `acpx <agent> -s <id> <prompt>`. NDJSON parsing accumulates `session/update` events with `sessionUpdate == "agent_message_chunk"`; completion fires on JSON-RPC `result.stopReason` or process exit with rc=0+text.
+
+Session IDs are substrate-derived: `derive_session_id(instance_id, target, member_id, conversation_id)` returns a deterministic 16-char SHA-256 prefix — same coordinates always thread to the same ACPX session.
+
+### Harness shims
+
+**Files:** `kernos/kernel/external_agents/harnesses/{claude_code,codex,gemini}.py`
+
+Thin compatibility wrappers. `consult()` calls `acpx_adapter.dispatch(target=self.name, prompt=_compose(question, context), session_id=session_id, workspace_dir=str(workspace_dir), timeout_seconds=timeout_seconds)`. Health-check still surfaces binary presence for the bring-up log. The legacy `_hex_to_uuid` and `_parse_codex_jsonl` helpers remain importable for back-compat consumers.
+
+### Bridge watcher
+
+**File:** `kernos/kernel/external_agents/bridge_watcher.py`
+
+Two background loops launched in `server.py` startup:
+
+- **Outbound** — polls `data/<instance>/coding_session_bridge/requests/` every 2s. For each new request: atomic `O_CREAT|O_EXCL` claim on `<req>.processing` sentinel, JSON-load request, dispatch via `acpx_adapter`, write response atomically to `…/responses/<req>.json` via tmp+rename. Closes the `ask_coding_session` relay gap so the Kernos agent can consult external CLIs without the user routing prompts by hand.
+- **Inbound** — polls `data/<instance>/cc_inbox/`, dispatches read-only handlers, writes to `cc_outbox/`. Lets external CLI clients (CC in another session, Codex via ACPX, scripts) ask Kernos to introspect itself.
+
+Supported inbound kinds:
+
+| Kind | Behavior |
+|------|----------|
+| `free_text` | echoes `params.prompt` (smoke probe) |
+| `inspect_state` | returns `data_root` path + existence flags |
+| `read_file` | reads `data/<instance>/<path>`; rejects path traversal |
+| `list_files` | lists directory entries; rejects path traversal |
+| `sqlite_query` | runs SELECT/PRAGMA only; INSERT/UPDATE/DELETE/DROP rejected with `ValueError`. Limit clamps row count. |
+
+Stale-lock recovery probes pid liveness via `os.kill(pid, 0)` and reclaims after `_STALE_LOCK_TTL_SEC`. Concurrent watchers on the same request resolve atomically via `O_CREAT|O_EXCL` — exactly one wins.
+
+### Bring-up
+
+**File:** `kernos/server.py` (after zombie-reaper registration)
+
+- `is_acpx_available()` probes the `acpx` binary, logs `AGENT_PROTOCOL_AVAILABLE: acpx=<ver> (expected=<ver>)` or `AGENT_PROTOCOL_UNAVAILABLE: <reason>`.
+- `KERNOS_ACPX_AUTO_INSTALL=1` opts into `npm i -g acpx@<EXPECTED_ACPX_VERSION>` at startup; default is fail-loud (don't silently install).
+- `KERNOS_ACPX_VERSION` overrides the pinned version.
+- Both watcher loops launched via `asyncio.create_task(...)` with `instance_id` from `KERNOS_INSTANCE_ID` (default `"default"`). Wrapped in try/except — `BRIDGE_WATCHER_LAUNCH_FAILED` log on failure; bot startup never blocked.
+
+### Why ACP (vs. bespoke subprocess wrangling)
+
+The plugin-subagent dispatch path through Claude Code's `codex:rescue` hangs in some environments — broker connects but stream events don't reach completion. ACPX bypasses that entirely by speaking ACP directly to the agent process. Background: <https://bighatgroup.com/blog/using-acp-with-openclaw-to-prevent-agent-hangs/>.
+
+---
+
 ## 12. Identity & Covenants
 
 ### Soul
