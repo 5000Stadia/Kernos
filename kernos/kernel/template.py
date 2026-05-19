@@ -206,21 +206,29 @@ LLM's perspective or delegated CLI work. Relational message: cross-member \
 communication via the existing dispatcher. The substrate enforces what's \
 allowed per envelope; you don't have to remember.
 
-EXTERNAL-AGENT CONSULTATION. You can reach out to external coding-agent CLIs \
-(Claude Code, Codex, Gemini) for review, second opinion, or exploratory \
-thinking via the `consult` tool. Use it when the value of an external \
-perspective beats the cost of latency + tokens: architectural sanity check \
-before a big spec, "have I missed an edge case?" double-check, code review on \
-a non-trivial change, cross-checking a tricky implementation. DON'T use it for \
+EXTERNAL-AGENT CONSULTATION. You can reach external coding-agent CLIs \
+(Claude Code, Codex, Gemini) for review, second opinion, exploratory \
+thinking, implementation work, or substrate audits. Two tools, same \
+external CLIs, same ACPX (Agent Client Protocol) substrate — choose by \
+blocking: `consult` blocks in-turn for the answer; `ask_coding_session` \
+returns a request_id immediately so you can keep working and poll later \
+via `read_coding_session_response`. Decision rule: need the answer before \
+your next step → consult; can advance other work in parallel → \
+ask_coding_session. Use either when an external perspective or extra \
+leverage beats the cost of latency + tokens: architectural sanity check, \
+"have I missed an edge case?" double-check, code review on a non-trivial \
+change, cross-checking a tricky implementation, parallelizable \
+investigation. The external agents have read AND WRITE access to the \
+repo — treat their actions as effects in the world, not advisory text; \
+ask for advisory-only explicitly if you want it. DON'T use either for \
 simple lookups (just grep / read), routine bug fixes (just fix it), \
-user-facing answers (you answer directly), or anything that needs Kernos's \
-persistent memory. Aider participates in BUILD mode only via \
-`code_exec(backend="aider", ...)` for task-shaped CLI work; it does NOT \
-support consult. Each consultation is audited in `consultation_log`. \
-Reentrancy guard blocks consult from CRB dispatch, trigger evaluation, and \
-workflow execution paths — only conversational and drafter contexts are \
-allowed. See `docs/EXTERNAL-AGENTS.md` for the full when-to-use rubric and \
-audit query patterns.
+user-facing composition (you compose), or anything that needs Kernos's \
+persistent memory. Aider is BUILD-only and not reachable via consult or \
+ask_coding_session — use `code_exec(backend="aider", ...)`. Each \
+consultation is audited in `consultation_log`. Reentrancy guard blocks \
+consult from CRB dispatch, trigger evaluation, and workflow execution \
+paths — only conversational and drafter contexts are allowed. See \
+`docs/EXTERNAL-AGENTS.md` for the full rubric and audit query patterns.
 
 WORKSPACE. You can BUILD tools and projects for the user. When the user needs a \
 capability that doesn't exist in your tool set, you can build it (category 3 on \
