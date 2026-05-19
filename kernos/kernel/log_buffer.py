@@ -108,3 +108,113 @@ def get_recent_log_lines(last_n: int | None = None) -> list[str]:
     if _singleton is None:
         return []
     return _singleton.snapshot(last_n=last_n)
+
+
+# ---------------------------------------------------------------------
+# Persistent file capture (LOG-PERSIST-V1, 2026-05-19)
+# ---------------------------------------------------------------------
+#
+# The ring buffer is in-memory only. When the bot crashes or gets
+# manually restarted (e.g. to recover from a stuck gateway), the
+# buffer is wiped and post-hoc RCA becomes impossible. Codex
+# investigation of the 2026-05-19 14:24 silent-gateway failure
+# pointed at "asyncio loop blocked starving discord.py heartbeat"
+# as the likely root cause — discord.py logs `Heartbeat blocked`
+# warnings when this happens, but we couldn't see them because
+# logs only existed in memory and got nuked by the recovery
+# restart.
+#
+# This handler writes ALL log records to a rotating file under
+# data/<instance>/diagnostics/server.log. Survives restarts. Lets
+# the next investigation actually have evidence.
+
+_file_handler_singleton: logging.Handler | None = None
+
+
+def install_log_file_handler(
+    *, data_dir: str, max_bytes: int | None = None, backup_count: int | None = None,
+) -> logging.Handler | None:
+    """Attach a rotating file handler to the root logger.
+
+    Default cap: 10 MB per file, 5 backups = 50 MB ceiling.
+    Tunable via ``KERNOS_LOG_FILE_MAX_BYTES`` / ``KERNOS_LOG_FILE_BACKUP_COUNT``.
+
+    Skipped (returns None) when ``data_dir`` is empty or unwritable —
+    the bot must continue running even if log persistence isn't
+    possible. Idempotent.
+    """
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+    global _file_handler_singleton
+    if _file_handler_singleton is not None:
+        return _file_handler_singleton
+    if not data_dir:
+        return None
+    if max_bytes is None:
+        try:
+            max_bytes = int(
+                os.getenv("KERNOS_LOG_FILE_MAX_BYTES", str(10 * 1024 * 1024))
+            )
+        except ValueError:
+            max_bytes = 10 * 1024 * 1024
+    if backup_count is None:
+        try:
+            backup_count = int(
+                os.getenv("KERNOS_LOG_FILE_BACKUP_COUNT", "5")
+            )
+        except ValueError:
+            backup_count = 5
+
+    # Resolve the diagnostics dir under the instance root, falling
+    # back to data_dir / diagnostics for non-multi-tenant configs.
+    instance_id = os.getenv("KERNOS_INSTANCE_ID", "")
+    if instance_id:
+        from kernos.utils import _safe_name
+        log_root = Path(data_dir) / _safe_name(instance_id) / "diagnostics"
+    else:
+        log_root = Path(data_dir) / "diagnostics"
+    try:
+        log_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    log_path = log_root / "server.log"
+
+    try:
+        handler = RotatingFileHandler(
+            str(log_path),
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+    except OSError:
+        return None
+
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+    )
+    logging.root.addHandler(handler)
+
+    # Critical: ensure discord.py's own loggers actually emit at INFO
+    # so we capture `Heartbeat blocked` and reconnect-cycle messages.
+    # discord.py defaults to WARNING for most of its loggers; bumping
+    # discord.gateway to INFO without going to DEBUG (which is very
+    # chatty) gives us the failure-mode signals without firehose.
+    logging.getLogger("discord.gateway").setLevel(logging.INFO)
+    logging.getLogger("discord.client").setLevel(logging.INFO)
+    logging.getLogger("discord.http").setLevel(logging.WARNING)  # noisy at INFO
+
+    _file_handler_singleton = handler
+    return handler
+
+
+def get_log_file_path() -> str | None:
+    """Return the absolute path of the active log file, or None when
+    the file handler isn't installed."""
+    if _file_handler_singleton is None:
+        return None
+    base = getattr(_file_handler_singleton, "baseFilename", None)
+    return base if isinstance(base, str) else None

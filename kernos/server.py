@@ -85,8 +85,21 @@ for h in logging.root.handlers:
 # a RECENT LOG section. Lets operators see substrate AND runtime evidence
 # (CODEX_REQUEST tools=N, TOOL_SURFACING, etc.) in the same artifact.
 # See kernos/kernel/log_buffer.py for capacity + env override.
-from kernos.kernel.log_buffer import install_log_ring_buffer
+from kernos.kernel.log_buffer import (
+    install_log_file_handler,
+    install_log_ring_buffer,
+)
 install_log_ring_buffer()
+# LOG-PERSIST-V1 (2026-05-19): also write all logs to a rotating
+# file under data/<instance>/diagnostics/server.log so post-crash
+# RCA actually has evidence. The in-memory ring buffer is wiped
+# on restart; the file survives. Discord's `Heartbeat blocked`
+# warnings — the smoking gun for the 2026-05-19 silent-gateway
+# failure mode — land here. Best-effort: if data_dir is unwritable
+# the bot continues without file logging.
+install_log_file_handler(
+    data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
+)
 
 logger = logging.getLogger(__name__)
 
