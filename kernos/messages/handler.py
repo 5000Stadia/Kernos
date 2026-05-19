@@ -4612,6 +4612,108 @@ class MessageHandler:
         self._runners.clear()
 
     # -----------------------------------------------------------------------
+    # AUTO-WAKE-V1 (2026-05-19): consult completion → wake turn
+    # -----------------------------------------------------------------------
+
+    async def inject_consult_completion_wake(self, payload: dict) -> None:
+        """Wake a turn in the originating space when an external-agent
+        consultation completes.
+
+        Wired from ``CodingSessionBridgeResponseEmitter.wake_callback``
+        at bring-up. Closes the architectural gap the bot flagged in
+        the 2026-05-19 12:26 /dump: ``ask_coding_session`` was
+        emitting ``coding_consult.response_received`` events but
+        nothing was actually waking a turn — the agent had to poll
+        ``read_coding_session_response`` manually.
+
+        Architecture (founder-approved 2026-05-19):
+          * Wake target: originating space (not a whisper)
+          * Multiple pending: sequential queue, FIFO with user turns
+          * Mechanism: synthetic NormalizedMessage on the space's
+            mailbox; the existing SpaceRunner.mailbox is already
+            per-space FIFO and merges within MERGE_WINDOW_MS
+
+        The synthetic message carries
+        ``execution_envelope.source = "consult_completion_wake"`` so
+        downstream phases can recognize it. Fire-and-forget — the
+        ``handle()`` future resolves with the agent's response which
+        is ignored here; if the agent decides to surface to the user
+        it uses ``notify_user``.
+
+        Failure-isolated: any error logs a warning and returns
+        normally so the audit emission path is never blocked.
+        """
+        from datetime import datetime, timezone
+        from kernos.messages.models import (
+            NormalizedMessage as _Msg, AuthLevel as _Auth,
+        )
+
+        space_id = payload.get("originating_space", "") or ""
+        member_id = payload.get("originating_member_id", "") or ""
+        instance_id = payload.get("instance_id", "") or ""
+        request_id = payload.get("request_id", "") or ""
+        target = payload.get("target", "") or "(unknown)"
+        outcome = (
+            payload.get("investigation_outcome", "") or "(unknown)"
+        )
+        summary = payload.get("summary", "") or ""
+
+        if not (space_id and instance_id and request_id):
+            logger.warning(
+                "CONSULT_WAKE_SKIPPED_MISSING_FIELDS "
+                "instance_id=%r space_id=%r request_id=%r",
+                instance_id, space_id, request_id,
+            )
+            return
+
+        wake_body = (
+            f"[system: external consult response arrived]\n"
+            f"target: {target}\n"
+            f"outcome: {outcome}\n"
+            f"request_id: {request_id}\n\n"
+            f"{summary}"
+        )
+
+        synthetic = _Msg(
+            content=wake_body,
+            sender="kernos-system",
+            sender_auth_level=_Auth.owner_verified,
+            platform="system",
+            platform_capabilities=[],
+            conversation_id=space_id,
+            timestamp=datetime.now(timezone.utc),
+            instance_id=instance_id,
+            member_id=member_id,
+            context={
+                "execution_envelope": {
+                    "source": "consult_completion_wake",
+                    "request_id": request_id,
+                    "target": target,
+                    "investigation_outcome": outcome,
+                    "originating_space": space_id,
+                },
+            },
+        )
+
+        # Fire-and-forget: handle() does the full pipeline (routing,
+        # assemble, reason, persist). The response future resolves
+        # but nothing's awaiting; if the agent decides to surface to
+        # the user it does so via notify_user. Sequential ordering
+        # with user turns is automatic via the SpaceRunner mailbox.
+        try:
+            asyncio.create_task(self.handle(synthetic))
+            logger.info(
+                "CONSULT_WAKE_INJECTED instance=%s space=%s "
+                "request_id=%s target=%s outcome=%s",
+                instance_id, space_id, request_id, target, outcome,
+            )
+        except Exception as exc:
+            logger.warning(
+                "CONSULT_WAKE_INJECT_FAILED request_id=%s error=%s",
+                request_id, exc,
+            )
+
+    # -----------------------------------------------------------------------
     # Six-Phase Pipeline (SPEC-HANDLER-DECOMPOSE)
     # -----------------------------------------------------------------------
 

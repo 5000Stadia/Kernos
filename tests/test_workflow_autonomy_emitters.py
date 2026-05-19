@@ -575,3 +575,248 @@ class TestCodingSessionBridgeResponseEmitter:
             if e.event_type == "coding_consult.response_received"
         ]
         assert len(response_events) == 1
+
+
+# ===========================================================================
+# AUTO-WAKE-V1 (2026-05-19) — wake callback wiring
+# ===========================================================================
+
+
+class TestCodingSessionBridgeResponseEmitterWakeCallback:
+    """Pins the AUTO-WAKE-V1 wiring: when a response arrives, the
+    emitter calls the optional ``wake_callback`` with a payload
+    carrying enough substrate coordinates (instance, space,
+    member, request_id, target, outcome, summary) for the
+    MessageHandler to inject a wake-turn into the originating
+    space's mailbox.
+
+    Also pins the pre-existing path bug fix: ``_safe_name`` must be
+    applied to the instance_id when constructing the responses dir,
+    so colon-bearing instance ids like ``discord:364303...`` work
+    (the bridge_watcher writes to the safe-name'd path).
+    """
+
+    async def test_wake_callback_fires_with_correct_payload(
+        self, event_stream_writer,
+    ):
+        tmp_path = event_stream_writer
+        instance_id = "inst_wake_test"
+        bridge_root = Path(tmp_path) / instance_id / "coding_session_bridge"
+        (bridge_root / "requests").mkdir(parents=True)
+        (bridge_root / "responses").mkdir(parents=True)
+
+        request_id = "req_wake_abc"
+        (bridge_root / "requests" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "originating_kernos_instance": instance_id,
+                "originating_member_id": "mem_xyz",
+                "originating_space": "space_target_abc",
+                "target": "codex",
+            }),
+        )
+        (bridge_root / "responses" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "target": "codex",
+                "investigation_outcome": "completed",
+                "summary": "codex says: looks good",
+            }),
+        )
+
+        captured: list[dict] = []
+
+        async def fake_wake(payload):
+            captured.append(payload)
+
+        emitter = CodingSessionBridgeResponseEmitter(
+            instance_id=instance_id,
+            data_dir=str(tmp_path),
+            poll_interval_s=0.05,
+            wake_callback=fake_wake,
+        )
+        await emitter.start()
+        try:
+            await _wait_until(
+                lambda: len(captured) >= 1, timeout_s=2.0,
+            )
+        finally:
+            await emitter.stop()
+
+        assert len(captured) == 1
+        p = captured[0]
+        assert p["request_id"] == request_id
+        assert p["instance_id"] == instance_id
+        assert p["originating_space"] == "space_target_abc"
+        assert p["originating_member_id"] == "mem_xyz"
+        assert p["target"] == "codex"
+        assert p["investigation_outcome"] == "completed"
+        assert p["summary"] == "codex says: looks good"
+
+    async def test_wake_callback_none_means_no_wake(
+        self, event_stream_writer,
+    ):
+        """Legacy mode: when wake_callback isn't wired, the audit
+        event still fires but no wake happens. This is the default
+        constructor shape so existing callers don't break."""
+        tmp_path = event_stream_writer
+        instance_id = "inst_nowake"
+        bridge_root = Path(tmp_path) / instance_id / "coding_session_bridge"
+        (bridge_root / "requests").mkdir(parents=True)
+        (bridge_root / "responses").mkdir(parents=True)
+
+        request_id = "req_nowake"
+        (bridge_root / "requests" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "originating_kernos_instance": instance_id,
+                "originating_member_id": "mem",
+                "originating_space": "s",
+                "target": "codex",
+            }),
+        )
+        (bridge_root / "responses" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "target": "codex",
+                "investigation_outcome": "completed",
+                "summary": "ok",
+            }),
+        )
+
+        emitter = CodingSessionBridgeResponseEmitter(
+            instance_id=instance_id,
+            data_dir=str(tmp_path),
+            poll_interval_s=0.05,
+            # wake_callback unset = None
+        )
+        await emitter.start()
+        try:
+            await _wait_until(
+                lambda: emitter._emit_count >= 1, timeout_s=2.0,
+            )
+        finally:
+            await emitter.stop()
+        # No exception; emit_count went up; no wake was fired
+        # (nothing to assert beyond that — the test pins that the
+        # default shape doesn't require wake wiring to function).
+        assert emitter._emit_count >= 1
+
+    async def test_wake_callback_failure_does_not_block_emission(
+        self, event_stream_writer,
+    ):
+        """Failure isolation pin: if the wake callback raises, the
+        audit emission must still complete. Wake is best-effort
+        surfacing; audit is load-bearing."""
+        tmp_path = event_stream_writer
+        instance_id = "inst_wake_fail"
+        bridge_root = Path(tmp_path) / instance_id / "coding_session_bridge"
+        (bridge_root / "requests").mkdir(parents=True)
+        (bridge_root / "responses").mkdir(parents=True)
+
+        request_id = "req_wake_fail"
+        (bridge_root / "requests" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "originating_kernos_instance": instance_id,
+                "originating_member_id": "m",
+                "originating_space": "s",
+                "target": "codex",
+            }),
+        )
+        (bridge_root / "responses" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "target": "codex",
+                "investigation_outcome": "completed",
+                "summary": "ok",
+            }),
+        )
+
+        async def boom_wake(payload):
+            raise RuntimeError("wake callback simulated failure")
+
+        emitter = CodingSessionBridgeResponseEmitter(
+            instance_id=instance_id,
+            data_dir=str(tmp_path),
+            poll_interval_s=0.05,
+            wake_callback=boom_wake,
+        )
+        await emitter.start()
+        try:
+            await _wait_until(
+                lambda: emitter._emit_count >= 1, timeout_s=2.0,
+            )
+        finally:
+            await emitter.stop()
+        # Emission completed even though wake threw — that's the
+        # failure-isolation invariant we're pinning.
+        assert emitter._emit_count >= 1
+        # And the sentinel landed (proof the emit-once primitive
+        # completed normally despite the wake failure).
+        sentinel = bridge_root / "responses" / f"{request_id}.emitted"
+        assert sentinel.exists()
+
+    async def test_safe_name_applied_to_instance_id_in_path(
+        self, event_stream_writer,
+    ):
+        """Pre-existing bug fix pin: instance_ids containing colons
+        (the prod shape: ``discord:364303223047323649``) must be
+        ``_safe_name``-transformed when constructing the responses
+        dir, matching what the bridge_watcher writes to. Before this
+        fix the emitter looked at a non-existent dir and silently
+        no-op'd in prod."""
+        from kernos.utils import _safe_name
+
+        tmp_path = event_stream_writer
+        instance_id_raw = "discord:9999_test_colon"
+        instance_id_safe = _safe_name(instance_id_raw)
+        # Sanity check the transform actually changes the string
+        assert instance_id_raw != instance_id_safe
+
+        bridge_root = (
+            Path(tmp_path) / instance_id_safe / "coding_session_bridge"
+        )
+        (bridge_root / "requests").mkdir(parents=True)
+        (bridge_root / "responses").mkdir(parents=True)
+
+        request_id = "req_colon"
+        (bridge_root / "requests" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "originating_kernos_instance": instance_id_raw,
+                "originating_member_id": "m",
+                "originating_space": "s_xyz",
+                "target": "codex",
+            }),
+        )
+        (bridge_root / "responses" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "target": "codex",
+                "investigation_outcome": "completed",
+                "summary": "ok",
+            }),
+        )
+
+        captured: list[dict] = []
+
+        async def cap(payload):
+            captured.append(payload)
+
+        emitter = CodingSessionBridgeResponseEmitter(
+            instance_id=instance_id_raw,  # raw with colon
+            data_dir=str(tmp_path),
+            poll_interval_s=0.05,
+            wake_callback=cap,
+        )
+        await emitter.start()
+        try:
+            await _wait_until(
+                lambda: len(captured) >= 1, timeout_s=2.0,
+            )
+        finally:
+            await emitter.stop()
+        assert len(captured) == 1
+        assert captured[0]["instance_id"] == instance_id_raw
+        assert captured[0]["originating_space"] == "s_xyz"

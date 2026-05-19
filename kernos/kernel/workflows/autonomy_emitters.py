@@ -277,6 +277,7 @@ class CodingSessionBridgeResponseEmitter:
         instance_id: str,
         data_dir: str,
         poll_interval_s: float = 2.0,
+        wake_callback=None,
     ) -> None:
         self._instance_id = instance_id
         self._data_dir = data_dir
@@ -287,6 +288,15 @@ class CodingSessionBridgeResponseEmitter:
         # triggered.
         self._poll_count = 0
         self._emit_count = 0
+        # AUTO-WAKE-V1 (2026-05-19): optional callback invoked once
+        # per newly-arrived response so the MessageHandler can inject
+        # a wake-turn into the originating space's mailbox. Signature:
+        # `async def wake_callback(payload: dict) -> None` where
+        # payload carries instance_id, request_id, target,
+        # investigation_outcome, summary, originating_member_id,
+        # originating_space. None = legacy behavior (audit-only,
+        # no wake).
+        self._wake_callback = wake_callback
 
     async def start(self) -> None:
         """Spawn the polling task. Idempotent."""
@@ -353,9 +363,19 @@ class CodingSessionBridgeResponseEmitter:
         from kernos.kernel.coding_session_bridge import (
             handle_read_coding_session_response,
         )
+        from kernos.utils import _safe_name
 
+        # Pre-existing bug fix (2026-05-19): instance_id was used
+        # raw here while the bridge_watcher + coding_session_bridge
+        # both use ``_safe_name(instance_id)``. With colon-bearing
+        # instance ids like ``discord:364303223047323649``, the raw
+        # form pointed at a non-existent dir and the emitter loop
+        # has been silently no-oping in prod. Agent-initiated
+        # ``read_coding_session_response`` calls were doing the
+        # emission work instead. Fixing here so the poll path actually
+        # finds responses — required for AUTO-WAKE-V1.
         responses_dir = (
-            Path(self._data_dir) / self._instance_id
+            Path(self._data_dir) / _safe_name(self._instance_id)
             / "coding_session_bridge" / "responses"
         )
         if not responses_dir.exists():
@@ -377,12 +397,77 @@ class CodingSessionBridgeResponseEmitter:
                     request_id=request_id,
                 )
                 self._emit_count += 1
+                # AUTO-WAKE-V1: after the audit event fires, invoke
+                # the wake callback (if wired) so the MessageHandler
+                # can inject a synthetic turn into the originating
+                # space's mailbox. Failure-isolated so a wake-side
+                # bug can't break the audit emission.
+                if self._wake_callback is not None:
+                    try:
+                        payload = self._read_request_payload(
+                            response_file=response_file,
+                            request_id=request_id,
+                        )
+                        await self._wake_callback(payload)
+                    except Exception as wake_exc:
+                        logger.warning(
+                            "CODING_SESSION_BRIDGE_WAKE_CALLBACK_FAILED "
+                            "request_id=%s error=%s",
+                            request_id, wake_exc,
+                        )
             except Exception as exc:
                 logger.warning(
                     "CODING_SESSION_BRIDGE_RESPONSE_EMITTER_READ_FAILED "
                     "request_id=%s error=%s",
                     request_id, exc,
                 )
+
+    def _read_request_payload(
+        self, *, response_file, request_id: str,
+    ) -> dict:
+        """Construct the wake payload by joining the response file
+        (carries summary + investigation_outcome) with the original
+        request file (carries originating_space + member_id + target).
+        Missing fields default to empty strings rather than raising —
+        the wake is best-effort surfacing, not a load-bearing path.
+        """
+        import json as _json
+        # Response side
+        try:
+            response_data = _json.loads(
+                response_file.read_text(encoding="utf-8")
+            )
+        except Exception:
+            response_data = {}
+        # Request side (sibling dir, same id)
+        request_file = (
+            response_file.parent.parent / "requests"
+            / f"{request_id}.json"
+        )
+        try:
+            request_data = _json.loads(
+                request_file.read_text(encoding="utf-8")
+            )
+        except Exception:
+            request_data = {}
+        return {
+            "request_id": request_id,
+            "instance_id": self._instance_id,
+            "target": response_data.get("target", ""),
+            "investigation_outcome": response_data.get(
+                "investigation_outcome", "",
+            ),
+            "summary": response_data.get("summary", ""),
+            "originating_member_id": request_data.get(
+                "originating_member_id", "",
+            ),
+            "originating_space": request_data.get(
+                "originating_space", "",
+            ),
+            "originating_conversation_id": request_data.get(
+                "originating_conversation_id", "",
+            ),
+        }
 
 
 __all__ = [

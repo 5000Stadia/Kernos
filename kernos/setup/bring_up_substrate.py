@@ -604,9 +604,16 @@ async def bring_up_substrate(
             execution_engine.register_emitter(
                 "friction_pattern_frequency", _freq_emitter_si,
             )
+            # AUTO-WAKE-V1 (2026-05-19): wire the emitter's wake
+            # callback to the handler's injection method so consult
+            # completions wake a turn in the originating space
+            # instead of requiring the agent to poll.
             _response_emitter_si = CodingSessionBridgeResponseEmitter(
                 instance_id=_si_instance_id,
                 data_dir=data_dir,
+                wake_callback=getattr(
+                    handler, "inject_consult_completion_wake", None,
+                ),
             )
             await _response_emitter_si.start()
             execution_engine.register_emitter(
