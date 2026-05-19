@@ -48,6 +48,22 @@ _load_kernos_env() {
 }
 _load_kernos_env
 
+# --- Ensure npm-global bin is on PATH -------------------------
+# The ACPX adapter (Agent Client Protocol → claude/codex/gemini)
+# is installed via `npm install -g acpx`, which lands in
+# ~/.npm-global/bin/ on user-prefixed npm setups. When start.sh
+# is launched from a context that hasn't sourced the user's
+# shell rc (systemd unit, file-manager double-click), that dir
+# isn't on PATH and every external-agent dispatch comes back
+# `unable_to_investigate` with "'acpx' not on PATH".
+#
+# The adapter has a fallback that probes this location anyway,
+# but exposing it on PATH is the right layer — any other
+# npm-installed CLI gets the same benefit.
+if [ -d "$HOME/.npm-global/bin" ] && [[ ":$PATH:" != *":$HOME/.npm-global/bin:"* ]]; then
+    export PATH="$HOME/.npm-global/bin:$PATH"
+fi
+
 # --- Graceful-crash handler ----------------------------------
 # When start.sh is launched by double-click, the terminal window
 # is owned by the script's shell. If python (or any earlier step)

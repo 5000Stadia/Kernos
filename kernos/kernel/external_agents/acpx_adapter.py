@@ -57,10 +57,35 @@ logger = logging.getLogger(__name__)
 
 
 def _acpx_binary() -> str:
-    """Return the ACPX binary path. Defaults to PATH lookup; override
-    via ``KERNOS_ACPX_BINARY`` for tests / non-standard installs.
+    """Return the ACPX binary path.
+
+    Lookup order:
+      1. ``KERNOS_ACPX_BINARY`` env override (tests / non-standard installs)
+      2. ``shutil.which("acpx")`` — standard PATH lookup
+      3. Common npm-global fallbacks: ``~/.npm-global/bin/acpx``,
+         ``~/.local/bin/acpx``, ``/usr/local/bin/acpx``
+
+    The fallback handles the deploy gap where the bot's launch PATH
+    (systemd, double-clicked start.sh) lacks the npm-global bin dir
+    even though ``acpx`` is installed. Without this, every dispatch
+    came back ``unable_to_investigate`` with "'acpx' not on PATH".
     """
-    return os.environ.get("KERNOS_ACPX_BINARY", "acpx").strip() or "acpx"
+    override = os.environ.get("KERNOS_ACPX_BINARY", "").strip()
+    if override:
+        return override
+    import shutil
+    found = shutil.which("acpx")
+    if found:
+        return found
+    home = os.path.expanduser("~")
+    for candidate in (
+        f"{home}/.npm-global/bin/acpx",
+        f"{home}/.local/bin/acpx",
+        "/usr/local/bin/acpx",
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return "acpx"
 
 
 # Kernos-boundary target name → ACPX subcommand agent name. Kernos
