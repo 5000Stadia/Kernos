@@ -263,3 +263,140 @@ class TestSupportedTargets:
 
     def test_supported_targets_are_strings(self):
         assert all(isinstance(t, str) for t in SUPPORTED_TARGETS)
+
+
+# ===========================================================================
+# Descendant reaping — closes the codex-acp orphan leak
+# ===========================================================================
+
+
+class TestCollectDescendants:
+    """``_collect_descendants`` walks ``/proc/<pid>/task/<tid>/children``
+    to enumerate the full process tree under a root PID. Required
+    because ``npm exec`` calls ``setsid`` and the leaves escape our
+    process group — killpg can't reach them.
+    """
+
+    def test_returns_self_descendants_via_subprocess(self):
+        import subprocess
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _collect_descendants,
+        )
+
+        # Spawn `sh -c "sleep 30 & sleep 30 & wait"` so we have a
+        # deterministic descendant tree we can observe.
+        proc = subprocess.Popen(
+            ["sh", "-c", "sleep 30 & sleep 30 & wait"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            # Give the shell a moment to fork its children
+            import time
+            time.sleep(0.3)
+            descendants = _collect_descendants(proc.pid)
+            # Should see at least the two `sleep` children
+            assert len(descendants) >= 2, (
+                f"expected >=2 descendants, got {descendants}"
+            )
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+            # Clean up any straggler sleeps
+            import os, signal
+            for pid in descendants if 'descendants' in dir() else []:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+    def test_returns_empty_for_nonexistent_pid(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _collect_descendants,
+        )
+        # A PID very unlikely to exist
+        assert _collect_descendants(9_999_999) == []
+
+    def test_returns_empty_for_leaf_process(self):
+        import subprocess
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _collect_descendants,
+        )
+        # `sleep` with no children → empty descendant set
+        proc = subprocess.Popen(
+            ["sleep", "30"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            import time
+            time.sleep(0.1)
+            assert _collect_descendants(proc.pid) == []
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+class TestKillTree:
+    """``_kill_tree`` SIGKILLs every descendant of a root PID and
+    returns the count signaled. Used in the dispatch teardown to
+    reap codex-acp / claude-acp grandchildren that escaped the
+    process group."""
+
+    def test_kills_descendants_and_returns_count(self):
+        import subprocess, time, os
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _kill_tree, _collect_descendants,
+        )
+        # sh with two sleep grandchildren we want killed
+        proc = subprocess.Popen(
+            ["sh", "-c", "sleep 30 & sleep 30 & wait"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.3)
+            descendants_before = _collect_descendants(proc.pid)
+            assert len(descendants_before) >= 2
+            killed = _kill_tree(proc.pid)
+            assert killed >= 2
+            # Give the kernel a moment to reap
+            time.sleep(0.2)
+            # Now confirm the descendants are gone
+            for pid in descendants_before:
+                # Either truly gone or zombie waiting for parent
+                try:
+                    # SIGCONT to test existence; ESRCH means gone
+                    os.kill(pid, 0)
+                    # Still there — must be a zombie (status Z)
+                    with open(f"/proc/{pid}/status") as f:
+                        state_line = next(
+                            l for l in f if l.startswith("State:")
+                        )
+                    assert "Z" in state_line, (
+                        f"PID {pid} survived kill: {state_line}"
+                    )
+                except (ProcessLookupError, OSError, FileNotFoundError):
+                    pass  # gone, expected
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+    def test_returns_zero_for_leaf_pid(self):
+        import subprocess, time
+        from kernos.kernel.external_agents.acpx_adapter import _kill_tree
+        proc = subprocess.Popen(
+            ["sleep", "30"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(0.1)
+            assert _kill_tree(proc.pid) == 0
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+    def test_handles_nonexistent_pid_gracefully(self):
+        from kernos.kernel.external_agents.acpx_adapter import _kill_tree
+        assert _kill_tree(9_999_999) == 0

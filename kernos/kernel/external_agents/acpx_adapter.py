@@ -56,6 +56,68 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 
 
+def _collect_descendants(root_pid: int) -> list[int]:
+    """Return all descendant PIDs of ``root_pid`` (BFS), Linux-only via
+    ``/proc/<pid>/task/<tid>/children``.
+
+    Why we need this: ACPX spawns ``codex-acp`` (and ``claude-acp`` /
+    ``gemini-acp``) via ``npm exec`` → ``sh -c`` → ``node`` → the ACP
+    binary itself. The intermediate ``npm exec`` chain calls ``setsid``
+    so process-group reap via ``killpg`` doesn't reach the leaves —
+    they escape our group. We have to walk the descendant tree
+    explicitly and SIGKILL each leaf to fully tear down the dispatch.
+
+    Returns an empty list on non-Linux platforms or if ``/proc`` is
+    unavailable. The caller should always be defensive — orphan
+    cleanup is best-effort.
+    """
+    descendants: list[int] = []
+    queue: list[int] = [root_pid]
+    while queue:
+        pid = queue.pop(0)
+        children_path = f"/proc/{pid}/task/{pid}/children"
+        try:
+            with open(children_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+        if not content:
+            continue
+        for child_str in content.split():
+            try:
+                child_pid = int(child_str)
+            except ValueError:
+                continue
+            descendants.append(child_pid)
+            queue.append(child_pid)
+    return descendants
+
+
+def _kill_tree(root_pid: int) -> int:
+    """SIGKILL the descendant tree rooted at ``root_pid``. Returns the
+    number of PIDs we sent the signal to.
+
+    The root itself is NOT killed here — the caller already handles
+    the direct child via ``proc.kill()``. We only need the descendants
+    that escaped the process group.
+
+    Leaves-first ordering so a parent's death doesn't reparent its
+    children to init mid-kill.
+    """
+    import signal
+    descendants = _collect_descendants(root_pid)
+    if not descendants:
+        return 0
+    killed = 0
+    for pid in reversed(descendants):
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed += 1
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    return killed
+
+
 def _acpx_binary() -> str:
     """Return the ACPX binary path.
 
@@ -334,6 +396,11 @@ async def _ensure_session(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Same process-group reap rationale as dispatch — mirror
+            # so ensure-time leaks (probably none in practice since
+            # `sessions ensure` exits fast, but defensive) can't
+            # accumulate.
+            start_new_session=True,
         )
     except (FileNotFoundError, OSError) as exc:
         raise ConsultationFailed(
@@ -371,6 +438,12 @@ async def _ensure_session(
                 await asyncio.wait_for(proc.wait(), timeout=2)
             except Exception:
                 pass
+        # Descendant tree reap (see dispatch's matching block for
+        # the full rationale).
+        try:
+            _kill_tree(proc.pid)
+        except Exception:
+            pass
         for task in (drain_stdout, drain_stderr):
             if not task.done():
                 task.cancel()
@@ -500,6 +573,13 @@ async def dispatch(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Put acpx in its own process group so we can kill the
+            # whole tree on teardown — codex-acp / claude-acp / etc.
+            # are spawned as grandchildren via npx, and acpx itself
+            # doesn't always reap them on its own exit. Without this,
+            # every dispatch leaks a long-lived ACP server process
+            # (parent reassigns to systemd-user / PID 1).
+            start_new_session=True,
         )
     except (FileNotFoundError, OSError) as exc:
         raise HarnessUnavailable(
@@ -549,8 +629,28 @@ async def dispatch(
         async for raw_line in proc.stderr:
             stderr_chunks.append(raw_line)
 
+    # Descendant-tracking task: walks /proc/<acpx_pid>/.../children
+    # every ~0.5s and accumulates a set of every PID acpx ever
+    # spawned during the dispatch. Required because by the time the
+    # finally block runs, acpx itself may have exited and its
+    # children reparented to PID 1 — at that point a post-hoc walk
+    # finds nothing, but the codex-acp / claude-acp daemons keep
+    # running. Snapshotting WHILE acpx is alive is the only reliable
+    # way to track them for cleanup.
+    known_descendants: set[int] = set()
+
+    async def _track_descendants() -> None:
+        while True:
+            try:
+                for pid in _collect_descendants(proc.pid):
+                    known_descendants.add(pid)
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+
     drain_stdout_task = asyncio.create_task(_drain_stdout())
     drain_stderr_task = asyncio.create_task(_drain_stderr())
+    tracker_task = asyncio.create_task(_track_descendants())
     timed_out = False
     drain_incomplete = False
 
@@ -573,14 +673,49 @@ async def dispatch(
                 await asyncio.wait_for(proc.wait(), timeout=2)
             except Exception:
                 pass
+        # Stop the descendant tracker and fold in any final snapshot
+        # before we kill (in case the very last children appeared in
+        # the gap between the tracker's last tick and now).
+        if not tracker_task.done():
+            tracker_task.cancel()
+        try:
+            for pid in _collect_descendants(proc.pid):
+                known_descendants.add(pid)
+        except Exception:
+            pass
+
+        # Descendant tree reap: acpx spawns codex-acp / claude-acp as
+        # grandchildren via `npm exec` → `sh -c` → `node` → the ACP
+        # binary. `npm exec` calls setsid internally, so process-group
+        # reap (killpg) doesn't reach the leaves — they escape our
+        # group. We tracked descendants live during the dispatch
+        # (see _track_descendants above) so we have their PIDs even
+        # though they've been reparented away from us by the time
+        # acpx exits. SIGKILL each one. Run on EVERY teardown — not
+        # just timeout — because the leak shows up even on rc=0
+        # happy-path dispatches.
+        import signal as _signal
+        killed = 0
+        for pid in sorted(known_descendants, reverse=True):
+            try:
+                os.kill(pid, _signal.SIGKILL)
+                killed += 1
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        if killed:
+            logger.info(
+                "ACPX_DESCENDANT_REAP: target=%s killed=%d "
+                "tracked=%d",
+                target, killed, len(known_descendants),
+            )
         # Codex review fold #3: cancel AND await the drain tasks so
         # exceptions are observed and we don't get "Task was
         # destroyed but it is pending" warnings.
-        for task in (drain_stdout_task, drain_stderr_task):
+        for task in (drain_stdout_task, drain_stderr_task, tracker_task):
             if not task.done():
                 task.cancel()
         await asyncio.gather(
-            drain_stdout_task, drain_stderr_task,
+            drain_stdout_task, drain_stderr_task, tracker_task,
             return_exceptions=True,
         )
 
