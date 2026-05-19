@@ -223,6 +223,39 @@ class TestDispatchPolicy:
         assert "dump_context" in ReasoningService._KERNEL_TOOL_PATHS
         assert "restart_self" in ReasoningService._KERNEL_TOOL_PATHS
 
+    def test_both_tools_always_pinned(self):
+        """Founder decision 2026-05-19: both tools must be in
+        ALWAYS_PINNED so the agent always has self-introspection
+        + self-recovery reachable, regardless of active space or
+        the surfacer's per-turn choices."""
+        from kernos.kernel.tool_catalog import ALWAYS_PINNED
+        assert "dump_context" in ALWAYS_PINNED
+        assert "restart_self" in ALWAYS_PINNED
+
+    def test_dispatch_branches_do_not_require_system_space(self):
+        """Regression pin (founder decision 2026-05-19): the
+        dispatch branches for dump_context and restart_self must
+        NOT call _assert_admin_space — they're available in every
+        space. Safety stays at the handler level (restart_self's
+        confirm=true) + gate's hard_write classification."""
+        import inspect
+        from kernos.kernel.reasoning import ReasoningService
+        src = inspect.getsource(ReasoningService.execute_tool)
+        # Find the dump_context / restart_self dispatch blocks and
+        # verify _assert_admin_space isn't called in them. We grep
+        # the source around each branch.
+        for tool in ("dump_context", "restart_self"):
+            marker = f'tool_name == "{tool}"'
+            idx = src.find(marker)
+            assert idx >= 0, f"dispatch branch for {tool} missing"
+            # Take the next 400 chars after the marker — that's
+            # the dispatch block.
+            block = src[idx:idx + 400]
+            assert "_assert_admin_space" not in block, (
+                f"{tool} dispatch must not call _assert_admin_space "
+                f"(founder decision 2026-05-19: available everywhere)"
+            )
+
 
 class TestGateClassification:
     """The gate classifies tool effects (read / soft_write /

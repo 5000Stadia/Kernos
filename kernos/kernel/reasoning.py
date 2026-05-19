@@ -1249,11 +1249,11 @@ class ReasoningService:
                 )
             elif tool_name == "dump_context":
                 # SELF-ADMIN-TOOLS-V1: agent-callable equivalent of
-                # the /dump slash command. System-space-gated to
-                # mirror the other admin-tool surfaces. Read-only.
-                _gate_msg = self._assert_admin_space(request, "dump_context")
-                if _gate_msg is not None:
-                    return _gate_msg
+                # the /dump slash command. Read-only introspection;
+                # available in every space (founder decision
+                # 2026-05-19: the agent benefits from being able to
+                # self-introspect from any context, and there's no
+                # destructive risk).
                 from kernos.kernel.self_admin_tools import (
                     handle_dump_context_tool,
                 )
@@ -1263,11 +1263,12 @@ class ReasoningService:
                 )
             elif tool_name == "restart_self":
                 # SELF-ADMIN-TOOLS-V1: agent-callable equivalent of
-                # /restart. Two-call confirmation; second call
-                # execs and never returns. System-space-gated.
-                _gate_msg = self._assert_admin_space(request, "restart_self")
-                if _gate_msg is not None:
-                    return _gate_msg
+                # /restart. Available in every space (founder
+                # decision 2026-05-19: the agent must be able to
+                # self-recover from any state, including when
+                # stuck outside the System space). Safety stays at
+                # the handler level (two-call confirm=true required)
+                # + the gate's hard_write classification, layered.
                 from kernos.kernel.self_admin_tools import (
                     handle_restart_self_tool,
                 )

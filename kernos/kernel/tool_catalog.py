@@ -73,6 +73,14 @@ ALWAYS_PINNED: set[str] = {
     "consult",                       # autonomous CLI spawn (sync, fresh-context)
     "ask_coding_session",            # async file-bridge to running session (operator/watcher relay)
     "read_coding_session_response",  # companion poll for ask_coding_session
+    # SELF-ADMIN-TOOLS-V1 (2026-05-19): pinned so the agent always
+    # has self-introspection (dump_context) and self-recovery
+    # (restart_self) reachable, regardless of active space or the
+    # dynamic-surfacing selector's per-turn choices. The hard-write
+    # gate + handler-level confirm=true safeguards mean
+    # availability doesn't mean ease-of-fire.
+    "dump_context",
+    "restart_self",
 }
 
 # Common MCP tools that get priority in the active window (not pinned, but preferred)
