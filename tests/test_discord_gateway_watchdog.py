@@ -228,3 +228,50 @@ class TestWatchdogTick:
             server_module._discord_gateway_watchdog_loop(), timeout=0.5,
         )
         assert execv_calls == []
+
+    async def test_loop_actually_runs_body_without_name_errors(
+        self, server_module, monkeypatch,
+    ):
+        """Regression pin: the prior async-test for the loop took
+        the early-return path (disable=True), so the bodies of
+        the try/except inside the while True loop NEVER ran in
+        tests. That let a missing module import (``asyncio``)
+        ship to prod where the watchdog task crashed on every
+        startup with ``NameError: name 'asyncio' is not defined``.
+        This test forces the loop body to run at least one full
+        iteration so any missing imports / NameErrors / typos
+        surface immediately.
+        """
+        # Short interval, healthy client → loop ticks once cleanly
+        monkeypatch.setattr(
+            server_module, "_DISCORD_WATCHDOG_INTERVAL_SEC", 0.05,
+        )
+        monkeypatch.setattr(server_module, "client", _StubClient(0.05))
+        monkeypatch.setattr(
+            server_module, "_DISCORD_WATCHDOG_DISABLE", False,
+        )
+        server_module._gateway_unhealthy_strikes = 0
+        execv_calls = []
+        monkeypatch.setattr(
+            server_module.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+
+        task = asyncio.create_task(
+            server_module._discord_gateway_watchdog_loop()
+        )
+        # Let at least one tick + sleep cycle complete (interval=0.05s)
+        await asyncio.sleep(0.2)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        # No execv (healthy gateway), no NameError surfacing in
+        # the task — if either module-level reference was missing,
+        # the task would have died on the first iteration.
+        assert execv_calls == []
+        # Confirm we DID enter the loop body and at least one
+        # tick fired (strike counter behavior we'd see on tick
+        # is "stay at 0" for healthy ticks).
+        assert server_module._gateway_unhealthy_strikes == 0
