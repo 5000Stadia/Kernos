@@ -657,7 +657,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -766,6 +766,10 @@ class ReasoningService:
         # in the confirmed elif chain.
         "ask_coding_session":                 frozenset({"confirmed"}),
         "read_coding_session_response":       frozenset({"confirmed"}),
+        # SELF-ADMIN-TOOLS-V1 (2026-05-19): /dump + /restart
+        # agent-callable equivalents. System-space-gated at dispatch.
+        "dump_context":                       frozenset({"confirmed"}),
+        "restart_self":                       frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1242,6 +1246,35 @@ class ReasoningService:
                     self._state,
                     self._trigger_store,
                     self._registry,
+                )
+            elif tool_name == "dump_context":
+                # SELF-ADMIN-TOOLS-V1: agent-callable equivalent of
+                # the /dump slash command. System-space-gated to
+                # mirror the other admin-tool surfaces. Read-only.
+                _gate_msg = self._assert_admin_space(request, "dump_context")
+                if _gate_msg is not None:
+                    return _gate_msg
+                from kernos.kernel.self_admin_tools import (
+                    handle_dump_context_tool,
+                )
+                return handle_dump_context_tool(
+                    request=request,
+                    reason=tool_input.get("reason", "") or "",
+                )
+            elif tool_name == "restart_self":
+                # SELF-ADMIN-TOOLS-V1: agent-callable equivalent of
+                # /restart. Two-call confirmation; second call
+                # execs and never returns. System-space-gated.
+                _gate_msg = self._assert_admin_space(request, "restart_self")
+                if _gate_msg is not None:
+                    return _gate_msg
+                from kernos.kernel.self_admin_tools import (
+                    handle_restart_self_tool,
+                )
+                return handle_restart_self_tool(
+                    reason=tool_input.get("reason", "") or "",
+                    confirm=bool(tool_input.get("confirm", False)),
+                    instance_id=request.instance_id,
                 )
             elif tool_name == "set_chain_model":
                 _gate_msg = self._assert_admin_space(request, "set_chain_model")

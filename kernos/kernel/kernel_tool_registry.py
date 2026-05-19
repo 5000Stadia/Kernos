@@ -142,6 +142,10 @@ def _import_kernel_schemas() -> list[dict]:
     )
     from kernos.kernel.execution import MANAGE_PLAN_TOOL
     from kernos.kernel.external_agents.tool import CONSULT_TOOL
+    from kernos.kernel.self_admin_tools import (
+        DUMP_CONTEXT_TOOL,
+        RESTART_SELF_TOOL,
+    )
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -214,6 +218,11 @@ def _import_kernel_schemas() -> list[dict]:
         # Cross-space + external
         REQUEST_SPACE_ACTION_TOOL,
         CONSULT_TOOL,
+        # SELF-ADMIN-TOOLS-V1 (2026-05-19): agent-callable
+        # equivalents of /dump + /restart slash commands.
+        # System-space-gated at dispatch time.
+        DUMP_CONTEXT_TOOL,
+        RESTART_SELF_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery

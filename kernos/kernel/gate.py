@@ -115,6 +115,11 @@ class DispatchGate:
             # broker role can't actually fire.
             "read_coding_session_response",  # polls bridge response dir
             "diagnose_issue",                # reads trace + source + friction reports
+            # SELF-ADMIN-TOOLS-V1 (2026-05-19): dump_context is pure
+            # read-only introspection (writes a diagnostic file but
+            # doesn't mutate substrate state — the file is an
+            # artifact, like inspect_state's return value).
+            "dump_context",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -203,6 +208,16 @@ class DispatchGate:
             # Creating a canvas provisions shared state + fires notifications
             # to declared members → hard_write so the gate model evaluates
             # whether it's a reactive user request or a proactive agent move.
+            return "hard_write"
+        if tool_name == "restart_self":
+            # SELF-ADMIN-TOOLS-V1 (2026-05-19): execv replaces the
+            # process — in-flight tasks die, including the calling
+            # turn. Reversible only in the sense that the bot comes
+            # back, but the calling turn's response is permanently
+            # lost. hard_write so the gate evaluates the move with
+            # the model + space-context, AND restart_self has its
+            # own two-call confirm=true safeguard inside its handler.
+            # Defense in depth: both layers gate.
             return "hard_write"
         if tool_name == "manage_schedule":
             # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 5: was
