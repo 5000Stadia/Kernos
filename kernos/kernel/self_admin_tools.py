@@ -52,13 +52,22 @@ DUMP_CONTEXT_TOOL: dict = {
         "Self-introspect: write your fully-assembled turn context "
         "(system prompt, conversation messages, surfaced tool "
         "schemas, recent log buffer, token summary) to a "
-        "diagnostic file at "
-        "data/<instance>/diagnostics/context_<timestamp>.txt. "
-        "Returns the file path. Use this when you need to see "
-        "exactly what you were shown (verify substrate state, "
-        "audit a tool-surface decision, hand the file to a coding "
-        "agent for review). Equivalent to the owner running "
-        "/dump. Read-only; no confirmation needed."
+        "diagnostic file at data/diagnostics/context_<timestamp>.txt. "
+        "Returns a short summary (path, file size, section "
+        "breakdown, token estimates) by default — useful for "
+        "quick self-checks without bloating the next turn's "
+        "context.\n\n"
+        "Pass include_content=true to inline the full file "
+        "contents in the tool result so you can actually inspect "
+        "what was dumped (the dump file lives outside any "
+        "Kernos space so read_file cannot reach it). Use this "
+        "when you need to grep your own substrate, audit a "
+        "tool-surface decision, or feed the dump to a coding "
+        "agent via consult/ask_coding_session. Caveat: dumps "
+        "are typically 50-200 KB; only inline when you actually "
+        "need the content.\n\n"
+        "Equivalent to the owner running /dump. Read-only; no "
+        "confirmation needed."
     ),
     "input_schema": {
         "type": "object",
@@ -68,6 +77,15 @@ DUMP_CONTEXT_TOOL: dict = {
                 "description": (
                     "Optional: why you're dumping. Logged for "
                     "operator visibility."
+                ),
+            },
+            "include_content": {
+                "type": "boolean",
+                "description": (
+                    "Default false: returns just the summary + "
+                    "file path. Pass true to inline the full "
+                    "dump file content in the tool result so "
+                    "you can inspect it directly."
                 ),
             },
         },
@@ -259,31 +277,75 @@ def handle_dump_context_tool(
     *,
     request: Any,  # ReasoningRequest; typed as Any to avoid import cycle
     reason: str = "",
+    include_content: bool = False,
 ) -> str:
     """Dispatch handler for the ``dump_context`` tool.
 
-    Returns a short user-/agent-facing summary describing the file
-    written + the absolute path so the agent can reference it or
-    surface it to the user.
+    Default: returns a short summary (file path, file size,
+    section breakdown, token estimates). Useful for quick self-
+    checks without bloating the next turn with a multi-KB inline
+    payload.
+
+    ``include_content=True``: returns the FULL file contents
+    inline. The dump file lives outside any Kernos space so
+    ``read_file`` cannot reach it — this is the agent's only
+    path to actually inspect its own dump (vs. just knowing it
+    exists). Use deliberately; dumps are typically 50-200 KB.
     """
     if reason:
         logger.info(
             "DUMP_CONTEXT_TOOL_REASON: instance=%s reason=%r",
             request.instance_id, reason,
         )
+    system_prompt = getattr(request, "system_prompt", "") or ""
+    messages = getattr(request, "messages", []) or []
+    tools = getattr(request, "tools", []) or []
     dump_path = write_context_dump(
-        system_prompt=getattr(request, "system_prompt", "") or "",
-        messages=getattr(request, "messages", []) or [],
-        tools=getattr(request, "tools", []) or [],
+        system_prompt=system_prompt,
+        messages=messages,
+        tools=tools,
         instance_id=getattr(request, "instance_id", "") or "",
         system_prompt_static=getattr(request, "system_prompt_static", "") or "",
         system_prompt_dynamic=getattr(request, "system_prompt_dynamic", "") or "",
         omit_conversation_note=True,
     )
+
+    if include_content:
+        try:
+            content = dump_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return (
+                f"Context dumped to {dump_path}, but reading it "
+                f"back failed: {exc}. Use the file directly."
+            )
+        size_kb = len(content) / 1024
+        return (
+            f"=== dump_context (full content, {size_kb:.1f} KB) ===\n"
+            f"Source: {dump_path}\n"
+            f"---\n"
+            f"{content}"
+        )
+
+    # Default: summary only — useful at-a-glance info without
+    # bloating the next turn's input.
+    try:
+        size_bytes = dump_path.stat().st_size
+    except OSError:
+        size_bytes = 0
+    sys_chars = len(system_prompt)
+    msg_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    tool_chars = sum(len(json.dumps(t)) for t in tools)
     return (
-        f"Context dumped to {dump_path}. "
-        f"Use /dump for the full slash-command version "
-        f"including conversation tail."
+        f"Context dumped to {dump_path}\n"
+        f"  file size: {size_bytes / 1024:.1f} KB\n"
+        f"  system prompt: ~{sys_chars // 4} tokens ({sys_chars} chars)\n"
+        f"  messages: {len(messages)} entries, ~{msg_chars // 4} tokens\n"
+        f"  tools: {len(tools)} schemas, ~{tool_chars // 4} tokens\n"
+        f"\n"
+        f"Sections in the dump: SYSTEM PROMPT, MESSAGES, TOOLS, "
+        f"RECENT LOG, LAST OUTGOING PAYLOAD, SUMMARY.\n"
+        f"Pass include_content=true to inline the full file in "
+        f"a follow-up call so you can read it directly."
     )
 
 

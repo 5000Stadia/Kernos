@@ -143,7 +143,13 @@ class TestWriteContextDump:
 
 
 class TestHandleDumpContextTool:
-    def test_returns_path_pointer(self, tmp_path, monkeypatch):
+    """Pins the agent-facing contract: by default the tool returns
+    a useful summary (path + sizes + section list) instead of just
+    a pointer. include_content=True inlines the full file so the
+    agent can actually read what was dumped (since the dump file
+    lives outside any space and read_file can't reach it)."""
+
+    def test_default_returns_summary_not_just_path(self, tmp_path, monkeypatch):
         from kernos.kernel.self_admin_tools import handle_dump_context_tool
 
         class _FakeRequest:
@@ -156,11 +162,68 @@ class TestHandleDumpContextTool:
 
         monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
         result = handle_dump_context_tool(request=_FakeRequest(), reason="test")
+        # File path present
         assert "Context dumped to" in result
-        # File should exist at the referenced path
-        path_str = result.split("Context dumped to ", 1)[1].split(".", 2)
-        # Reasonable smoke check that a path was written
         assert "diagnostics" in result
+        # Useful summary present — not just the path
+        assert "file size:" in result
+        assert "system prompt:" in result
+        assert "messages:" in result
+        assert "tools:" in result
+        # Includes the offer to inline content
+        assert "include_content=true" in result
+
+    def test_include_content_inlines_full_dump(self, tmp_path, monkeypatch):
+        """The bug this guards against (live-observed 2026-05-19):
+        agent dumps context, gets the path back, tries read_file —
+        fails because the dump lives outside spaces. With
+        include_content=true the full file is in the tool result
+        so the agent doesn't need a separate read."""
+        from kernos.kernel.self_admin_tools import handle_dump_context_tool
+
+        class _FakeRequest:
+            instance_id = "i"
+            system_prompt = "MARKER_SYSTEM_PROMPT_TEXT"
+            messages = [{"role": "user", "content": "MARKER_MSG_CONTENT"}]
+            tools = [{"name": "MARKER_TOOL_NAME"}]
+            system_prompt_static = ""
+            system_prompt_dynamic = ""
+
+        monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+        result = handle_dump_context_tool(
+            request=_FakeRequest(), include_content=True,
+        )
+        # The full dump file content is inline in the response
+        assert "MARKER_SYSTEM_PROMPT_TEXT" in result
+        assert "MARKER_MSG_CONTENT" in result
+        assert "MARKER_TOOL_NAME" in result
+        # Header is clear about what this is
+        assert "=== dump_context (full content" in result
+        assert "Source:" in result
+
+    def test_include_content_false_does_not_inline(self, tmp_path, monkeypatch):
+        from kernos.kernel.self_admin_tools import handle_dump_context_tool
+
+        class _FakeRequest:
+            instance_id = "i"
+            system_prompt = "MARKER_SYSTEM_PROMPT_TEXT"
+            messages = [{"role": "user", "content": "MARKER_MSG_CONTENT"}]
+            tools = [{"name": "MARKER_TOOL_NAME"}]
+            system_prompt_static = ""
+            system_prompt_dynamic = ""
+
+        monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+        # Default: include_content is False
+        result = handle_dump_context_tool(request=_FakeRequest())
+        # Markers are NOT in the result (only in the file)
+        assert "MARKER_SYSTEM_PROMPT_TEXT" not in result
+        assert "MARKER_MSG_CONTENT" not in result
+
+    def test_schema_advertises_include_content_param(self):
+        from kernos.kernel.self_admin_tools import DUMP_CONTEXT_TOOL
+        props = DUMP_CONTEXT_TOOL["input_schema"]["properties"]
+        assert "include_content" in props
+        assert props["include_content"]["type"] == "boolean"
 
 
 # ===========================================================================

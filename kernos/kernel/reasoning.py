@@ -1260,6 +1260,9 @@ class ReasoningService:
                 return handle_dump_context_tool(
                     request=request,
                     reason=tool_input.get("reason", "") or "",
+                    include_content=bool(
+                        tool_input.get("include_content", False)
+                    ),
                 )
             elif tool_name == "restart_self":
                 # SELF-ADMIN-TOOLS-V1: agent-callable equivalent of
