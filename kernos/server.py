@@ -258,6 +258,167 @@ handler: MessageHandler | None = None
 
 
 # ---------------------------------------------------------------------------
+# Discord gateway watchdog (DISCORD-GATEWAY-WATCHDOG-V1, 2026-05-19)
+# ---------------------------------------------------------------------------
+#
+# Live failure mode (2026-05-19 14:24): Discord gateway WebSocket
+# closed server-side (FIN from 65.8.53.8), bot accumulated CLOSE_WAIT
+# sockets with 25 bytes unread each, discord.py's auto-reconnect did
+# NOT recover the session, asyncio event loop stayed idle in ep_poll
+# for 20+ min, no incoming messages reached on_message. Bot had to
+# be manually restarted to recover.
+#
+# Defense-in-depth: watchdog observes ``client.latency`` (heartbeat
+# RTT). When the heartbeat is broken (latency is inf / NaN / >> 60s)
+# for N consecutive checks, force a clean restart via os.execv. This
+# matches what /restart does and what the network actually needs:
+# fresh gateway IDENTIFY.
+#
+# Why latency, not "no incoming events": users may legitimately be
+# quiet for hours. We must NOT restart for normal idle. Heartbeat is
+# the gateway-level health signal that's independent of user activity.
+
+_DISCORD_WATCHDOG_INTERVAL_SEC: int = int(
+    os.getenv("KERNOS_DISCORD_WATCHDOG_INTERVAL_SEC", "120"),
+)
+_DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC: float = float(
+    os.getenv("KERNOS_DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC", "60"),
+)
+_DISCORD_WATCHDOG_STRIKES_TO_RESTART: int = int(
+    os.getenv("KERNOS_DISCORD_WATCHDOG_STRIKES_TO_RESTART", "3"),
+)
+_DISCORD_WATCHDOG_DISABLE: bool = (
+    os.getenv("KERNOS_DISCORD_WATCHDOG_DISABLE", "").strip() == "1"
+)
+
+# Mutable state. _last_inbound_event_ts is updated by on_message and
+# the gateway lifecycle events (on_ready, on_resumed) so the watchdog
+# can correlate "heartbeat broken" with "no recent activity" before
+# choosing to restart.
+_last_inbound_event_ts: float = 0.0
+_gateway_unhealthy_strikes: int = 0
+
+
+def _mark_inbound_event() -> None:
+    """Bump ``_last_inbound_event_ts``. Called from on_message,
+    on_ready, on_resumed."""
+    global _last_inbound_event_ts
+    _last_inbound_event_ts = _time_module.time()
+
+
+def _is_gateway_heartbeat_unhealthy() -> tuple[bool, str]:
+    """Return ``(unhealthy, reason)``. The heartbeat is unhealthy
+    when ``client.latency`` is non-finite or grossly exceeds the
+    expected Discord gateway heartbeat interval (~41.25s)."""
+    import math
+    try:
+        latency = client.latency  # seconds, float
+    except Exception as exc:
+        return True, f"client.latency raised: {exc}"
+    if latency is None:
+        return True, "client.latency is None"
+    try:
+        finite = math.isfinite(latency)
+    except (TypeError, ValueError):
+        return True, f"client.latency is non-numeric: {latency!r}"
+    if not finite:
+        return True, f"client.latency is non-finite: {latency}"
+    if latency <= 0:
+        return True, f"client.latency is non-positive: {latency}"
+    if latency > _DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC:
+        return True, (
+            f"client.latency={latency:.1f}s exceeds threshold "
+            f"{_DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC}s"
+        )
+    return False, f"latency={latency:.3f}s OK"
+
+
+def _watchdog_tick() -> str:
+    """One observation of the gateway. Updates ``_gateway_unhealthy_strikes``
+    and triggers ``os.execv`` (via the module attribute so tests can
+    monkey-patch) when the strike count reaches the configured
+    threshold. Returns a short status code:
+
+      * ``"ok"`` — gateway healthy this tick
+      * ``"recovered"`` — gateway healthy after prior strikes
+      * ``"strike"`` — gateway unhealthy, strikes incremented
+      * ``"restart"`` — strikes hit threshold, execv called
+
+    Pure of timing concerns (the loop owns sleep). Easier to test
+    than driving the full loop through asyncio.
+    """
+    global _gateway_unhealthy_strikes
+    unhealthy, reason = _is_gateway_heartbeat_unhealthy()
+    if not unhealthy:
+        if _gateway_unhealthy_strikes > 0:
+            logger.info(
+                "DISCORD_GATEWAY_WATCHDOG_RECOVERED "
+                "strikes_cleared=%d reason=%s",
+                _gateway_unhealthy_strikes, reason,
+            )
+            _gateway_unhealthy_strikes = 0
+            return "recovered"
+        _gateway_unhealthy_strikes = 0
+        return "ok"
+    _gateway_unhealthy_strikes += 1
+    logger.warning(
+        "DISCORD_GATEWAY_WATCHDOG_STRIKE strike=%d/%d reason=%s",
+        _gateway_unhealthy_strikes,
+        _DISCORD_WATCHDOG_STRIKES_TO_RESTART,
+        reason,
+    )
+    if _gateway_unhealthy_strikes >= _DISCORD_WATCHDOG_STRIKES_TO_RESTART:
+        idle_sec = (
+            _time_module.time() - _last_inbound_event_ts
+            if _last_inbound_event_ts else -1.0
+        )
+        logger.error(
+            "DISCORD_GATEWAY_WATCHDOG_FORCE_RESTART "
+            "strikes=%d reason=%s idle_sec=%.0f — restarting "
+            "process via execv",
+            _gateway_unhealthy_strikes, reason, idle_sec,
+        )
+        # Same restart path as /restart command — replaces the
+        # process, re-establishes a fresh Discord IDENTIFY,
+        # clears any stuck WebSocket state.
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+        return "restart"
+    return "strike"
+
+
+async def _discord_gateway_watchdog_loop() -> None:
+    """Periodically check the Discord gateway heartbeat. After
+    ``_DISCORD_WATCHDOG_STRIKES_TO_RESTART`` consecutive bad ticks,
+    log a loud warning and ``os.execv`` to restart cleanly.
+
+    Disabled when ``KERNOS_DISCORD_WATCHDOG_DISABLE=1`` — escape hatch
+    for diagnostic sessions where you want to inspect a stuck bot
+    instead of having it auto-recover.
+    """
+    if _DISCORD_WATCHDOG_DISABLE:
+        logger.info("DISCORD_GATEWAY_WATCHDOG: disabled via env")
+        return
+    logger.info(
+        "DISCORD_GATEWAY_WATCHDOG_STARTED interval_s=%d "
+        "latency_threshold_s=%.1f strikes_to_restart=%d",
+        _DISCORD_WATCHDOG_INTERVAL_SEC,
+        _DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC,
+        _DISCORD_WATCHDOG_STRIKES_TO_RESTART,
+    )
+    while True:
+        try:
+            await asyncio.sleep(_DISCORD_WATCHDOG_INTERVAL_SEC)
+            _watchdog_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "DISCORD_GATEWAY_WATCHDOG_LOOP_ERROR: %s",
+                exc, exc_info=True,
+            )
+
+
+# ---------------------------------------------------------------------------
 # Zombie-reaper background loop (ZOMBIE-CHILD-PROCESS-REAP-V1)
 # ---------------------------------------------------------------------------
 
@@ -967,6 +1128,17 @@ async def on_ready():
     except Exception as exc:
         logger.warning("ZOMBIE_REAPER_LAUNCH_FAILED: %s", exc)
 
+    # DISCORD-GATEWAY-WATCHDOG-V1 (2026-05-19): observe gateway
+    # heartbeat health and force-restart when broken. See the
+    # watchdog block above for full rationale; bug shape was a
+    # silent gateway death that left the bot online but deaf
+    # for 20+ min until manual /restart.
+    _mark_inbound_event()  # bootstrap timestamp
+    try:
+        _au_asyncio.create_task(_discord_gateway_watchdog_loop())
+    except Exception as exc:
+        logger.warning("DISCORD_GATEWAY_WATCHDOG_LAUNCH_FAILED: %s", exc)
+
     # ACPX-INTEGRATION-V1 (2026-05-18): probe + launch the bridge
     # watchers. Outbound watcher closes the ask_coding_session
     # operator-relay gap (Kernos's tool surface dispatching out to
@@ -1381,7 +1553,29 @@ async def _send_pause_notice_to_channel(channel) -> None:
 
 
 @client.event
+async def on_disconnect():
+    """Discord gateway WebSocket disconnected. Logs so silent
+    gateway death is visible in events; discord.py's reconnect
+    machinery handles the actual reconnect."""
+    logger.warning("DISCORD_GATEWAY_DISCONNECT")
+
+
+@client.event
+async def on_resumed():
+    """Discord gateway session resumed (after a transient drop).
+    Treat as inbound activity so the watchdog's idle counter
+    resets — the gateway is demonstrably alive."""
+    logger.info("DISCORD_GATEWAY_RESUMED")
+    _mark_inbound_event()
+
+
+@client.event
 async def on_message(message):
+    # Watchdog: any incoming message proves the gateway is routing.
+    # Bump the timestamp regardless of whether we'll respond — even
+    # bot-own messages and other-bot messages indicate gateway health.
+    _mark_inbound_event()
+
     # Deduplicate gateway re-deliveries
     if message.id in _seen_message_ids:
         return
