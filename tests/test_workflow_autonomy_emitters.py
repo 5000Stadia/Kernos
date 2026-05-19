@@ -757,6 +757,127 @@ class TestCodingSessionBridgeResponseEmitterWakeCallback:
         sentinel = bridge_root / "responses" / f"{request_id}.emitted"
         assert sentinel.exists()
 
+    async def test_wake_fires_when_audit_already_emitted(
+        self, event_stream_writer,
+    ):
+        """Critical race-condition pin (caught live 2026-05-19 on
+        bot c750a85): the agent's manual ``read_coding_session_response``
+        tool call also fires the audit emission via the SAME
+        ``_emit_response_received_once`` primitive, creating the
+        ``.emitted`` sentinel. If the wake callback is gated on the
+        SAME sentinel as audit dedup, the agent-polled-first case
+        races the emitter loop and the wake never fires.
+
+        AUTO-WAKE-V1 v2 uses a separate ``.waked`` sentinel so wake
+        firing is decoupled from which path won the audit race.
+        """
+        tmp_path = event_stream_writer
+        instance_id = "inst_race"
+        bridge_root = Path(tmp_path) / instance_id / "coding_session_bridge"
+        (bridge_root / "requests").mkdir(parents=True)
+        (bridge_root / "responses").mkdir(parents=True)
+
+        request_id = "req_audit_first"
+        (bridge_root / "requests" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "originating_kernos_instance": instance_id,
+                "originating_member_id": "m",
+                "originating_space": "s_race",
+                "target": "codex",
+            }),
+        )
+        (bridge_root / "responses" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "target": "codex",
+                "investigation_outcome": "completed",
+                "summary": "ok",
+            }),
+        )
+        # Simulate the race: agent's manual poll already created
+        # the audit-emit sentinel before our emitter polled.
+        (bridge_root / "responses" / f"{request_id}.emitted").write_text("done")
+
+        captured: list[dict] = []
+
+        async def cap(payload):
+            captured.append(payload)
+
+        emitter = CodingSessionBridgeResponseEmitter(
+            instance_id=instance_id,
+            data_dir=str(tmp_path),
+            poll_interval_s=0.05,
+            wake_callback=cap,
+        )
+        await emitter.start()
+        try:
+            await _wait_until(
+                lambda: len(captured) >= 1, timeout_s=2.0,
+            )
+        finally:
+            await emitter.stop()
+        # Wake fired even though .emitted pre-existed
+        assert len(captured) == 1
+        assert captured[0]["originating_space"] == "s_race"
+        # And the wake sentinel landed (so a second drain wouldn't refire)
+        assert (
+            bridge_root / "responses" / f"{request_id}.waked"
+        ).exists()
+
+    async def test_wake_dedupped_across_polling_passes(
+        self, event_stream_writer,
+    ):
+        """The .waked sentinel must guarantee wake-fires-exactly-once
+        even across many polling passes. Mirrors the audit-side
+        dedup pin for the wake path."""
+        tmp_path = event_stream_writer
+        instance_id = "inst_wake_dedup"
+        bridge_root = Path(tmp_path) / instance_id / "coding_session_bridge"
+        (bridge_root / "requests").mkdir(parents=True)
+        (bridge_root / "responses").mkdir(parents=True)
+
+        request_id = "req_wake_dedup"
+        (bridge_root / "requests" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "originating_kernos_instance": instance_id,
+                "originating_member_id": "m",
+                "originating_space": "s",
+                "target": "codex",
+            }),
+        )
+        (bridge_root / "responses" / f"{request_id}.json").write_text(
+            json.dumps({
+                "request_id": request_id,
+                "target": "codex",
+                "investigation_outcome": "completed",
+                "summary": "ok",
+            }),
+        )
+
+        wake_count = 0
+
+        async def counter(payload):
+            nonlocal wake_count
+            wake_count += 1
+
+        emitter = CodingSessionBridgeResponseEmitter(
+            instance_id=instance_id,
+            data_dir=str(tmp_path),
+            poll_interval_s=0.05,
+            wake_callback=counter,
+        )
+        await emitter.start()
+        try:
+            await _wait_until(
+                lambda: emitter._poll_count >= 4, timeout_s=1.5,
+            )
+        finally:
+            await emitter.stop()
+        # Despite multiple polling passes, the wake fired exactly once
+        assert wake_count == 1
+
     async def test_safe_name_applied_to_instance_id_in_path(
         self, event_stream_writer,
     ):

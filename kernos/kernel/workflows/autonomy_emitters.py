@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -387,40 +388,69 @@ class CodingSessionBridgeResponseEmitter:
                 continue
             request_id = response_file.stem
             sentinel = responses_dir / f"{request_id}.emitted"
-            if sentinel.exists():
-                # Already emitted; skip.
-                continue
-            try:
-                await handle_read_coding_session_response(
-                    instance_id=self._instance_id,
-                    data_dir=self._data_dir,
-                    request_id=request_id,
-                )
-                self._emit_count += 1
-                # AUTO-WAKE-V1: after the audit event fires, invoke
-                # the wake callback (if wired) so the MessageHandler
-                # can inject a synthetic turn into the originating
-                # space's mailbox. Failure-isolated so a wake-side
-                # bug can't break the audit emission.
-                if self._wake_callback is not None:
-                    try:
-                        payload = self._read_request_payload(
-                            response_file=response_file,
-                            request_id=request_id,
-                        )
-                        await self._wake_callback(payload)
-                    except Exception as wake_exc:
-                        logger.warning(
-                            "CODING_SESSION_BRIDGE_WAKE_CALLBACK_FAILED "
-                            "request_id=%s error=%s",
-                            request_id, wake_exc,
-                        )
-            except Exception as exc:
-                logger.warning(
-                    "CODING_SESSION_BRIDGE_RESPONSE_EMITTER_READ_FAILED "
-                    "request_id=%s error=%s",
-                    request_id, exc,
-                )
+            wake_sentinel = responses_dir / f"{request_id}.waked"
+
+            # Audit emission path — gated on .emitted sentinel.
+            if not sentinel.exists():
+                try:
+                    await handle_read_coding_session_response(
+                        instance_id=self._instance_id,
+                        data_dir=self._data_dir,
+                        request_id=request_id,
+                    )
+                    self._emit_count += 1
+                except Exception as exc:
+                    logger.warning(
+                        "CODING_SESSION_BRIDGE_RESPONSE_EMITTER_READ_FAILED "
+                        "request_id=%s error=%s",
+                        request_id, exc,
+                    )
+                    continue
+
+            # AUTO-WAKE-V1 path — INDEPENDENT of audit dedup. Both
+            # emission paths (this emitter loop + agent-initiated
+            # read_coding_session_response tool calls) race on the
+            # .emitted sentinel; whichever wins skips the other.
+            # The wake callback must fire regardless of which path
+            # won the audit race, so it gets its own .waked sentinel
+            # via O_CREAT|O_EXCL. This guarantees the wake fires
+            # exactly once per response, but isn't blocked by an
+            # agent that polled the response first.
+            if self._wake_callback is not None and not wake_sentinel.exists():
+                # Atomic claim — only one polling pass actually fires
+                # the wake even if drain is somehow concurrent.
+                try:
+                    fd = os.open(
+                        str(wake_sentinel),
+                        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                        0o644,
+                    )
+                except FileExistsError:
+                    # Another pass already claimed the wake; skip.
+                    continue
+                except OSError as exc:
+                    logger.warning(
+                        "CODING_SESSION_BRIDGE_WAKE_SENTINEL_FAILED "
+                        "request_id=%s error=%s",
+                        request_id, exc,
+                    )
+                    continue
+                try:
+                    os.write(fd, b"waked")
+                finally:
+                    os.close(fd)
+                try:
+                    payload = self._read_request_payload(
+                        response_file=response_file,
+                        request_id=request_id,
+                    )
+                    await self._wake_callback(payload)
+                except Exception as wake_exc:
+                    logger.warning(
+                        "CODING_SESSION_BRIDGE_WAKE_CALLBACK_FAILED "
+                        "request_id=%s error=%s",
+                        request_id, wake_exc,
+                    )
 
     def _read_request_payload(
         self, *, response_file, request_id: str,
