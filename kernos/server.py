@@ -967,6 +967,83 @@ async def on_ready():
     except Exception as exc:
         logger.warning("ZOMBIE_REAPER_LAUNCH_FAILED: %s", exc)
 
+    # ACPX-INTEGRATION-V1 (2026-05-18): probe + launch the bridge
+    # watchers. Outbound watcher closes the ask_coding_session
+    # operator-relay gap (Kernos's tool surface dispatching out to
+    # CC/Codex/Gemini through ACPX). Inbound watcher gives external
+    # CLI clients (CC sessions, Codex via acpx, scripts) a read-only
+    # channel to ask Kernos to introspect itself.
+    #
+    # The ACPX probe is informational, not blocking — if ACPX is
+    # missing, the watchers still launch but each outbound dispatch
+    # writes an unable_to_investigate response with a clear pointer
+    # to the install command. Fail-loud, fail-recoverable.
+    try:
+        from kernos.kernel.external_agents.acpx_adapter import (
+            EXPECTED_ACPX_VERSION as _ACPX_EXPECTED,
+            is_acpx_available as _acpx_check,
+        )
+        _acpx_ok, _acpx_detail = _acpx_check()
+        if _acpx_ok:
+            logger.info(
+                "AGENT_PROTOCOL_AVAILABLE: acpx=%s (expected=%s)",
+                _acpx_detail, _ACPX_EXPECTED,
+            )
+        else:
+            _auto = os.getenv("KERNOS_ACPX_AUTO_INSTALL", "").strip().lower()
+            if _auto in ("1", "true", "on", "yes"):
+                logger.warning(
+                    "AGENT_PROTOCOL_MISSING: %s — attempting auto-install "
+                    "(KERNOS_ACPX_AUTO_INSTALL set)", _acpx_detail,
+                )
+                import subprocess as _subp
+                try:
+                    _subp.run(
+                        ["npm", "install", "-g",
+                         f"acpx@{_ACPX_EXPECTED}"],
+                        check=True, capture_output=True, timeout=120,
+                    )
+                    logger.info(
+                        "AGENT_PROTOCOL_AUTO_INSTALLED: acpx@%s",
+                        _ACPX_EXPECTED,
+                    )
+                except Exception as _ie:
+                    logger.warning(
+                        "AGENT_PROTOCOL_AUTO_INSTALL_FAILED: %s — "
+                        "broker dispatch will return "
+                        "unable_to_investigate until acpx is "
+                        "installed manually: `npm install -g acpx@%s`",
+                        _ie, _ACPX_EXPECTED,
+                    )
+            else:
+                logger.warning(
+                    "AGENT_PROTOCOL_MISSING: %s — install via "
+                    "`npm install -g acpx@%s` or set "
+                    "KERNOS_ACPX_AUTO_INSTALL=1 for auto-install at "
+                    "next startup. Broker dispatch will return "
+                    "unable_to_investigate until acpx is installed.",
+                    _acpx_detail, _ACPX_EXPECTED,
+                )
+        # Launch the watchers regardless — they handle the no-ACPX
+        # case gracefully (per-request unable_to_investigate response).
+        from kernos.kernel.external_agents.bridge_watcher import (
+            inbound_watcher_loop as _inbound_watcher,
+            outbound_watcher_loop as _outbound_watcher,
+        )
+        _watcher_instance_id = (
+            os.getenv("KERNOS_INSTANCE_ID", "") or "default"
+        )
+        _au_asyncio.create_task(_outbound_watcher(
+            data_dir=data_dir,
+            instance_id=_watcher_instance_id,
+        ))
+        _au_asyncio.create_task(_inbound_watcher(
+            data_dir=data_dir,
+            instance_id=_watcher_instance_id,
+        ))
+    except Exception as exc:
+        logger.warning("BRIDGE_WATCHER_LAUNCH_FAILED: %s", exc)
+
     # Send pending confirmation from a prior /restart or /wipe
     if _PENDING_CONFIRMATION_PATH.is_file():
         try:
