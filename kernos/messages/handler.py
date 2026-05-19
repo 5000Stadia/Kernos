@@ -4695,13 +4695,28 @@ class MessageHandler:
             },
         )
 
-        # Fire-and-forget: handle() does the full pipeline (routing,
+        # Fire-and-forget: process() does the full pipeline (routing,
         # assemble, reason, persist). The response future resolves
         # but nothing's awaiting; if the agent decides to surface to
         # the user it does so via notify_user. Sequential ordering
         # with user turns is automatic via the SpaceRunner mailbox.
+        async def _run_wake_turn():
+            try:
+                await self.process(synthetic)
+            except Exception as exc:
+                # Without this, asyncio.create_task swallows the
+                # exception unless someone awaits .exception() —
+                # which is how the v1 of this wire silently failed
+                # for the entire AUTO-WAKE-V1 / 6417543 test cycle:
+                # method-name typo (handle vs process) was masked.
+                logger.exception(
+                    "CONSULT_WAKE_TURN_CRASHED request_id=%s "
+                    "space=%s exc=%s",
+                    request_id, space_id, exc,
+                )
+
         try:
-            asyncio.create_task(self.handle(synthetic))
+            asyncio.create_task(_run_wake_turn())
             logger.info(
                 "CONSULT_WAKE_INJECTED instance=%s space=%s "
                 "request_id=%s target=%s outcome=%s",
@@ -4779,8 +4794,29 @@ class MessageHandler:
         self.reasoning.reset_conflict_raised()
         self.reasoning.cleanup_expired_authorizations(instance_id)
         self._error_buffer.set_tenant(instance_id)
+
+        # AUTO-WAKE-V1 (2026-05-19) — system-injected messages bypass
+        # _resolve_incoming. The injector (e.g.
+        # inject_consult_completion_wake) pre-resolves the member_id
+        # from substrate coordinates; running it through the unknown-
+        # sender abuse-prevention path treats the wake as an
+        # invasion attempt, racks up sender_failures for
+        # (platform="system", sender="kernos-system"), and short-
+        # circuits with the "private Kernos" static response.
+        # Substrate-honest: if a system message arrives with no
+        # member_id, that's the injector's bug — skip it loudly.
+        if message.platform == "system":
+            if not message.member_id:
+                logger.warning(
+                    "SYSTEM_MESSAGE_NO_MEMBER_ID: sender=%s "
+                    "content_head=%r — skipping turn",
+                    message.sender, (message.content or "")[:80],
+                )
+                return ""
+            # member_id already set by the injector; ctx propagation
+            # below picks it up.
         # Resolve member via instance.db (multi-member aware)
-        if hasattr(self, '_instance_db') and self._instance_db:
+        elif hasattr(self, '_instance_db') and self._instance_db:
             _member_id, _static = await self._resolve_incoming(
                 message.platform, message.sender, message.content or "")
             if _static is not None:
