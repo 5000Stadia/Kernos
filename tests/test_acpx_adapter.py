@@ -205,6 +205,74 @@ class TestExtractAgentMessageChunk:
             assert _extract_agent_message_chunk(ev) is None
 
 
+class TestExtractErrorMessage:
+    """2026-05-20 root-cause fix: claude-acp returned JSON-RPC
+    error envelopes on stdout (billing_error). Our dispatch was
+    blind to them because it only surfaced stderr. Pin the
+    extractor that fixes the visibility gap."""
+
+    def test_extracts_message_with_kind(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _extract_error_message,
+        )
+        # Exact shape captured from the live failure
+        event = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32603,
+                "message": "Internal error: Credit balance is too low",
+                "data": {
+                    "acpxCode": "RUNTIME",
+                    "origin": "cli",
+                    "sessionId": "unknown",
+                    "errorKind": "billing_error",
+                },
+            },
+        }
+        out = _extract_error_message(event)
+        assert out is not None
+        assert "Credit balance is too low" in out
+        assert "[billing_error]" in out
+
+    def test_extracts_message_without_kind(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _extract_error_message,
+        )
+        event = {
+            "error": {"code": -32603, "message": "Something else broke"},
+        }
+        out = _extract_error_message(event)
+        assert out == "Something else broke"
+
+    def test_no_error_returns_none(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _extract_error_message,
+        )
+        # Normal session/update event — no error
+        assert _extract_error_message({
+            "method": "session/update",
+            "params": {"update": {"sessionUpdate": "agent_message_chunk"}},
+        }) is None
+        assert _extract_error_message({}) is None
+
+    def test_malformed_error_shapes_dont_crash(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _extract_error_message,
+        )
+        for evil in [
+            {"error": "string-not-dict"},
+            {"error": {"code": 1}},  # no message
+            {"error": {"message": ""}},  # empty message
+            {"error": {"message": 42}},  # non-string message
+            {"error": {"message": "ok", "data": "not-dict"}},
+            {"error": {"message": "ok", "data": {"errorKind": 99}}},
+        ]:
+            # Must return either None or a useful string, never crash
+            result = _extract_error_message(evil)
+            assert result is None or isinstance(result, str)
+
+
 class TestExtractStopReason:
     def test_recognizes_jsonrpc_result_stop_reason(self):
         event = {"id": 1, "result": {"stopReason": "end_turn"}}

@@ -350,6 +350,35 @@ def _extract_agent_message_chunk(event: dict[str, Any]) -> str | None:
     return None
 
 
+def _extract_error_message(event: dict[str, Any]) -> str | None:
+    """Pull a human-readable error from a JSON-RPC error response.
+
+    Surfaced after the 2026-05-20 root-cause: claude-acp returned
+    ``{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":
+    "Internal error: Credit balance is too low",
+    "data":{"errorKind":"billing_error"}}}`` on stdout. The dispatch
+    error message only logged stderr (empty), hiding the real cause.
+    This extractor turns those JSON-RPC error envelopes into a
+    short string we surface in the rc!=0 raise.
+
+    Returns short error description or None if event isn't an error
+    envelope. Defensive against malformed shapes.
+    """
+    err = event.get("error")
+    if not isinstance(err, dict):
+        return None
+    msg = err.get("message")
+    if not isinstance(msg, str) or not msg:
+        return None
+    data = err.get("data")
+    kind = ""
+    if isinstance(data, dict):
+        ek = data.get("errorKind")
+        if isinstance(ek, str) and ek:
+            kind = f" [{ek}]"
+    return f"{msg}{kind}"
+
+
 def _extract_stop_reason(event: dict[str, Any]) -> str | None:
     """Detect a JSON-RPC ``prompt`` response carrying ``stopReason``,
     which signals turn completion per Codex's pre-spec review.
@@ -684,6 +713,12 @@ async def dispatch(
     event_count = 0
     last_stop_reason: str = ""
     parse_errors = 0
+    # 2026-05-20 root-cause fix: accumulate JSON-RPC error messages
+    # from stdout (e.g. claude-acp's "Credit balance is too low"
+    # billing_error). Without this, errors that come via the
+    # JSON-RPC channel are invisible to the dispatch failure message
+    # — only stderr gets surfaced, which is often empty for these.
+    stdout_errors: list[str] = []
 
     async def _drain_stdout() -> None:
         nonlocal event_count, last_stop_reason, parse_errors
@@ -709,6 +744,9 @@ async def dispatch(
             chunk = _extract_agent_message_chunk(event)
             if chunk is not None:
                 accumulated_chunks.append(chunk)
+            err_msg = _extract_error_message(event)
+            if err_msg:
+                stdout_errors.append(err_msg)
             stop = _extract_stop_reason(event)
             if stop:
                 last_stop_reason = stop
@@ -878,10 +916,26 @@ async def dispatch(
             )
         # Hard failure: non-zero exit. Even if some chunks
         # arrived, we don't know if the response is complete.
+        # 2026-05-20 root-cause fix: include JSON-RPC error messages
+        # captured from stdout. Without this, billing_error /
+        # auth_error / etc. that come via JSON-RPC are invisible —
+        # only stderr surfaces, which is often empty.
+        stdout_err_text = ""
+        if stdout_errors:
+            # Dedup + cap to keep the failure message readable;
+            # multiple identical errors collapse to one count.
+            from collections import Counter
+            err_counter = Counter(stdout_errors)
+            err_parts = [
+                f"{msg} (×{count})" if count > 1 else msg
+                for msg, count in err_counter.most_common()
+            ]
+            stdout_err_text = " | ".join(err_parts)[:500]
         raise ConsultationFailed(
             f"ACPX dispatch to {target!r} exited rc={proc.returncode}. "
             f"Accumulated {len(response_text)} chars before failure. "
-            f"stderr: {stderr_text}"
+            f"stderr: {stderr_text} | "
+            f"stdout_errors: {stdout_err_text or '(none)'}"
         )
     if drain_incomplete:
         raise ConsultationFailed(
