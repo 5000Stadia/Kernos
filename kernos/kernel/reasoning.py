@@ -871,14 +871,55 @@ class ReasoningService:
                 from kernos.kernel.external_agents.errors import (
                     ExternalAgentError as _ExtError,
                 )
+                # 2026-05-20 handler-side validation: the schema layer
+                # *should* enforce non-empty harness + question via
+                # minLength: 1 + enum, but some models bypass JSON
+                # schema validation silently. Without this guard, an
+                # empty `question` defaults to "" via .get(), reaches
+                # acpx, which exits rc=2 with stdout_errors='Prompt is
+                # required'. Catch it here with a clear actionable
+                # message so the agent can fix the next call.
+                _harness = (tool_input.get("harness") or "").strip()
+                _question = (tool_input.get("question") or "").strip()
+                _valid_harnesses = {"claude_code", "codex", "gemini"}
+                if not _harness:
+                    return _json.dumps({
+                        "error": "InvalidConsultCall",
+                        "message": (
+                            "consult requires non-empty harness. "
+                            "Valid values: claude_code, codex, gemini. "
+                            "Example: "
+                            "consult(harness=\"codex\", question=\"...\")"
+                        ),
+                    })
+                if _harness not in _valid_harnesses:
+                    return _json.dumps({
+                        "error": "InvalidConsultCall",
+                        "message": (
+                            f"consult harness={_harness!r} is not "
+                            f"registered. Valid: claude_code, codex, "
+                            f"gemini."
+                        ),
+                    })
+                if not _question:
+                    return _json.dumps({
+                        "error": "InvalidConsultCall",
+                        "message": (
+                            "consult requires non-empty question. "
+                            "Pass the prompt you want sent to the "
+                            "external agent. Example: "
+                            f"consult(harness=\"{_harness}\", "
+                            "question=\"Reply with: hello\")"
+                        ),
+                    })
                 try:
                     _svc = await _ext_get_service()
                     _consult_result = await _svc.orchestrator.consult(
                         instance_id=request.instance_id,
                         member_id=getattr(request, "member_id", "")
                                   or request.instance_id,
-                        harness=tool_input.get("harness", ""),
-                        question=tool_input.get("question", ""),
+                        harness=_harness,
+                        question=_question,
                         context=tool_input.get("context", ""),
                         session_id_raw=tool_input.get("session_id", ""),
                         workspace_dir=tool_input.get("workspace_dir") or None,

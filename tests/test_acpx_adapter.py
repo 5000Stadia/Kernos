@@ -382,6 +382,54 @@ class TestStaleSessionDetection:
         ) is False
 
 
+class TestConsultHandlerValidation:
+    """2026-05-20 live-failure pin: even with the schema's
+    minLength: 1 + enum on harness/question, some model APIs
+    bypass JSON schema validation silently. Live result:
+    `consult(harness="claude_code")` (missing question) reached
+    acpx, which exited rc=2 with stdout 'Prompt is required'.
+
+    Handler-side validation at reasoning.py:866+ now catches this
+    BEFORE dispatch and returns a friendly error JSON the agent
+    can use to correct the next call.
+    """
+
+    def test_handler_branch_has_validation_for_missing_harness(self):
+        import inspect
+        from kernos.kernel.reasoning import ReasoningService
+        src = inspect.getsource(ReasoningService.execute_tool)
+        # The consult branch must check harness before dispatch
+        idx = src.find('tool_name == "consult"')
+        assert idx >= 0
+        # Take the next ~3000 chars (the consult block)
+        block = src[idx:idx + 3000]
+        # Validation must call .get("harness") and check empty
+        assert 'tool_input.get("harness")' in block
+        assert "consult requires non-empty harness" in block
+
+    def test_handler_branch_has_validation_for_missing_question(self):
+        import inspect
+        from kernos.kernel.reasoning import ReasoningService
+        src = inspect.getsource(ReasoningService.execute_tool)
+        idx = src.find('tool_name == "consult"')
+        block = src[idx:idx + 3000]
+        assert 'tool_input.get("question")' in block
+        assert "consult requires non-empty question" in block
+
+    def test_handler_branch_validates_harness_enum(self):
+        """Handler also rejects harness not in the enum, with a
+        helpful message naming valid values."""
+        import inspect
+        from kernos.kernel.reasoning import ReasoningService
+        src = inspect.getsource(ReasoningService.execute_tool)
+        idx = src.find('tool_name == "consult"')
+        block = src[idx:idx + 3000]
+        assert "_valid_harnesses" in block
+        assert "claude_code" in block
+        assert "codex" in block
+        assert "gemini" in block
+
+
 class TestConsultSchemaValidation:
     """2026-05-19 live-bug pin: agent called consult with
     harness='' (empty string). JSON schema accepted because string
