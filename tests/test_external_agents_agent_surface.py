@@ -52,24 +52,30 @@ class TestConsultToolSchema:
         assert "question" in props
         assert set(schema["required"]) == {"harness", "question"}
 
-    def test_harness_param_is_free_form_string(self):
-        # 2026-05-17 contract change: harness is no longer a hardcoded
-        # enum on the schema. The registry is dynamic / operator-
-        # extensible; the agent passes a free-form string validated at
-        # dispatch time against HarnessRegistry. Unknown names return a
-        # clear error listing currently registered harnesses, so the
-        # agent self-discovers without the schema baking in a closed
-        # list. Aider-blocking still happens at the registry level
-        # (entry.consult_supported=False), not at the schema layer.
+    def test_harness_param_locked_to_supported_enum(self):
+        # 2026-05-20 contract REVISION (founder push: "How do we get
+        # kernos to freaking talk to codex and claude code"):
+        # the 2026-05-17 "free-form string + registry-time validation"
+        # design valued extensibility but in live testing the agent
+        # repeatedly fumbled — empty harness, wrong tool names
+        # (external_agent_consult.cc), invented variants. The schema
+        # validator catches all of these BEFORE dispatch if harness
+        # is an enum.
+        #
+        # The set is intentionally the three consult-supported
+        # harnesses (aider stays excluded — it's BUILD-only via
+        # execute_code). If a fourth harness ever gets added, this
+        # enum is the source-of-truth list to update along with the
+        # registry. Schema and registry stay in lockstep — that's
+        # the trade for reliability over magic extensibility.
         harness_prop = (
             CONSULT_TOOL["input_schema"]["properties"]["harness"]
         )
         assert harness_prop["type"] == "string"
-        assert "enum" not in harness_prop, (
-            "harness param must NOT carry a hardcoded enum — registry "
-            "is dynamic and the enum would block future-installed "
-            "harnesses from being addressable from the agent surface"
-        )
+        assert harness_prop.get("enum") == [
+            "claude_code", "codex", "gemini",
+        ]
+        assert harness_prop.get("minLength") == 1
 
     def test_optional_fields_present(self):
         props = CONSULT_TOOL["input_schema"]["properties"]

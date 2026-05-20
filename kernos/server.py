@@ -148,6 +148,111 @@ async def restart_command(interaction: discord.Interaction) -> None:
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
+# Owner-only direct broker dispatch (DIRECT-BROKER-V1, 2026-05-20):
+# Bypasses the LLM-driven `consult` tool path entirely. Lets the
+# operator verify the CC/Codex broker chain end-to-end without
+# depending on the agent's tool-calling judgment. Use:
+#   /codex Reply with exactly: hello
+#   /cc How many files are in the kernos/ directory?
+async def _direct_broker_dispatch(
+    interaction: "discord.Interaction",
+    *,
+    target: str,
+    prompt: str,
+    timeout_seconds: int = 180,
+) -> None:
+    if interaction.user.id != OWNER_USER_ID:
+        await interaction.response.send_message(
+            "Not authorized.", ephemeral=True,
+        )
+        return
+    if not prompt or not prompt.strip():
+        await interaction.response.send_message(
+            f"Pass a non-empty prompt: `/{target.split('_')[0]} <prompt>`",
+            ephemeral=True,
+        )
+        return
+    # Defer publicly so the response is visible to the channel
+    await interaction.response.defer(ephemeral=False)
+    from kernos.kernel.external_agents.acpx_adapter import dispatch
+    from kernos.kernel.external_agents.errors import (
+        ConsultationFailed, ConsultationTimeout, HarnessUnavailable,
+    )
+    workspace_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+    # Use repo root for the broker's --cwd so it can read code if asked
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    try:
+        result = await dispatch(
+            target=target,
+            prompt=prompt,
+            workspace_dir=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
+    except (ConsultationFailed, ConsultationTimeout, HarnessUnavailable) as exc:
+        await interaction.followup.send(
+            f"**/{target.split('_')[0]}** failed:\n```\n{exc}\n```"[:1900],
+        )
+        return
+    except Exception as exc:
+        await interaction.followup.send(
+            f"**/{target.split('_')[0]}** unexpected error:\n"
+            f"```\n{type(exc).__name__}: {exc}\n```"[:1900],
+        )
+        return
+    response_text = result.response or "(empty response)"
+    label = "Codex" if target == "codex" else "Claude Code"
+    body = (
+        f"**{label}** "
+        f"(stop_reason={result.metadata.get('acpx_stop_reason', '?')}):\n"
+        f"{response_text}"
+    )
+    # Chunk to fit Discord's 2000-char limit (subtracting header overhead)
+    if len(body) <= 1900:
+        await interaction.followup.send(body)
+        return
+    # Multi-chunk send
+    chunks = _chunk_response(body)
+    first = True
+    for chunk in chunks:
+        if first:
+            await interaction.followup.send(chunk)
+            first = False
+        else:
+            await interaction.channel.send(chunk)
+
+
+@tree.command(
+    name="codex",
+    description=(
+        "Dispatch a prompt directly to Codex via ACPX. "
+        "Bypasses the agent's consult tool — for operator-driven broker testing."
+    ),
+)
+@app_commands.describe(prompt="The full prompt to send to Codex.")
+async def codex_command(
+    interaction: discord.Interaction, prompt: str,
+) -> None:
+    await _direct_broker_dispatch(
+        interaction, target="codex", prompt=prompt,
+    )
+
+
+@tree.command(
+    name="cc",
+    description=(
+        "Dispatch a prompt directly to Claude Code via ACPX. "
+        "Bypasses the agent's consult tool — for operator-driven broker testing."
+    ),
+)
+@app_commands.describe(prompt="The full prompt to send to Claude Code.")
+async def cc_command(
+    interaction: discord.Interaction, prompt: str,
+) -> None:
+    await _direct_broker_dispatch(
+        interaction, target="claude_code", prompt=prompt,
+    )
+
+
 @tree.command(name="debug", description="Show diagnostic data: friction, trace, specs")
 @app_commands.describe(category="What to show: friction, trace, specs")
 async def debug_command(interaction: discord.Interaction, category: str = "trace") -> None:

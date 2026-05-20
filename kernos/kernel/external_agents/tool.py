@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 CONSULT_TOOL = {
     "name": "consult",
     "description": (
+        "Call shape: `consult(harness=\"codex\", question=\"...\")` "
+        "OR `consult(harness=\"claude_code\", question=\"...\")`. "
+        "harness MUST be a non-empty string naming one of: "
+        "claude_code, codex, gemini. Empty string is a schema-"
+        "validation error, not 'pick the default'. Calling with "
+        "the wrong tool name (e.g. external_agent_consult.cc, "
+        "consult_codex, codex_async_advisory) returns "
+        "'tool not registered' — there is exactly ONE tool here "
+        "and its name is `consult`.\n\n"
         "Decision rule: need the answer before your next step → "
         "`consult` (blocks in-turn). Can keep working → "
         "`ask_coding_session` (returns request_id; poll later). "
@@ -83,18 +92,16 @@ CONSULT_TOOL = {
             "harness": {
                 "type": "string",
                 "minLength": 1,
+                "enum": ["claude_code", "codex", "gemini"],
                 "description": (
-                    "REQUIRED, non-empty. Common values: "
-                    "'claude_code', 'codex', 'gemini'. The harness "
-                    "registry is dynamic and operator-extensible — "
-                    "additional CLIs can be installed and addressed "
-                    "by name without code changes here. If you pass "
-                    "an unknown name, the call returns a clear error "
-                    "listing all currently registered harnesses. "
-                    "Empty string is rejected at schema-validation "
-                    "time (minLength: 1) — pick an actual harness "
-                    "name. Pick based on what fits the work, not on "
-                    "prescribed domains: registered harnesses are "
+                    "REQUIRED, must be one of the enum values: "
+                    "'claude_code', 'codex', 'gemini'. The schema "
+                    "validator hard-rejects any other value including "
+                    "the empty string, missing field, and common "
+                    "near-misses ('cc', 'claude', 'gpt'). If you "
+                    "need a harness not in the enum, talk to the "
+                    "operator about adding it — don't invent a name. "
+                    "Pick based on what fits the work: these are "
                     "general-purpose agentic CLIs; differences are in "
                     "training/style/availability rather than fixed "
                     "task scope. Threading support varies by harness."

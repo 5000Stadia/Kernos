@@ -340,6 +340,35 @@ class TestConsultSchemaValidation:
         for name in ("claude_code", "codex", "gemini"):
             assert name in desc
 
+    def test_harness_enum_locks_valid_values(self):
+        """2026-05-20 founder push: 'How do we get kernos to freaking
+        talk to codex and claude code'. The live agent kept fumbling
+        with empty harness, wrong tool names (external_agent_consult.cc,
+        codex_async_advisory). enum on the harness field hard-rejects
+        bad values at schema-validation time, before the call dispatches.
+        """
+        from kernos.kernel.external_agents.tool import CONSULT_TOOL
+        props = CONSULT_TOOL["input_schema"]["properties"]
+        enum = props["harness"].get("enum")
+        assert enum == ["claude_code", "codex", "gemini"], (
+            f"harness enum should lock to the three supported "
+            f"agent-callable harnesses; got {enum!r}"
+        )
+
+    def test_consult_description_names_specific_call_shape(self):
+        """Tool-name hallucination guard: description must explicitly
+        show the right call shape so the model has examples to
+        anchor on instead of inventing names like
+        'external_agent_consult.cc' or 'codex_async_advisory'."""
+        from kernos.kernel.external_agents.tool import CONSULT_TOOL
+        desc = CONSULT_TOOL["description"]
+        # Concrete call shape
+        assert 'consult(harness="codex"' in desc
+        assert 'consult(harness="claude_code"' in desc
+        # Negative examples (what NOT to do)
+        assert "external_agent_consult.cc" in desc
+        assert "codex_async_advisory" in desc
+
 
 class TestSupportedTargets:
     def test_includes_three_canonical_names(self):
