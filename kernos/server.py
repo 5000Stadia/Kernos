@@ -1566,6 +1566,28 @@ async def _send_pause_notice_to_channel(channel) -> None:
         pass
 
 
+# GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19): MESSAGE_CREATE counter
+# shared between the on_socket_event_type handler below and the
+# GatewayHealthObserver. Bounded deque, window-filtered at read
+# time. The observer reads this to detect the "Discord sent
+# MESSAGE_CREATE but on_message didn't fire" pattern (Codex's
+# 2026-05-19 diagnostic split).
+from kernos.kernel.gateway_health import _MessageCreateCounter as _MCC
+_message_create_counter = _MCC(
+    window_sec=int(os.getenv("KERNOS_GATEWAY_DEAF_WINDOW_SEC", "600")),
+)
+
+
+@client.event
+async def on_socket_event_type(event_type: str):
+    """Fired by discord.py BEFORE parser dispatch. We count
+    MESSAGE_CREATE events here as a gateway-level ground truth:
+    if these fire but on_message doesn't, the parser/dispatcher
+    layer is broken (Codex 2026-05-19 RCA)."""
+    if event_type == "MESSAGE_CREATE":
+        _message_create_counter.record(_time_module.time())
+
+
 @client.event
 async def on_disconnect():
     """Discord gateway WebSocket disconnected. Logs so silent

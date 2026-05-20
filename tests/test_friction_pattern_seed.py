@@ -75,11 +75,19 @@ async def test_seed_populates_seven_starter_patterns(tmp_path, store):
     result = await seed_friction_patterns_on_first_boot(
         "inst_a", store, data_dir=str(tmp_path),
     )
-    assert len(result.seeded) == 7
+    # Derive expected count from the seed module itself so the
+    # test auto-tracks new patterns instead of needing manual bumps.
+    expected_count = len(_STARTER_PATTERNS)
+    assert len(result.seeded) == expected_count
     assert len(result.skipped) == 0
     assert result.warnings == ()
     patterns = await store.list_patterns("inst_a")
-    assert {p.pattern_id for p in patterns} == set(_EXPECTED_THRESHOLDS)
+    # _EXPECTED_THRESHOLDS covers the original 7 turn-level patterns;
+    # gateway-level patterns added by GATEWAY-HEALTH-OBSERVER-V1
+    # aren't covered by _EXPECTED_THRESHOLDS but ARE in the catalog.
+    seeded_ids = {p.pattern_id for p in patterns}
+    for expected_id in _EXPECTED_THRESHOLDS:
+        assert expected_id in seeded_ids
 
 
 async def test_each_seeded_pattern_has_architect_specified_threshold(
@@ -121,36 +129,37 @@ async def test_seeded_patterns_enter_active_state(tmp_path, store):
 
 async def test_reseed_is_idempotent(tmp_path, store):
     """Second seed call skips every pattern; catalog is unchanged."""
+    expected_count = len(_STARTER_PATTERNS)
     first = await seed_friction_patterns_on_first_boot(
         "inst_a", store, data_dir=str(tmp_path),
     )
-    assert len(first.seeded) == 7
+    assert len(first.seeded) == expected_count
     second = await seed_friction_patterns_on_first_boot(
         "inst_a", store, data_dir=str(tmp_path),
     )
     assert len(second.seeded) == 0
-    assert len(second.skipped) == 7
+    assert len(second.skipped) == expected_count
     assert second.warnings == ()
-    # Catalog total should still be 7 — no duplicates.
     patterns = await store.list_patterns("inst_a")
-    assert len(patterns) == 7
+    assert len(patterns) == expected_count
 
 
 async def test_seed_isolates_per_instance(tmp_path, store):
     """Seeding instance A doesn't touch instance B's catalog."""
+    expected_count = len(_STARTER_PATTERNS)
     await seed_friction_patterns_on_first_boot(
         "inst_a", store, data_dir=str(tmp_path),
     )
     patterns_a = await store.list_patterns("inst_a")
     patterns_b = await store.list_patterns("inst_b")
-    assert len(patterns_a) == 7
+    assert len(patterns_a) == expected_count
     assert len(patterns_b) == 0
     # Seeding B then matches.
     await seed_friction_patterns_on_first_boot(
         "inst_b", store, data_dir=str(tmp_path),
     )
     patterns_b = await store.list_patterns("inst_b")
-    assert len(patterns_b) == 7
+    assert len(patterns_b) == expected_count
 
 
 # ---------------------------------------------------------------------
@@ -312,7 +321,7 @@ async def test_seeded_pattern_drives_full_autonomy_loop_trigger_chain(
     seed_result = await seed_friction_patterns_on_first_boot(
         "inst_a", store, data_dir=str(tmp_path),
     )
-    assert len(seed_result.seeded) == 7
+    assert len(seed_result.seeded) == len(_STARTER_PATTERNS)
 
     # 2. Resolve the seeded provider-error-repeated pattern so the
     # next record_recurrence calls flow through the recurrence path

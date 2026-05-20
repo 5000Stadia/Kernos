@@ -619,6 +619,48 @@ async def bring_up_substrate(
             execution_engine.register_emitter(
                 "coding_session_response", _response_emitter_si,
             )
+
+            # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19): companion to
+            # FrictionObserver. Per-turn observer detects turn-level
+            # friction; this one detects gateway/dispatch-layer
+            # friction (deaf gateway, stuck runner, heartbeat
+            # blocked, connection-pool leak). Same FrictionPatternStore
+            # instance — uniform catalog records regardless of
+            # source. V1: emit-only; V2 will add declarative
+            # auto-remediation per pattern. See
+            # specs/GATEWAY-HEALTH-OBSERVER-V1.md.
+            try:
+                from kernos.kernel.gateway_health import (
+                    GatewayHealthObserver as _GatewayHealthObserver,
+                )
+                import kernos.server as _srv
+                _gw_observer = _GatewayHealthObserver(
+                    instance_id=_si_instance_id,
+                    data_dir=data_dir,
+                    pattern_store=_si_pattern_store,
+                    latency_provider=lambda: (
+                        getattr(_srv.client, "latency", None)
+                        if hasattr(_srv, "client") else None
+                    ),
+                    inbound_event_ts_provider=lambda: getattr(
+                        _srv, "_last_inbound_event_ts", 0.0,
+                    ),
+                    message_create_counter=getattr(
+                        _srv, "_message_create_counter", None,
+                    ),
+                    runner_inspector=None,  # V1.5 wires this
+                )
+                await _gw_observer.start()
+                execution_engine.register_emitter(
+                    "gateway_health", _gw_observer,
+                )
+            except Exception as _exc_gw:
+                logger.warning(
+                    "GATEWAY_HEALTH_OBSERVER_BRINGUP_FAILED error=%s "
+                    "— continuing without gateway-health observer",
+                    _exc_gw,
+                )
+
             logger.info(
                 "SELF_IMPROVEMENT_AUTONOMY_LOOP_LIVE workflow_id=%s "
                 "instance_id=%s",

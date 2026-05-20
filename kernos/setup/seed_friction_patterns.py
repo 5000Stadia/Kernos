@@ -138,6 +138,73 @@ _STARTER_PATTERNS: tuple[_SeedPattern, ...] = (
         signal_type_keys=("TOOL_AVAILABLE_BUT_NOT_USED",),
         reactivation_threshold=5,
     ),
+    # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19) — gateway/dispatch-layer
+    # patterns. Emitted by the new GatewayHealthObserver background
+    # task, not by FrictionObserver. Same catalog, same lifecycle,
+    # same classifier hook — uniform across both observers.
+    _SeedPattern(
+        pattern_id="discord-gateway-deaf",
+        display_name="Discord gateway dispatching but on_message not firing",
+        description=(
+            "Discord's gateway is sending MESSAGE_CREATE socket "
+            "events (on_socket_event_type counts them) but our "
+            "on_message handler hasn't fired within the configured "
+            "window. Implies a parser-layer break: events reach the "
+            "WebSocket but don't reach the application. Distinct from "
+            "discord-heartbeat-blocked which fires when the gateway "
+            "itself is dead — this one means the gateway works but "
+            "the dispatcher above it is broken. Low threshold (2) "
+            "because each occurrence represents lost user messages."
+        ),
+        signal_type_keys=("DISCORD_GATEWAY_DEAF",),
+        reactivation_threshold=2,
+    ),
+    _SeedPattern(
+        pattern_id="space-runner-stuck",
+        display_name="on_message fired but no turn produced within window",
+        description=(
+            "A user message reached on_message (mailbox accepted it) "
+            "but no TURN_TIMING event fired for that space within the "
+            "configured window. Implies the runner task is blocked — "
+            "most likely the sync-I/O-in-async-pipeline class "
+            "documented in ASYNC-IO-CONVERSION-V1. Low threshold (2): "
+            "stuck runners drop user-facing responses."
+        ),
+        signal_type_keys=("SPACE_RUNNER_STUCK",),
+        reactivation_threshold=2,
+    ),
+    _SeedPattern(
+        pattern_id="discord-heartbeat-blocked",
+        display_name="Discord client.latency non-finite or excessive",
+        description=(
+            "Heartbeat ACK round-trip is reporting inf/NaN/None or "
+            "exceeds the configured threshold. Indicates the asyncio "
+            "event loop blocked long enough to starve discord.py's "
+            "heartbeat task. Once consistent, gateway will close + "
+            "discord.py's reconnect coroutine cannot run (same loop) "
+            "→ bot goes 'connected but deaf' from the network side. "
+            "Moderate threshold (3) — single-tick latency spikes are "
+            "common; sustained signals the real failure mode."
+        ),
+        signal_type_keys=("DISCORD_HEARTBEAT_BLOCKED",),
+        reactivation_threshold=3,
+    ),
+    _SeedPattern(
+        pattern_id="discord-connection-pool-leak",
+        display_name="Connection-pool CLOSE_WAIT count above threshold",
+        description=(
+            "Process has more CLOSE_WAIT sockets than the keepalive "
+            "pool size justifies. Typical cause: an httpx.AsyncClient "
+            "/ aiohttp ClientSession that's never aclose()d, leaving "
+            "remote-closed idle keepalives unreaped until next pool "
+            "use. Most commonly observed on the codex_provider's "
+            "long-lived OpenAI/Codex client — bounded (pool capped) "
+            "but a real lifecycle bug. Higher threshold (5) — pool "
+            "naturally floats near its max under load."
+        ),
+        signal_type_keys=("CONNECTION_POOL_LEAK",),
+        reactivation_threshold=5,
+    ),
 )
 
 
