@@ -218,3 +218,28 @@ def get_log_file_path() -> str | None:
         return None
     base = getattr(_file_handler_singleton, "baseFilename", None)
     return base if isinstance(base, str) else None
+
+
+def ensure_log_file_handler_attached() -> bool:
+    """Defensive re-install check (2026-05-20).
+
+    Live observation: on the live bot the RotatingFileHandler stopped
+    writing at 18:46:55 PT even though the ring buffer kept capturing
+    records — so the handler was somehow detached from
+    ``logging.root.handlers`` while the in-memory ring buffer wasn't.
+    Cause unconfirmed; likely candidates include discord.py's
+    ``setup_logging`` interaction or a third-party handler-list
+    manipulation we haven't tracked down.
+
+    This check is meant to be called periodically (from
+    GatewayHealthObserver's tick): if the singleton handler exists
+    but isn't currently in ``logging.root.handlers``, re-attach it.
+    Returns True if a re-attach was needed (caller can log loud),
+    False if everything was already correct.
+    """
+    if _file_handler_singleton is None:
+        return False
+    if _file_handler_singleton in logging.root.handlers:
+        return False
+    logging.root.addHandler(_file_handler_singleton)
+    return True

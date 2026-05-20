@@ -359,6 +359,112 @@ class TestObserverLifecycle:
         await obs._tick()
 
 
+class TestInlineRemediation:
+    """V1.5 inline remediation (founder request 2026-05-20): when
+    discord-heartbeat-blocked fires for N consecutive ticks, the
+    observer force-restarts via os.execv. Safety net for the case
+    where the standalone watchdog has stopped firing.
+    """
+
+    async def test_strikes_increment_on_consecutive_unhealthy_ticks(
+        self, tmp_path, monkeypatch,
+    ):
+        from kernos.kernel import gateway_health
+        monkeypatch.setattr(
+            gateway_health,
+            "_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES", 10,
+        )
+        execv_calls = []
+        monkeypatch.setattr(
+            gateway_health.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+        obs = _make_observer(latency=float("nan"), tmp_path=tmp_path)
+        for _ in range(3):
+            await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 3
+        assert execv_calls == []
+
+    async def test_strikes_reset_on_healthy_tick(
+        self, tmp_path, monkeypatch,
+    ):
+        from kernos.kernel import gateway_health
+        monkeypatch.setattr(
+            gateway_health,
+            "_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES", 10,
+        )
+        execv_calls = []
+        monkeypatch.setattr(
+            gateway_health.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+        # Start unhealthy
+        obs = _make_observer(latency=float("nan"), tmp_path=tmp_path)
+        await obs._tick()
+        await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 2
+
+        # Switch to healthy — strikes must reset to 0
+        obs._latency_provider = lambda: 0.05
+        await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 0
+        assert execv_calls == []
+
+    async def test_threshold_triggers_execv(self, tmp_path, monkeypatch):
+        from kernos.kernel import gateway_health
+        monkeypatch.setattr(
+            gateway_health,
+            "_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES", 3,
+        )
+        execv_calls = []
+        monkeypatch.setattr(
+            gateway_health.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+        obs = _make_observer(latency=float("nan"), tmp_path=tmp_path)
+        for _ in range(3):
+            await obs._tick()
+        assert len(execv_calls) == 1, (
+            "observer should have called execv after 3 consecutive "
+            "heartbeat-unhealthy ticks"
+        )
+
+    async def test_other_signals_do_not_count_against_heartbeat_strikes(
+        self, tmp_path, monkeypatch,
+    ):
+        """The strike counter is heartbeat-specific. A pool-leak or
+        gateway-deaf signal should NOT trigger restart, only persistent
+        heartbeat-blocked does."""
+        from kernos.kernel import gateway_health
+        monkeypatch.setattr(
+            gateway_health,
+            "_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES", 3,
+        )
+        execv_calls = []
+        monkeypatch.setattr(
+            gateway_health.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+        # Healthy latency but high pool-leak — emits CONNECTION_POOL_LEAK
+        # signal, NOT heartbeat-blocked. Strike counter stays 0.
+        import psutil
+
+        class _FakeConn:
+            status = "CLOSE_WAIT"
+
+        class _FakeProc:
+            def net_connections(self, kind):
+                return [_FakeConn() for _ in range(50)]
+
+        monkeypatch.setattr(psutil, "Process", lambda pid: _FakeProc())
+        monkeypatch.setattr(psutil, "CONN_CLOSE_WAIT", "CLOSE_WAIT")
+        obs = _make_observer(latency=0.05, tmp_path=tmp_path)
+        for _ in range(5):
+            await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 0
+        assert execv_calls == []
+
+
 # ===========================================================================
 # Seed-pattern presence pins
 # ===========================================================================

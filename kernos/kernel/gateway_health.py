@@ -46,6 +46,21 @@ _HEARTBEAT_THRESHOLD_SEC = float(
 _POOL_LEAK_THRESHOLD = int(
     os.getenv("KERNOS_HTTP_POOL_CLOSE_WAIT_THRESHOLD", "30"),
 )
+# V1.5 inline remediation (founder's all-three request, 2026-05-20):
+# when the observer has detected discord-heartbeat-blocked for N
+# consecutive ticks, force-restart via os.execv directly. This is
+# the safety net for the failure mode we observed where the
+# existing watchdog stopped firing (its task may have died silently)
+# — the observer's tick is the one we know is reliable.
+#
+# Spec'd more cleanly as V2 (declarative remediation_action on
+# FrictionPattern records via FrictionPatternStore.start callback).
+# This inline shape is the minimum-viable safety net while V2 is
+# scoped — addresses the exact failure we just observed without
+# blocking on the larger framework change.
+_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES = int(
+    os.getenv("KERNOS_GATEWAY_HEALTH_RESTART_AFTER_STRIKES", "5"),
+)
 
 
 @dataclass
@@ -122,6 +137,11 @@ class GatewayHealthObserver:
         # Test-introspection counters
         self._poll_count = 0
         self._signals_emitted = 0
+        # V1.5 inline remediation state. Counts consecutive ticks
+        # that emit DISCORD_HEARTBEAT_BLOCKED. When the count
+        # reaches _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES we
+        # log + execv. Reset to 0 on any healthy heartbeat tick.
+        self._consecutive_heartbeat_strikes = 0
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -179,25 +199,95 @@ class GatewayHealthObserver:
     async def _tick(self) -> None:
         """One observation cycle. Run all detectors; emit each
         non-None signal into the catalog. Fail-isolated per
-        detector — one detector raising doesn't skip the others."""
+        detector — one detector raising doesn't skip the others.
+
+        V1.5 inline remediation: track consecutive heartbeat-
+        blocked ticks; when ``_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES``
+        is reached, log + os.execv. Catches the case where the
+        standalone watchdog stopped firing (silent task death)
+        and the gateway has been broken long enough that recovery
+        won't come from anywhere else.
+        """
         import time as _time
         now = _time.time()
+
+        # Defensive: ensure the log file handler is still attached to
+        # logging.root. Live observation 2026-05-20: the handler was
+        # silently detached at some point ~30min after boot, so
+        # post-failure RCA had no file evidence even though the
+        # ring buffer kept capturing. This re-attach is best-effort.
+        try:
+            from kernos.kernel.log_buffer import (
+                ensure_log_file_handler_attached,
+            )
+            if ensure_log_file_handler_attached():
+                logger.warning(
+                    "GATEWAY_HEALTH_LOG_FILE_REATTACHED: "
+                    "RotatingFileHandler had been detached from "
+                    "logging.root.handlers; re-attached. Cause "
+                    "unconfirmed (likely discord.py setup_logging "
+                    "or other handler-list mutation)."
+                )
+        except Exception as exc:
+            logger.warning(
+                "GATEWAY_HEALTH_LOG_FILE_CHECK_FAILED: %s", exc,
+            )
+
         detectors = [
             ("discord-heartbeat-blocked", self._detect_heartbeat_blocked),
             ("discord-gateway-deaf", lambda: self._detect_gateway_deaf(now)),
             ("space-runner-stuck", lambda: self._detect_runner_stuck(now)),
             ("discord-connection-pool-leak", self._detect_pool_leak),
         ]
+        heartbeat_unhealthy_this_tick = False
         for name, fn in detectors:
             try:
                 signal = fn()
                 if signal is not None:
                     await self._record_signal(signal)
+                    if name == "discord-heartbeat-blocked":
+                        heartbeat_unhealthy_this_tick = True
             except Exception as exc:
                 logger.warning(
                     "GATEWAY_HEALTH_DETECTOR_FAILED: detector=%s exc=%s",
                     name, exc,
                 )
+
+        # V1.5 inline remediation for the failure mode observed
+        # 2026-05-20: heartbeat NaN persists, standalone watchdog
+        # not firing (its task died silently somewhere). The observer
+        # is the survivor; restart via the observer's path.
+        if heartbeat_unhealthy_this_tick:
+            self._consecutive_heartbeat_strikes += 1
+            if (
+                self._consecutive_heartbeat_strikes
+                >= _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES
+            ):
+                logger.error(
+                    "GATEWAY_HEALTH_FORCE_RESTART: heartbeat unhealthy "
+                    "for %d consecutive ticks (interval=%ds, threshold=%d). "
+                    "Standalone watchdog hasn't recovered — observer "
+                    "is force-restarting via os.execv.",
+                    self._consecutive_heartbeat_strikes,
+                    self._poll_interval_sec,
+                    _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES,
+                )
+                # Flush logs before exec replaces the process
+                for h in logging.getLogger().handlers:
+                    try:
+                        h.flush()
+                    except Exception:
+                        pass
+                os.execv(__import__("sys").executable, [
+                    __import__("sys").executable
+                ] + __import__("sys").argv)
+        else:
+            if self._consecutive_heartbeat_strikes > 0:
+                logger.info(
+                    "GATEWAY_HEALTH_HEARTBEAT_RECOVERED: strikes_cleared=%d",
+                    self._consecutive_heartbeat_strikes,
+                )
+            self._consecutive_heartbeat_strikes = 0
 
     # ----- detectors -------------------------------------------------
 

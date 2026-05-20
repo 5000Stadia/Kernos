@@ -128,3 +128,78 @@ class TestInstallLogFileHandler:
         # RotatingFileHandler exposes maxBytes / backupCount
         assert handler.maxBytes == 1024
         assert handler.backupCount == 2
+
+
+class TestEnsureLogFileHandlerAttached:
+    """2026-05-20 live-bug pin: on the live bot the RotatingFileHandler
+    stopped writing while the ring buffer kept capturing — the
+    handler was somehow removed from logging.root.handlers. This
+    helper is called periodically from GatewayHealthObserver.tick
+    to defensively re-attach if missing."""
+
+    def test_no_op_when_handler_not_installed(self, monkeypatch):
+        """ensure_log_file_handler_attached returns False when the
+        singleton isn't installed at all (e.g. test environment)."""
+        from kernos.kernel.log_buffer import (
+            ensure_log_file_handler_attached,
+        )
+        import kernos.kernel.log_buffer as lb
+        # The autouse reset fixture cleared the singleton
+        assert lb._file_handler_singleton is None
+        assert ensure_log_file_handler_attached() is False
+
+    def test_no_op_when_handler_already_attached(self, tmp_path, monkeypatch):
+        from kernos.kernel.log_buffer import (
+            install_log_file_handler,
+            ensure_log_file_handler_attached,
+        )
+        monkeypatch.delenv("KERNOS_INSTANCE_ID", raising=False)
+        install_log_file_handler(data_dir=str(tmp_path))
+        # Handler is currently attached
+        assert ensure_log_file_handler_attached() is False
+
+    def test_reattaches_when_handler_silently_removed(self, tmp_path, monkeypatch):
+        """The bug case: handler exists as a singleton but isn't in
+        logging.root.handlers. Re-attach happens, return is True."""
+        import logging
+        from kernos.kernel.log_buffer import (
+            install_log_file_handler,
+            ensure_log_file_handler_attached,
+        )
+        import kernos.kernel.log_buffer as lb
+        monkeypatch.delenv("KERNOS_INSTANCE_ID", raising=False)
+        handler = install_log_file_handler(data_dir=str(tmp_path))
+        assert handler in logging.root.handlers
+        # Simulate the silent-removal bug
+        logging.root.removeHandler(handler)
+        assert handler not in logging.root.handlers
+        # The defensive re-attach catches it
+        result = ensure_log_file_handler_attached()
+        assert result is True
+        assert handler in logging.root.handlers
+
+    def test_logs_actually_land_after_reattach(self, tmp_path, monkeypatch):
+        """End-to-end: detach, log something (should NOT land in file),
+        re-attach via helper, log again (SHOULD land in file)."""
+        import logging
+        from kernos.kernel.log_buffer import (
+            install_log_file_handler,
+            ensure_log_file_handler_attached,
+        )
+        monkeypatch.delenv("KERNOS_INSTANCE_ID", raising=False)
+        handler = install_log_file_handler(data_dir=str(tmp_path))
+        log_path = tmp_path / "diagnostics" / "server.log"
+        test_log = logging.getLogger("test.reattach")
+        test_log.setLevel(logging.INFO)
+        # Detach
+        logging.root.removeHandler(handler)
+        test_log.info("LOST_LINE_BEFORE_REATTACH")
+        handler.flush()
+        # Re-attach
+        ensure_log_file_handler_attached()
+        test_log.info("CAPTURED_LINE_AFTER_REATTACH")
+        handler.flush()
+        contents = log_path.read_text()
+        # Pre-reattach line lost; post-reattach line captured
+        assert "LOST_LINE_BEFORE_REATTACH" not in contents
+        assert "CAPTURED_LINE_AFTER_REATTACH" in contents
