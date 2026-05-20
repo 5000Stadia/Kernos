@@ -874,13 +874,30 @@ class ReasoningService:
                 # 2026-05-20 handler-side validation: the schema layer
                 # *should* enforce non-empty harness + question via
                 # minLength: 1 + enum, but some models bypass JSON
-                # schema validation silently. Without this guard, an
-                # empty `question` defaults to "" via .get(), reaches
-                # acpx, which exits rc=2 with stdout_errors='Prompt is
-                # required'. Catch it here with a clear actionable
-                # message so the agent can fix the next call.
-                _harness = (tool_input.get("harness") or "").strip()
-                _question = (tool_input.get("question") or "").strip()
+                # schema validation silently.
+                #
+                # 2026-05-20 SECOND fix: live evidence showed the
+                # agent supplied `harness` + `prompt` (NOT `question`).
+                # Field-name mismatch — vocabulary drifts across
+                # layers: schema says question, acpx_adapter takes
+                # `prompt`, slash commands use `prompt`. Accept any
+                # of {question, prompt, text} for the prompt arg, and
+                # {harness, target, agent} for the harness arg —
+                # intent is unambiguous regardless. The schema still
+                # documents the canonical names; this is graceful
+                # acceptance at the handler boundary.
+                _harness = (
+                    tool_input.get("harness")
+                    or tool_input.get("target")
+                    or tool_input.get("agent")
+                    or ""
+                ).strip()
+                _question = (
+                    tool_input.get("question")
+                    or tool_input.get("prompt")
+                    or tool_input.get("text")
+                    or ""
+                ).strip()
                 _valid_harnesses = {"claude_code", "codex", "gemini"}
                 if not _harness:
                     return _json.dumps({
@@ -905,9 +922,10 @@ class ReasoningService:
                     return _json.dumps({
                         "error": "InvalidConsultCall",
                         "message": (
-                            "consult requires non-empty question. "
-                            "Pass the prompt you want sent to the "
-                            "external agent. Example: "
+                            "consult requires non-empty question (or "
+                            "prompt/text — any of those field names "
+                            "are accepted). Pass the prompt you want "
+                            "sent to the external agent. Example: "
                             f"consult(harness=\"{_harness}\", "
                             "question=\"Reply with: hello\")"
                         ),

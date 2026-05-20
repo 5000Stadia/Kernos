@@ -429,6 +429,36 @@ class TestConsultHandlerValidation:
         assert "codex" in block
         assert "gemini" in block
 
+    def test_handler_accepts_question_prompt_text_aliases(self):
+        """2026-05-20 live failure: agent called consult with
+        `harness` + `prompt` (not `question`). Schema declares
+        `question` as the canonical name but vocabulary drifts
+        across layers (acpx_adapter takes `prompt`, slash commands
+        use `prompt`). Handler now accepts question/prompt/text as
+        aliases for the prompt arg — intent is unambiguous
+        regardless of which word the model picked."""
+        import inspect
+        from kernos.kernel.reasoning import ReasoningService
+        src = inspect.getsource(ReasoningService.execute_tool)
+        idx = src.find('tool_name == "consult"')
+        block = src[idx:idx + 3000]
+        # All three alias names referenced in the .get() fallback chain
+        assert 'tool_input.get("question")' in block
+        assert 'tool_input.get("prompt")' in block
+        assert 'tool_input.get("text")' in block
+
+    def test_handler_accepts_harness_target_agent_aliases(self):
+        """Same defensive aliasing for harness — accepts target/
+        agent in addition to the canonical 'harness'."""
+        import inspect
+        from kernos.kernel.reasoning import ReasoningService
+        src = inspect.getsource(ReasoningService.execute_tool)
+        idx = src.find('tool_name == "consult"')
+        block = src[idx:idx + 3000]
+        assert 'tool_input.get("harness")' in block
+        assert 'tool_input.get("target")' in block
+        assert 'tool_input.get("agent")' in block
+
 
 class TestConsultSchemaValidation:
     """2026-05-19 live-bug pin: agent called consult with
