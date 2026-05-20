@@ -255,6 +255,92 @@ class TestIsAcpxAvailable:
 # ===========================================================================
 
 
+class TestStaleSessionDetection:
+    """2026-05-19 live-bug pin: ACPX named sessions can go stale
+    when the bound agent process dies. `sessions ensure` reports
+    the session "exists" so subsequent dispatch hits stderr
+    'agent needs reconnect' with rc=1. There's no `sessions
+    reset` — close + re-ensure is the only path. dispatch() now
+    auto-retries once on this exact failure shape."""
+
+    def test_marker_detected_in_real_stderr(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _stderr_indicates_stale_agent,
+        )
+        # Exact string captured from server.log during the 2026-05-19
+        # bug report.
+        live_stderr = (
+            "[acpx] session 5ffe4c7047de1deb "
+            "(6e22e50b-072a-4cb3-9edf-5cc7551197a0) · "
+            "/home/k/Kernos-main · agent needs reconnect\n"
+        )
+        assert _stderr_indicates_stale_agent(live_stderr) is True
+
+    def test_marker_case_insensitive(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _stderr_indicates_stale_agent,
+        )
+        assert _stderr_indicates_stale_agent(
+            "AGENT NEEDS RECONNECT"
+        ) is True
+
+    def test_alternative_marker(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _stderr_indicates_stale_agent,
+        )
+        assert _stderr_indicates_stale_agent(
+            "[acpx] agent disconnected from session foo"
+        ) is True
+
+    def test_empty_stderr_not_detected(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _stderr_indicates_stale_agent,
+        )
+        assert _stderr_indicates_stale_agent("") is False
+
+    def test_unrelated_error_not_detected(self):
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _stderr_indicates_stale_agent,
+        )
+        # Must NOT false-positive on generic errors
+        assert _stderr_indicates_stale_agent(
+            "connection refused"
+        ) is False
+        assert _stderr_indicates_stale_agent(
+            "Error: missing required argument"
+        ) is False
+        assert _stderr_indicates_stale_agent(
+            "permission denied"
+        ) is False
+
+
+class TestConsultSchemaValidation:
+    """2026-05-19 live-bug pin: agent called consult with
+    harness='' (empty string). JSON schema accepted because string
+    type allows empty. Now harness + question are minLength: 1 so
+    schema-validation layer rejects empty before dispatch reaches
+    the registry."""
+
+    def test_harness_field_has_min_length_1(self):
+        from kernos.kernel.external_agents.tool import CONSULT_TOOL
+        props = CONSULT_TOOL["input_schema"]["properties"]
+        assert props["harness"].get("minLength") == 1
+
+    def test_question_field_has_min_length_1(self):
+        from kernos.kernel.external_agents.tool import CONSULT_TOOL
+        props = CONSULT_TOOL["input_schema"]["properties"]
+        assert props["question"].get("minLength") == 1
+
+    def test_harness_description_advertises_examples(self):
+        """Description should name actual harnesses so the agent
+        knows what to pass instead of guessing or leaving empty."""
+        from kernos.kernel.external_agents.tool import CONSULT_TOOL
+        props = CONSULT_TOOL["input_schema"]["properties"]
+        desc = props["harness"]["description"]
+        for name in ("claude_code", "codex", "gemini"):
+            assert name in desc
+
+
 class TestSupportedTargets:
     def test_includes_three_canonical_names(self):
         assert "claude_code" in SUPPORTED_TARGETS

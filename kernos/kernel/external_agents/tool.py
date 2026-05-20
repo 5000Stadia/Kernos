@@ -82,15 +82,18 @@ CONSULT_TOOL = {
         "properties": {
             "harness": {
                 "type": "string",
+                "minLength": 1,
                 "description": (
-                    "The registered name of the external CLI harness "
-                    "to dispatch to. The harness registry is dynamic "
-                    "and operator-extensible — additional CLIs can be "
-                    "installed and addressed by name without code "
-                    "changes here. If you pass an unknown name, the "
-                    "call returns a clear error listing all currently "
-                    "registered harnesses, which you can then choose "
-                    "from. Pick based on what fits the work, not on "
+                    "REQUIRED, non-empty. Common values: "
+                    "'claude_code', 'codex', 'gemini'. The harness "
+                    "registry is dynamic and operator-extensible — "
+                    "additional CLIs can be installed and addressed "
+                    "by name without code changes here. If you pass "
+                    "an unknown name, the call returns a clear error "
+                    "listing all currently registered harnesses. "
+                    "Empty string is rejected at schema-validation "
+                    "time (minLength: 1) — pick an actual harness "
+                    "name. Pick based on what fits the work, not on "
                     "prescribed domains: registered harnesses are "
                     "general-purpose agentic CLIs; differences are in "
                     "training/style/availability rather than fixed "
@@ -99,7 +102,10 @@ CONSULT_TOOL = {
             },
             "question": {
                 "type": "string",
-                "description": "The prompt / question to ask.",
+                "minLength": 1,
+                "description": (
+                    "REQUIRED, non-empty. The prompt / question to ask."
+                ),
             },
             "context": {
                 "type": "string",

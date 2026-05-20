@@ -368,6 +368,98 @@ def _extract_stop_reason(event: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------
 
 
+async def _close_session(
+    *,
+    binary: str,
+    workspace_dir: str,
+    acpx_agent_name: str,
+    session_id: str,
+) -> bool:
+    """Force-close an ACPX named session via ``acpx <agent> sessions
+    close <name>``. Returns True on clean close (or "session didn't
+    exist anyway"), False on error.
+
+    Why: when an ACPX named session's underlying agent process dies,
+    ``sessions ensure`` reports the session "exists" but every
+    subsequent dispatch fails with stderr ``agent needs reconnect``.
+    There's no ``sessions reset`` — close + re-ensure is the only
+    way to refresh the agent process bound to the name.
+
+    Fire-and-forget shape: any failure here just means the next
+    ``sessions ensure`` may also fail; we log + continue rather
+    than blow up the dispatch path.
+    """
+    cmd = [
+        binary,
+        "--cwd", workspace_dir,
+        acpx_agent_name,
+        "sessions", "close",
+        session_id,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        logger.warning(
+            "ACPX_SESSION_CLOSE_SPAWN_FAILED: target=%s session=%s exc=%s",
+            acpx_agent_name, session_id, exc,
+        )
+        return False
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=15)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await asyncio.wait_for(proc.wait(), timeout=2)
+        except Exception:
+            pass
+        logger.warning(
+            "ACPX_SESSION_CLOSE_TIMEOUT: target=%s session=%s",
+            acpx_agent_name, session_id,
+        )
+        return False
+    # rc=0 means closed. Non-zero with "no session" or similar still
+    # leaves us in the "session doesn't exist" state which is what
+    # we want — log + return success.
+    if proc.returncode == 0:
+        logger.info(
+            "ACPX_SESSION_CLOSED: target=%s session=%s",
+            acpx_agent_name, session_id,
+        )
+        return True
+    # Non-zero close — common when session already gone. Either
+    # way the next ensure will create fresh.
+    logger.info(
+        "ACPX_SESSION_CLOSE_NONZERO: target=%s session=%s rc=%d "
+        "(treating as already-gone)",
+        acpx_agent_name, session_id, proc.returncode,
+    )
+    return True
+
+
+# Stderr markers indicating a named session exists but its bound
+# agent process has died. Detection triggers a force-close + retry.
+# Conservative list — any marker MUST be a near-certain indicator of
+# stale-agent, not a generic error.
+_STALE_AGENT_MARKERS: tuple[str, ...] = (
+    "agent needs reconnect",
+    "agent disconnected",
+)
+
+
+def _stderr_indicates_stale_agent(stderr_text: str) -> bool:
+    """True iff stderr contains a stale-agent marker. Case-insensitive
+    substring match; the markers are stable in ACPX's stderr."""
+    if not stderr_text:
+        return False
+    lowered = stderr_text.lower()
+    return any(marker.lower() in lowered for marker in _STALE_AGENT_MARKERS)
+
+
 async def _ensure_session(
     *,
     binary: str,
@@ -479,6 +571,7 @@ async def dispatch(
     workspace_dir: str = "",
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     approve_all: bool = True,
+    _stale_session_retry: int = 0,
 ) -> ConsultResult:
     """Dispatch ``prompt`` to ``target`` via ACPX and return a
     :class:`ConsultResult`.
@@ -751,6 +844,38 @@ async def dispatch(
     # exit with partial text as a failure — without that distinction,
     # a crash mid-response is indistinguishable from a complete answer.
     if proc.returncode != 0:
+        # Stale-session detection (2026-05-19 founder report): when an
+        # ACPX named session's underlying agent died, `sessions ensure`
+        # reports the session "exists" and every subsequent dispatch
+        # fails with ``stderr=[acpx] agent needs reconnect``. There's
+        # no `sessions reset` in ACPX — we have to close + re-ensure
+        # to bind a fresh agent process to the name. One retry; if
+        # the retry also fails we surface the failure honestly.
+        if (
+            session_id
+            and _stale_session_retry == 0
+            and _stderr_indicates_stale_agent(stderr_text)
+        ):
+            logger.warning(
+                "ACPX_STALE_SESSION_DETECTED: target=%s session=%s "
+                "stderr_head=%r — force-closing + retrying once",
+                target, session_id, stderr_text[:150],
+            )
+            await _close_session(
+                binary=binary,
+                workspace_dir=workspace_dir,
+                acpx_agent_name=acpx_agent_name,
+                session_id=session_id,
+            )
+            return await dispatch(
+                target=target,
+                prompt=prompt,
+                session_id=session_id,
+                workspace_dir=workspace_dir,
+                timeout_seconds=timeout_seconds,
+                approve_all=approve_all,
+                _stale_session_retry=1,
+            )
         # Hard failure: non-zero exit. Even if some chunks
         # arrived, we don't know if the response is complete.
         raise ConsultationFailed(
