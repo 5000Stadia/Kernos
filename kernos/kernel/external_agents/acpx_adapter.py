@@ -581,9 +581,19 @@ async def _ensure_session(
             b"".join(stderr_chunks)
             .decode("utf-8", errors="replace")
         )[:300]
+        # 2026-05-20 Codex audit fix: mirror dispatch's stdout-error
+        # surfacing here too. If sessions ensure fails because of a
+        # provider/auth error (which comes via JSON-RPC on stdout
+        # for the same reason claude-acp's billing_error did), the
+        # raise message needs the stdout payload, not just stderr.
+        stdout_text = (
+            b"".join(stdout_chunks)
+            .decode("utf-8", errors="replace")
+        )[:300]
         raise ConsultationFailed(
             f"acpx sessions ensure for {session_id!r} returned "
-            f"rc={proc.returncode}: {stderr_text}"
+            f"rc={proc.returncode}: stderr={stderr_text!r} "
+            f"stdout={stdout_text!r}"
         )
 
 
@@ -935,7 +945,11 @@ async def dispatch(
             f"ACPX dispatch to {target!r} exited rc={proc.returncode}. "
             f"Accumulated {len(response_text)} chars before failure. "
             f"stderr: {stderr_text} | "
-            f"stdout_errors: {stdout_err_text or '(none)'}"
+            f"stdout_errors: {stdout_err_text or '(none)'}",
+            # 2026-05-20 Codex audit fix: pass real rc through so
+            # consult_log's exit_status column reflects reality
+            # instead of defaulting to 0.
+            exit_status=proc.returncode,
         )
     if drain_incomplete:
         raise ConsultationFailed(

@@ -257,30 +257,56 @@ class GatewayHealthObserver:
         # 2026-05-20: heartbeat NaN persists, standalone watchdog
         # not firing (its task died silently somewhere). The observer
         # is the survivor; restart via the observer's path.
+        #
+        # V1.5 + V2 SHARED COOL-OFF (Codex audit 2026-05-20 + live
+        # restart-loop observation): the original V1.5 had no
+        # cool-off and was restart-looping every ~5 min when the
+        # heartbeat NaN was caused by something restart couldn't
+        # fix. V2's sentinel-file cool-off was correctly preventing
+        # V2's path from looping, but V1.5 was bypassing it.
+        # Fix: V1.5 now checks the SAME sentinel V2 writes.
+        # If the sentinel says we restarted within the cool-off
+        # window, V1.5 logs SKIP and resets strikes — letting
+        # operator inspect the broken state without ducking the
+        # process out from under them.
         if heartbeat_unhealthy_this_tick:
             self._consecutive_heartbeat_strikes += 1
             if (
                 self._consecutive_heartbeat_strikes
                 >= _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES
             ):
-                logger.error(
-                    "GATEWAY_HEALTH_FORCE_RESTART: heartbeat unhealthy "
-                    "for %d consecutive ticks (interval=%ds, threshold=%d). "
-                    "Standalone watchdog hasn't recovered — observer "
-                    "is force-restarting via os.execv.",
-                    self._consecutive_heartbeat_strikes,
-                    self._poll_interval_sec,
-                    _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES,
-                )
-                # Flush logs before exec replaces the process
-                for h in logging.getLogger().handlers:
-                    try:
-                        h.flush()
-                    except Exception:
-                        pass
-                os.execv(__import__("sys").executable, [
-                    __import__("sys").executable
-                ] + __import__("sys").argv)
+                if self._is_recent_restart_via_sentinel():
+                    logger.warning(
+                        "GATEWAY_HEALTH_FORCE_RESTART_SKIPPED_COOL_OFF: "
+                        "heartbeat unhealthy for %d ticks but V2 "
+                        "remediation sentinel says we restarted "
+                        "recently — gateway issue persists across "
+                        "restart, not a recoverable failure. Skipping "
+                        "V1.5 restart to prevent loop.",
+                        self._consecutive_heartbeat_strikes,
+                    )
+                    # Reset strikes so we don't log STRIKE every
+                    # subsequent tick during cool-off
+                    self._consecutive_heartbeat_strikes = 0
+                else:
+                    logger.error(
+                        "GATEWAY_HEALTH_FORCE_RESTART: heartbeat unhealthy "
+                        "for %d consecutive ticks (interval=%ds, threshold=%d). "
+                        "Standalone watchdog hasn't recovered — observer "
+                        "is force-restarting via os.execv.",
+                        self._consecutive_heartbeat_strikes,
+                        self._poll_interval_sec,
+                        _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES,
+                    )
+                    # Flush logs before exec replaces the process
+                    for h in logging.getLogger().handlers:
+                        try:
+                            h.flush()
+                        except Exception:
+                            pass
+                    os.execv(__import__("sys").executable, [
+                        __import__("sys").executable
+                    ] + __import__("sys").argv)
         else:
             if self._consecutive_heartbeat_strikes > 0:
                 logger.info(
@@ -288,6 +314,53 @@ class GatewayHealthObserver:
                     self._consecutive_heartbeat_strikes,
                 )
             self._consecutive_heartbeat_strikes = 0
+
+    def _is_recent_restart_via_sentinel(self) -> bool:
+        """Read the V2 remediation sentinel for the
+        ``discord-heartbeat-blocked`` pattern; return True iff its
+        timestamp is within the configured window (default 600s).
+
+        Shared with V2 (kernos/kernel/friction_patterns.py
+        _remediation_in_cool_off) — same sentinel path, same
+        window. Lets V1.5 and V2 share one cool-off discipline so
+        they can't restart-loop against each other.
+
+        Falls back to False (allow restart) on any read/parse
+        error — V1.5 fails open. The trade is: better to risk a
+        loop in the rare 'sentinel corrupt' case than to never
+        recover from a real heartbeat-blocked failure.
+        """
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        instance_id = self._instance_id.replace(":", "_").replace("/", "_")
+        sentinel = (
+            Path(self._data_dir)
+            / "diagnostics" / "friction" / "remediation"
+            / f"{instance_id}__discord-heartbeat-blocked.last_fired"
+        )
+        if not sentinel.exists():
+            return False
+        window_sec = int(
+            os.getenv("KERNOS_DISCORD_HEARTBEAT_REMEDIATION_WINDOW_SEC",
+                      "600"),
+        )
+        try:
+            content = sentinel.read_text(encoding="utf-8").strip()
+            last_fired = datetime.fromisoformat(content)
+            if last_fired.tzinfo is None:
+                last_fired = last_fired.replace(tzinfo=timezone.utc)
+        except Exception as exc:
+            logger.warning(
+                "GATEWAY_HEALTH_SENTINEL_PARSE_FAILED: %s — "
+                "treating as no cool-off (V1.5 may proceed)",
+                exc,
+            )
+            return False
+        age_sec = (
+            datetime.now(timezone.utc) - last_fired
+        ).total_seconds()
+        return age_sec < window_sec
 
     # ----- detectors -------------------------------------------------
 

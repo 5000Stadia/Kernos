@@ -429,6 +429,94 @@ class TestInlineRemediation:
             "heartbeat-unhealthy ticks"
         )
 
+    async def test_skips_restart_when_v2_sentinel_within_window(
+        self, tmp_path, monkeypatch,
+    ):
+        """The critical loop-prevention pin: V1.5 must respect the
+        SAME sentinel V2 writes. Live-observed 2026-05-20: bot
+        restart-looped every ~5 min because V1.5 had no cool-off
+        while V2 did. Both now share the sentinel; restart loops
+        are mathematically impossible regardless of which path
+        triggered the first restart."""
+        from kernos.kernel import gateway_health
+        from datetime import datetime, timezone
+        monkeypatch.setattr(
+            gateway_health,
+            "_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES", 3,
+        )
+        execv_calls = []
+        monkeypatch.setattr(
+            gateway_health.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+
+        # Seed the sentinel as if V2 just fired
+        instance = "test_inst"
+        sentinel_path = (
+            tmp_path / "diagnostics" / "friction" / "remediation"
+            / f"{instance}__discord-heartbeat-blocked.last_fired"
+        )
+        sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        sentinel_path.write_text(
+            datetime.now(timezone.utc).isoformat(),
+            encoding="utf-8",
+        )
+
+        obs = _make_observer(
+            latency=float("nan"), tmp_path=tmp_path,
+        )
+        # Override instance_id to match the sentinel
+        obs._instance_id = instance
+
+        # 3 consecutive unhealthy ticks would normally trigger
+        # restart, but sentinel says we just restarted
+        for _ in range(3):
+            await obs._tick()
+        assert execv_calls == [], (
+            "V1.5 must respect V2's sentinel cool-off; otherwise "
+            "the two restart paths race each other and we restart-loop "
+            "every 5 min (the 2026-05-20 live failure shape)"
+        )
+        # Strikes get reset on skip so we don't spam the log
+        assert obs._consecutive_heartbeat_strikes == 0
+
+    async def test_restarts_when_sentinel_aged_out(self, tmp_path, monkeypatch):
+        """After the cool-off window expires, V1.5 IS allowed to
+        restart — the sentinel is a window-gate, not a kill switch."""
+        from kernos.kernel import gateway_health
+        from datetime import datetime, timedelta, timezone
+        monkeypatch.setattr(
+            gateway_health,
+            "_RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES", 3,
+        )
+        monkeypatch.setenv(
+            "KERNOS_DISCORD_HEARTBEAT_REMEDIATION_WINDOW_SEC", "60",
+        )
+        execv_calls = []
+        monkeypatch.setattr(
+            gateway_health.os, "execv",
+            lambda *a, **kw: execv_calls.append(a),
+        )
+
+        instance = "test_inst"
+        sentinel_path = (
+            tmp_path / "diagnostics" / "friction" / "remediation"
+            / f"{instance}__discord-heartbeat-blocked.last_fired"
+        )
+        sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        # Backdate the sentinel beyond the 60s window
+        old_ts = datetime.now(timezone.utc) - timedelta(seconds=90)
+        sentinel_path.write_text(old_ts.isoformat(), encoding="utf-8")
+
+        obs = _make_observer(latency=float("nan"), tmp_path=tmp_path)
+        obs._instance_id = instance
+        for _ in range(3):
+            await obs._tick()
+        assert len(execv_calls) == 1, (
+            "V1.5 should fire restart once the V2 sentinel has aged "
+            "past the window — sentinel is a cool-off, not a permanent block"
+        )
+
     async def test_other_signals_do_not_count_against_heartbeat_strikes(
         self, tmp_path, monkeypatch,
     ):

@@ -180,6 +180,20 @@ kernos/kernel/external_agents/
 re-exports from `external_agents/` so `KERNOS_BUILDER` env var,
 `code_exec`, and existing imports keep working unchanged.
 
+### `ANTHROPIC_API_KEY` env var caveat (2026-05-20 operator note)
+
+If `ANTHROPIC_API_KEY` is set in the bot's environment, `claude-acp` (the ACPX backend for the Claude Code harness) **uses that API key instead of falling back to the Claude Code subscription / OAuth path**. If the API account has zero credit, every `consult(harness="claude_code", ...)` returns:
+
+```
+"Internal error: Credit balance is too low" [billing_error]
+```
+
+— and the error comes via JSON-RPC on **stdout**, not stderr, so older dispatch code only logged `stderr: ` (empty), hiding the cause for hours.
+
+**Operator fix**: remove or comment out `ANTHROPIC_API_KEY` from `.env`. Kernos's own reasoning chain (gpt-5.5 / gpt-5.4-mini via the openai-codex provider) doesn't use Anthropic at all; the env var only affected the broker subprocess.
+
+**Code fix**: as of commit 950faa2, dispatch failures now include JSON-RPC error payloads from stdout in addition to stderr — so future provider/auth/billing failures surface immediately in `server.log` instead of going silent.
+
 ### ACPX integration (2026-05-18)
 
 The `claude_code`, `codex`, and `gemini` harnesses are now thin
