@@ -596,6 +596,37 @@ async def bring_up_substrate(
             if _si_pattern_store is None:
                 _si_pattern_store = _FrictionPatternStore_si()
             await _si_pattern_store.ensure_schema(data_dir)
+
+            # FRICTION-REMEDIATION-V2 (2026-05-20): register the
+            # declarative remediation handlers. Currently only
+            # restart_kernos — fired when discord-heartbeat-blocked
+            # crosses its threshold (5 occurrences in 10 min by
+            # default). Sentinel-file cool-off prevents loop-restart.
+            async def _restart_kernos_handler(
+                *, instance_id: str, pattern_id: str,
+                occurrence_count: int,
+            ) -> None:
+                import sys as _sys
+                import os as _os
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    "FRICTION_REMEDIATION_RESTART_KERNOS: "
+                    "pattern=%s instance=%s occurrence_count=%d — "
+                    "executing os.execv now",
+                    pattern_id, instance_id, occurrence_count,
+                )
+                for h in _logging.getLogger().handlers:
+                    try:
+                        h.flush()
+                    except Exception:
+                        pass
+                _os.execv(
+                    _sys.executable,
+                    [_sys.executable] + _sys.argv,
+                )
+            _si_pattern_store.register_remediation_handler(
+                "restart_kernos", _restart_kernos_handler,
+            )
             _freq_emitter_si = FrictionPatternFrequencyEmitter(
                 instance_id=_si_instance_id,
                 pattern_store=_si_pattern_store,

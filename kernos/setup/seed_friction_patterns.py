@@ -52,6 +52,11 @@ class _SeedPattern:
     description: str
     signal_type_keys: tuple[str, ...]
     reactivation_threshold: int
+    # FRICTION-REMEDIATION-V2 (2026-05-20): optional declarative
+    # auto-remediation policy. Defaults '' + 0 + 0 = no remediation.
+    remediation_action: str = ""
+    remediation_threshold_count: int = 0
+    remediation_threshold_window_sec: int = 0
 
 
 # Architect-curated starter catalog (FRICTION-PATTERN-SEED-V1).
@@ -188,6 +193,15 @@ _STARTER_PATTERNS: tuple[_SeedPattern, ...] = (
         ),
         signal_type_keys=("DISCORD_HEARTBEAT_BLOCKED",),
         reactivation_threshold=3,
+        # FRICTION-REMEDIATION-V2: 5 occurrences in 10 min → restart
+        # the bot process. Same effective behavior as the standalone
+        # watchdog + V1.5 inline strike-counter, but driven by the
+        # declarative pattern policy. Cool-off via sentinel file
+        # prevents loop-restart if the underlying issue isn't fixed
+        # by restart (sentinel survives execv).
+        remediation_action="restart_kernos",
+        remediation_threshold_count=5,
+        remediation_threshold_window_sec=600,
     ),
     _SeedPattern(
         pattern_id="discord-connection-pool-leak",
@@ -220,6 +234,58 @@ class FrictionPatternSeedResult:
     seeded: tuple[str, ...]
     skipped: tuple[str, ...]
     warnings: tuple[str, ...]
+
+
+async def _maybe_update_remediation_policy(
+    *, pattern_store: Any, instance_id: str, seed: "_SeedPattern",
+) -> None:
+    """FRICTION-REMEDIATION-V2 upgrade path. Existing patterns get
+    the seed's remediation policy applied if it differs from what's
+    in the DB. Direct SQL update — bypasses ``create_pattern`` since
+    the row already exists. Idempotent: a second call where DB
+    matches seed is a no-op.
+    """
+    db = pattern_store._db
+    if db is None:
+        return
+    async with db.execute(
+        "SELECT remediation_action, remediation_threshold_count, "
+        "       remediation_threshold_window_sec "
+        "FROM friction_pattern "
+        "WHERE instance_id = ? AND pattern_id = ?",
+        (instance_id, seed.pattern_id),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        return
+    if (
+        (row["remediation_action"] or "") == seed.remediation_action
+        and int(row["remediation_threshold_count"] or 0)
+        == int(seed.remediation_threshold_count)
+        and int(row["remediation_threshold_window_sec"] or 0)
+        == int(seed.remediation_threshold_window_sec)
+    ):
+        return  # matches; no-op
+    await db.execute(
+        "UPDATE friction_pattern SET "
+        "remediation_action = ?, "
+        "remediation_threshold_count = ?, "
+        "remediation_threshold_window_sec = ? "
+        "WHERE instance_id = ? AND pattern_id = ?",
+        (
+            seed.remediation_action,
+            int(seed.remediation_threshold_count),
+            int(seed.remediation_threshold_window_sec),
+            instance_id, seed.pattern_id,
+        ),
+    )
+    logger.info(
+        "FRICTION_PATTERN_REMEDIATION_POLICY_UPDATED: "
+        "pattern=%s action=%s count=%d window_sec=%d instance=%s",
+        seed.pattern_id, seed.remediation_action,
+        seed.remediation_threshold_count,
+        seed.remediation_threshold_window_sec, instance_id,
+    )
 
 
 async def seed_friction_patterns_on_first_boot(
@@ -265,6 +331,26 @@ async def seed_friction_patterns_on_first_boot(
 
     for seed in _STARTER_PATTERNS:
         if seed.pattern_id in existing_ids:
+            # FRICTION-REMEDIATION-V2: existing patterns get
+            # their remediation policy updated from the seed when
+            # the policy is non-empty AND differs from what's
+            # currently in the DB. This is the upgrade path for
+            # bots that were seeded before V2 — they get the
+            # restart_kernos policy on discord-heartbeat-blocked
+            # without needing a full re-seed.
+            if seed.remediation_action:
+                try:
+                    await _maybe_update_remediation_policy(
+                        pattern_store=pattern_store,
+                        instance_id=instance_id,
+                        seed=seed,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "FRICTION_PATTERN_REMEDIATION_UPDATE_FAILED "
+                        "pattern=%s error=%s",
+                        seed.pattern_id, exc,
+                    )
             logger.info(
                 "FRICTION_PATTERN_SEED_SKIP: pattern=%r already present "
                 "instance=%s",
@@ -284,6 +370,11 @@ async def seed_friction_patterns_on_first_boot(
                 display_name=seed.display_name,
                 seed_slug=seed.pattern_id,
                 reactivation_threshold=seed.reactivation_threshold,
+                remediation_action=seed.remediation_action,
+                remediation_threshold_count=seed.remediation_threshold_count,
+                remediation_threshold_window_sec=(
+                    seed.remediation_threshold_window_sec
+                ),
             )
             logger.info(
                 "FRICTION_PATTERN_SEED: pattern_id=%s signal_types=%s "

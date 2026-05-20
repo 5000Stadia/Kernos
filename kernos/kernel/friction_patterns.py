@@ -40,7 +40,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import aiosqlite
 
@@ -365,6 +365,24 @@ class FrictionPattern:
     # is per-instance (MAX+1 over the instance's friction_pattern rows)
     # so emitters can persist a "last fired epoch" cursor.
     active_epoch: int = 0
+    # FRICTION-REMEDIATION-V2 (2026-05-20): declarative auto-
+    # remediation policy. When ``remediation_action`` is non-empty
+    # AND ``remediation_threshold_count`` > 0 AND
+    # ``remediation_threshold_window_sec`` > 0, record_occurrence
+    # counts recent occurrences in the window; if the count
+    # crosses the threshold the registered handler for the action
+    # name fires (registered via
+    # ``FrictionPatternStore.register_remediation_handler``).
+    # Cool-off via filesystem sentinel
+    # (``data/diagnostics/friction/remediation/<pattern_id>.last_fired``)
+    # so the handler doesn't re-fire within the same window — that
+    # would loop-restart if the action is os.execv and the
+    # underlying issue isn't recoverable by restart. Default
+    # values ('' + 0 + 0) mean "no remediation"; existing patterns
+    # are backward-compatible.
+    remediation_action: str = ""
+    remediation_threshold_count: int = 0
+    remediation_threshold_window_sec: int = 0
     # FRICTION-PATTERN-SEED-V1 (2026-05-16): per-pattern reactivation
     # threshold. record_recurrence reads this value (not the global
     # KERNOS_FRICTION_REACTIVATION_THRESHOLD env) when deciding
@@ -401,6 +419,10 @@ CREATE TABLE IF NOT EXISTS friction_pattern (
     reactivated_at         TEXT NOT NULL DEFAULT '',
     active_epoch           INTEGER NOT NULL DEFAULT 0,
     reactivation_threshold INTEGER NOT NULL DEFAULT 3,
+    -- FRICTION-REMEDIATION-V2: declarative auto-remediation policy
+    remediation_action                 TEXT    NOT NULL DEFAULT '',
+    remediation_threshold_count        INTEGER NOT NULL DEFAULT 0,
+    remediation_threshold_window_sec   INTEGER NOT NULL DEFAULT 0,
     created_at             TEXT NOT NULL,
     PRIMARY KEY (instance_id, pattern_id),
     CHECK (lifecycle_state IN (
@@ -485,6 +507,23 @@ def _row_to_pattern(row: aiosqlite.Row) -> FrictionPattern:
         reactivation_threshold = int(row["reactivation_threshold"] or 3)
     except (KeyError, IndexError, TypeError, ValueError):
         reactivation_threshold = 3
+    # FRICTION-REMEDIATION-V2: defensive defaults for pre-migration rows
+    try:
+        remediation_action = row["remediation_action"] or ""
+    except (KeyError, IndexError, TypeError):
+        remediation_action = ""
+    try:
+        remediation_threshold_count = int(
+            row["remediation_threshold_count"] or 0
+        )
+    except (KeyError, IndexError, TypeError, ValueError):
+        remediation_threshold_count = 0
+    try:
+        remediation_threshold_window_sec = int(
+            row["remediation_threshold_window_sec"] or 0
+        )
+    except (KeyError, IndexError, TypeError, ValueError):
+        remediation_threshold_window_sec = 0
     return FrictionPattern(
         instance_id=row["instance_id"],
         pattern_id=row["pattern_id"],
@@ -503,6 +542,9 @@ def _row_to_pattern(row: aiosqlite.Row) -> FrictionPattern:
         created_at=row["created_at"],
         active_epoch=active_epoch,
         reactivation_threshold=reactivation_threshold,
+        remediation_action=remediation_action,
+        remediation_threshold_count=remediation_threshold_count,
+        remediation_threshold_window_sec=remediation_threshold_window_sec,
     )
 
 
@@ -522,6 +564,14 @@ class FrictionPatternStore:
         self._db: aiosqlite.Connection | None = None
         self._db_path: Path | None = None
         self._write_lock = asyncio.Lock()
+        # FRICTION-REMEDIATION-V2: registry of declarative remediation
+        # handlers. Keyed by ``remediation_action`` string set on the
+        # FrictionPattern; values are ``async def handler(instance_id,
+        # pattern_id, occurrence_count) -> None``. Bring-up registers
+        # the production handlers (e.g. ``restart_kernos``); tests
+        # register lambdas. Patterns with no matching handler skip
+        # remediation silently (logged at warning level).
+        self._remediation_handlers: dict[str, "Callable"] = {}
 
     # --- Lifecycle ----------------------------------------------------
 
@@ -595,6 +645,27 @@ class FrictionPatternStore:
             except aiosqlite.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+        # FRICTION-REMEDIATION-V2 (2026-05-20): declarative
+        # auto-remediation policy. Same idempotent ALTER pattern.
+        # Defaults ('' + 0 + 0) mean "no remediation" so existing
+        # patterns are backward-compatible.
+        for col_name, col_decl in (
+            ("remediation_action",
+             "TEXT NOT NULL DEFAULT ''"),
+            ("remediation_threshold_count",
+             "INTEGER NOT NULL DEFAULT 0"),
+            ("remediation_threshold_window_sec",
+             "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if col_name not in cols:
+                try:
+                    await self._db.execute(
+                        f"ALTER TABLE friction_pattern "
+                        f"ADD COLUMN {col_name} {col_decl}"
+                    )
+                except aiosqlite.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
 
     async def ensure_schema(self, data_dir: str) -> None:
         """Alias for ``start``. Mirrors the API name the spec uses."""
@@ -737,6 +808,9 @@ class FrictionPatternStore:
         display_name: str = "",
         seed_slug: str = "",
         reactivation_threshold: int | None = None,
+        remediation_action: str = "",
+        remediation_threshold_count: int = 0,
+        remediation_threshold_window_sec: int = 0,
     ) -> FrictionPattern:
         if not description:
             raise ValueError("description is required")
@@ -789,13 +863,19 @@ class FrictionPatternStore:
                 " description, signal_type_keys, aliases, lifecycle_state, "
                 " occurrence_count, first_observed_at, last_observed_at, "
                 " resolved_at, resolved_by_spec, reactivated_at, "
-                " active_epoch, reactivation_threshold, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " active_epoch, reactivation_threshold, "
+                " remediation_action, remediation_threshold_count, "
+                " remediation_threshold_window_sec, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     instance_id, pattern_id, parent_pattern_id, display_name,
                     description, json.dumps(sig_keys), json.dumps([]),
                     LIFECYCLE_ACTIVE, 0, "", "", "", "", "",
-                    active_epoch, effective_threshold, now,
+                    active_epoch, effective_threshold,
+                    remediation_action,
+                    int(remediation_threshold_count),
+                    int(remediation_threshold_window_sec),
+                    now,
                 ),
             )
             return FrictionPattern(
@@ -809,6 +889,11 @@ class FrictionPatternStore:
                 lifecycle_state=LIFECYCLE_ACTIVE,
                 active_epoch=active_epoch,
                 reactivation_threshold=effective_threshold,
+                remediation_action=remediation_action,
+                remediation_threshold_count=int(remediation_threshold_count),
+                remediation_threshold_window_sec=int(
+                    remediation_threshold_window_sec
+                ),
                 created_at=now,
             )
 
@@ -1098,6 +1183,24 @@ class FrictionPatternStore:
 
         await self._run_in_immediate_txn(_do)
 
+        # FRICTION-REMEDIATION-V2 (2026-05-20): after the occurrence
+        # is committed, check if the pattern has a declarative
+        # remediation policy. If recent occurrences in the configured
+        # window cross the threshold AND we're not in cool-off, fire
+        # the registered handler. Fail-isolated: any error here is
+        # logged + swallowed so the occurrence record itself is never
+        # rolled back by a misbehaving handler.
+        try:
+            await self._maybe_fire_remediation(
+                instance_id=instance_id, pattern_id=pattern_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "FRICTION_REMEDIATION_CHECK_FAILED: instance=%s "
+                "pattern=%s exc=%s",
+                instance_id, pattern_id, exc,
+            )
+
     async def record_recurrence(
         self,
         *,
@@ -1378,6 +1481,190 @@ class FrictionPatternStore:
         pattern_id: str,
     ) -> FrictionPattern:
         return await self._require_pattern(db, instance_id, pattern_id)
+
+    # --- FRICTION-REMEDIATION-V2 -------------------------------------
+
+    def register_remediation_handler(
+        self, action_name: str, handler,
+    ) -> None:
+        """Register a callable for a remediation_action name.
+
+        Handler signature: ``async def handler(*, instance_id: str,
+        pattern_id: str, occurrence_count: int) -> None``. Caller is
+        responsible for the action's side effects (logging, restart,
+        etc.). Re-registration replaces silently.
+        """
+        self._remediation_handlers[action_name] = handler
+
+    def _remediation_sentinel_path(
+        self, instance_id: str, pattern_id: str,
+    ) -> "Path":
+        """Path of the cool-off sentinel file for a pattern.
+
+        Lives under ``data/diagnostics/friction/remediation/`` so it
+        survives bot restart. The file's contents are the ISO
+        timestamp of the last fire; cool-off check reads the timestamp
+        and skips if newer than ``window_sec`` ago.
+        """
+        # data_dir is the parent of the db_path we set in start().
+        from pathlib import Path
+        if self._db_path is None:
+            base = Path("./data")
+        else:
+            base = self._db_path.parent
+        safe_pattern = pattern_id.replace("/", "_").replace("..", "_")
+        safe_instance = instance_id.replace(":", "_").replace("/", "_")
+        return (
+            base / "diagnostics" / "friction" / "remediation"
+            / f"{safe_instance}__{safe_pattern}.last_fired"
+        )
+
+    async def _count_recent_occurrences(
+        self, instance_id: str, pattern_id: str, window_sec: int,
+    ) -> int:
+        """Count occurrence rows for this pattern with observed_at
+        within the last ``window_sec`` seconds. Used by V2 remediation
+        threshold check."""
+        if self._db is None or window_sec <= 0:
+            return 0
+        from datetime import datetime, timedelta, timezone
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=window_sec)
+        ).isoformat()
+        async with self._db.execute(
+            "SELECT COUNT(*) AS c FROM friction_pattern_occurrence "
+            "WHERE instance_id = ? AND pattern_id = ? "
+            "AND observed_at >= ?",
+            (instance_id, pattern_id, cutoff),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row["c"]) if row else 0
+
+    def _remediation_in_cool_off(
+        self, instance_id: str, pattern_id: str, window_sec: int,
+    ) -> bool:
+        """True iff we fired remediation for this pattern within the
+        last ``window_sec`` seconds (sentinel-file timestamp check).
+        Sentinel survives bot restart so post-restart re-fires are
+        gated by the same window — prevents loop-restart when the
+        action is ``restart_kernos`` and the underlying issue isn't
+        actually fixed by restart."""
+        from datetime import datetime, timezone
+        sentinel = self._remediation_sentinel_path(instance_id, pattern_id)
+        if not sentinel.exists():
+            return False
+        try:
+            content = sentinel.read_text(encoding="utf-8").strip()
+            last_fired = datetime.fromisoformat(content)
+            if last_fired.tzinfo is None:
+                last_fired = last_fired.replace(tzinfo=timezone.utc)
+        except Exception as exc:
+            logger.warning(
+                "FRICTION_REMEDIATION_SENTINEL_PARSE_FAILED: path=%s exc=%s "
+                "— treating as no cool-off",
+                sentinel, exc,
+            )
+            return False
+        age_sec = (datetime.now(timezone.utc) - last_fired).total_seconds()
+        return age_sec < window_sec
+
+    def _mark_remediation_fired(
+        self, instance_id: str, pattern_id: str,
+    ) -> None:
+        """Atomically write the cool-off sentinel. Best-effort: any
+        write failure is logged but doesn't block the handler call."""
+        from datetime import datetime, timezone
+        sentinel = self._remediation_sentinel_path(instance_id, pattern_id)
+        try:
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            tmp = sentinel.with_suffix(".tmp")
+            tmp.write_text(
+                datetime.now(timezone.utc).isoformat(),
+                encoding="utf-8",
+            )
+            os.rename(str(tmp), str(sentinel))
+        except Exception as exc:
+            logger.warning(
+                "FRICTION_REMEDIATION_SENTINEL_WRITE_FAILED: path=%s exc=%s",
+                sentinel, exc,
+            )
+
+    async def _maybe_fire_remediation(
+        self, *, instance_id: str, pattern_id: str,
+    ) -> None:
+        """Check declarative remediation policy and fire the handler
+        if threshold + cool-off conditions are met.
+
+        Called after each successful record_occurrence. No-op when
+        the pattern has no remediation policy declared (the common
+        case for catalog patterns).
+        """
+        # Read the pattern's policy via a fresh load (the current
+        # transaction has already committed by this point).
+        async with self._db.execute(
+            "SELECT remediation_action, remediation_threshold_count, "
+            "       remediation_threshold_window_sec "
+            "FROM friction_pattern "
+            "WHERE instance_id = ? AND pattern_id = ?",
+            (instance_id, pattern_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return
+        action = row["remediation_action"] or ""
+        threshold = int(row["remediation_threshold_count"] or 0)
+        window_sec = int(row["remediation_threshold_window_sec"] or 0)
+        if not action or threshold <= 0 or window_sec <= 0:
+            return  # no policy
+
+        count = await self._count_recent_occurrences(
+            instance_id, pattern_id, window_sec,
+        )
+        if count < threshold:
+            return  # not yet at threshold
+
+        if self._remediation_in_cool_off(
+            instance_id, pattern_id, window_sec,
+        ):
+            logger.info(
+                "FRICTION_REMEDIATION_SKIPPED_COOL_OFF: instance=%s "
+                "pattern=%s action=%s count=%d threshold=%d "
+                "window_sec=%d — cool-off sentinel within window",
+                instance_id, pattern_id, action, count, threshold,
+                window_sec,
+            )
+            return
+
+        handler = self._remediation_handlers.get(action)
+        if handler is None:
+            logger.warning(
+                "FRICTION_REMEDIATION_NO_HANDLER: instance=%s pattern=%s "
+                "action=%s — no handler registered for action; skipping",
+                instance_id, pattern_id, action,
+            )
+            return
+
+        # Mark BEFORE calling so the sentinel exists even if the handler
+        # is os.execv (which never returns).
+        self._mark_remediation_fired(instance_id, pattern_id)
+        logger.warning(
+            "FRICTION_REMEDIATION_FIRED: instance=%s pattern=%s "
+            "action=%s count=%d threshold=%d window_sec=%d",
+            instance_id, pattern_id, action, count, threshold,
+            window_sec,
+        )
+        try:
+            await handler(
+                instance_id=instance_id,
+                pattern_id=pattern_id,
+                occurrence_count=count,
+            )
+        except Exception as exc:
+            logger.warning(
+                "FRICTION_REMEDIATION_HANDLER_RAISED: instance=%s "
+                "pattern=%s action=%s exc=%s",
+                instance_id, pattern_id, action, exc,
+            )
 
 
 # ---------------------------------------------------------------------------
