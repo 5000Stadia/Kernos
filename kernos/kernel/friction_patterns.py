@@ -1589,6 +1589,86 @@ class FrictionPatternStore:
                 sentinel, exc,
             )
 
+    def _remediation_escalation_log_path(
+        self, instance_id: str, pattern_id: str,
+    ) -> "Path":
+        """Path for the longer-window escalation history. Stores
+        ISO timestamps of every fire, one per line. Used by the
+        max-fires-per-hour guard to detect 'restart isn't fixing
+        this' cycles.
+        """
+        from pathlib import Path
+        safe_pattern = pattern_id.replace("/", "_").replace("..", "_")
+        safe_instance = instance_id.replace(":", "_").replace("/", "_")
+        if self._db_path is None:
+            base = Path("./data")
+        else:
+            base = self._db_path.parent
+        return (
+            base / "diagnostics" / "friction" / "remediation"
+            / f"{safe_instance}__{safe_pattern}.fire_history"
+        )
+
+    def _count_recent_remediation_fires(
+        self, instance_id: str, pattern_id: str, window_sec: int,
+    ) -> int:
+        """Count remediation fires for this pattern in the rolling
+        window. Used by the escalation guard: when too many fires
+        happen within a longer window, we stop trying because
+        clearly restart isn't fixing the underlying issue.
+
+        Reads the .fire_history file (one ISO timestamp per line);
+        returns 0 if the file is missing or unparseable (fail open).
+        """
+        from datetime import datetime, timezone
+        history_path = self._remediation_escalation_log_path(
+            instance_id, pattern_id,
+        )
+        if not history_path.exists():
+            return 0
+        try:
+            now = datetime.now(timezone.utc)
+            count = 0
+            for line in history_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(line)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                age = (now - ts).total_seconds()
+                if age <= window_sec:
+                    count += 1
+            return count
+        except Exception as exc:
+            logger.warning(
+                "FRICTION_REMEDIATION_HISTORY_READ_FAILED: %s — "
+                "treating as 0 fires (escalation guard fails open)",
+                exc,
+            )
+            return 0
+
+    def _record_remediation_fire_to_history(
+        self, instance_id: str, pattern_id: str,
+    ) -> None:
+        """Append a fire timestamp to the history file. Best-effort;
+        write failure logs but doesn't block the remediation."""
+        from datetime import datetime, timezone
+        history_path = self._remediation_escalation_log_path(
+            instance_id, pattern_id,
+        )
+        try:
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(history_path, "a", encoding="utf-8") as f:
+                f.write(datetime.now(timezone.utc).isoformat() + "\n")
+        except Exception as exc:
+            logger.warning(
+                "FRICTION_REMEDIATION_HISTORY_WRITE_FAILED: %s", exc,
+            )
+
     async def _maybe_fire_remediation(
         self, *, instance_id: str, pattern_id: str,
     ) -> None:
@@ -1644,14 +1724,55 @@ class FrictionPatternStore:
             )
             return
 
+        # 2026-05-20 escalation guard: live observation showed V2
+        # restart-cycling every 10 min for hours because the
+        # heartbeat NaN persists across restart (the metric is
+        # lying — bot is functionally alive between restarts).
+        # Sentinel cool-off prevents WITHIN-window loops; this
+        # rolling-history guard prevents CROSS-window loops.
+        # If too many fires in the longer window, we stop trying
+        # and log loud so the operator notices.
+        escalation_window_sec = int(
+            os.environ.get(
+                "KERNOS_FRICTION_REMEDIATION_ESCALATION_WINDOW_SEC",
+                "3600",  # 1 hour
+            )
+        )
+        escalation_max_fires = int(
+            os.environ.get(
+                "KERNOS_FRICTION_REMEDIATION_ESCALATION_MAX_FIRES",
+                "3",  # 3 fires/hour ceiling
+            )
+        )
+        recent_fires = self._count_recent_remediation_fires(
+            instance_id, pattern_id, escalation_window_sec,
+        )
+        if recent_fires >= escalation_max_fires:
+            logger.error(
+                "FRICTION_REMEDIATION_ESCALATION_GUARD: instance=%s "
+                "pattern=%s action=%s — already fired %d times in "
+                "last %ds (max=%d). The action isn't fixing the "
+                "underlying problem; refusing further fires until "
+                "operator clears the history file or window expires. "
+                "Clear with: rm %s",
+                instance_id, pattern_id, action, recent_fires,
+                escalation_window_sec, escalation_max_fires,
+                self._remediation_escalation_log_path(
+                    instance_id, pattern_id,
+                ),
+            )
+            return
+
         # Mark BEFORE calling so the sentinel exists even if the handler
         # is os.execv (which never returns).
         self._mark_remediation_fired(instance_id, pattern_id)
+        self._record_remediation_fire_to_history(instance_id, pattern_id)
         logger.warning(
             "FRICTION_REMEDIATION_FIRED: instance=%s pattern=%s "
-            "action=%s count=%d threshold=%d window_sec=%d",
+            "action=%s count=%d threshold=%d window_sec=%d "
+            "escalation_fires_in_window=%d/%d",
             instance_id, pattern_id, action, count, threshold,
-            window_sec,
+            window_sec, recent_fires + 1, escalation_max_fires,
         )
         try:
             await handler(

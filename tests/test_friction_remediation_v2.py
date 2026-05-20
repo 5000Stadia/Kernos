@@ -376,6 +376,146 @@ class TestCoolOffSentinel:
 # ===========================================================================
 
 
+class TestEscalationGuard:
+    """2026-05-20 live-failure pin: the bot was restart-cycling
+    every 10 min for hours because heartbeat-NaN persisted across
+    restart (the metric was effectively false-positive — bot was
+    functionally alive but metric kept reading NaN). V2 sentinel
+    cool-off correctly prevented WITHIN-window loops, but CROSS-
+    window the cycle continued indefinitely. Escalation guard
+    caps total fires per longer rolling window (1 hour default,
+    3 fires max). When the cap trips, V2 stops firing and logs
+    loud — operator decides next move."""
+
+    async def test_under_max_fires_remediation_fires(
+        self, store, monkeypatch,
+    ):
+        monkeypatch.setenv(
+            "KERNOS_FRICTION_REMEDIATION_ESCALATION_MAX_FIRES", "5",
+        )
+        fires = []
+
+        async def handler(**kw):
+            fires.append(kw)
+
+        store.register_remediation_handler("test", handler)
+        await store.create_pattern(
+            instance_id="i", description="x" * 20, seed_slug="t",
+            remediation_action="test",
+            remediation_threshold_count=1,
+            remediation_threshold_window_sec=1,  # short so cool-off ages out
+        )
+        for i in range(3):  # 3 fires
+            await store.record_occurrence(
+                instance_id="i", pattern_id="t",
+                observed_at=datetime.now(timezone.utc).isoformat(),
+                report_path=f"/tmp/r{i}.md",
+            )
+            await asyncio.sleep(1.1)  # let cool-off expire
+        assert len(fires) == 3
+
+    async def test_over_max_fires_remediation_stops(
+        self, store, monkeypatch,
+    ):
+        """Critical: after the escalation cap is reached, further
+        record_occurrence calls do NOT trigger the handler. Even
+        if cool-off has expired. The cycle is broken."""
+        monkeypatch.setenv(
+            "KERNOS_FRICTION_REMEDIATION_ESCALATION_MAX_FIRES", "3",
+        )
+        fires = []
+
+        async def handler(**kw):
+            fires.append(kw)
+
+        store.register_remediation_handler("test", handler)
+        await store.create_pattern(
+            instance_id="i", description="x" * 20, seed_slug="t",
+            remediation_action="test",
+            remediation_threshold_count=1,
+            remediation_threshold_window_sec=1,
+        )
+        # Fire 3 times — should all succeed
+        for i in range(3):
+            await store.record_occurrence(
+                instance_id="i", pattern_id="t",
+                observed_at=datetime.now(timezone.utc).isoformat(),
+                report_path=f"/tmp/r{i}.md",
+            )
+            await asyncio.sleep(1.1)
+        assert len(fires) == 3
+
+        # Fire 5 more — escalation guard should block ALL of them
+        for i in range(3, 8):
+            await store.record_occurrence(
+                instance_id="i", pattern_id="t",
+                observed_at=datetime.now(timezone.utc).isoformat(),
+                report_path=f"/tmp/r{i}.md",
+            )
+            await asyncio.sleep(1.1)
+        assert len(fires) == 3, (
+            f"escalation guard must block fires beyond max; "
+            f"got {len(fires)} fires when max is 3"
+        )
+
+    async def test_history_file_persists_across_store_restart(
+        self, tmp_path, monkeypatch,
+    ):
+        """The escalation guard reads from a file, so escalation
+        decisions survive bot restart (just like the cool-off
+        sentinel). Without this, every restart resets the counter
+        and the cycle would continue."""
+        from kernos.kernel.friction_patterns import FrictionPatternStore
+        monkeypatch.setenv(
+            "KERNOS_FRICTION_REMEDIATION_ESCALATION_MAX_FIRES", "3",
+        )
+        # Pre-fire and stop
+        store = FrictionPatternStore()
+        await store.start(str(tmp_path))
+        fires_first = []
+
+        async def h1(**kw):
+            fires_first.append(kw)
+
+        store.register_remediation_handler("test", h1)
+        await store.create_pattern(
+            instance_id="i", description="x" * 20, seed_slug="t",
+            remediation_action="test",
+            remediation_threshold_count=1,
+            remediation_threshold_window_sec=1,
+        )
+        for i in range(3):
+            await store.record_occurrence(
+                instance_id="i", pattern_id="t",
+                observed_at=datetime.now(timezone.utc).isoformat(),
+                report_path=f"/tmp/r{i}.md",
+            )
+            await asyncio.sleep(1.1)
+        assert len(fires_first) == 3
+        await store.stop()
+
+        # Fresh store, same data_dir — escalation history persists
+        store2 = FrictionPatternStore()
+        await store2.start(str(tmp_path))
+        fires_second = []
+
+        async def h2(**kw):
+            fires_second.append(kw)
+
+        store2.register_remediation_handler("test", h2)
+        # One more occurrence — should be blocked by escalation
+        await store2.record_occurrence(
+            instance_id="i", pattern_id="t",
+            observed_at=datetime.now(timezone.utc).isoformat(),
+            report_path="/tmp/r_post_restart.md",
+        )
+        await store2.stop()
+        assert fires_second == [], (
+            "escalation history must persist across restart; "
+            "without this, restart resets the counter and the cycle continues"
+        )
+
+
 class TestSeedRemediationPolicy:
     def test_discord_heartbeat_blocked_seed_declares_restart(self):
         from kernos.setup.seed_friction_patterns import _STARTER_PATTERNS
