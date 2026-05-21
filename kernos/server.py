@@ -1103,10 +1103,31 @@ async def on_ready():
             await _agent_registry.start(data_dir)
             handler._agent_registry = _agent_registry
         from kernos.setup.bring_up_substrate import bring_up_substrate
+        from kernos.kernel.gateway_health import GatewayHealthProviders
+        # SUBSTRATE-PROVIDER-INJECTION-V1 (2026-05-21): construct the
+        # gateway-health providers from THIS module's globals and pass
+        # them in. Before this, bring_up_substrate did
+        # ``import kernos.server as _srv`` which silently produced a
+        # parallel module copy when server.py runs as __main__ (start.sh
+        # launches `python kernos/server.py`). The observer's lambdas
+        # then read inert state in the parallel copy while the live
+        # @client.event handlers mutated __main__ — the heartbeat
+        # cross-check never suppressed a single signal in production.
+        # See spec for the RCA + acceptance criteria.
+        _gw_providers = GatewayHealthProviders(
+            latency_provider=lambda: (
+                getattr(client, "latency", None)
+                if client is not None else None
+            ),
+            inbound_event_ts_provider=lambda: _last_inbound_event_ts,
+            last_on_message_provider=lambda: _last_on_message_only_ts,
+            message_create_counter=_message_create_counter,
+        )
         _substrate = await bring_up_substrate(
             data_dir=data_dir,
             handler=handler,
             agent_registry=_agent_registry,
+            gateway_health_providers=_gw_providers,
         )
         handler._wlp_substrate = _substrate
         handler._wlp_runtime = _substrate.runtime

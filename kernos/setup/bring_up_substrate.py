@@ -60,6 +60,7 @@ should not block bot startup.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -129,6 +130,7 @@ async def bring_up_substrate(
     data_dir: str,
     handler: Any,
     agent_registry: "AgentRegistry",
+    gateway_health_providers: "Any | None" = None,
 ) -> Substrate:
     """Construct and start the full WLP / runtime / STS substrate.
 
@@ -141,6 +143,16 @@ async def bring_up_substrate(
         agent_registry: production DAR :class:`AgentRegistry`,
             already constructed and started by the legacy bring-up
             path. Reused here rather than re-instantiated.
+        gateway_health_providers: optional
+            :class:`kernos.kernel.gateway_health.GatewayHealthProviders`
+            bundle of live state sources for the gateway-health
+            observer. When ``None`` (default), the observer is
+            skipped entirely — appropriate for tests, headless
+            invocations, or any caller that does not own the live
+            Discord client. SUBSTRATE-PROVIDER-INJECTION-V1 (2026-05-21):
+            this replaces the prior ``import kernos.server`` reach-back
+            that silently broke under ``python kernos/server.py``
+            (dual-module bug — RCA in spec).
 
     Returns:
         :class:`Substrate` bundle. Callers should hold this for the
@@ -651,53 +663,6 @@ async def bring_up_substrate(
                 "coding_session_response", _response_emitter_si,
             )
 
-            # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19): companion to
-            # FrictionObserver. Per-turn observer detects turn-level
-            # friction; this one detects gateway/dispatch-layer
-            # friction (deaf gateway, stuck runner, heartbeat
-            # blocked, connection-pool leak). Same FrictionPatternStore
-            # instance — uniform catalog records regardless of
-            # source. V1: emit-only; V2 will add declarative
-            # auto-remediation per pattern. See
-            # specs/GATEWAY-HEALTH-OBSERVER-V1.md.
-            try:
-                from kernos.kernel.gateway_health import (
-                    GatewayHealthObserver as _GatewayHealthObserver,
-                )
-                import kernos.server as _srv
-                _gw_observer = _GatewayHealthObserver(
-                    instance_id=_si_instance_id,
-                    data_dir=data_dir,
-                    pattern_store=_si_pattern_store,
-                    latency_provider=lambda: (
-                        getattr(_srv.client, "latency", None)
-                        if hasattr(_srv, "client") else None
-                    ),
-                    inbound_event_ts_provider=lambda: getattr(
-                        _srv, "_last_inbound_event_ts", 0.0,
-                    ),
-                    message_create_counter=getattr(
-                        _srv, "_message_create_counter", None,
-                    ),
-                    # HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1:
-                    # pure on_message timestamp (not bumped by
-                    # lifecycle handlers). See spec scenario 15.
-                    last_on_message_provider=lambda: getattr(
-                        _srv, "_last_on_message_only_ts", 0.0,
-                    ),
-                    runner_inspector=None,  # V1.5 wires this
-                )
-                await _gw_observer.start()
-                execution_engine.register_emitter(
-                    "gateway_health", _gw_observer,
-                )
-            except Exception as _exc_gw:
-                logger.warning(
-                    "GATEWAY_HEALTH_OBSERVER_BRINGUP_FAILED error=%s "
-                    "— continuing without gateway-health observer",
-                    _exc_gw,
-                )
-
             logger.info(
                 "SELF_IMPROVEMENT_AUTONOMY_LOOP_LIVE workflow_id=%s "
                 "instance_id=%s",
@@ -723,6 +688,25 @@ async def bring_up_substrate(
             "KERNOS_ARCHITECT_ACTOR_ID not set; helper requires "
             "architect identity at bring-up"
         )
+
+    # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19) + SUBSTRATE-PROVIDER-
+    # INJECTION-V1 (2026-05-21): gateway-health is a SAFETY MONITOR;
+    # it must run independently of self-improvement gating, and it
+    # must read live state directly from the caller (not via
+    # ``import kernos.server``, which silently produces a parallel
+    # module copy under ``python kernos/server.py`` — RCA in spec).
+    #
+    # When ``gateway_health_providers`` is None, skip the observer
+    # entirely with a loud log (test/headless mode). When provided,
+    # construct via injected callables/counter. The observer reads
+    # live state through the provider lambdas; no substrate-side
+    # import of the caller.
+    await _bring_up_gateway_health_observer(
+        data_dir=data_dir,
+        handler=handler,
+        execution_engine=execution_engine,
+        gateway_health_providers=gateway_health_providers,
+    )
 
     logger.info(
         "WTC v1 C5c-bringup: substrate live — runtime=%s engine=%s "
@@ -752,6 +736,93 @@ async def bring_up_substrate(
         reference_ingestion_scanner=reference_ingestion_scanner,
         reference_service=reference_service,
     )
+
+
+async def _bring_up_gateway_health_observer(
+    *,
+    data_dir: str,
+    handler: Any,
+    execution_engine: Any,
+    gateway_health_providers: "Any | None",
+) -> None:
+    """Construct + start the GatewayHealthObserver using injected
+    providers. Extracted as a helper so it can be unit-tested in
+    isolation with mocked dependencies — without standing up the
+    entire substrate.
+
+    Behavior:
+      * ``gateway_health_providers is None`` → log SKIPPED, return.
+      * Otherwise: construct the observer with the providers, start
+        it, register on the execution_engine. Any exception during
+        bring-up is caught and logged as
+        ``GATEWAY_HEALTH_OBSERVER_BRINGUP_FAILED`` — the rest of
+        the substrate continues.
+
+    The handler's pre-existing ``_friction_pattern_store`` is reused
+    if present (default in MessageHandler.__init__). If absent
+    (e.g., handler init skipped its pattern store, or a stub handler
+    in tests), a fresh ``FrictionPatternStore`` is created and
+    schema-ensured against ``data_dir``. The fallback store's
+    teardown is not tracked here — that's the handler's job in
+    production; tests should pass a handler with a populated store
+    if they care about shutdown semantics.
+    """
+    if gateway_health_providers is None:
+        logger.info(
+            "GATEWAY_HEALTH_OBSERVER_SKIPPED: no providers injected "
+            "(test or headless mode)",
+        )
+        return
+    try:
+        from kernos.kernel.gateway_health import (
+            GatewayHealthObserver as _GatewayHealthObserver,
+        )
+        _gw_instance_id = (
+            os.getenv("KERNOS_INSTANCE_ID", "")
+            or getattr(handler, "_instance_id", "")
+            or "default"
+        )
+        _gw_pattern_store = getattr(
+            handler, "_friction_pattern_store", None,
+        )
+        if _gw_pattern_store is None:
+            from kernos.kernel.friction_patterns import (
+                FrictionPatternStore,
+            )
+            _gw_pattern_store = FrictionPatternStore()
+            await _gw_pattern_store.ensure_schema(data_dir)
+            logger.info(
+                "GATEWAY_HEALTH_OBSERVER_FALLBACK_STORE: handler had "
+                "no _friction_pattern_store; created fresh "
+                "FrictionPatternStore for the observer (teardown "
+                "left to caller).",
+            )
+        _gw_observer = _GatewayHealthObserver(
+            instance_id=_gw_instance_id,
+            data_dir=data_dir,
+            pattern_store=_gw_pattern_store,
+            latency_provider=gateway_health_providers.latency_provider,
+            inbound_event_ts_provider=(
+                gateway_health_providers.inbound_event_ts_provider
+            ),
+            message_create_counter=(
+                gateway_health_providers.message_create_counter
+            ),
+            last_on_message_provider=(
+                gateway_health_providers.last_on_message_provider
+            ),
+            runner_inspector=None,  # V1.5 wires this
+        )
+        await _gw_observer.start()
+        execution_engine.register_emitter(
+            "gateway_health", _gw_observer,
+        )
+    except Exception as _exc_gw:
+        logger.warning(
+            "GATEWAY_HEALTH_OBSERVER_BRINGUP_FAILED error=%s — "
+            "continuing without gateway-health observer",
+            _exc_gw,
+        )
 
 
 async def tear_down_substrate(substrate: Substrate) -> None:

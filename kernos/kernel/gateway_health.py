@@ -111,6 +111,38 @@ class _MessageCreateCounter:
         return sum(1 for ts in self._events if ts >= cutoff)
 
 
+@dataclass(frozen=True)
+class GatewayHealthProviders:
+    """Live state sources the ``GatewayHealthObserver`` reads on
+    every tick. The caller (typically ``server.py``) constructs
+    this from its own module globals and passes it to
+    ``bring_up_substrate`` as the ``gateway_health_providers``
+    kwarg.
+
+    Why this exists (SUBSTRATE-PROVIDER-INJECTION-V1, 2026-05-21):
+    before this, ``bring_up_substrate.py`` did
+    ``import kernos.server as _srv`` to read live state. But
+    ``server.py`` runs as ``__main__`` (via
+    ``python kernos/server.py`` from ``start.sh``), so
+    ``import kernos.server`` produced a separate module object —
+    the observer's lambdas read inert globals while the live
+    @client.event handlers mutated the ``__main__`` copy. The
+    heartbeat cross-check never suppressed a single signal in
+    production. This dataclass moves the dependency to a single,
+    visible, testable boundary: substrate no longer imports its
+    caller.
+
+    All fields except ``message_create_counter`` are callables so
+    the observer reads fresh values on every tick. The counter is
+    a stable mutable object that records in place; passing the
+    reference is sufficient.
+    """
+    latency_provider: Callable[[], float | None]
+    inbound_event_ts_provider: Callable[[], float]
+    last_on_message_provider: Callable[[], float]
+    message_create_counter: "_MessageCreateCounter | None"
+
+
 class GatewayHealthObserver:
     """Background-task observer for gateway/dispatch-layer friction.
 
@@ -141,7 +173,7 @@ class GatewayHealthObserver:
         pattern_store: Any,
         latency_provider: Callable[[], float | None],
         inbound_event_ts_provider: Callable[[], float],
-        message_create_counter: _MessageCreateCounter,
+        message_create_counter: _MessageCreateCounter | None,
         runner_inspector: Callable[[], list[tuple[str, float]]] | None = None,
         poll_interval_sec: int = _POLL_INTERVAL_SEC,
         last_on_message_provider: Callable[[], float] | None = None,
@@ -824,5 +856,6 @@ class GatewayHealthObserver:
 
 __all__ = [
     "GatewayHealthObserver",
+    "GatewayHealthProviders",
     "_MessageCreateCounter",
 ]
