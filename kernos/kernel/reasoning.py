@@ -867,69 +867,20 @@ class ReasoningService:
                 import json as _json
                 from kernos.kernel.external_agents.tool import (
                     get_service as _ext_get_service,
+                    validate_consult_input as _validate_consult_input,
                 )
                 from kernos.kernel.external_agents.errors import (
                     ExternalAgentError as _ExtError,
                 )
-                # 2026-05-20 handler-side validation: the schema layer
-                # *should* enforce non-empty harness + question via
-                # minLength: 1 + enum, but some models bypass JSON
-                # schema validation silently.
-                #
-                # 2026-05-20 SECOND fix: live evidence showed the
-                # agent supplied `harness` + `prompt` (NOT `question`).
-                # Field-name mismatch — vocabulary drifts across
-                # layers: schema says question, acpx_adapter takes
-                # `prompt`, slash commands use `prompt`. Accept any
-                # of {question, prompt, text} for the prompt arg, and
-                # {harness, target, agent} for the harness arg —
-                # intent is unambiguous regardless. The schema still
-                # documents the canonical names; this is graceful
-                # acceptance at the handler boundary.
-                _harness = (
-                    tool_input.get("harness")
-                    or tool_input.get("target")
-                    or tool_input.get("agent")
-                    or ""
-                ).strip()
-                _question = (
-                    tool_input.get("question")
-                    or tool_input.get("prompt")
-                    or tool_input.get("text")
-                    or ""
-                ).strip()
-                _valid_harnesses = {"claude_code", "codex", "gemini"}
-                if not _harness:
-                    return _json.dumps({
-                        "error": "InvalidConsultCall",
-                        "message": (
-                            "consult requires non-empty harness. "
-                            "Valid values: claude_code, codex, gemini. "
-                            "Example: "
-                            "consult(harness=\"codex\", question=\"...\")"
-                        ),
-                    })
-                if _harness not in _valid_harnesses:
-                    return _json.dumps({
-                        "error": "InvalidConsultCall",
-                        "message": (
-                            f"consult harness={_harness!r} is not "
-                            f"registered. Valid: claude_code, codex, "
-                            f"gemini."
-                        ),
-                    })
-                if not _question:
-                    return _json.dumps({
-                        "error": "InvalidConsultCall",
-                        "message": (
-                            "consult requires non-empty question (or "
-                            "prompt/text — any of those field names "
-                            "are accepted). Pass the prompt you want "
-                            "sent to the external agent. Example: "
-                            f"consult(harness=\"{_harness}\", "
-                            "question=\"Reply with: hello\")"
-                        ),
-                    })
+                # Handler-side validation: schema enforces non-empty
+                # harness + question via minLength: 1 + enum, but
+                # some models bypass JSON schema validation silently.
+                # validate_consult_input is the pure helper — same
+                # logic, testable without the full handler.
+                _validated = _validate_consult_input(tool_input)
+                if isinstance(_validated, dict):
+                    return _json.dumps(_validated)
+                _harness, _question = _validated
                 try:
                     _svc = await _ext_get_service()
                     _consult_result = await _svc.orchestrator.consult(

@@ -37,6 +37,14 @@ from kernos.kernel.external_agents.registry import HarnessRegistry
 logger = logging.getLogger(__name__)
 
 
+# Single source of truth — schema enum, handler validator, and error
+# messages all read from here. Adding a harness means appending to
+# this tuple and registering the harness in _build_default_registry.
+SUPPORTED_CONSULT_HARNESSES: tuple[str, ...] = (
+    "claude_code", "codex", "gemini",
+)
+
+
 CONSULT_TOOL = {
     "name": "consult",
     "description": (
@@ -45,9 +53,11 @@ CONSULT_TOOL = {
         "prompt for the external agent). Both must be non-empty. "
         "If you supply only `harness` without `question`, the "
         "tool returns InvalidConsultCall. Common mistake: using "
-        "`prompt` or `text` instead of `question` — the handler "
-        "accepts those aliases too, but the canonical field name "
-        "is `question`.\n\n"
+        "`prompt` instead of `question` — the handler accepts "
+        "`prompt` as a single alias, but the canonical field name "
+        "is `question`. If both `question` and `prompt` are "
+        "supplied with different non-empty values, the handler "
+        "returns InvalidConsultCall rather than guessing.\n\n"
         "Concrete examples:\n"
         "  consult(harness=\"codex\", question=\"Review the diff at HEAD\")\n"
         "  consult(harness=\"claude_code\", question=\"Write a 2-line poem\")\n"
@@ -99,7 +109,7 @@ CONSULT_TOOL = {
             "harness": {
                 "type": "string",
                 "minLength": 1,
-                "enum": ["claude_code", "codex", "gemini"],
+                "enum": list(SUPPORTED_CONSULT_HARNESSES),
                 "description": (
                     "REQUIRED, must be one of the enum values: "
                     "'claude_code', 'codex', 'gemini'. The schema "
@@ -153,6 +163,96 @@ CONSULT_TOOL = {
         "required": ["harness", "question"],
     },
 }
+
+
+# ----- input validation (pure helper, testable without handler) ----
+
+
+def _coerce_str(value: Any) -> str:
+    """Return ``value`` as a stripped string if it is a string, else "".
+    Codex caught the original ``.strip()`` directly on the get-result
+    which crashed when the agent passed an int, list, or None for
+    ``question``/``harness``."""
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def validate_consult_input(
+    tool_input: dict | None,
+) -> tuple[str, str] | dict:
+    """Validate the agent's ``consult`` tool input.
+
+    Returns ``(harness, question)`` on success, or an
+    ``InvalidConsultCall`` error dict (ready to ``json.dumps``).
+
+    Accepts a single alias: ``prompt`` for ``question``. Earlier
+    drafts added ``text``/``target``/``agent`` but those were
+    speculative — drop and surface clean errors instead. If both
+    canonical and alias supply different non-empty values, refuse
+    rather than guess which the agent meant.
+
+    Pure function: no I/O, no global state, takes a dict and
+    returns a value. Behavior tests call this directly with input
+    dicts and assert on outputs, replacing the prior static-source
+    tests that only proved error strings literally existed in the
+    file.
+    """
+    if not isinstance(tool_input, dict):
+        # Codex audit 2026-05-20: ``tool_input or {}`` only catches
+        # None — a string or int would crash on the ``.get()`` call.
+        # Treat any non-dict (None included) as an empty mapping and
+        # let the missing-harness branch produce the canonical error.
+        tool_input = {}
+    _harness = _coerce_str(tool_input.get("harness"))
+    _question = _coerce_str(tool_input.get("question"))
+    _prompt = _coerce_str(tool_input.get("prompt"))
+
+    # Alias conflict — both supplied with different non-empty values
+    if _question and _prompt and _question != _prompt:
+        return {
+            "error": "InvalidConsultCall",
+            "message": (
+                "consult received both `question` and `prompt` with "
+                "different non-empty values — refusing to guess. "
+                "Pass only `question` (canonical) OR only `prompt` "
+                "(alias)."
+            ),
+        }
+    if not _question:
+        _question = _prompt
+
+    if not _harness:
+        return {
+            "error": "InvalidConsultCall",
+            "message": (
+                "consult requires non-empty `harness`. Valid values: "
+                + ", ".join(SUPPORTED_CONSULT_HARNESSES)
+                + '. Example: consult(harness="codex", '
+                'question="...")'
+            ),
+        }
+    if _harness not in SUPPORTED_CONSULT_HARNESSES:
+        return {
+            "error": "InvalidConsultCall",
+            "message": (
+                f"consult harness={_harness!r} is not registered. "
+                f"Valid: " + ", ".join(SUPPORTED_CONSULT_HARNESSES)
+                + "."
+            ),
+        }
+    if not _question:
+        return {
+            "error": "InvalidConsultCall",
+            "message": (
+                "consult requires non-empty `question` (alias: "
+                "`prompt`). Pass the prompt you want sent to the "
+                "external agent. Example: "
+                f'consult(harness="{_harness}", '
+                'question="Reply with: hello")'
+            ),
+        }
+    return (_harness, _question)
 
 
 # ----- service singleton -------------------------------------------
@@ -302,7 +402,9 @@ async def reset_service_for_tests() -> None:
 
 __all__ = [
     "CONSULT_TOOL",
+    "SUPPORTED_CONSULT_HARNESSES",
     "ExternalAgentService",
     "get_service",
     "reset_service_for_tests",
+    "validate_consult_input",
 ]

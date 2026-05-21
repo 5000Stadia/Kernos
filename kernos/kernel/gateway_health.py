@@ -243,57 +243,112 @@ class GatewayHealthObserver:
         for name, fn in detectors:
             try:
                 signal = fn()
-                if signal is not None:
-                    await self._record_signal(signal)
-                    if name == "discord-heartbeat-blocked":
-                        heartbeat_unhealthy_this_tick = True
             except Exception as exc:
                 logger.warning(
                     "GATEWAY_HEALTH_DETECTOR_FAILED: detector=%s exc=%s",
                     name, exc,
                 )
+                continue
+            # Set strike flag from the DETECTOR output, not from
+            # whether _record_signal succeeded. Codex audit
+            # 2026-05-20: tying the strike counter to the catalog
+            # write means a transient store failure silently
+            # zeroes our restart guard. The detector is the source
+            # of truth for "is the heartbeat unhealthy right now."
+            if signal is not None and name == "discord-heartbeat-blocked":
+                heartbeat_unhealthy_this_tick = True
+            if signal is not None:
+                try:
+                    await self._record_signal(signal)
+                except Exception as exc:
+                    logger.warning(
+                        "GATEWAY_HEALTH_RECORD_SIGNAL_FAILED: "
+                        "detector=%s exc=%s", name, exc,
+                    )
 
         # V1.5 inline remediation for the failure mode observed
         # 2026-05-20: heartbeat NaN persists, standalone watchdog
         # not firing (its task died silently somewhere). The observer
         # is the survivor; restart via the observer's path.
         #
-        # V1.5 + V2 SHARED COOL-OFF (Codex audit 2026-05-20 + live
-        # restart-loop observation): the original V1.5 had no
-        # cool-off and was restart-looping every ~5 min when the
-        # heartbeat NaN was caused by something restart couldn't
-        # fix. V2's sentinel-file cool-off was correctly preventing
-        # V2's path from looping, but V1.5 was bypassing it.
-        # Fix: V1.5 now checks the SAME sentinel V2 writes.
-        # If the sentinel says we restarted within the cool-off
-        # window, V1.5 logs SKIP and resets strikes — letting
-        # operator inspect the broken state without ducking the
-        # process out from under them.
+        # FRICTION-REMEDIATION-V2.1 (2026-05-20): both V1.5 and V2
+        # claim through ``try_claim_remediation_fire`` — single source
+        # of truth for the cool-off sentinel AND the rolling escalation
+        # guard. The prior implementation only had V1.5 READ V2's
+        # sentinel but never WRITE one, so a V1.5-first fire would
+        # still loop. With the shared helper, V1.5 writes the same
+        # sentinel + history that V2 reads (and vice versa).
         if heartbeat_unhealthy_this_tick:
             self._consecutive_heartbeat_strikes += 1
             if (
                 self._consecutive_heartbeat_strikes
                 >= _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES
             ):
-                if self._is_recent_restart_via_sentinel():
-                    logger.warning(
-                        "GATEWAY_HEALTH_FORCE_RESTART_SKIPPED_COOL_OFF: "
-                        "heartbeat unhealthy for %d ticks but V2 "
-                        "remediation sentinel says we restarted "
-                        "recently — gateway issue persists across "
-                        "restart, not a recoverable failure. Skipping "
-                        "V1.5 restart to prevent loop.",
-                        self._consecutive_heartbeat_strikes,
+                from kernos.kernel.friction_patterns import (
+                    try_claim_remediation_fire,
+                )
+                window_sec = int(
+                    os.getenv(
+                        "KERNOS_DISCORD_HEARTBEAT_REMEDIATION_WINDOW_SEC",
+                        "600",
+                    ),
+                )
+                escalation_window_sec = int(
+                    os.environ.get(
+                        "KERNOS_FRICTION_REMEDIATION_ESCALATION_WINDOW_SEC",
+                        "3600",
                     )
+                )
+                escalation_max_fires = int(
+                    os.environ.get(
+                        "KERNOS_FRICTION_REMEDIATION_ESCALATION_MAX_FIRES",
+                        "3",
+                    )
+                )
+                claimed, reason = try_claim_remediation_fire(
+                    data_dir=self._data_dir,
+                    instance_id=self._instance_id,
+                    pattern_id="discord-heartbeat-blocked",
+                    window_sec=window_sec,
+                    max_fires_per_window=escalation_max_fires,
+                    escalation_window_sec=escalation_window_sec,
+                )
+                if not claimed:
+                    if reason == "cool_off":
+                        logger.warning(
+                            "GATEWAY_HEALTH_FORCE_RESTART_SKIPPED_COOL_OFF: "
+                            "heartbeat unhealthy for %d ticks but shared "
+                            "remediation sentinel says we restarted "
+                            "recently — gateway issue persists across "
+                            "restart, not a recoverable failure. Skipping "
+                            "V1.5 restart to prevent loop.",
+                            self._consecutive_heartbeat_strikes,
+                        )
+                    elif reason == "escalation_max_fires_reached":
+                        logger.error(
+                            "GATEWAY_HEALTH_FORCE_RESTART_ESCALATION_GUARD: "
+                            "heartbeat unhealthy for %d ticks but the "
+                            "shared escalation guard tripped — restart "
+                            "isn't fixing this. Refusing further fires "
+                            "until operator clears history.",
+                            self._consecutive_heartbeat_strikes,
+                        )
+                    else:
+                        logger.warning(
+                            "GATEWAY_HEALTH_FORCE_RESTART_CLAIM_REFUSED: "
+                            "reason=%s strikes=%d",
+                            reason, self._consecutive_heartbeat_strikes,
+                        )
                     # Reset strikes so we don't log STRIKE every
-                    # subsequent tick during cool-off
+                    # subsequent tick during cool-off / escalation
                     self._consecutive_heartbeat_strikes = 0
                 else:
                     logger.error(
                         "GATEWAY_HEALTH_FORCE_RESTART: heartbeat unhealthy "
                         "for %d consecutive ticks (interval=%ds, threshold=%d). "
                         "Standalone watchdog hasn't recovered — observer "
-                        "is force-restarting via os.execv.",
+                        "is force-restarting via os.execv (claim acquired "
+                        "via shared try_claim_remediation_fire).",
                         self._consecutive_heartbeat_strikes,
                         self._poll_interval_sec,
                         _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES,
@@ -314,53 +369,6 @@ class GatewayHealthObserver:
                     self._consecutive_heartbeat_strikes,
                 )
             self._consecutive_heartbeat_strikes = 0
-
-    def _is_recent_restart_via_sentinel(self) -> bool:
-        """Read the V2 remediation sentinel for the
-        ``discord-heartbeat-blocked`` pattern; return True iff its
-        timestamp is within the configured window (default 600s).
-
-        Shared with V2 (kernos/kernel/friction_patterns.py
-        _remediation_in_cool_off) — same sentinel path, same
-        window. Lets V1.5 and V2 share one cool-off discipline so
-        they can't restart-loop against each other.
-
-        Falls back to False (allow restart) on any read/parse
-        error — V1.5 fails open. The trade is: better to risk a
-        loop in the rare 'sentinel corrupt' case than to never
-        recover from a real heartbeat-blocked failure.
-        """
-        from datetime import datetime, timezone
-        from pathlib import Path
-
-        instance_id = self._instance_id.replace(":", "_").replace("/", "_")
-        sentinel = (
-            Path(self._data_dir)
-            / "diagnostics" / "friction" / "remediation"
-            / f"{instance_id}__discord-heartbeat-blocked.last_fired"
-        )
-        if not sentinel.exists():
-            return False
-        window_sec = int(
-            os.getenv("KERNOS_DISCORD_HEARTBEAT_REMEDIATION_WINDOW_SEC",
-                      "600"),
-        )
-        try:
-            content = sentinel.read_text(encoding="utf-8").strip()
-            last_fired = datetime.fromisoformat(content)
-            if last_fired.tzinfo is None:
-                last_fired = last_fired.replace(tzinfo=timezone.utc)
-        except Exception as exc:
-            logger.warning(
-                "GATEWAY_HEALTH_SENTINEL_PARSE_FAILED: %s — "
-                "treating as no cool-off (V1.5 may proceed)",
-                exc,
-            )
-            return False
-        age_sec = (
-            datetime.now(timezone.utc) - last_fired
-        ).total_seconds()
-        return age_sec < window_sec
 
     # ----- detectors -------------------------------------------------
 

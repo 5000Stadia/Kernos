@@ -585,3 +585,134 @@ class TestSeedRemediationPolicy:
         assert after.remediation_threshold_count == 5
         assert after.remediation_threshold_window_sec == 600
         await store.stop()
+
+
+# ===========================================================================
+# Shared try_claim_remediation_fire helper (Codex audit 2026-05-20 round 2)
+# ===========================================================================
+
+
+class TestTryClaimRemediationFire:
+    """Behavior tests for the shared claim helper. V1.5 and V2 both
+    call this; tests live here because the helper is in the same
+    module."""
+
+    def test_first_call_claims(self, tmp_path):
+        from kernos.kernel.friction_patterns import (
+            try_claim_remediation_fire,
+        )
+        claimed, reason = try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=600,
+        )
+        assert claimed is True
+        assert reason == "claimed"
+
+    def test_second_call_blocked_by_cool_off(self, tmp_path):
+        from kernos.kernel.friction_patterns import (
+            try_claim_remediation_fire,
+        )
+        try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=600,
+        )
+        claimed, reason = try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=600,
+        )
+        assert claimed is False
+        assert reason == "cool_off"
+
+    def test_sentinel_write_failure_refuses_claim(self, tmp_path, monkeypatch):
+        """Codex audit round 2: if the cool-off sentinel can't be
+        persisted, the helper MUST refuse the claim rather than
+        return True. Otherwise os.execv proceeds with no cool-off
+        and the next process boot loops immediately."""
+        from kernos.kernel import friction_patterns as fp_mod
+
+        def boom(*a, **kw):
+            raise OSError("simulated write failure")
+        monkeypatch.setattr(
+            fp_mod.Path, "write_text", boom, raising=False,
+        )
+        # Use a separate module-level monkeypatch on pathlib.Path so
+        # the .write_text on the tmp sentinel hits our boom.
+        import pathlib
+        monkeypatch.setattr(pathlib.Path, "write_text", boom)
+
+        claimed, reason = fp_mod.try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=600,
+        )
+        assert claimed is False
+        assert reason == "sentinel_write_failed"
+
+    def test_escalation_max_fires_blocks_after_threshold(self, tmp_path):
+        """Three fires already in the rolling window → fourth refuses."""
+        from datetime import datetime, timezone
+        from kernos.kernel.friction_patterns import (
+            FrictionPatternStore, try_claim_remediation_fire,
+        )
+        history = FrictionPatternStore.remediation_history_path(
+            str(tmp_path), "i", "discord-heartbeat-blocked",
+        )
+        history.parent.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(timezone.utc).isoformat()
+        history.write_text(f"{now}\n{now}\n{now}\n", encoding="utf-8")
+
+        claimed, reason = try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=0,
+            max_fires_per_window=3, escalation_window_sec=3600,
+        )
+        assert claimed is False
+        assert reason == "escalation_max_fires_reached"
+
+    def test_successful_claim_writes_sentinel_and_history(self, tmp_path):
+        from kernos.kernel.friction_patterns import (
+            FrictionPatternStore, try_claim_remediation_fire,
+        )
+        claimed, _ = try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=600,
+        )
+        assert claimed is True
+        sentinel = FrictionPatternStore.remediation_sentinel_path(
+            str(tmp_path), "i", "discord-heartbeat-blocked",
+        )
+        history = FrictionPatternStore.remediation_history_path(
+            str(tmp_path), "i", "discord-heartbeat-blocked",
+        )
+        assert sentinel.exists()
+        assert history.exists()
+        assert history.read_text(encoding="utf-8").strip() != ""
+
+    def test_per_pid_tmp_path_avoids_collision(self, tmp_path):
+        """Codex audit round 2: prior implementation used a fixed
+        '.tmp' suffix that two concurrent processes would trample.
+        Per-PID suffix means each attempt has its own tmp file."""
+        import os
+        from kernos.kernel.friction_patterns import (
+            FrictionPatternStore, try_claim_remediation_fire,
+        )
+        sentinel = FrictionPatternStore.remediation_sentinel_path(
+            str(tmp_path), "i", "discord-heartbeat-blocked",
+        )
+        # Pre-create a stale .tmp file (no PID suffix) — old code
+        # would have trampled this; new code ignores it.
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        stale = sentinel.with_suffix(".tmp")
+        stale.write_text("stale", encoding="utf-8")
+
+        claimed, _ = try_claim_remediation_fire(
+            data_dir=str(tmp_path), instance_id="i",
+            pattern_id="discord-heartbeat-blocked", window_sec=600,
+        )
+        assert claimed is True
+        # Per-PID tmp was used, the stale fixed-suffix tmp untouched
+        assert stale.exists()
+        assert stale.read_text(encoding="utf-8") == "stale"
+        # Our PID's tmp got renamed to the sentinel, not left behind
+        pid_tmp = sentinel.with_suffix(f".tmp.{os.getpid()}")
+        assert not pid_tmp.exists()
+        assert sentinel.exists()

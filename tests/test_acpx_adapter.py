@@ -382,82 +382,219 @@ class TestStaleSessionDetection:
         ) is False
 
 
-class TestConsultHandlerValidation:
-    """2026-05-20 live-failure pin: even with the schema's
-    minLength: 1 + enum on harness/question, some model APIs
-    bypass JSON schema validation silently. Live result:
-    `consult(harness="claude_code")` (missing question) reached
-    acpx, which exited rc=2 with stdout 'Prompt is required'.
+class TestValidateConsultInput:
+    """Behavior tests for the pure ``validate_consult_input`` helper.
 
-    Handler-side validation at reasoning.py:866+ now catches this
-    BEFORE dispatch and returns a friendly error JSON the agent
-    can use to correct the next call.
+    Replaces the prior static-source tests (which Codex flagged as
+    weak — they only proved literal strings existed in reasoning.py,
+    not that the validation behaved). The helper is pure, so tests
+    call it directly with input dicts and assert on outputs.
+
+    Origin: 2026-05-20 live agent failed schema validation silently —
+    `consult(harness="claude_code")` (missing question) reached acpx
+    and exited rc=2. Handler-side validation catches this before
+    dispatch. See ``validate_consult_input`` in tool.py.
     """
 
-    def test_handler_branch_has_validation_for_missing_harness(self):
-        import inspect
-        from kernos.kernel.reasoning import ReasoningService
-        src = inspect.getsource(ReasoningService.execute_tool)
-        # The consult branch must check harness before dispatch
-        idx = src.find('tool_name == "consult"')
-        assert idx >= 0
-        # Take the next ~3000 chars (the consult block)
-        block = src[idx:idx + 3000]
-        # Validation must call .get("harness") and check empty
-        assert 'tool_input.get("harness")' in block
-        assert "consult requires non-empty harness" in block
+    def test_valid_input_returns_tuple(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "question": "What is 2+2?"},
+        )
+        assert result == ("codex", "What is 2+2?")
 
-    def test_handler_branch_has_validation_for_missing_question(self):
-        import inspect
-        from kernos.kernel.reasoning import ReasoningService
-        src = inspect.getsource(ReasoningService.execute_tool)
-        idx = src.find('tool_name == "consult"')
-        block = src[idx:idx + 3000]
-        assert 'tool_input.get("question")' in block
-        assert "consult requires non-empty question" in block
+    def test_empty_harness_returns_error(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input({"harness": "", "question": "x"})
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+        assert "harness" in result["message"]
 
-    def test_handler_branch_validates_harness_enum(self):
-        """Handler also rejects harness not in the enum, with a
-        helpful message naming valid values."""
-        import inspect
-        from kernos.kernel.reasoning import ReasoningService
-        src = inspect.getsource(ReasoningService.execute_tool)
-        idx = src.find('tool_name == "consult"')
-        block = src[idx:idx + 3000]
-        assert "_valid_harnesses" in block
-        assert "claude_code" in block
-        assert "codex" in block
-        assert "gemini" in block
+    def test_missing_harness_returns_error(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input({"question": "x"})
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
 
-    def test_handler_accepts_question_prompt_text_aliases(self):
-        """2026-05-20 live failure: agent called consult with
-        `harness` + `prompt` (not `question`). Schema declares
-        `question` as the canonical name but vocabulary drifts
-        across layers (acpx_adapter takes `prompt`, slash commands
-        use `prompt`). Handler now accepts question/prompt/text as
-        aliases for the prompt arg — intent is unambiguous
-        regardless of which word the model picked."""
-        import inspect
-        from kernos.kernel.reasoning import ReasoningService
-        src = inspect.getsource(ReasoningService.execute_tool)
-        idx = src.find('tool_name == "consult"')
-        block = src[idx:idx + 3000]
-        # All three alias names referenced in the .get() fallback chain
-        assert 'tool_input.get("question")' in block
-        assert 'tool_input.get("prompt")' in block
-        assert 'tool_input.get("text")' in block
+    def test_invalid_harness_value_returns_error(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "cc", "question": "x"},
+        )
+        assert isinstance(result, dict)
+        assert "cc" in result["message"]
 
-    def test_handler_accepts_harness_target_agent_aliases(self):
-        """Same defensive aliasing for harness — accepts target/
-        agent in addition to the canonical 'harness'."""
-        import inspect
-        from kernos.kernel.reasoning import ReasoningService
-        src = inspect.getsource(ReasoningService.execute_tool)
-        idx = src.find('tool_name == "consult"')
-        block = src[idx:idx + 3000]
-        assert 'tool_input.get("harness")' in block
-        assert 'tool_input.get("target")' in block
-        assert 'tool_input.get("agent")' in block
+    def test_empty_question_returns_error(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "question": ""},
+        )
+        assert isinstance(result, dict)
+        assert "question" in result["message"]
+
+    def test_missing_question_returns_error(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input({"harness": "codex"})
+        assert isinstance(result, dict)
+        assert "question" in result["message"]
+
+    def test_prompt_alias_accepted(self):
+        """Live 2026-05-20: agent used `prompt` instead of
+        `question`. Single alias preserves intent without
+        speculation."""
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "prompt": "hello"},
+        )
+        assert result == ("codex", "hello")
+
+    def test_question_wins_when_both_supplied_with_same_value(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "question": "x", "prompt": "x"},
+        )
+        assert result == ("codex", "x")
+
+    def test_conflicting_question_and_prompt_refused(self):
+        """Codex audit: alias fallback that silently masks
+        conflicting values is dangerous — refuse instead."""
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "question": "A", "prompt": "B"},
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+        assert "different" in result["message"].lower()
+
+    def test_speculative_alias_target_rejected(self):
+        """`target` was a speculative alias — dropped per Codex
+        audit. Confirm it now produces InvalidConsultCall instead
+        of silently working."""
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"target": "codex", "question": "x"},
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_speculative_alias_text_rejected(self):
+        """`text` was a speculative alias — dropped per Codex audit."""
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "text": "x"},
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_non_string_harness_does_not_crash(self):
+        """Codex audit: prior implementation did .strip() on the
+        get-result, which crashed on int/list/None values. Coerce
+        to "" instead so the caller sees a clean InvalidConsultCall."""
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": 42, "question": "x"},
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_non_string_question_does_not_crash(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "codex", "question": ["hello"]},
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_whitespace_only_harness_treated_as_empty(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(
+            {"harness": "   ", "question": "x"},
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_none_input_does_not_crash(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(None)
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_string_input_does_not_crash(self):
+        """Codex audit round 2: ``tool_input or {}`` only catches
+        None; a stray string passed by a buggy caller used to hit
+        ``.get()`` on a str. Now coerced to empty dict."""
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input("oops")  # type: ignore[arg-type]
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_int_input_does_not_crash(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(3)  # type: ignore[arg-type]
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+    def test_list_input_does_not_crash(self):
+        from kernos.kernel.external_agents.tool import (
+            validate_consult_input,
+        )
+        result = validate_consult_input(["harness", "question"])  # type: ignore[arg-type]
+        assert isinstance(result, dict)
+        assert result["error"] == "InvalidConsultCall"
+
+
+class TestSupportedConsultHarnesses:
+    """The shared constant feeds the schema enum AND the handler
+    validator — verifying it stays the one source of truth."""
+
+    def test_schema_enum_matches_constant(self):
+        from kernos.kernel.external_agents.tool import (
+            CONSULT_TOOL, SUPPORTED_CONSULT_HARNESSES,
+        )
+        enum = CONSULT_TOOL["input_schema"]["properties"]["harness"]["enum"]
+        assert tuple(enum) == SUPPORTED_CONSULT_HARNESSES
+
+    def test_constant_has_three_canonical_harnesses(self):
+        from kernos.kernel.external_agents.tool import (
+            SUPPORTED_CONSULT_HARNESSES,
+        )
+        assert "claude_code" in SUPPORTED_CONSULT_HARNESSES
+        assert "codex" in SUPPORTED_CONSULT_HARNESSES
+        assert "gemini" in SUPPORTED_CONSULT_HARNESSES
 
 
 class TestConsultSchemaValidation:

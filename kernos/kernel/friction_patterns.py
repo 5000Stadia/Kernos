@@ -1589,6 +1589,44 @@ class FrictionPatternStore:
                 sentinel, exc,
             )
 
+    @staticmethod
+    def remediation_sentinel_path(
+        data_dir: str, instance_id: str, pattern_id: str,
+    ) -> "Path":
+        """Public, stateless equivalent of ``_remediation_sentinel_path``.
+        Used by ``try_claim_remediation_fire`` so the shared claim
+        helper doesn't need a FrictionPatternStore instance. Same
+        path the instance-method version computes — keep in sync.
+
+        ``data_dir`` is the base data directory (parent of instance.db),
+        matching what ``self._db_path.parent`` resolves to inside the
+        store.
+        """
+        from pathlib import Path
+        safe_pattern = pattern_id.replace("/", "_").replace("..", "_")
+        safe_instance = instance_id.replace(":", "_").replace("/", "_")
+        return (
+            Path(data_dir)
+            / "diagnostics" / "friction" / "remediation"
+            / f"{safe_instance}__{safe_pattern}.last_fired"
+        )
+
+    @staticmethod
+    def remediation_history_path(
+        data_dir: str, instance_id: str, pattern_id: str,
+    ) -> "Path":
+        """Public, stateless equivalent of
+        ``_remediation_escalation_log_path``. ``data_dir`` semantics
+        match :meth:`remediation_sentinel_path`."""
+        from pathlib import Path
+        safe_pattern = pattern_id.replace("/", "_").replace("..", "_")
+        safe_instance = instance_id.replace(":", "_").replace("/", "_")
+        return (
+            Path(data_dir)
+            / "diagnostics" / "friction" / "remediation"
+            / f"{safe_instance}__{safe_pattern}.fire_history"
+        )
+
     def _remediation_escalation_log_path(
         self, instance_id: str, pattern_id: str,
     ) -> "Path":
@@ -1703,18 +1741,6 @@ class FrictionPatternStore:
         if count < threshold:
             return  # not yet at threshold
 
-        if self._remediation_in_cool_off(
-            instance_id, pattern_id, window_sec,
-        ):
-            logger.info(
-                "FRICTION_REMEDIATION_SKIPPED_COOL_OFF: instance=%s "
-                "pattern=%s action=%s count=%d threshold=%d "
-                "window_sec=%d — cool-off sentinel within window",
-                instance_id, pattern_id, action, count, threshold,
-                window_sec,
-            )
-            return
-
         handler = self._remediation_handlers.get(action)
         if handler is None:
             logger.warning(
@@ -1724,55 +1750,71 @@ class FrictionPatternStore:
             )
             return
 
-        # 2026-05-20 escalation guard: live observation showed V2
-        # restart-cycling every 10 min for hours because the
-        # heartbeat NaN persists across restart (the metric is
-        # lying — bot is functionally alive between restarts).
-        # Sentinel cool-off prevents WITHIN-window loops; this
-        # rolling-history guard prevents CROSS-window loops.
-        # If too many fires in the longer window, we stop trying
-        # and log loud so the operator notices.
+        # FRICTION-REMEDIATION-V2.1 (2026-05-20): both V2 and the
+        # standalone GatewayHealthObserver V1.5 inline strike counter
+        # claim through the same shared helper. This is the single
+        # source of truth for "may I fire remediation now?" — see
+        # try_claim_remediation_fire below for cool-off + escalation
+        # semantics.
         escalation_window_sec = int(
             os.environ.get(
                 "KERNOS_FRICTION_REMEDIATION_ESCALATION_WINDOW_SEC",
-                "3600",  # 1 hour
+                "3600",
             )
         )
         escalation_max_fires = int(
             os.environ.get(
                 "KERNOS_FRICTION_REMEDIATION_ESCALATION_MAX_FIRES",
-                "3",  # 3 fires/hour ceiling
+                "3",
             )
         )
-        recent_fires = self._count_recent_remediation_fires(
-            instance_id, pattern_id, escalation_window_sec,
+        data_dir = (
+            str(self._db_path.parent) if self._db_path else "./data"
         )
-        if recent_fires >= escalation_max_fires:
-            logger.error(
-                "FRICTION_REMEDIATION_ESCALATION_GUARD: instance=%s "
-                "pattern=%s action=%s — already fired %d times in "
-                "last %ds (max=%d). The action isn't fixing the "
-                "underlying problem; refusing further fires until "
-                "operator clears the history file or window expires. "
-                "Clear with: rm %s",
-                instance_id, pattern_id, action, recent_fires,
-                escalation_window_sec, escalation_max_fires,
-                self._remediation_escalation_log_path(
-                    instance_id, pattern_id,
-                ),
-            )
+        claimed, reason = try_claim_remediation_fire(
+            data_dir=data_dir,
+            instance_id=instance_id,
+            pattern_id=pattern_id,
+            window_sec=window_sec,
+            max_fires_per_window=escalation_max_fires,
+            escalation_window_sec=escalation_window_sec,
+        )
+        if not claimed:
+            if reason == "cool_off":
+                logger.info(
+                    "FRICTION_REMEDIATION_SKIPPED_COOL_OFF: instance=%s "
+                    "pattern=%s action=%s count=%d threshold=%d "
+                    "window_sec=%d — cool-off sentinel within window",
+                    instance_id, pattern_id, action, count, threshold,
+                    window_sec,
+                )
+            elif reason == "escalation_max_fires_reached":
+                logger.error(
+                    "FRICTION_REMEDIATION_ESCALATION_GUARD: instance=%s "
+                    "pattern=%s action=%s — already fired max times in "
+                    "last %ds (max=%d). The action isn't fixing the "
+                    "underlying problem; refusing further fires until "
+                    "operator clears the history file or window expires. "
+                    "Clear with: rm %s",
+                    instance_id, pattern_id, action,
+                    escalation_window_sec, escalation_max_fires,
+                    self._remediation_escalation_log_path(
+                        instance_id, pattern_id,
+                    ),
+                )
+            else:
+                logger.warning(
+                    "FRICTION_REMEDIATION_CLAIM_REFUSED: instance=%s "
+                    "pattern=%s action=%s reason=%s",
+                    instance_id, pattern_id, action, reason,
+                )
             return
 
-        # Mark BEFORE calling so the sentinel exists even if the handler
-        # is os.execv (which never returns).
-        self._mark_remediation_fired(instance_id, pattern_id)
-        self._record_remediation_fire_to_history(instance_id, pattern_id)
         logger.warning(
             "FRICTION_REMEDIATION_FIRED: instance=%s pattern=%s "
-            "action=%s count=%d threshold=%d window_sec=%d "
-            "escalation_fires_in_window=%d/%d",
+            "action=%s count=%d threshold=%d window_sec=%d",
             instance_id, pattern_id, action, count, threshold,
-            window_sec, recent_fires + 1, escalation_max_fires,
+            window_sec,
         )
         try:
             await handler(
@@ -1786,6 +1828,146 @@ class FrictionPatternStore:
                 "pattern=%s action=%s exc=%s",
                 instance_id, pattern_id, action, exc,
             )
+
+
+# ---------------------------------------------------------------------------
+# Shared remediation claim helper (FRICTION-REMEDIATION-V2.1, 2026-05-20)
+# ---------------------------------------------------------------------------
+
+
+def try_claim_remediation_fire(
+    *,
+    data_dir: str,
+    instance_id: str,
+    pattern_id: str,
+    window_sec: int,
+    max_fires_per_window: int = 3,
+    escalation_window_sec: int = 3600,
+) -> tuple[bool, str]:
+    """Single source of truth for "may I fire remediation now?"
+
+    Both the catalog-side ``FrictionPatternStore._maybe_fire_remediation``
+    AND the standalone ``GatewayHealthObserver`` V1.5 inline strike
+    counter call this. Returns ``(claimed, reason)``:
+
+      * ``(True, "claimed")`` — caller may proceed with the action
+        (e.g. os.execv); sentinel + history have been written
+      * ``(False, "cool_off")`` — sentinel says we fired within window
+      * ``(False, "escalation_max_fires_reached")`` — too many fires
+        in the rolling escalation window; refusing further fires
+        until operator clears history
+      * ``(False, "sentinel_write_failed")`` — could not persist the
+        cool-off sentinel; refusing the claim so caller does NOT
+        proceed (without a sentinel, a successful execv would loop)
+      * ``(False, "<other reason>")`` — best-effort fail-open on
+        unexpected error
+
+    The shared shape eliminates the V1.5/V2 race that the original
+    2026-05-20 implementation had (V1.5 read V2's sentinel but never
+    wrote one, so V1.5 firing first → loop). Both paths now claim
+    through this single function.
+
+    Concurrency model — single-process invariant. This helper is
+    designed for the Kernos single-process-per-instance deployment
+    model: one Kernos process owns the FrictionPatternStore for a
+    given instance, the helper has no ``await`` so asyncio cannot
+    interleave it, and V1.5/V2 within that process race-serialize
+    through the event loop. The check→write pattern is NOT a
+    cross-process atomic claim — running two Kernos processes for
+    the same instance.db could see both win simultaneously. That's
+    a deployment bug (the sqlite store's single-writer model would
+    have already corrupted state), not a supported configuration.
+    Codex audit 2026-05-20: documented rather than papered over.
+
+    Sentinel-write failure: Codex audit 2026-05-20 flagged that
+    the prior implementation logged the write failure but still
+    returned ``(True, "claimed")``. That's wrong — if the caller
+    is ``os.execv``, no persisted cool-off means the next process
+    boot fires again immediately, looping. Now we return
+    ``(False, "sentinel_write_failed")`` and let the caller skip
+    this tick; the next tick retries from scratch.
+    """
+    import os as _os
+    from datetime import datetime, timezone
+    sentinel = FrictionPatternStore.remediation_sentinel_path(
+        data_dir, instance_id, pattern_id,
+    )
+    history = FrictionPatternStore.remediation_history_path(
+        data_dir, instance_id, pattern_id,
+    )
+    now = datetime.now(timezone.utc)
+
+    # 1. Cool-off check (sentinel)
+    if sentinel.exists():
+        try:
+            content = sentinel.read_text(encoding="utf-8").strip()
+            last_fired = datetime.fromisoformat(content)
+            if last_fired.tzinfo is None:
+                last_fired = last_fired.replace(tzinfo=timezone.utc)
+            age_sec = (now - last_fired).total_seconds()
+            if age_sec < window_sec:
+                return (False, "cool_off")
+        except Exception as exc:
+            logger.warning(
+                "REMEDIATION_CLAIM_SENTINEL_PARSE_FAILED: %s — "
+                "treating as no cool-off (fail open)", exc,
+            )
+
+    # 2. Escalation check (rolling history)
+    if history.exists():
+        try:
+            count = 0
+            for line in history.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(line)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                if (now - ts).total_seconds() <= escalation_window_sec:
+                    count += 1
+            if count >= max_fires_per_window:
+                return (False, "escalation_max_fires_reached")
+        except Exception as exc:
+            logger.warning(
+                "REMEDIATION_CLAIM_HISTORY_READ_FAILED: %s — "
+                "treating as 0 fires (fail open)", exc,
+            )
+
+    # 3. Claim — write sentinel BEFORE caller acts. If caller is
+    # os.execv this is the only chance to update state. Per-PID
+    # tmp suffix so the tmp path can't be trampled by a concurrent
+    # attempt within the same data dir.
+    try:
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        tmp = sentinel.with_suffix(f".tmp.{_os.getpid()}")
+        tmp.write_text(now.isoformat(), encoding="utf-8")
+        _os.rename(str(tmp), str(sentinel))
+    except Exception as exc:
+        logger.warning(
+            "REMEDIATION_CLAIM_SENTINEL_WRITE_FAILED: %s — "
+            "refusing claim so caller does not proceed without "
+            "persisted cool-off (would loop on execv).", exc,
+        )
+        return (False, "sentinel_write_failed")
+
+    # History append is best-effort: the cool-off sentinel above
+    # is the load-bearing record. History undercounting after a
+    # crash mid-append is acceptable (the parser tolerates partial
+    # lines), and the escalation guard fails open.
+    try:
+        history.parent.mkdir(parents=True, exist_ok=True)
+        with open(history, "a", encoding="utf-8") as f:
+            f.write(now.isoformat() + "\n")
+    except Exception as exc:
+        logger.warning(
+            "REMEDIATION_CLAIM_HISTORY_WRITE_FAILED: %s", exc,
+        )
+
+    return (True, "claimed")
 
 
 # ---------------------------------------------------------------------------
