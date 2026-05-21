@@ -98,6 +98,16 @@ class DispatchGate:
 
         Returns: "read", "soft_write", "hard_write", or "unknown"
         """
+        # SELF-CONTROLLED-LOOP-LIVENESS-V1 (2026-05-21): canonicalize
+        # known model-hallucinated tool names before classification.
+        # Live dispatch classifies BEFORE calling execute_tool; without
+        # repair here the gate returns "unknown" and the live
+        # dispatcher refuses before reasoning ever sees the call.
+        # See kernos/kernel/tool_aliases.py.
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        _canonical_name, _was_repaired = canonicalize_tool_name(tool_name)
+        if _was_repaired:
+            tool_name = _canonical_name
         _KERNEL_READS = {
             "remember", "remember_details", "list_files", "read_file",
             "dismiss_whisper", "read_source", "read_soul",

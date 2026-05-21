@@ -689,6 +689,55 @@ async def bring_up_substrate(
             "architect identity at bring-up"
         )
 
+    # SELF-CONTROLLED-LOOP-LIVENESS-V1 (2026-05-21): boot-smoke
+    # sentinel workflow that proves the substrate event-trigger-
+    # workflow loop is alive on every restart. Unconditional —
+    # uses a synthetic substrate-owned architect so it does not
+    # depend on KERNOS_ARCHITECT_ACTOR_ID being set. Failure logs
+    # WARNING and continues; the sentinel is diagnostic infra and
+    # cannot cascade into a substrate boot abort.
+    try:
+        from kernos.kernel.workflows.loop_health_helper import (
+            register_loop_health_workflow,
+            emit_boot_probe,
+            register_completion_logger,
+            _generate_boot_id,
+        )
+        from kernos.kernel import event_stream as _event_stream_loop_health
+        _loop_health_instance_id = (
+            os.environ.get("KERNOS_INSTANCE_ID", "")
+            or _substrate_instance_id
+            or "default"
+        )
+        await register_loop_health_workflow(
+            engine=execution_engine,
+            instance_id=_loop_health_instance_id,
+            trigger_runtime=runtime,
+        )
+        # Codex round 3: generate boot_id + subscribe completion-log
+        # hook BEFORE emitting the boot probe so the hook is in place
+        # before any workflow.execution_terminated event could flush
+        # (avoids flush-order race where the workflow completes before
+        # the subscriber registers).
+        _loop_health_boot_id = _generate_boot_id()
+        register_completion_logger(
+            event_stream=_event_stream_loop_health,
+            instance_id=_loop_health_instance_id,
+            boot_id=_loop_health_boot_id,
+        )
+        # Emit AFTER both registration AND completion-logger subscription.
+        await emit_boot_probe(
+            instance_id=_loop_health_instance_id,
+            event_stream=_event_stream_loop_health,
+            boot_id=_loop_health_boot_id,
+        )
+    except Exception as _exc_lh:
+        logger.warning(
+            "LOOP_HEALTH_SENTINEL_BRINGUP_FAILED error=%s — "
+            "substrate continues without boot-smoke liveness proof",
+            _exc_lh,
+        )
+
     # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19) + SUBSTRATE-PROVIDER-
     # INJECTION-V1 (2026-05-21): gateway-health is a SAFETY MONITOR;
     # it must run independently of self-improvement gating, and it

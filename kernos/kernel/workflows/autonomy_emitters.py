@@ -158,12 +158,29 @@ class FrictionPatternFrequencyEmitter:
         )
 
     async def _on_flush(self, batch: list[Event]) -> None:
-        """Post-flush hook: scan the just-flushed batch for
-        friction.pattern_reactivated events scoped to our instance,
-        look up the pattern's active_epoch, and emit the
-        threshold-exceeded translation."""
+        """Post-flush hook: scan the just-flushed batch for two
+        canonical inputs scoped to our instance and translate each
+        into ``friction.pattern_frequency_threshold_exceeded``:
+
+        1. ``friction.pattern_reactivated`` — emitted when a resolved
+           pattern crosses its recurrence threshold (existing path).
+        2. ``friction.pattern_active_frequency_threshold_crossed`` —
+           emitted by ``record_occurrence`` when an active pattern's
+           count just crosses its ``reactivation_threshold``
+           (SELF-CONTROLLED-LOOP-LIVENESS-V1 2026-05-21 — without
+           this path, active patterns accumulate occurrences forever
+           and the self-improvement workflow trigger never matches).
+
+        Both inputs share the same ``active_epoch`` dedup discipline
+        so the workflow trigger sees exactly one canonical event per
+        epoch, regardless of which input fired first.
+        """
+        _TRANSLATABLE_EVENT_TYPES = {
+            "friction.pattern_reactivated",
+            "friction.pattern_active_frequency_threshold_crossed",
+        }
         for event in batch:
-            if event.event_type != "friction.pattern_reactivated":
+            if event.event_type not in _TRANSLATABLE_EVENT_TYPES:
                 continue
             if event.instance_id != self._instance_id:
                 continue

@@ -553,6 +553,12 @@ class FrictionObserver:
                 classified_by=classified_by,
                 space_id=space_id,
                 member_id=member_id,
+                # SELF-CONTROLLED-LOOP-LIVENESS-V1: enable active-
+                # frequency threshold-crossing emission so the
+                # self-improvement autonomy loop has a path to fire
+                # on active-pattern accumulation (not just
+                # resolved→reactivated transitions).
+                emit_event=self._emit_event,
             )
         elif pattern.lifecycle_state == LIFECYCLE_RESOLVED:
             await self._pattern_store.record_recurrence(

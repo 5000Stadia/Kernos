@@ -1104,6 +1104,7 @@ class FrictionPatternStore:
         classified_by: str = CLASSIFIED_AUTO_SIGNAL_TYPE,
         space_id: str = "",
         member_id: str = "",
+        emit_event=None,
     ) -> None:
         """Record an occurrence on an active or reactivated pattern.
 
@@ -1111,6 +1112,21 @@ class FrictionPatternStore:
         use ``record_recurrence``) or raises ``PatternArchived`` if
         archived. Idempotent on ``(instance_id, report_path)`` via the
         partial UNIQUE index.
+
+        SELF-CONTROLLED-LOOP-LIVENESS-V1 (2026-05-21): if
+        ``emit_event`` is supplied and this occurrence causes the
+        pattern's count to transition from ``< reactivation_threshold``
+        to ``>= reactivation_threshold`` (active-frequency threshold
+        crossing), emit
+        ``friction.pattern_active_frequency_threshold_crossed``. The
+        downstream ``FrictionPatternFrequencyEmitter`` translates this
+        into the canonical ``friction.pattern_frequency_threshold_exceeded``
+        event the self-improvement workflow listens for. Without this
+        emission, active patterns just accumulate occurrences forever
+        and the workflow trigger never matches — lifecycle-starved.
+        Dedup via the existing ``active_epoch`` field: the
+        translator's epoch-based dedupe ensures only one canonical
+        event per epoch reaches the workflow trigger.
         """
         if classified_by not in VALID_CLASSIFIED_BY:
             raise ValueError(
@@ -1118,7 +1134,10 @@ class FrictionPatternStore:
                 f"{sorted(VALID_CLASSIFIED_BY)}"
             )
 
+        threshold_crossed_event: dict | None = None
+
         async def _do(db: aiosqlite.Connection) -> None:
+            nonlocal threshold_crossed_event
             current = await self._require_pattern(db, instance_id, pattern_id)
             if current.lifecycle_state == LIFECYCLE_ARCHIVED:
                 raise PatternArchived(
@@ -1181,7 +1200,55 @@ class FrictionPatternStore:
                 (first_at, now_observed, instance_id, pattern_id),
             )
 
+            # SELF-CONTROLLED-LOOP-LIVENESS-V1 active-frequency
+            # threshold-crossing detection. Transition: prev count
+            # strictly below threshold, new count at/above. One
+            # emission per crossing; the existing active_epoch dedupe
+            # in FrictionPatternFrequencyEmitter prevents downstream
+            # double-fire across translator restarts.
+            prev_count = int(current.occurrence_count or 0)
+            new_count = prev_count + 1
+            threshold = int(current.reactivation_threshold or 0)
+            if (
+                threshold > 0
+                and prev_count < threshold
+                and new_count >= threshold
+            ):
+                threshold_crossed_event = {
+                    "instance_id": instance_id,
+                    "pattern_id": pattern_id,
+                    "count": new_count,
+                    "reactivation_threshold": threshold,
+                    "active_epoch": int(current.active_epoch or 0),
+                }
+
         await self._run_in_immediate_txn(_do)
+
+        # After the txn commits, emit the threshold-crossed event if
+        # the transition fired. Best-effort: emission failure is logged
+        # and swallowed so the occurrence record itself is never
+        # affected by a misbehaving event sink.
+        if threshold_crossed_event is not None and emit_event is not None:
+            try:
+                await emit_event(
+                    "friction.pattern_active_frequency_threshold_crossed",
+                    threshold_crossed_event,
+                )
+                logger.info(
+                    "FRICTION_PATTERN_ACTIVE_FREQUENCY_THRESHOLD_CROSSED "
+                    "instance=%s pattern=%s count=%d threshold=%d "
+                    "active_epoch=%d",
+                    instance_id, pattern_id,
+                    threshold_crossed_event["count"],
+                    threshold_crossed_event["reactivation_threshold"],
+                    threshold_crossed_event["active_epoch"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "FRICTION_PATTERN_THRESHOLD_CROSSED_EMIT_FAILED: "
+                    "instance=%s pattern=%s exc=%s",
+                    instance_id, pattern_id, exc,
+                )
 
         # FRICTION-REMEDIATION-V2 (2026-05-20): after the occurrence
         # is committed, check if the pattern has a declarative

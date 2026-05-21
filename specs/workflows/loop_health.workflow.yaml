@@ -1,0 +1,61 @@
+# LOOP-HEALTH-SENTINEL — SELF-CONTROLLED-LOOP-LIVENESS-V1 (2026-05-21)
+#
+# A harmless boot-smoke workflow whose only job is to prove the
+# substrate event-trigger-workflow loop is alive on every restart.
+# Fires once per restart after substrate bring-up completes. The
+# absence of this workflow's ledger entry after a boot is a loud
+# signal that the loop is broken — operators don't have to wait
+# for organic friction to notice.
+#
+# Triggered by the synthetic ``loop_health.boot_probe`` event that
+# ``bring_up_substrate.py`` emits after wiring is complete.
+
+workflow_id: loop_health
+instance_id: '{installer.instance_id}'
+name: Self-Control Loop Liveness Sentinel
+description: |
+  Proves the substrate event-trigger-workflow loop is alive on
+  every boot. Fires once per restart after substrate bring-up
+  completes. The presence of a new ledger entry per boot AND a
+  workflow.execution_terminated event with outcome=completed is
+  the load-bearing operator-visible proof of liveness.
+version: "1.0"
+owner: architect
+instance_local: true
+
+bounds:
+  iteration_count: 1
+  wall_time_seconds: 30
+
+verifier:
+  flavor: deterministic
+  check: terminated
+
+triggers:
+  - event_type: loop_health.boot_probe
+    event_selector:
+      op: AND
+      operands:
+        # Top-level event_type filter narrows the trigger to ONLY
+        # match boot_probe events. Mirrors self_improvement's
+        # selector shape so the runtime treats it identically.
+        - op: eq
+          path: event_type
+          value: loop_health.boot_probe
+        - op: eq
+          path: instance_id
+          value: '{installer.instance_id}'
+        - op: exists
+          path: payload.boot_id
+
+action_sequence:
+  - id: record_boot_smoke
+    action_type: append_to_ledger
+    parameters:
+      workflow_id: loop_health
+      entry:
+        kind: boot_smoke
+        boot_id: '{idea_payload.boot_id}'
+        booted_at: '{idea_payload.booted_at}'
+    continuation_rules:
+      on_failure: abort

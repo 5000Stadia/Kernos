@@ -814,6 +814,18 @@ class ReasoningService:
 
         Handles both kernel tools and MCP tools. Mirrors the routing in reason().
         """
+        # SELF-CONTROLLED-LOOP-LIVENESS-V1 (2026-05-21): canonicalize
+        # known model-hallucinated tool names before routing. Keeps
+        # critical kernel primitives (manage_plan) reachable even when
+        # the model picks the wrong name. See kernos/kernel/tool_aliases.py.
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        _canonical_name, _was_repaired = canonicalize_tool_name(tool_name)
+        if _was_repaired:
+            logger.info(
+                "TOOL_ALIAS_REPAIR alias=%s canonical=%s",
+                tool_name, _canonical_name,
+            )
+            tool_name = _canonical_name
         if tool_name in self._KERNEL_TOOLS:
             if tool_name == "write_file":
                 if self._files:
