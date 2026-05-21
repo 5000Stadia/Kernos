@@ -61,6 +61,19 @@ _POOL_LEAK_THRESHOLD = int(
 _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES = int(
     os.getenv("KERNOS_GATEWAY_HEALTH_RESTART_AFTER_STRIKES", "5"),
 )
+# HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1 (2026-05-20):
+# tunables for the cross-check that suppresses noise from a
+# tracker-unreliable client.latency when the gateway is alive
+# via other evidence.
+_WARMUP_GRACE_SEC = int(
+    os.getenv("KERNOS_GATEWAY_HEALTH_WARMUP_GRACE_SEC", "60"),
+)
+_INBOUND_TRAFFIC_LIVENESS_WINDOW_SEC = int(
+    os.getenv("KERNOS_HEARTBEAT_LIVENESS_TRAFFIC_WINDOW_SEC", "300"),
+)
+_SUPPRESSION_LOG_EVERY_N = int(
+    os.getenv("KERNOS_HEARTBEAT_SUPPRESSION_LOG_EVERY_N", "10"),
+)
 
 
 @dataclass
@@ -69,6 +82,11 @@ class _MessageCreateCounter:
 
     Wired from ``server.py``'s ``on_socket_event_type`` handler.
     Window-bounded so memory is constant regardless of message rate.
+
+    ``count_in_window`` accepts an optional ``window_sec`` override
+    so different detectors can query their own windows without
+    each owning a private counter. The heartbeat cross-check uses
+    its 300s window; the gateway-deaf detector uses its 600s.
     """
     _events: deque[float]
 
@@ -81,8 +99,11 @@ class _MessageCreateCounter:
     def record(self, ts: float) -> None:
         self._events.append(ts)
 
-    def count_in_window(self, now: float) -> int:
-        cutoff = now - self._window_sec
+    def count_in_window(
+        self, now: float, *, window_sec: int | None = None,
+    ) -> int:
+        window = window_sec if window_sec is not None else self._window_sec
+        cutoff = now - window
         # deque is unordered for membership but ordered for
         # insertion; events come in monotonic time, so a left-pop
         # would work, but we keep the deque immutable here and just
@@ -123,6 +144,7 @@ class GatewayHealthObserver:
         message_create_counter: _MessageCreateCounter,
         runner_inspector: Callable[[], list[tuple[str, float]]] | None = None,
         poll_interval_sec: int = _POLL_INTERVAL_SEC,
+        last_on_message_provider: Callable[[], float] | None = None,
     ) -> None:
         self._instance_id = instance_id
         self._data_dir = data_dir
@@ -142,20 +164,49 @@ class GatewayHealthObserver:
         # reaches _RESTART_AFTER_CONSECUTIVE_HEARTBEAT_STRIKES we
         # log + execv. Reset to 0 on any healthy heartbeat tick.
         self._consecutive_heartbeat_strikes = 0
+        # HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1. Pure on_message
+        # timestamp (not bumped by on_ready/on_resumed). Codex round 1
+        # finding: inbound_event_ts_provider includes lifecycle events
+        # so a post-resume gateway death would have a fresh ts even
+        # with zero real traffic; this provider is bumped only inside
+        # on_message. None during construction; set in start() so
+        # _uptime_sec is honest about "since the observer task began".
+        self._last_on_message_provider = last_on_message_provider
+        self._observer_started_at: float = 0.0
+        self._heartbeat_suppression_count: int = 0
+        self._last_suppression_kind: str = ""
+        self._last_suppression_reason: str = ""
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
             return
+        import time as _time
+        # monotonic for clock-skew immunity. Set BEFORE create_task
+        # so the first tick already sees a real uptime.
+        self._observer_started_at = _time.monotonic()
         self._stop_event = asyncio.Event()
         self._task = asyncio.create_task(self._poll_loop())
         logger.info(
             "GATEWAY_HEALTH_OBSERVER_STARTED instance=%s "
             "poll_interval=%ds deaf_window=%ds heartbeat_threshold=%.1fs "
-            "pool_leak_threshold=%d",
+            "pool_leak_threshold=%d warmup_grace=%ds "
+            "liveness_traffic_window=%ds",
             self._instance_id, self._poll_interval_sec,
             _GATEWAY_DEAF_WINDOW_SEC, _HEARTBEAT_THRESHOLD_SEC,
             _POOL_LEAK_THRESHOLD,
+            _WARMUP_GRACE_SEC, _INBOUND_TRAFFIC_LIVENESS_WINDOW_SEC,
         )
+
+    def _uptime_sec(self) -> float:
+        """Seconds since ``start()`` was called. Returns 0.0 if the
+        observer hasn't been started — callers should treat that
+        as 'still warming up' so warm-up grace remains in effect
+        for tests that exercise the detector without starting the
+        background task."""
+        if self._observer_started_at == 0.0:
+            return 0.0
+        import time as _time
+        return _time.monotonic() - self._observer_started_at
 
     async def stop(self) -> None:
         if self._stop_event is not None:
@@ -234,7 +285,7 @@ class GatewayHealthObserver:
             )
 
         detectors = [
-            ("discord-heartbeat-blocked", self._detect_heartbeat_blocked),
+            ("discord-heartbeat-blocked", lambda: self._detect_heartbeat_blocked(now)),
             ("discord-gateway-deaf", lambda: self._detect_gateway_deaf(now)),
             ("space-runner-stuck", lambda: self._detect_runner_stuck(now)),
             ("discord-connection-pool-leak", self._detect_pool_leak),
@@ -372,31 +423,52 @@ class GatewayHealthObserver:
 
     # ----- detectors -------------------------------------------------
 
-    def _detect_heartbeat_blocked(self) -> FrictionSignal | None:
-        """Mirror the existing watchdog's heartbeat check, but emit
-        as a FrictionSignal instead of incrementing a strike
-        counter. V1: detection only. V3 will fold the watchdog's
-        restart action into this pattern's remediation policy."""
+    def _detect_heartbeat_blocked(
+        self, now: float | None = None,
+    ) -> FrictionSignal | None:
+        """Emit ``DISCORD_HEARTBEAT_BLOCKED`` when ``client.latency``
+        indicates the heartbeat tracker is unhealthy AND the
+        substrate has no independent evidence that the gateway is
+        alive (cross-check, V1 LIVENESS-CROSSCHECK 2026-05-20).
+
+        Optional ``now`` argument mirrors ``_detect_gateway_deaf`` —
+        the poll-loop passes ``time.time()`` once per tick and
+        threads it through both detectors so they see the same
+        instant. Tests pass an explicit value to pin window
+        boundary behavior without racing the internal clock.
+
+        Failure-mode classification + suppression rules:
+
+        | latency value                          | tracker_unreliable | emits when no traffic |
+        | -------------------------------------- | ------------------ | --------------------- |
+        | finite > 0, <= 60s                     | n/a (healthy)      | no                    |
+        | finite > 60s threshold                 | False              | yes (real signal)     |
+        | +inf                                   | False              | yes (pathological)    |
+        | None / nan / -inf / non-numeric / <= 0 | True               | yes (after window)    |
+
+        ``tracker_unreliable`` cases are suppressed when (a) the
+        observer is within the warm-up grace window, or (b)
+        ``_is_inbound_traffic_alive`` returns True (recent
+        on_message-only evidence). Non-suppressible cases (finite
+        high latency, +inf) emit regardless.
+        """
+        if now is None:
+            import time as _time
+            now = _time.time()
         latency = self._latency_provider()
-        if latency is None:
-            reason = "client.latency is None"
-        else:
-            try:
-                finite = math.isfinite(latency)
-            except (TypeError, ValueError):
-                reason = f"client.latency non-numeric: {latency!r}"
-            else:
-                if not finite:
-                    reason = f"client.latency non-finite: {latency}"
-                elif latency <= 0:
-                    reason = f"client.latency non-positive: {latency}"
-                elif latency > _HEARTBEAT_THRESHOLD_SEC:
-                    reason = (
-                        f"client.latency={latency:.1f}s exceeds "
-                        f"threshold {_HEARTBEAT_THRESHOLD_SEC}s"
-                    )
-                else:
-                    return None  # healthy
+
+        reason, tracker_unreliable = self._classify_latency(latency)
+        if reason is None:
+            return None  # healthy
+
+        if tracker_unreliable:
+            if self._uptime_sec() < _WARMUP_GRACE_SEC:
+                self._note_heartbeat_suppression("warmup", reason)
+                return None
+            if self._is_inbound_traffic_alive(now):
+                self._note_heartbeat_suppression("live_traffic", reason)
+                return None
+
         return FrictionSignal(
             signal_type="DISCORD_HEARTBEAT_BLOCKED",
             description=f"Discord heartbeat unhealthy: {reason}",
@@ -408,6 +480,125 @@ class GatewayHealthObserver:
             },
             heuristic=False,
         )
+
+    def _classify_latency(
+        self, latency: Any,
+    ) -> tuple[str | None, bool]:
+        """Return ``(reason, tracker_unreliable)``. ``reason=None``
+        signals 'healthy, no emission'. ``tracker_unreliable=True``
+        flags this as a candidate for cross-check suppression.
+
+        Order of checks matters: ``None`` first (avoids isfinite
+        TypeError); ``isfinite`` in a try/except to handle weird
+        types (string, list, etc.); then the finite branches.
+
+        +inf is treated as a REAL signal (latency is pathologically
+        high) and is NOT suppressible — the tracker IS reporting,
+        the value just happens to be infinity. -inf has no
+        meaningful interpretation; suppressible.
+        """
+        if latency is None:
+            return ("client.latency is None", True)
+        try:
+            finite = math.isfinite(latency)
+        except (TypeError, ValueError):
+            return (
+                f"client.latency non-numeric: {latency!r}", True,
+            )
+        if not finite:
+            try:
+                if math.isnan(latency):
+                    return (
+                        f"client.latency non-finite: {latency}",
+                        True,
+                    )
+                # +inf vs -inf — both isfinite()=False, isnan()=False
+                if latency > 0:
+                    return (
+                        f"client.latency non-finite: {latency} "
+                        f"(infinite)",
+                        False,  # real signal: tracker says infinity
+                    )
+                # -inf
+                return (
+                    f"client.latency non-finite: {latency}", True,
+                )
+            except (TypeError, ValueError):
+                # Belt-and-suspenders if isnan trips on a weird type
+                return (
+                    f"client.latency non-numeric: {latency!r}", True,
+                )
+        if latency <= 0:
+            return (f"client.latency non-positive: {latency}", True)
+        if latency > _HEARTBEAT_THRESHOLD_SEC:
+            return (
+                f"client.latency={latency:.1f}s exceeds threshold "
+                f"{_HEARTBEAT_THRESHOLD_SEC}s",
+                False,  # real signal: tracker is computing, value is bad
+            )
+        return (None, False)  # healthy
+
+    def _is_inbound_traffic_alive(self, now: float) -> bool:
+        """True iff PURE on_message evidence shows the gateway is
+        alive. Two independent signals — either is sufficient:
+
+          * MESSAGE_CREATE socket-event counter > 0 inside
+            ``_INBOUND_TRAFFIC_LIVENESS_WINDOW_SEC`` (proves the
+            websocket is delivering dispatch).
+          * ``last_on_message_provider()`` within the same window
+            (proves the parser + handler fired on real input).
+
+        Both signals are bumped ONLY by real message traffic.
+        ``inbound_event_ts_provider`` (used by ``_detect_gateway_deaf``)
+        is intentionally NOT consulted here because it includes
+        ``on_ready`` / ``on_resumed`` / bootstrap bumps, which would
+        mask a post-resume gateway death.
+
+        Counter absence (None) does NOT short-circuit — the
+        on_message path is checked independently so test fixtures
+        and partial wirings still get an honest answer.
+        """
+        # MESSAGE_CREATE check — explicit window override so we
+        # don't inherit the deaf-detector counter's 600s window.
+        if self._message_create_counter is not None:
+            if self._message_create_counter.count_in_window(
+                now,
+                window_sec=_INBOUND_TRAFFIC_LIVENESS_WINDOW_SEC,
+            ) > 0:
+                return True
+        # on_message-only check — independent of counter wiring
+        if self._last_on_message_provider is not None:
+            last = self._last_on_message_provider()
+            if last and last > 0:
+                idle = now - last
+                if idle < _INBOUND_TRAFFIC_LIVENESS_WINDOW_SEC:
+                    return True
+        return False
+
+    def _note_heartbeat_suppression(
+        self, kind: str, reason: str,
+    ) -> None:
+        """Track suppression so operators can distinguish 'detector
+        is suppressing correctly' from 'detector stopped running'.
+        Per Codex round 1 medium finding: debug-only logs may be
+        invisible during rollout; an INFO log every Nth suppression
+        plus a counter exposed for tests makes suppression
+        observable without spamming."""
+        self._heartbeat_suppression_count += 1
+        self._last_suppression_kind = kind
+        self._last_suppression_reason = reason
+        if (
+            self._heartbeat_suppression_count
+            % _SUPPRESSION_LOG_EVERY_N == 0
+        ):
+            logger.info(
+                "GATEWAY_HEALTH_HEARTBEAT_SUPPRESSED_NOMINAL: "
+                "kind=%s reason=%s suppression_count=%d — detector "
+                "is alive and correctly ignoring tracker noise "
+                "(gateway has real traffic evidence or is in "
+                "warm-up grace).",
+                kind, reason, self._heartbeat_suppression_count,
+            )
 
     def _detect_gateway_deaf(self, now: float) -> FrictionSignal | None:
         """MESSAGE_CREATE socket events observed but on_message

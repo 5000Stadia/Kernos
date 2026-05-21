@@ -679,6 +679,12 @@ async def bring_up_substrate(
                     message_create_counter=getattr(
                         _srv, "_message_create_counter", None,
                     ),
+                    # HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1:
+                    # pure on_message timestamp (not bumped by
+                    # lifecycle handlers). See spec scenario 15.
+                    last_on_message_provider=lambda: getattr(
+                        _srv, "_last_on_message_only_ts", 0.0,
+                    ),
                     runner_inspector=None,  # V1.5 wires this
                 )
                 await _gw_observer.start()

@@ -122,8 +122,10 @@ class _CaptureStore:
 def _make_observer(
     *, latency=0.05, last_inbound=0.0, mc_counter=None,
     runner_inspector=None, store=None, tmp_path=None,
+    last_on_message=0.0,
+    past_warmup=True,
 ):
-    return GatewayHealthObserver(
+    obs = GatewayHealthObserver(
         instance_id="test_inst",
         data_dir=str(tmp_path) if tmp_path else "./data",
         pattern_store=store or _CaptureStore(),
@@ -131,7 +133,16 @@ def _make_observer(
         inbound_event_ts_provider=lambda: last_inbound,
         message_create_counter=mc_counter,
         runner_inspector=runner_inspector,
+        last_on_message_provider=lambda: last_on_message,
     )
+    if past_warmup:
+        # Backdate the start marker so _uptime_sec returns a value
+        # past the warm-up grace window. monotonic() is a counter
+        # not a wall clock; subtracting an hour from "now" pushes
+        # uptime far past any reasonable warmup default.
+        import time as _time
+        obs._observer_started_at = _time.monotonic() - 3600.0
+    return obs
 
 
 class TestDetectHeartbeatBlocked:
@@ -167,6 +178,414 @@ class TestDetectHeartbeatBlocked:
         obs = _make_observer(latency=None, tmp_path=tmp_path)
         signal = obs._detect_heartbeat_blocked()
         assert signal is not None
+
+
+class TestHeartbeatLivenessCrossCheck:
+    """Behavior tests for the HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1
+    cross-check + warm-up suppression. Covers the spec's acceptance
+    criteria (scenarios 1-18). Pure-function focus where possible —
+    we exercise the detector synchronously, not the running observer
+    task."""
+
+    # --- scenarios 1, 2: live traffic suppresses tracker-unreliable
+
+    def test_scenario1_nan_with_message_create_suppressed(self, tmp_path):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency=float("nan"), mc_counter=counter, tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+        assert obs._heartbeat_suppression_count == 1
+        assert obs._last_suppression_kind == "live_traffic"
+
+    def test_scenario2_none_latency_with_on_message_suppressed(self, tmp_path):
+        obs = _make_observer(
+            latency=None, last_on_message=time.time(), tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+        assert obs._last_suppression_kind == "live_traffic"
+
+    # --- scenario 3: no liveness evidence → emit
+
+    def test_scenario3_nan_no_traffic_no_on_message_emits(self, tmp_path):
+        obs = _make_observer(latency=float("nan"), tmp_path=tmp_path)
+        signal = obs._detect_heartbeat_blocked()
+        assert signal is not None
+        assert obs._heartbeat_suppression_count == 0
+
+    # --- scenario 4: warm-up suppresses
+
+    def test_scenario4_nan_within_warmup_suppressed(self, tmp_path):
+        obs = _make_observer(
+            latency=float("nan"), tmp_path=tmp_path, past_warmup=False,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+        assert obs._last_suppression_kind == "warmup"
+
+    # --- scenario 5: real high latency emits even with traffic
+
+    def test_scenario5_high_latency_with_traffic_emits(self, tmp_path):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency=120.0, mc_counter=counter, tmp_path=tmp_path,
+        )
+        signal = obs._detect_heartbeat_blocked()
+        assert signal is not None
+        assert "exceeds threshold" in signal.description
+        assert obs._heartbeat_suppression_count == 0
+
+    # --- scenario 6: healthy returns None always
+
+    def test_scenario6_healthy_returns_none(self, tmp_path):
+        obs = _make_observer(latency=0.05, tmp_path=tmp_path)
+        assert obs._detect_heartbeat_blocked() is None
+
+    # --- scenarios 7-8: counter=None + on_message-only behavior
+
+    def test_scenario7_counter_none_recent_on_message_suppressed(self, tmp_path):
+        obs = _make_observer(
+            latency=float("nan"),
+            mc_counter=None,
+            last_on_message=time.time(),
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+
+    def test_scenario8_counter_none_no_on_message_emits(self, tmp_path):
+        obs = _make_observer(
+            latency=float("nan"),
+            mc_counter=None,
+            last_on_message=0.0,
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is not None
+
+    # --- scenario 9: warm-up does NOT suppress real high-latency
+
+    def test_scenario9_high_latency_during_warmup_still_emits(self, tmp_path):
+        obs = _make_observer(
+            latency=120.0, tmp_path=tmp_path, past_warmup=False,
+        )
+        signal = obs._detect_heartbeat_blocked()
+        assert signal is not None
+        assert obs._heartbeat_suppression_count == 0
+
+    # --- scenario 10: +inf is pathological, NOT suppressible
+
+    def test_scenario10_positive_inf_emits_even_with_traffic(self, tmp_path):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency=float("inf"), mc_counter=counter, tmp_path=tmp_path,
+        )
+        signal = obs._detect_heartbeat_blocked()
+        assert signal is not None
+        assert "infinite" in signal.description
+
+    # --- scenario 11: -inf IS suppressible
+
+    def test_scenario11_negative_inf_suppressible_with_traffic(self, tmp_path):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency=float("-inf"), mc_counter=counter, tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+        # Without traffic, still emits
+        obs2 = _make_observer(latency=float("-inf"), tmp_path=tmp_path)
+        assert obs2._detect_heartbeat_blocked() is not None
+
+    # --- scenarios 12-13: non-numeric + negative
+
+    def test_scenario12_non_numeric_suppressible(self, tmp_path):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency="foo",  # type: ignore[arg-type]
+            mc_counter=counter, tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+        obs2 = _make_observer(
+            latency="foo", tmp_path=tmp_path,  # type: ignore[arg-type]
+        )
+        signal = obs2._detect_heartbeat_blocked()
+        assert signal is not None
+        assert "non-numeric" in signal.description
+
+    def test_scenario13_negative_finite_suppressible(self, tmp_path):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency=-1.0, mc_counter=counter, tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked() is None
+
+    # --- scenario 14: window boundary
+    #
+    # Codex round 3 finding: the two signal sources have different
+    # boundary semantics by construction:
+    #
+    #   * on_message path uses strict ``<`` (matches the
+    #     existing _detect_gateway_deaf idle_sec check at line 444)
+    #   * MESSAGE_CREATE counter uses inclusive ``>=`` cutoff (the
+    #     existing count_in_window implementation at line ~107)
+    #
+    # In production these differ by a single sample at the exact
+    # boundary — irrelevant given clock resolution — but pin the
+    # behavior anyway so a future change doesn't drift either side
+    # silently.
+
+    def test_scenario14_on_message_just_inside_window_suppresses(self, tmp_path):
+        now = 1_000_000.0  # deterministic; pass to detector via `now` arg
+        obs = _make_observer(
+            latency=float("nan"),
+            last_on_message=now - 299.0,  # idle = 299, < 300 → suppress
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked(now=now) is None
+
+    def test_scenario14_on_message_at_exact_boundary_emits(self, tmp_path):
+        """Strict-less-than: idle == 300.0 is NOT < 300 → emit.
+        Pins on_message-path boundary semantics."""
+        now = 1_000_000.0
+        obs = _make_observer(
+            latency=float("nan"),
+            last_on_message=now - 300.0,
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked(now=now) is not None
+
+    def test_scenario14_on_message_just_outside_window_emits(self, tmp_path):
+        now = 1_000_000.0
+        obs = _make_observer(
+            latency=float("nan"),
+            last_on_message=now - 301.0,
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked(now=now) is not None
+
+    def test_scenario14_counter_at_exact_boundary_suppresses(self, tmp_path):
+        """Inclusive ``>=`` cutoff: event at exactly now-300 counts.
+        Pins counter-path boundary semantics."""
+        now = 1_000_000.0
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(now - 300.0)
+        obs = _make_observer(
+            latency=float("nan"), mc_counter=counter, tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked(now=now) is None
+
+    def test_scenario14_counter_just_past_boundary_emits(self, tmp_path):
+        now = 1_000_000.0
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(now - 300.5)
+        obs = _make_observer(
+            latency=float("nan"), mc_counter=counter, tmp_path=tmp_path,
+        )
+        assert obs._detect_heartbeat_blocked(now=now) is not None
+
+    # --- scenario 15: lifecycle leak negative test
+
+    def test_scenario15_lifecycle_fresh_ts_does_not_leak(self, tmp_path):
+        """Codex round 2 tightening: this is the load-bearing
+        negative test that proves lifecycle bumps (on_ready,
+        on_resumed) do NOT leak into the heartbeat cross-check.
+
+        Setup forces the wrong cross-check signal (lifecycle ts is
+        fresh = NOW) to be available, while the right signal
+        (on_message-only ts = 0.0, counter = None) is empty. If
+        the detector accidentally consults inbound_event_ts_provider,
+        this test fails."""
+        now = time.time()
+        obs = _make_observer(
+            latency=float("nan"),
+            mc_counter=None,  # no counter wired
+            last_inbound=now,  # lifecycle bumped to NOW (mocking on_resumed)
+            last_on_message=0.0,  # no real message ever received
+            tmp_path=tmp_path,
+        )
+        signal = obs._detect_heartbeat_blocked()
+        assert signal is not None, (
+            "Lifecycle event leaked into heartbeat cross-check — "
+            "detector should ONLY consult on_message-only ts + "
+            "MESSAGE_CREATE counter, never inbound_event_ts."
+        )
+
+    def test_scenario15b_no_lifecycle_bumps_in_server_module(self):
+        """Wiring assertion: ``_bump_on_message_only_ts()`` must
+        appear EXACTLY ONCE in server.py, and that call's enclosing
+        function MUST be ``on_message``. Additionally, writes to
+        the ``_last_on_message_only_ts`` global may only occur
+        inside ``_bump_on_message_only_ts`` itself (and at module
+        init / annotation).
+
+        Codex round 3 tightening: a permissive forbidden-set guard
+        misses leaks via newly-added lifecycle helpers, renamed
+        bootstrap paths, indirect calls, or direct assignment to
+        the global. Exact-count + enclosing-function + assignment
+        scope cover all four."""
+        import ast
+        import kernos.server as srv_mod
+        src = open(srv_mod.__file__).read()
+        tree = ast.parse(src)
+
+        bump_call_sites: list[tuple[str, int]] = []
+        global_writes: list[tuple[str, int]] = []
+        # Track call-stack of enclosing function/method when walking
+        # so nested call lookup is exact.
+
+        def walk_func(node, enclosing: str):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.Call) and (
+                    isinstance(child.func, ast.Name)
+                    and child.func.id == "_bump_on_message_only_ts"
+                ):
+                    bump_call_sites.append((enclosing, child.lineno))
+                elif isinstance(child, ast.Call) and (
+                    isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "_bump_on_message_only_ts"
+                ):
+                    # qualified call (mod._bump_on_message_only_ts())
+                    bump_call_sites.append((enclosing, child.lineno))
+                if isinstance(child, ast.Assign):
+                    for tgt in child.targets:
+                        if (
+                            isinstance(tgt, ast.Name)
+                            and tgt.id == "_last_on_message_only_ts"
+                        ):
+                            global_writes.append((enclosing, child.lineno))
+                # Recurse into nested funcs / blocks
+                if isinstance(
+                    child, (ast.FunctionDef, ast.AsyncFunctionDef),
+                ):
+                    walk_func(child, child.name)
+                else:
+                    walk_func(child, enclosing)
+
+        # Module-level walk (annotations + module-level assignments
+        # don't count as "writes" we care about restricting)
+        for top in ast.iter_child_nodes(tree):
+            if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk_func(top, top.name)
+
+        # Exactly one direct call, inside on_message
+        assert len(bump_call_sites) == 1, (
+            f"_bump_on_message_only_ts() must appear exactly once "
+            f"in server.py; found {len(bump_call_sites)} site(s): "
+            f"{bump_call_sites}"
+        )
+        enclosing, _lineno = bump_call_sites[0]
+        assert enclosing == "on_message", (
+            f"_bump_on_message_only_ts() must be called from "
+            f"on_message; found in {enclosing!r}. Adding it to "
+            f"any lifecycle handler breaks the heartbeat "
+            f"cross-check (spec scenario 15)."
+        )
+
+        # Writes to _last_on_message_only_ts: only allowed inside
+        # _bump_on_message_only_ts itself
+        for enclosing, lineno in global_writes:
+            assert enclosing == "_bump_on_message_only_ts", (
+                f"_last_on_message_only_ts written from {enclosing!r} "
+                f"at line {lineno}. This global may only be mutated "
+                f"by _bump_on_message_only_ts (or module init), or "
+                f"the lifecycle-leak guarantee is broken."
+            )
+
+    # --- scenario 16: V1.5 strike interaction
+    # The strike counter increment happens in _tick (not in
+    # _detect_heartbeat_blocked), so we exercise it through _tick.
+
+    @pytest.mark.asyncio
+    async def test_scenario16_suppressed_tick_does_not_increment_strikes(
+        self, tmp_path,
+    ):
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs = _make_observer(
+            latency=float("nan"), mc_counter=counter, tmp_path=tmp_path,
+        )
+        await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 0
+
+    @pytest.mark.asyncio
+    async def test_scenario16b_suppressed_after_strikes_clears_counter(
+        self, tmp_path,
+    ):
+        # First a few real strikes (no traffic, nan, past warmup)
+        obs = _make_observer(latency=float("nan"), tmp_path=tmp_path)
+        await obs._tick()
+        await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 2
+        # Now traffic arrives — suppressed; strike counter clears
+        # (because the else-branch in _tick resets to 0 when
+        # heartbeat_unhealthy_this_tick is False)
+        counter = _MessageCreateCounter(window_sec=600)
+        counter.record(time.time())
+        obs._message_create_counter = counter
+        await obs._tick()
+        assert obs._consecutive_heartbeat_strikes == 0
+
+    # --- scenario 17: suppression log fires every Nth time
+
+    def test_scenario17_suppression_log_emits_every_10th(
+        self, tmp_path, caplog,
+    ):
+        import logging as _logging
+        obs = _make_observer(
+            latency=float("nan"),
+            last_on_message=time.time(),
+            tmp_path=tmp_path,
+        )
+        with caplog.at_level(_logging.INFO, logger="kernos.kernel.gateway_health"):
+            for _ in range(10):
+                obs._detect_heartbeat_blocked()
+        assert obs._heartbeat_suppression_count == 10
+        nominal = [
+            r for r in caplog.records
+            if "GATEWAY_HEALTH_HEARTBEAT_SUPPRESSED_NOMINAL" in r.getMessage()
+        ]
+        assert len(nominal) == 1, (
+            f"Expected exactly one nominal log per 10 suppressions, "
+            f"got {len(nominal)}"
+        )
+
+    # --- scenario 18: finite high latency reaches FrictionSignal
+
+    def test_scenario18_real_signal_reaches_friction_signal(self, tmp_path):
+        obs = _make_observer(latency=120.0, tmp_path=tmp_path)
+        signal = obs._detect_heartbeat_blocked()
+        assert signal is not None
+        assert signal.signal_type == "DISCORD_HEARTBEAT_BLOCKED"
+        assert signal.heuristic is False
+        # Real signals do NOT count as suppressions
+        assert obs._heartbeat_suppression_count == 0
+
+
+class TestMessageCreateCounterWindowOverride:
+    """Codex round 2 finding 1: count_in_window must accept an
+    optional window_sec override so different detectors can query
+    their own windows."""
+
+    def test_default_window_used_when_no_override(self):
+        c = _MessageCreateCounter(window_sec=600)
+        now = time.time()
+        c.record(now - 500)  # inside 600 default
+        assert c.count_in_window(now) == 1
+
+    def test_override_window_can_be_tighter(self):
+        c = _MessageCreateCounter(window_sec=600)
+        now = time.time()
+        c.record(now - 500)  # outside 300 override
+        assert c.count_in_window(now, window_sec=300) == 0
+
+    def test_override_window_can_be_wider(self):
+        c = _MessageCreateCounter(window_sec=60)
+        now = time.time()
+        c.record(now - 100)  # outside 60 default, inside 300 override
+        assert c.count_in_window(now, window_sec=300) == 1
 
 
 class TestDetectGatewayDeaf:

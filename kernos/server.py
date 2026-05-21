@@ -417,12 +417,32 @@ _DISCORD_WATCHDOG_DISABLE: bool = (
 _last_inbound_event_ts: float = 0.0
 _gateway_unhealthy_strikes: int = 0
 
+# HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1 (2026-05-20). Pure
+# on_message timestamp used by the gateway-health heartbeat
+# cross-check. MUST be bumped ONLY from inside the on_message body
+# — never from on_ready, on_resumed, bootstrap, or any other
+# lifecycle path. If lifecycle events bumped this, a gateway dying
+# right after on_resumed would have a fresh timestamp with zero
+# real traffic, and the cross-check would suppress the friction
+# signal for the entire liveness window. Scenario 15 of the spec
+# is the negative test that this stays clean.
+_last_on_message_only_ts: float = 0.0
+
 
 def _mark_inbound_event() -> None:
     """Bump ``_last_inbound_event_ts``. Called from on_message,
     on_ready, on_resumed."""
     global _last_inbound_event_ts
     _last_inbound_event_ts = _time_module.time()
+
+
+def _bump_on_message_only_ts() -> None:
+    """Bump ``_last_on_message_only_ts``. ONLY call from inside
+    on_message. Adding this to any lifecycle handler breaks the
+    heartbeat liveness cross-check (see spec
+    HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1, scenario 15)."""
+    global _last_on_message_only_ts
+    _last_on_message_only_ts = _time_module.time()
 
 
 def _is_gateway_heartbeat_unhealthy() -> tuple[bool, str]:
@@ -1716,6 +1736,9 @@ async def on_message(message):
     # Bump the timestamp regardless of whether we'll respond — even
     # bot-own messages and other-bot messages indicate gateway health.
     _mark_inbound_event()
+    # HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1: pure on_message
+    # bump (NO lifecycle handlers call this — see scenario 15).
+    _bump_on_message_only_ts()
 
     # Deduplicate gateway re-deliveries
     if message.id in _seen_message_ids:
