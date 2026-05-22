@@ -4388,6 +4388,15 @@ class MessageHandler:
                         response = await self._handle_tools_command(
                             primary_ctx, _cmd,
                         )
+                    elif (
+                        _cmd_lower == "/improvement_status"
+                        or _cmd_lower.startswith("/improvement_status ")
+                    ):
+                        # IMPROVEMENT-ATTEMPT-LEDGER-V1 (2026-05-22):
+                        # owner-only ledger inspection.
+                        response = await self._handle_improvement_status_command(
+                            primary_ctx, _cmd,
+                        )
                     elif _cmd_lower.startswith("/approve "):
                         # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21):
                         # two-step CONFIRM contract per spec D3.
@@ -5602,6 +5611,40 @@ class MessageHandler:
             )
         # detail form: /tools <name>
         return render_operator_detail(self._tool_catalog, arg)
+
+    async def _handle_improvement_status_command(
+        self, ctx: TurnContext, cmd: str,
+    ) -> str:
+        """IMPROVEMENT-ATTEMPT-LEDGER-V1 (2026-05-22): owner-only
+        ledger inspection.
+
+        Forms:
+          ``/improvement_status`` — list recent 5 attempts.
+          ``/improvement_status <attempt_id>`` — detail view for one.
+        """
+        if not self._instance_db or not ctx.member_id:
+            return "Improvement ledger isn't available in this environment."
+        _member = await self._instance_db.get_member(ctx.member_id)
+        if not _member or _member.get("role") != "owner":
+            return "Ledger inspection is owner-only."
+
+        from kernos.kernel import improvement_ledger as _ledger
+        conn = self._instance_db._conn
+        if conn is None:
+            return "Instance DB not connected."
+
+        parts = cmd.strip().split(maxsplit=1)
+        if len(parts) == 1:
+            attempts = await _ledger.list_recent_attempts(
+                conn, instance_id=ctx.instance_id, limit=5,
+            )
+            return _ledger.render_recent_attempts(attempts)
+
+        attempt_id = parts[1].strip()
+        attempt = await _ledger.get_attempt(conn, attempt_id)
+        commits = await _ledger.get_attempt_commits(conn, attempt_id)
+        events = await _ledger.get_attempt_events(conn, attempt_id)
+        return _ledger.render_attempt_detail(attempt, commits, events)
 
     async def _handle_disconnect(self, ctx: TurnContext) -> str:
         """Disconnect the current platform channel from the member's account."""

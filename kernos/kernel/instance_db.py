@@ -200,6 +200,59 @@ CREATE TABLE IF NOT EXISTS instance_posture (
     last_updated_at  TEXT,
     last_updated_by  TEXT
 );
+
+-- IMPROVEMENT-ATTEMPT-LEDGER-V1 (2026-05-22): observer-visible
+-- ledger for the autonomous-improvement loop. Three tables
+-- (top-level attempt + per-commit truth + append-only event
+-- narrative). Operator reads via /improvement_status slash.
+CREATE TABLE IF NOT EXISTS improvement_attempts (
+    attempt_id              TEXT PRIMARY KEY,
+    instance_id             TEXT NOT NULL,
+    started_at              TEXT NOT NULL,
+    ended_at                TEXT,
+    spec_requirement        TEXT NOT NULL,
+    primary_coding_agent    TEXT,
+    reviewer_coding_agent   TEXT,
+    worktree_path           TEXT,
+    spec_iterations         INTEGER NOT NULL DEFAULT 0,
+    spec_iterations_outcome TEXT,
+    impl_iterations         INTEGER NOT NULL DEFAULT 0,
+    impl_iterations_outcome TEXT,
+    final_commit_sha        TEXT,
+    test_outcome            TEXT,
+    first_pass_green        INTEGER,
+    final_state             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_improvement_attempts_started
+    ON improvement_attempts (started_at DESC);
+
+-- Per-cycle commit truth. One row per commit cycle (recovery
+-- cycles produce additional rows after the original commit).
+CREATE TABLE IF NOT EXISTS improvement_attempt_commits (
+    attempt_id                       TEXT NOT NULL,
+    commit_sequence                  INTEGER NOT NULL,
+    commit_sha                       TEXT NOT NULL,
+    parent_sha                       TEXT NOT NULL,
+    pushed_at                        TEXT NOT NULL,
+    approval_id                      TEXT,
+    test_outcome_after_this_commit   TEXT,
+    recovery_trigger                 TEXT,
+    PRIMARY KEY (attempt_id, commit_sequence)
+);
+
+-- Append-only per-iteration event narrative.
+CREATE TABLE IF NOT EXISTS improvement_attempt_events (
+    event_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id TEXT NOT NULL,
+    sequence   INTEGER NOT NULL,
+    timestamp  TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_improvement_events_attempt
+    ON improvement_attempt_events (attempt_id, sequence);
 """
 
 
