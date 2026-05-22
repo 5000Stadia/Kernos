@@ -113,6 +113,17 @@ class EventType(str, Enum):
     # Payload: field ("posture_profile" | "gate_mode"), old,
     #          new, actor (member_id)
 
+    # TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22): emitted when
+    # an agent's register_tool call for a hard_write or
+    # external_agent_read tool enters pending-operator-approval
+    # state. The approval-on-approve callback emits TOOL_REGISTRATION_
+    # APPROVED once the operator confirms.
+    TOOL_REGISTRATION_PENDING = "tool.registration_pending"
+    # Payload: name, classification, request_id, registration_hash,
+    #          space_id
+    TOOL_REGISTRATION_APPROVED = "tool.registration_approved"
+    # Payload: name, classification, request_id, space_id, actor
+
     # --- Phase 3C: Proactive Awareness ---
     PROACTIVE_INSIGHT = "proactive.insight"
     # Payload: whisper_id, insight_text, delivery_class, source_space_id,

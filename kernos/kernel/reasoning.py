@@ -939,8 +939,14 @@ class ReasoningService:
             elif tool_name == "register_tool":
                 if self._workspace:
                     _desc_file = tool_input.get("descriptor_file", "") or tool_input
+                    # TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22):
+                    # thread receipts-substrate context so workspace
+                    # can gate hard_write / external_agent_read tools.
                     _register_msg = await self._workspace.register_tool(
                         request.instance_id, request.active_space_id, _desc_file,
+                        member_id=request.member_id or "",
+                        data_dir=os.environ.get("KERNOS_DATA_DIR", "./data"),
+                        event_stream=self._events,
                     )
                     # SYSTEM-REFERENCE-CANVAS-SEED Pillar 2: append a page to
                     # the member's My Tools canvas. Best-effort — never

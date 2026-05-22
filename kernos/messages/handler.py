@@ -5200,6 +5200,52 @@ class MessageHandler:
             invoking_member_id=ctx.member_id or "",
             event_stream=_event_stream,
         )
+        if not ok:
+            return message
+
+        # TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22): dispatch
+        # post-approval activation callback by receipt kind. The
+        # approve() call above already transitioned state +
+        # emitted the decision event; we now run the kind-specific
+        # downstream work and append its result to the operator
+        # message. Receipts with unknown / no kind continue working
+        # as before (no callback runs, message is the approve()
+        # result alone).
+        kind = receipt.get("kind", "")
+        if kind == "tool_registration" and self._workspace is not None:
+            try:
+                import json as _json
+                binding_payload = _json.loads(
+                    receipt.get("binding_payload_json", "{}"),
+                )
+            except Exception as _exc:
+                logger.warning(
+                    "TOOL_REGISTRATION_PAYLOAD_PARSE_FAILED "
+                    "approval_id=%s exc=%s", approval_id, _exc,
+                )
+                return message + (
+                    "\n\nNote: activation callback could not parse "
+                    "the receipt's binding payload — receipt stays "
+                    "approved; agent must re-register."
+                )
+            try:
+                activation_msg = await self._workspace.activate_pending_registration(
+                    approval_id=approval_id,
+                    binding_payload=binding_payload,
+                    event_stream=_event_stream,
+                )
+                return message + "\n\n" + activation_msg
+            except Exception as _exc:
+                logger.warning(
+                    "TOOL_REGISTRATION_ACTIVATION_FAILED "
+                    "approval_id=%s exc=%s", approval_id, _exc,
+                )
+                return message + (
+                    f"\n\nNote: activation callback raised "
+                    f"({_exc}). Receipt stays approved; agent must "
+                    f"re-register the tool to retry."
+                )
+
         return message
 
     async def _handle_reject_command(self, ctx: TurnContext, cmd: str) -> str:

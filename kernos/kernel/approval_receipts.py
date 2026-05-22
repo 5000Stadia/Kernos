@@ -205,6 +205,63 @@ async def get_receipt(
     return dict(row) if row else None
 
 
+async def find_pending_by_binding_field(
+    *, data_dir: str | Path, instance_id: str, kind: str,
+    field: str, value: str,
+) -> dict | None:
+    """Look up a pending receipt by an exact-match on a
+    ``binding_payload_json`` field. Used by callers (e.g.
+    ``register_tool``) that need idempotency on a content-derived
+    identifier (e.g. registration hash) so retries return the
+    same approval_id rather than issuing a duplicate receipt.
+
+    Returns the most recent pending receipt matching the predicate,
+    or None.
+
+    TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22).
+    """
+    async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
+        db.row_factory = aiosqlite.Row
+        # json_extract works on the standard SQLite JSON1 extension,
+        # which aiosqlite ships with via the bundled sqlite library.
+        async with db.execute(
+            "SELECT * FROM approval_receipts "
+            "WHERE instance_id = ? AND kind = ? AND state = 'pending' "
+            "AND json_extract(binding_payload_json, '$.' || ?) = ? "
+            "ORDER BY requested_at DESC LIMIT 1",
+            (instance_id, kind, field, value),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def find_recent_terminal_by_binding_field(
+    *, data_dir: str | Path, instance_id: str, kind: str,
+    field: str, value: str,
+) -> dict | None:
+    """Look up the most recent terminal-state (approved/rejected/
+    expired) receipt by binding field. Used by callers that need
+    to report the prior decision when a fresh retry hits a
+    historical entry (e.g. a register_tool retry after the
+    operator rejected the prior receipt — caller wants to surface
+    the rejection reason).
+
+    Returns the row or None.
+    """
+    async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM approval_receipts "
+            "WHERE instance_id = ? AND kind = ? "
+            "AND state IN ('approved','rejected','expired') "
+            "AND json_extract(binding_payload_json, '$.' || ?) = ? "
+            "ORDER BY decided_at DESC LIMIT 1",
+            (instance_id, kind, field, value),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def _verify_event_in_db(
     *, data_dir: str | Path, event_id: str, instance_id: str,
 ) -> bool:

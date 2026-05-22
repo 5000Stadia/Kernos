@@ -373,6 +373,16 @@ class WorkspaceManager:
 
     # --- Tool Registration ---
 
+    # TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22): tools that
+    # declare these classifications enter a pending-approval state
+    # rather than auto-registering. The operator approves via the
+    # existing /approve flow; on approve, the registration activates
+    # through the receipts callback.
+    _GATED_CLASSIFICATIONS: frozenset[str] = frozenset({
+        "hard_write", "external_agent_read",
+    })
+    _RECEIPT_KIND_TOOL_REGISTRATION: str = "tool_registration"
+
     async def register_tool(
         self,
         instance_id: str,
@@ -380,6 +390,9 @@ class WorkspaceManager:
         descriptor_file: str | dict,
         *,
         force: bool = False,
+        member_id: str = "",
+        data_dir: str = "",
+        event_stream: Any = None,
     ) -> str:
         """Validate a descriptor and register the tool in the catalog.
 
@@ -505,24 +518,218 @@ class WorkspaceManager:
         except OSError as exc:
             return f"Failed to read tool source for registration hash: {exc}"
 
-        # 7. Register in catalog
+        # 6e. TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22): if the
+        # descriptor declares a gated classification (hard_write or
+        # external_agent_read), defer activation pending operator
+        # approval. The receipts substrate provides durability +
+        # idempotency. v1 documented behavior: unknown / unset
+        # classification auto-approves (existing behavior); tighten
+        # in a future spec after the catalog audit lands.
+        _classification = (
+            getattr(extended_descriptor, "gate_classification", "") or ""
+        )
+        if (
+            _classification in self._GATED_CLASSIFICATIONS
+            and data_dir  # gate only when caller supplies receipts-substrate context
+        ):
+            gate_result = await self._gate_registration_via_receipt(
+                instance_id=instance_id,
+                space_id=space_id,
+                name=name,
+                description=descriptor["description"],
+                descriptor_file=descriptor_file,
+                impl=impl,
+                classification=_classification,
+                registration_hash=registration_hash,
+                force=force,
+                member_id=member_id or "owner",
+                data_dir=data_dir,
+                event_stream=event_stream,
+            )
+            if gate_result is not None:
+                return gate_result
+
+        # 7-8. Activate (catalog + manifest). Extracted into a helper
+        # so the receipts approval callback can re-use the same code.
+        return await self._activate_registration(
+            instance_id=instance_id,
+            space_id=space_id,
+            name=name,
+            descriptor=descriptor,
+            descriptor_file=descriptor_file,
+            impl=impl,
+            registration_hash=registration_hash,
+            extended_descriptor=extended_descriptor,
+            force=force,
+            validation_is_clean=validation.is_clean,
+        )
+
+    async def _gate_registration_via_receipt(
+        self, *,
+        instance_id: str,
+        space_id: str,
+        name: str,
+        description: str,
+        descriptor_file: str,
+        impl: str,
+        classification: str,
+        registration_hash: str,
+        force: bool,
+        member_id: str,
+        data_dir: str,
+        event_stream: Any,
+    ) -> str | None:
+        """TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22).
+
+        Returns the agent-facing message string when activation
+        should be deferred (pending receipt issued / existing
+        pending found / prior rejection surfaced). Returns None to
+        signal "proceed with normal activation" (e.g., a prior
+        approved receipt for the same hash + the activation has
+        not run yet — caller continues to step 7).
+        """
+        from kernos.kernel import approval_receipts as _approvals
+        from kernos.kernel.event_types import EventType
+
+        # Idempotency: same hash already pending → return same request_id.
+        existing_pending = await _approvals.find_pending_by_binding_field(
+            data_dir=data_dir, instance_id=instance_id,
+            kind=self._RECEIPT_KIND_TOOL_REGISTRATION,
+            field="registration_hash", value=registration_hash,
+        )
+        if existing_pending is not None:
+            return (
+                f"Tool registration for '{name}' is already pending "
+                f"owner approval. Request ID: "
+                f"{existing_pending['approval_id']}. Operator will "
+                f"see the request via /approve."
+            )
+
+        # Recent terminal-state lookup: if the prior identical hash
+        # was rejected, surface the rejection reason rather than
+        # silently re-issuing a fresh receipt.
+        recent_terminal = await _approvals.find_recent_terminal_by_binding_field(
+            data_dir=data_dir, instance_id=instance_id,
+            kind=self._RECEIPT_KIND_TOOL_REGISTRATION,
+            field="registration_hash", value=registration_hash,
+        )
+        if recent_terminal is not None and recent_terminal.get("state") == "rejected":
+            reason = (recent_terminal.get("state_reason") or "").strip()
+            return (
+                f"Tool registration for '{name}' (same descriptor + "
+                f"impl) was previously rejected by the operator"
+                + (f": {reason}." if reason else ".")
+                + " Modify the descriptor / impl to retry."
+            )
+        # An approved-but-unactivated row would be unusual (activation
+        # callback runs synchronously with approve); if it happened
+        # (operator pid-killed mid-callback), fall through to
+        # re-activate. The catalog.register call is idempotent on the
+        # name (returns existing entry).
+        if recent_terminal is not None and recent_terminal.get("state") == "approved":
+            return None  # signal: proceed with normal activation
+
+        # Issue a new pending receipt.
+        binding_payload = {
+            "kind": self._RECEIPT_KIND_TOOL_REGISTRATION,
+            "instance_id": instance_id,
+            "space_id": space_id,
+            "name": name,
+            "description": description,
+            "descriptor_file": descriptor_file,
+            "impl": impl,
+            "classification": classification,
+            "registration_hash": registration_hash,
+            "force": force,
+        }
+        summary = (
+            f"Tool registration: {name!r} ({classification}). "
+            f"From space {space_id}. /approve to activate."
+        )
+        try:
+            approval_id = await _approvals.request_approval(
+                data_dir=data_dir,
+                instance_id=instance_id,
+                kind=self._RECEIPT_KIND_TOOL_REGISTRATION,
+                requested_for_actor=member_id,
+                operator_actor_id=member_id,
+                request_summary=summary,
+                binding_payload=binding_payload,
+                event_stream=event_stream,
+            )
+        except Exception as exc:
+            logger.warning(
+                "TOOL_REGISTER_GATE_FAILED name=%s exc=%s",
+                name, exc,
+            )
+            return (
+                f"Tool registration for '{name}' could not be gated: "
+                f"{exc}. Tool was NOT registered."
+            )
+
+        if event_stream is not None:
+            try:
+                await event_stream.emit(
+                    instance_id, EventType.TOOL_REGISTRATION_PENDING.value,
+                    {
+                        "name": name,
+                        "classification": classification,
+                        "request_id": approval_id,
+                        "registration_hash": registration_hash,
+                        "space_id": space_id,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "TOOL_REGISTRATION_PENDING emit failed: %s", exc,
+                )
+
+        logger.info(
+            "TOOL_REGISTRATION_PENDING name=%s classification=%s "
+            "request_id=%s hash=%s space=%s",
+            name, classification, approval_id,
+            registration_hash[:12], space_id,
+        )
+        return (
+            f"Tool registration for '{name}' ({classification}) is "
+            f"pending owner approval. Request ID: {approval_id}. The "
+            f"owner sees a notification; the tool surfaces on next "
+            f"assemble after `/approve {approval_id} CONFIRM`."
+        )
+
+    async def _activate_registration(
+        self, *,
+        instance_id: str,
+        space_id: str,
+        name: str,
+        descriptor: dict,
+        descriptor_file: str,
+        impl: str,
+        registration_hash: str,
+        extended_descriptor: Any,
+        force: bool,
+        validation_is_clean: bool,
+    ) -> str:
+        """Steps 7-8 of the original register_tool flow, extracted so
+        the receipts approval callback can re-use it after operator
+        confirmation."""
         if self._catalog:
             self._catalog.register(
                 name=name,
                 description=descriptor["description"],
                 source="workspace",
             )
-            # Store workspace metadata on the catalog entry
             entry = self._catalog.get(name)
             if entry:
                 entry.home_space = space_id
                 entry.implementation = impl
                 entry.stateful = descriptor.get("stateful", True)
-                # Workshop primitive metadata.
                 entry.descriptor_file = descriptor_file
                 entry.service_id = extended_descriptor.service_id
                 entry.registration_hash = registration_hash
-                entry.force_registered = bool(force and not validation.is_clean)
+                entry.force_registered = bool(force and not validation_is_clean)
+        else:
+            entry = None
 
         logger.info(
             "TOOL_REGISTER: name=%s space=%s source=workspace "
@@ -530,10 +737,9 @@ class WorkspaceManager:
             name, space_id,
             extended_descriptor.service_id or "(internal)",
             registration_hash[:12],
-            entry.force_registered if self._catalog and entry else False,
+            entry.force_registered if entry else False,
         )
 
-        # 8. Auto-add to manifest if not already tracked
         manifest = await self.load_manifest(instance_id, space_id)
         existing_artifact = next(
             (a for a in manifest.artifacts if a.catalog_entry == name and a.status == "active"),
@@ -552,8 +758,208 @@ class WorkspaceManager:
                 "catalog_entry": name,
                 "stateful": descriptor.get("stateful", True),
             })
+        return (
+            f"Registered tool '{name}'. It's now available across "
+            f"all spaces via the universal catalog."
+        )
 
-        return f"Registered tool '{name}'. It's now available across all spaces via the universal catalog."
+    async def activate_pending_registration(
+        self, *,
+        approval_id: str,
+        binding_payload: dict,
+        event_stream: Any = None,
+    ) -> str:
+        """TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22).
+
+        Called by the /approve slash command after an operator
+        approves a tool_registration receipt. Reads the binding
+        payload's descriptor + impl from disk (validates they still
+        exist + hash unchanged), then activates via
+        :meth:`_activate_registration`.
+
+        Returns the operator-facing message describing the outcome.
+        Failures land here (descriptor deleted post-approval, hash
+        edited) and surface a clear message; the receipt stays
+        approved (idempotency).
+        """
+        from kernos.kernel.event_types import EventType
+
+        name = binding_payload.get("name", "")
+        instance_id = binding_payload.get("instance_id", "")
+        space_id = binding_payload.get("space_id", "")
+        descriptor_file = binding_payload.get("descriptor_file", "")
+        impl = binding_payload.get("impl", "")
+        recorded_hash = binding_payload.get("registration_hash", "")
+        classification = binding_payload.get("classification", "")
+        force = bool(binding_payload.get("force", False))
+
+        space_dir = self._space_dir(instance_id, space_id)
+        desc_path = space_dir / descriptor_file
+        impl_path = space_dir / impl
+
+        if not desc_path.exists() or not impl_path.is_file():
+            self._write_activation_friction_report(
+                approval_id=approval_id, name=name,
+                reason="descriptor or implementation missing on disk",
+                binding_payload=binding_payload,
+            )
+            return (
+                f"Tool '{name}' was approved but the descriptor or "
+                f"implementation file is no longer on disk. Activation "
+                f"aborted. Agent must re-create the files + re-call "
+                f"register_tool (which will issue a fresh approval)."
+            )
+
+        # Verify the hash hasn't drifted between issue and approval.
+        try:
+            current_hash = compute_registration_hash(
+                desc_path.read_bytes(),
+                impl_path.read_bytes(),
+            )
+        except OSError as exc:
+            self._write_activation_friction_report(
+                approval_id=approval_id, name=name,
+                reason=f"failed to read sources: {exc}",
+                binding_payload=binding_payload,
+            )
+            return (
+                f"Tool '{name}' was approved but its source files "
+                f"could not be read: {exc}. Activation aborted."
+            )
+        if current_hash != recorded_hash:
+            self._write_activation_friction_report(
+                approval_id=approval_id, name=name,
+                reason=(
+                    f"descriptor or implementation was edited after "
+                    f"approval (hash {recorded_hash[:12]} → "
+                    f"{current_hash[:12]})"
+                ),
+                binding_payload=binding_payload,
+            )
+            return (
+                f"Tool '{name}' was approved but the descriptor or "
+                f"implementation was edited since approval. The "
+                f"approved hash {recorded_hash[:12]} no longer "
+                f"matches. Activation aborted — agent must re-call "
+                f"register_tool to issue a fresh approval for the "
+                f"current source."
+            )
+
+        try:
+            descriptor = json.loads(desc_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            self._write_activation_friction_report(
+                approval_id=approval_id, name=name,
+                reason=f"descriptor JSON parse failed: {exc}",
+                binding_payload=binding_payload,
+            )
+            return (
+                f"Tool '{name}' was approved but its descriptor is "
+                f"no longer valid JSON: {exc}. Activation aborted."
+            )
+
+        service_lookup = self._services.get if self._services else None
+        try:
+            extended_descriptor = parse_tool_descriptor(
+                descriptor, service_lookup=service_lookup,
+            )
+        except ToolDescriptorError as exc:
+            self._write_activation_friction_report(
+                approval_id=approval_id, name=name,
+                reason=f"descriptor re-parse failed: {exc}",
+                binding_payload=binding_payload,
+            )
+            return (
+                f"Tool '{name}' was approved but its descriptor "
+                f"re-validation failed: {exc}. Activation aborted."
+            )
+
+        # Re-run authoring-pattern validation in case the impl was
+        # edited (we already caught hash drift above, but the
+        # validation gives us the is_clean flag).
+        validation = validate_tool_file(impl_path)
+
+        activation_msg = await self._activate_registration(
+            instance_id=instance_id,
+            space_id=space_id,
+            name=name,
+            descriptor=descriptor,
+            descriptor_file=descriptor_file,
+            impl=impl,
+            registration_hash=recorded_hash,
+            extended_descriptor=extended_descriptor,
+            force=force,
+            validation_is_clean=validation.is_clean,
+        )
+
+        if event_stream is not None:
+            try:
+                await event_stream.emit(
+                    instance_id,
+                    EventType.TOOL_REGISTRATION_APPROVED.value,
+                    {
+                        "name": name,
+                        "classification": classification,
+                        "request_id": approval_id,
+                        "space_id": space_id,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "TOOL_REGISTRATION_APPROVED emit failed: %s", exc,
+                )
+        logger.info(
+            "TOOL_REGISTRATION_APPROVED name=%s classification=%s "
+            "request_id=%s",
+            name, classification, approval_id,
+        )
+        return activation_msg
+
+    def _write_activation_friction_report(
+        self, *, approval_id: str, name: str, reason: str,
+        binding_payload: dict,
+    ) -> None:
+        """Drop a friction report when a tool_registration approval
+        callback fails post-approval. Best-effort; never raises."""
+        try:
+            from datetime import datetime, timezone
+            data_dir = os.environ.get("KERNOS_DATA_DIR", "./data")
+            friction_dir = Path(data_dir) / "diagnostics" / "friction"
+            friction_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            unique = uuid.uuid4().hex[:8]
+            filepath = (
+                friction_dir
+                / f"FRICTION_{ts}_{unique}_TOOL_REGISTRATION_ACTIVATION.md"
+            )
+            lines = [
+                "# Friction Report: TOOL_REGISTRATION_ACTIVATION",
+                f"Generated: {datetime.now(timezone.utc).isoformat()}",
+                "",
+                "## Description",
+                f"Tool '{name}' was approved (approval_id={approval_id}) "
+                f"but activation failed: {reason}.",
+                "",
+                "## Binding payload",
+                "```json",
+                json.dumps(binding_payload, indent=2),
+                "```",
+                "",
+                "## Recommendation",
+                "Receipt stays approved (terminal). Agent must "
+                "re-create the file(s) and call register_tool again "
+                "to issue a fresh approval.",
+            ]
+            filepath.write_text("\n".join(lines), encoding="utf-8")
+            logger.info(
+                "TOOL_REGISTRATION_ACTIVATION_FRICTION path=%s reason=%s",
+                filepath, reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                "TOOL_REGISTRATION_ACTIVATION_FRICTION_WRITE_FAILED "
+                "exc=%s", exc,
+            )
 
     # --- Workspace Tool Execution ---
 
