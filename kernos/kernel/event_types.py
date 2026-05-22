@@ -105,6 +105,15 @@ class EventType(str, Enum):
     TOOL_UNINSTALLED = "tool.uninstalled"
     # Payload: capability_name
 
+    # POSTURE-SURFACING-CALIBRATION-V1 (2026-05-22): emitted by
+    # the assemble-phase surfacer when a tool is dropped from
+    # the active surface. Gives operators an attributable
+    # friction signal — "page_write withheld 5x while user
+    # asked to write" surfaces post-hoc via event query.
+    TOOL_WITHHELD_FROM_SURFACE = "tool.withheld_from_surface"
+    # Payload: tool_name, reason ("evicted_for_budget" |
+    #          "disabled_service"), tier_attempted, turn_id
+
     # --- Phase 3C: Proactive Awareness ---
     PROACTIVE_INSIGHT = "proactive.insight"
     # Payload: whisper_id, insight_text, delivery_class, source_space_id,

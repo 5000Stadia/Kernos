@@ -147,9 +147,14 @@ class TestPhaseFilesHaveSensibleSize:
         # both legacy string construction and the typed cognitive
         # substrate (CognitiveContext) build, so the size growth is
         # intentional substrate work, not unrelated creep.
+        # Raised again at POSTURE-SURFACING-CALIBRATION-V1 (2026-05-22)
+        # to accommodate the intent-classifier hook, co-surfacing
+        # pair promotion, and the tool.withheld_from_surface
+        # event-emit sites in the surfacing loop. ~30 LOC of
+        # substrate-tier additions, not unrelated creep.
         ("provision", 30, 200),
         ("route", 80, 250),
-        ("assemble", 400, 1100),
+        ("assemble", 400, 1150),
         ("reason", 20, 100),
         ("consequence", 50, 200),
         ("persist", 150, 400),
