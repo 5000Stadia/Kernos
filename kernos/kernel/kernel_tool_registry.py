@@ -153,6 +153,9 @@ def _import_kernel_schemas() -> list[dict]:
         GIT_FETCH_TOOL, GIT_REV_PARSE_TOOL, GIT_STATUS_TOOL,
         GIT_DIFF_FOR_REVIEW_TOOL, GIT_COMMIT_TOOL, GIT_PUSH_TOOL,
     )
+    from kernos.kernel.self_test_gate import (
+        RUN_SELF_TEST_SUITE_TOOL,
+    )
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -243,6 +246,9 @@ def _import_kernel_schemas() -> list[dict]:
         GIT_DIFF_FOR_REVIEW_TOOL,
         GIT_COMMIT_TOOL,
         GIT_PUSH_TOOL,
+        # SELF-TEST-GATE-V1 (2026-05-22): curated smoke test
+        # runner for the autonomous-improvement loop.
+        RUN_SELF_TEST_SUITE_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery

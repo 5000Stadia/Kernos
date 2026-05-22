@@ -371,6 +371,9 @@ class DispatchGate:
             "git_rev_parse",
             "git_status",
             "git_diff_for_review",
+            # SELF-TEST-GATE-V1 (2026-05-22): pytest runner, no
+            # source mutation. workspace-guarded.
+            "run_self_test_suite",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
