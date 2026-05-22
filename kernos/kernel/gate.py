@@ -219,12 +219,22 @@ class DispatchGate:
         if tool_name == "respond_to_parcel":
             # accept triggers a permanent cross-member file delivery →
             # hard_write. decline is reversible / informational → soft_write.
+            # POSTURE-V1 D2 audit (2026-05-22): RETAINED — accept is a
+            # cross-member commitment with no substrate-side undo.
             action = (tool_input or {}).get("action", "")
             return "hard_write" if action == "accept" else "soft_write"
         if tool_name == "canvas_create":
-            # Creating a canvas provisions shared state + fires notifications
-            # to declared members → hard_write so the gate model evaluates
-            # whether it's a reactive user request or a proactive agent move.
+            # POSTURE-GATE-CLASSIFICATION-V1 (2026-05-22): scope-aware.
+            # personal = owner-only state, tombstone-able via
+            # canvas.delete() → soft_write. specific/team = cross-member
+            # notification fires at create-time (reasoning.py emits
+            # NOTIFY events to declared members) + shared state →
+            # hard_write. Unknown/missing scope defaults to hard_write
+            # as the conservative fallback so a schema-bypass caller
+            # never silently demotes.
+            scope = (tool_input or {}).get("scope", "")
+            if scope == "personal":
+                return "soft_write"
             return "hard_write"
         if tool_name == "restart_self":
             # SELF-ADMIN-TOOLS-V1 (2026-05-19): execv replaces the
@@ -235,6 +245,9 @@ class DispatchGate:
             # the model + space-context, AND restart_self has its
             # own two-call confirm=true safeguard inside its handler.
             # Defense in depth: both layers gate.
+            # POSTURE-V1 D2 audit (2026-05-22): RETAINED — process
+            # death cannot be undone by the substrate; calling turn's
+            # response is permanently lost.
             return "hard_write"
         if tool_name == "manage_schedule":
             # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 Fold 5: was
