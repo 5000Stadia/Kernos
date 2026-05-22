@@ -35,6 +35,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # CLI.
 DISCORD_ONLY_COMMANDS: frozenset[str] = frozenset({
     "debug",  # Discord ephemeral diagnostic surface; raw IDs unsafe in SMS
+    # /cc + /codex bypass the agent's consult tool — direct ACPX broker
+    # dispatch to Claude Code / Codex respectively. Operator-only testing
+    # surface that depends on Discord's interaction (defer + chunked
+    # followup). No text-mode value-add: text mode would route through the
+    # consult tool anyway. Promote to universal if multi-surface broker
+    # ergonomics ever matter.
+    "cc",
+    "codex",
 })
 
 
