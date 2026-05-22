@@ -149,6 +149,10 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.tool_introspection import (
         INSPECT_TOOLS_TOOL,
     )
+    from kernos.kernel.git_operations import (
+        GIT_FETCH_TOOL, GIT_REV_PARSE_TOOL, GIT_STATUS_TOOL,
+        GIT_DIFF_FOR_REVIEW_TOOL, GIT_COMMIT_TOOL, GIT_PUSH_TOOL,
+    )
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -229,6 +233,16 @@ def _import_kernel_schemas() -> list[dict]:
         # TOOL-INTROSPECTION-V1 (2026-05-22): natural-prose
         # catalog reader for the agent.
         INSPECT_TOOLS_TOOL,
+        # GIT-OPERATIONS-PRIMITIVES-V1 (2026-05-22): 6 git kernel
+        # tools for the autonomous-improvement loop. Read tools
+        # are 'read' classification; commit + push are
+        # 'hard_write' + receipt-bound.
+        GIT_FETCH_TOOL,
+        GIT_REV_PARSE_TOOL,
+        GIT_STATUS_TOOL,
+        GIT_DIFF_FOR_REVIEW_TOOL,
+        GIT_COMMIT_TOOL,
+        GIT_PUSH_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery

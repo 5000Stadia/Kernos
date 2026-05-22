@@ -235,6 +235,51 @@ async def find_pending_by_binding_field(
     return dict(row) if row else None
 
 
+async def set_outcome_field(
+    *, data_dir: str | Path, approval_id: str, field: str, value: Any,
+) -> bool:
+    """Atomically write/update a field in ``outcome_payload_json``.
+
+    GIT-OPERATIONS-PRIMITIVES-V1 (2026-05-22): ``git_commit``
+    uses this to write back the new ``commit_sha`` after a
+    successful commit. The receipt's outcome payload is the
+    contract surface ``git_push`` reads to verify the worktree's
+    HEAD matches what the operator approved.
+
+    Returns ``True`` on success, ``False`` if the receipt isn't
+    found or isn't writable (e.g., terminal-state already
+    consumed). The update is single-statement so concurrent
+    writers don't lose data.
+    """
+    async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
+        # Read current outcome to merge.
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT outcome_payload_json FROM approval_receipts "
+            "WHERE approval_id = ?",
+            (approval_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return False
+        try:
+            outcome = json.loads(row[0] or "{}")
+        except json.JSONDecodeError:
+            outcome = {}
+        outcome[field] = value
+        await db.execute(
+            "UPDATE approval_receipts SET outcome_payload_json = ? "
+            "WHERE approval_id = ?",
+            (json.dumps(outcome, separators=(",", ":")), approval_id),
+        )
+        await db.commit()
+    logger.info(
+        "APPROVAL_OUTCOME_SET approval_id=%s field=%s",
+        approval_id, field,
+    )
+    return True
+
+
 async def find_recent_terminal_by_binding_field(
     *, data_dir: str | Path, instance_id: str, kind: str,
     field: str, value: str,

@@ -363,6 +363,14 @@ class DispatchGate:
             # catalog metadata. No state mutation. Composes prose
             # from get_metadata; agent reads the sentence.
             "inspect_tools",
+            # GIT-OPERATIONS-PRIMITIVES-V1 (2026-05-22): read git
+            # tools for the autonomous-improvement loop. All
+            # workspace-guarded — refuse paths outside
+            # data/<instance>/improvement_workspace/.
+            "git_fetch",
+            "git_rev_parse",
+            "git_status",
+            "git_diff_for_review",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -468,6 +476,14 @@ class DispatchGate:
             scope = (tool_input or {}).get("scope", "")
             if scope == "personal":
                 return "soft_write"
+            return "hard_write"
+        if tool_name in ("git_commit", "git_push"):
+            # GIT-OPERATIONS-PRIMITIVES-V1 (2026-05-22): both
+            # operations are hard_write — git_commit creates a
+            # commit in the worktree (visible via git log), and
+            # git_push pushes to origin/main (visible to the
+            # world). Receipt-bound — verified in the handler
+            # against an operator-approved authorization.
             return "hard_write"
         if tool_name == "restart_self":
             # SELF-ADMIN-TOOLS-V1 (2026-05-19): execv replaces the
