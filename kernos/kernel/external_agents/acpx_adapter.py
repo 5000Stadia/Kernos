@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from typing import Any
 
 from kernos.kernel.external_agents.errors import (
@@ -598,6 +599,156 @@ async def _ensure_session(
 
 
 # ---------------------------------------------------------------------
+# Timeout diagnostic writer (ACPX_TIMEOUT_DIAGNOSTICS — 2026-05-22)
+# ---------------------------------------------------------------------
+
+
+def _write_acpx_timeout_friction_report(
+    *,
+    target: str,
+    acpx_agent_name: str,
+    session_id: str,
+    timeout_seconds: int,
+    dispatch_started_at: float,
+    last_event_at: float | None,
+    last_event_kind: str,
+    event_count: int,
+    parse_errors: int,
+    stdout_errors: list[str],
+    stderr_chunks: list[bytes],
+    last_stop_reason: str,
+    workspace_dir: str,
+    prompt_preview: str,
+) -> str:
+    """Drop a markdown friction report when an ACPX dispatch
+    exceeds its timeout. Captures the diagnostic state that
+    prior ConsultationTimeout exceptions lacked (events seen,
+    last-event timing, stderr tail, stdout-channel errors) so
+    the next investigation has evidence the prior incident
+    couldn't surface. Returns the absolute path written, or ""
+    if no friction folder is configured.
+
+    Mirrors the FrictionObserver / IntegrationRunner naming +
+    location convention so existing surfacing tooling (`/debug
+    friction`, session-start scans) picks the report up.
+    """
+    import time as _t
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    data_dir = os.environ.get("KERNOS_DATA_DIR", "./data")
+    friction_dir = Path(data_dir) / "diagnostics" / "friction"
+    try:
+        friction_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return ""
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    unique = uuid.uuid4().hex[:8]
+    filename = f"FRICTION_{ts}_{unique}_ACPX_TIMEOUT_{target.upper()}.md"
+    filepath = friction_dir / filename
+
+    elapsed_total = _t.monotonic() - dispatch_started_at
+    silence_seconds: str = "n/a (no events received)"
+    if last_event_at is not None:
+        silence_seconds = (
+            f"{_t.monotonic() - last_event_at:.1f}s since last event"
+        )
+
+    stderr_tail = b"".join(stderr_chunks[-50:]).decode(
+        "utf-8", errors="replace",
+    )[-2000:]
+
+    lines: list[str] = []
+    lines.append(f"# Friction Report: ACPX_TIMEOUT_{target.upper()}")
+    lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}")
+    lines.append("")
+    lines.append("## Description")
+    lines.append(
+        f"ACPX dispatch to `{target}` (agent=`{acpx_agent_name}`) "
+        f"exceeded the `{timeout_seconds}s` timeout. This report "
+        f"captures the state at the moment of timeout so the root "
+        f"cause (process never started / auth hang / mid-response "
+        f"stall / Codex API drift) can be attributed."
+    )
+    lines.append("")
+    lines.append("## Diagnostic state")
+    lines.append(f"- target: `{target}`")
+    lines.append(f"- acpx_agent: `{acpx_agent_name}`")
+    lines.append(f"- session_id: `{session_id or '(ephemeral)'}`")
+    lines.append(f"- workspace_dir: `{workspace_dir}`")
+    lines.append(f"- configured_timeout: `{timeout_seconds}s`")
+    lines.append(f"- actual_elapsed: `{elapsed_total:.1f}s`")
+    lines.append(f"- events_received: `{event_count}`")
+    lines.append(f"- last_event_kind: `{last_event_kind or '(none)'}`")
+    lines.append(f"- silence_at_timeout: `{silence_seconds}`")
+    lines.append(f"- parse_errors: `{parse_errors}`")
+    lines.append(f"- last_stop_reason: `{last_stop_reason or '(none)'}`")
+    lines.append(f"- stderr_bytes: `{sum(len(c) for c in stderr_chunks)}`")
+    lines.append("")
+    lines.append("## Triage hints")
+    if event_count == 0:
+        lines.append(
+            "- **No events ever received** — most likely process "
+            "never produced parseable output. Check stderr tail for "
+            "auth failures (`401`, `Unauthorized`), missing binary, "
+            "or Codex CLI startup errors. Also see "
+            "[[reference_codex_creds_resync]] in case credentials "
+            "are stale."
+        )
+    elif last_event_at is not None and (
+        _t.monotonic() - last_event_at
+    ) > timeout_seconds * 0.5:
+        lines.append(
+            "- **Stalled mid-stream** — events flowed for a while "
+            "then stopped. Check last_event_kind for the last "
+            "successful step. Could be a tool call inside the "
+            "ACP server hanging on a downstream API."
+        )
+    else:
+        lines.append(
+            "- **Long-running normal dispatch** — events kept "
+            "flowing right up to timeout. The work itself may "
+            "legitimately exceed the budget. Consider raising "
+            "`KERNOS_ACPX_TIMEOUT_SEC` for this kind of consultation."
+        )
+    if stdout_errors:
+        lines.append(
+            "- **stdout error channel populated** — the ACP server "
+            "reported errors via JSON-RPC. See stdout_errors below."
+        )
+    lines.append("")
+    if stdout_errors:
+        lines.append("## stdout_errors (JSON-RPC channel)")
+        for e in stdout_errors[-10:]:
+            lines.append(f"- `{e}`")
+        lines.append("")
+    lines.append("## Prompt preview")
+    lines.append("```")
+    lines.append(prompt_preview or "(empty)")
+    lines.append("```")
+    lines.append("")
+    lines.append("## stderr tail (last ~2KB)")
+    lines.append("```")
+    lines.append(stderr_tail or "(empty)")
+    lines.append("```")
+
+    try:
+        filepath.write_text("\n".join(lines), encoding="utf-8")
+        logger.info(
+            "ACPX_TIMEOUT_DIAG_REPORT_WRITTEN path=%s events=%d "
+            "last_event_kind=%r", filepath, event_count,
+            last_event_kind,
+        )
+        return str(filepath)
+    except Exception as exc:
+        logger.warning(
+            "ACPX_TIMEOUT_DIAG_REPORT_WRITE_FAILED exc=%s", exc,
+        )
+        return ""
+
+
+# ---------------------------------------------------------------------
 # The dispatch entry point
 # ---------------------------------------------------------------------
 
@@ -729,9 +880,18 @@ async def dispatch(
     # JSON-RPC channel are invisible to the dispatch failure message
     # — only stderr gets surfaced, which is often empty for these.
     stdout_errors: list[str] = []
+    # 2026-05-22 ACPX_TIMEOUT_DIAGNOSTICS: track last-event timing so
+    # ConsultationTimeout can attribute the hang. "no events ever" vs
+    # "events stopped at T+45s" point at very different root causes
+    # (process never started / auth-401-hang vs mid-response stall).
+    import time as _time_diag
+    dispatch_started_at = _time_diag.monotonic()
+    last_event_at: float | None = None
+    last_event_kind: str = ""
 
     async def _drain_stdout() -> None:
         nonlocal event_count, last_stop_reason, parse_errors
+        nonlocal last_event_at, last_event_kind
         assert proc.stdout is not None
         async for raw_line in proc.stdout:
             try:
@@ -751,6 +911,13 @@ async def dispatch(
                 # Blank / whitespace-only line — skip silently.
                 continue
             event_count += 1
+            # ACPX_TIMEOUT_DIAGNOSTICS: stamp last-event time + kind
+            # so a stalled dispatch attributes correctly post-hoc.
+            last_event_at = _time_diag.monotonic()
+            try:
+                last_event_kind = str(event.get("type", "") or event.get("kind", ""))
+            except AttributeError:
+                last_event_kind = "?"
             chunk = _extract_agent_message_chunk(event)
             if chunk is not None:
                 accumulated_chunks.append(chunk)
@@ -861,8 +1028,41 @@ async def dispatch(
         )
 
     if timed_out:
+        # ACPX_TIMEOUT_DIAGNOSTICS (2026-05-22): on every timeout,
+        # drop a friction report so the next investigation has the
+        # evidence the prior incident lacked. Best-effort write —
+        # never let the diagnostic raise.
+        _report_path: str = ""
+        try:
+            _report_path = _write_acpx_timeout_friction_report(
+                target=target,
+                acpx_agent_name=acpx_agent_name,
+                session_id=session_id or "",
+                timeout_seconds=timeout_seconds,
+                dispatch_started_at=dispatch_started_at,
+                last_event_at=last_event_at,
+                last_event_kind=last_event_kind,
+                event_count=event_count,
+                parse_errors=parse_errors,
+                stdout_errors=list(stdout_errors),
+                stderr_chunks=list(stderr_chunks),
+                last_stop_reason=last_stop_reason,
+                workspace_dir=workspace_dir,
+                prompt_preview=(prompt or "")[:300],
+            )
+        except Exception as _diag_exc:
+            logger.warning(
+                "ACPX_TIMEOUT_DIAG_REPORT_FAILED exc=%s", _diag_exc,
+            )
+        _hint = (
+            f" Diagnostic report: {_report_path}"
+            if _report_path else ""
+        )
         raise ConsultationTimeout(
-            f"ACPX dispatch to {target!r} exceeded {timeout_seconds}s"
+            f"ACPX dispatch to {target!r} exceeded {timeout_seconds}s "
+            f"(events_received={event_count}, "
+            f"last_event_kind={last_event_kind!r}, "
+            f"stderr_bytes={sum(len(c) for c in stderr_chunks)}).{_hint}"
         )
 
     # Codex review fold #6: if drain task hit an unexpected exception
