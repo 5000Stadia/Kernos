@@ -7,7 +7,9 @@ import hashlib
 import json
 import logging
 import os
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -211,6 +213,20 @@ class DispatchGate:
         # consulted at reactive-soft_write bypass, _evaluate_model
         # preamble, and the ambiguous-branch fallback.
         self._mode_policy: GateModePolicy = _resolve_gate_mode_policy()
+        # LIVE-DISPATCH-UNBLOCKER-V1 Phase B (2026-05-22): scoped
+        # amortization layer per [[kernos-dispatch-gate-design-input]].
+        # Gate.evaluate always runs evaluation; this cache collapses
+        # the user-visible CONFIRM cost on stable bindings. In-memory
+        # LRU; per-binding TTL. hard_write NEVER amortizes (every call
+        # gets full eval per its semantics). Cache wipes on mode swap;
+        # covenant-mutation invalidation is a documented follow-up.
+        self._amortization_cache: OrderedDict[tuple, float] = OrderedDict()
+        self._amortization_ttl_s = float(os.environ.get(
+            "KERNOS_GATE_AMORTIZATION_TTL_SEC", "3600",
+        ))
+        self._amortization_max_entries = int(os.environ.get(
+            "KERNOS_GATE_AMORTIZATION_MAX_ENTRIES", "256",
+        ))
         logger.info(
             "GATE_MODE_RESOLVED mode=%s ambiguous_fallback=%s "
             "reactive_soft_write_bypass=%s",
@@ -220,16 +236,84 @@ class DispatchGate:
         )
 
     def set_mode_policy(self, policy: GateModePolicy) -> None:
-        """Swap the active gate mode policy (used by future
-        ``/posture mode`` slash command per
-        ``POSTURE-CONFIGURATION-V1``). v1 has no in-process
-        caller; provided so the contract is stable for the
-        follow-up spec."""
+        """Swap the active gate mode policy. Used by
+        ``/posture mode`` slash command (POSTURE-CONFIGURATION-V1)."""
         self._mode_policy = policy
+        # LIVE-DISPATCH-UNBLOCKER-V1 Phase B: mode swap invalidates
+        # amortization cache — a mode change is a posture shift that
+        # could change the gate's decisions; stale cache entries
+        # could let a more-permissive decision survive into a
+        # more-strict posture window.
+        self.clear_amortization_cache()
         logger.info(
-            "GATE_MODE_SWAPPED mode=%s ambiguous_fallback=%s",
+            "GATE_MODE_SWAPPED mode=%s ambiguous_fallback=%s "
+            "amortization_cache=cleared",
             policy.name, policy.ambiguous_fallback,
         )
+
+    def clear_amortization_cache(self) -> None:
+        """Wipe the amortization cache. Called by set_mode_policy +
+        external invalidators (slash commands, tests, future
+        covenant-mutation hook).
+
+        LIVE-DISPATCH-UNBLOCKER-V1 Phase B (2026-05-22).
+        """
+        prior_count = len(self._amortization_cache)
+        self._amortization_cache.clear()
+        if prior_count:
+            logger.info(
+                "GATE_AMORTIZATION_CLEARED entries=%d", prior_count,
+            )
+
+    def _amortization_signature(
+        self, *, instance_id: str, member_id: str, tool_name: str,
+        effect: str, scope_key: str,
+    ) -> tuple:
+        """Build the stable-binding signature per
+        [[kernos-dispatch-gate-design-input]]. Includes
+        registration_hash for workspace tools when the catalog
+        carries it (Phase D's get_metadata API surfaces this);
+        kernel/MCP tools use tool_name as the stability marker
+        (their identity IS stable across calls)."""
+        tool_hash = tool_name  # default for kernel + MCP
+        if self._registry is not None:
+            try:
+                get_meta = getattr(self._registry, "get_metadata", None)
+                if callable(get_meta):
+                    meta = get_meta(tool_name) or {}
+                    h = meta.get("registration_hash") or ""
+                    if h:
+                        tool_hash = h
+            except Exception:
+                pass
+        return (
+            instance_id, member_id, tool_name, tool_hash, effect,
+            scope_key or "global",
+        )
+
+    def _check_amortization(self, sig: tuple) -> bool:
+        """Returns True if the signature has a fresh cache entry.
+        Side-effect: evicts the entry if expired."""
+        now = time.monotonic()
+        expires_at = self._amortization_cache.get(sig)
+        if expires_at is None:
+            return False
+        if expires_at < now:
+            self._amortization_cache.pop(sig, None)
+            return False
+        # LRU touch
+        self._amortization_cache.move_to_end(sig)
+        return True
+
+    def _record_amortization(self, sig: tuple) -> None:
+        """Insert into the cache, evicting LRU if over capacity.
+        Caller is responsible for skipping hard_write (which
+        never amortizes per spec)."""
+        expires_at = time.monotonic() + self._amortization_ttl_s
+        self._amortization_cache[sig] = expires_at
+        self._amortization_cache.move_to_end(sig)
+        while len(self._amortization_cache) > self._amortization_max_entries:
+            self._amortization_cache.popitem(last=False)
 
     def classify_tool_effect(
         self, tool_name: str, active_space: Any, tool_input: dict[str, Any] | None = None,
@@ -470,6 +554,7 @@ class DispatchGate:
         approval_token_id: str | None = None,
         agent_reasoning: str = "",
         is_reactive: bool = True,
+        member_id: str = "",
     ) -> GateResult:
         """Full gate evaluation: token → denial limit → override → reactive bypass → model check.
 
@@ -583,6 +668,33 @@ class DispatchGate:
                 return GateResult(allowed=True, reason="approved", method="reactive_soft_write")
             # has relevant must_not rules — fall through to model to check
 
+        # Step 3.5: Scoped amortization (LIVE-DISPATCH-UNBLOCKER-V1
+        # Phase B, per [[kernos-dispatch-gate-design-input]]).
+        # hard_write NEVER amortizes — every call gets full eval
+        # per its semantics (operator confirmation IS the per-call
+        # event). read / soft_write / external_agent_read may
+        # amortize on a stable binding.
+        amortizable = effect in ("read", "soft_write", "external_agent_read")
+        amortization_sig: tuple | None = None
+        if amortizable:
+            amortization_sig = self._amortization_signature(
+                instance_id=instance_id, member_id=member_id,
+                tool_name=tool_name, effect=effect,
+                scope_key=active_space_id or "global",
+            )
+            if self._check_amortization(amortization_sig):
+                self._denial_counts.pop(tool_name, None)
+                logger.info(
+                    "GATE: amortized tool=%s effect=%s scope=%s — "
+                    "collapsed via stable binding cache",
+                    tool_name, effect, active_space_id or "global",
+                )
+                return GateResult(
+                    allowed=True,
+                    reason="amortized",
+                    method="amortization",
+                )
+
         # Step 4: Model evaluation
         result = await self._evaluate_model(
             tool_name, tool_input, effect, messages, agent_reasoning,
@@ -591,6 +703,15 @@ class DispatchGate:
         # Track denials / reset on approve
         if result.allowed:
             self._denial_counts.pop(tool_name, None)
+            # LIVE-DISPATCH-UNBLOCKER-V1 Phase B: record into
+            # amortization cache so the next call within TTL
+            # short-circuits the model. Only record when the
+            # model produced the approval — token / override /
+            # reactive-soft_write paths already short-circuit
+            # before this point and don't need cache entries
+            # (their fast paths are already O(1)).
+            if amortization_sig is not None:
+                self._record_amortization(amortization_sig)
         else:
             self._denial_counts[tool_name] = self._denial_counts.get(tool_name, 0) + 1
         return result

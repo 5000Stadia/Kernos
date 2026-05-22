@@ -337,6 +337,7 @@ class LiveExecutor:
                 approval_token_id=inputs.approval_token_id,
                 messages=list(inputs.recent_messages),
                 user_message=inputs.user_message,
+                member_id=inputs.member_id,
             )
         except Exception as exc:
             logger.warning(
@@ -517,6 +518,7 @@ class LiveIntegrationDispatcher:
                 approval_token_id=getattr(inputs, "approval_token_id", "") or "",
                 messages=list(getattr(inputs, "recent_messages", ()) or ()),
                 user_message=getattr(inputs, "user_message", "") or "",
+                member_id=getattr(inputs, "member_id", "") or "",
             )
         except Exception as exc:
             logger.warning(
