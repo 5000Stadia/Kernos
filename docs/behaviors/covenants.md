@@ -1,6 +1,6 @@
 # Covenants
 
-Covenants are behavioral rules that guide agent actions. They define what the agent must do, must not do, prefers, and when to escalate. Every tenant starts with a profile-selected set of default rules (5, 7, or 9 depending on `KERNOS_POSTURE_PROFILE`). Users add rules through natural conversation.
+Covenants are behavioral rules that guide agent actions. They define what the agent must do, must not do, prefers, and when to escalate. Every tenant starts with a profile-selected set of default rules (4, 6, or 9 depending on `KERNOS_POSTURE_PROFILE`). Users add rules through natural conversation.
 
 ## How Covenants Are Created
 
@@ -26,9 +26,9 @@ Per `POSTURE-SEEDED-COVENANTS-V1` (2026-05-22), the default
 covenant seed is profile-selectable via the
 `KERNOS_POSTURE_PROFILE` env var. Three profiles:
 
-- `minimal` (DEFAULT) — 5 rules: spirit + privacy-belongs-to-sharer + don't-delete-without-asking + escalation + self-update-notice. The behavior-neutral posture.
-- `standard` — 7 rules: minimal + confirm-spending + show-drafts-to-3rd-parties.
-- `strict` — 9 rules: standard + match-depth-preference + never-send-3rd-party-contacts-unless-owner-initiated. Reproduces the pre-POSTURE-V1 default exactly.
+- `minimal` (DEFAULT) — 4 rules: spirit + privacy-belongs-to-sharer + don't-delete-without-asking + escalation. The behavior-neutral posture.
+- `standard` — 6 rules: minimal + confirm-spending + show-drafts-to-3rd-parties.
+- `strict` — 9 rules: standard + match-depth-preference + never-send-3rd-party-contacts-unless-owner-initiated + self-update-notice. Reproduces the pre-POSTURE-V1 default exactly (the self-update preference lives only in strict; minimal + standard treat it as opt-in via slash command or env override).
 
 Existing instances are NOT auto-rebased when the env changes;
 the seed runs only on first-boot of a NEW instance. Reset

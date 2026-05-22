@@ -314,19 +314,23 @@ _DESC_MATCH_DEPTH = "Match the depth of your response to what the moment needs. 
 _DESC_SELF_UPDATE = "When you see a substrate event indicating Kernos updated itself with new code, mention the update naturally in conversation and summarize what changed in your own words. The user wants to be kept in the loop on updates. If they ask you to stop telling them, or only mention certain kinds of updates, archive or revise this rule accordingly."
 _DESC_ESCALATION = "When a request is genuinely ambiguous AND involves irreversible consequences, money, or third-party impact, clarify before acting. If the request is clear, act."
 
-# Profile MINIMAL (DEFAULT): 5 rules. The behavior-neutral seed
+# Profile MINIMAL (DEFAULT): 4 rules. The behavior-neutral seed
 # the operator gets out of the box. Spirit + privacy invariant +
-# delete-consent invariant + escalation + self-update notice.
+# delete-consent invariant + escalation.
+# 2026-05-22: self-update notice removed from minimal at owner
+# request — the original INFORMING-V1 motivation (operator
+# wanting to be told about substrate edits) is opt-in territory,
+# not a behavior-neutral default. Strict still carries it for
+# pre-POSTURE parity.
 _PROFILE_MINIMAL = [
     ("spirit", "general", _DESC_SPIRIT),
     ("must_not", "general", _DESC_SHARER_INFO),
     ("must_not", "general", _DESC_DELETE_FILES),
     ("escalation", "general", _DESC_ESCALATION),
-    ("preference", "general", _DESC_SELF_UPDATE),
 ]
 
 # Profile STANDARD adds the situational must rules around money +
-# 3rd-party drafts. 7 rules total.
+# 3rd-party drafts. 6 rules total.
 _PROFILE_STANDARD_ADDS = [
     ("must", "general", _DESC_CONFIRM_SPENDING),
     ("must", "general", _DESC_SHOW_DRAFTS),

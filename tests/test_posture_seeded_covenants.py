@@ -1,8 +1,13 @@
 """POSTURE-SEEDED-COVENANTS-V1 (2026-05-22) acceptance tests.
 
+Updated 2026-05-22 post-implementation: self-update preference
+removed from minimal + standard at owner request — opt-in
+territory, not behavior-neutral default. Strict still carries
+it for pre-POSTURE parity.
+
 Covers spec ACs 1-11:
-- AC1  minimal (default) seeds 5 rules
-- AC2  KERNOS_POSTURE_PROFILE=standard seeds 7 rules
+- AC1  minimal (default) seeds 4 rules
+- AC2  KERNOS_POSTURE_PROFILE=standard seeds 6 rules
 - AC3  KERNOS_POSTURE_PROFILE=strict seeds 9 rules with EXACT
        content + order parity to the pre-change implementation
 - AC4  invalid env value falls back to STRICT + logs ERROR
@@ -25,28 +30,30 @@ import pytest
 
 
 # ============================================================
-# AC1 — minimal default seeds 5 rules
+# AC1 — minimal default seeds 4 rules
+# (2026-05-22: self-update preference removed from minimal per
+# owner request — opt-in territory, not behavior-neutral default.)
 # ============================================================
 
 
 class TestMinimalDefaultSeed:
-    def test_unset_env_seeds_5_rules(self, monkeypatch):
+    def test_unset_env_seeds_4_rules(self, monkeypatch):
         from kernos.kernel.state import default_covenant_rules
         monkeypatch.delenv("KERNOS_POSTURE_PROFILE", raising=False)
         rules = default_covenant_rules("test_inst", "2026-05-22T00:00:00")
-        assert len(rules) == 5, (
-            f"minimal profile must seed 5 rules; got {len(rules)}"
+        assert len(rules) == 4, (
+            f"minimal profile must seed 4 rules; got {len(rules)}"
         )
 
-    def test_minimal_explicit_seeds_5_rules(self, monkeypatch):
+    def test_minimal_explicit_seeds_4_rules(self, monkeypatch):
         from kernos.kernel.state import default_covenant_rules
         monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "minimal")
         rules = default_covenant_rules("test_inst", "2026-05-22T00:00:00")
-        assert len(rules) == 5
+        assert len(rules) == 4
 
     def test_minimal_contains_load_bearing_invariants(self, monkeypatch):
         """Minimal must include: spirit, sharer-info, delete-files,
-        escalation, self-update."""
+        escalation. (Self-update removed 2026-05-22.)"""
         from kernos.kernel.state import default_covenant_rules
         monkeypatch.delenv("KERNOS_POSTURE_PROFILE", raising=False)
         rules = default_covenant_rules("test_inst", "2026-05-22T00:00:00")
@@ -56,20 +63,22 @@ class TestMinimalDefaultSeed:
         assert "escalation" in types
         assert any("delete" in d.lower() for d in descs)
         assert any("shared with you belongs" in d for d in descs)
-        assert any("substrate event" in d for d in descs)  # self-update
+        # Self-update is NOT in minimal (only strict, for parity).
+        assert not any("substrate event" in d for d in descs)
 
 
 # ============================================================
-# AC2 — standard seeds 7 rules
+# AC2 — standard seeds 6 rules
+# (2026-05-22: was 7 pre-self-update-removal.)
 # ============================================================
 
 
 class TestStandardProfile:
-    def test_standard_seeds_7_rules(self, monkeypatch):
+    def test_standard_seeds_6_rules(self, monkeypatch):
         from kernos.kernel.state import default_covenant_rules
         monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "standard")
         rules = default_covenant_rules("test_inst", "2026-05-22T00:00:00")
-        assert len(rules) == 7
+        assert len(rules) == 6
 
     def test_standard_adds_spending_and_drafts(self, monkeypatch):
         from kernos.kernel.state import default_covenant_rules
@@ -78,6 +87,8 @@ class TestStandardProfile:
         descs = [r.description for r in rules]
         assert any("spending money" in d for d in descs)
         assert any("Show drafts" in d for d in descs)
+        # Self-update is NOT in standard either.
+        assert not any("substrate event" in d for d in descs)
 
 
 # ============================================================
@@ -159,11 +170,11 @@ class TestInvalidEnvFailsLoud:
 
 class TestEnvNormalization:
     @pytest.mark.parametrize("env_value,expected_count", [
-        ("MINIMAL", 5),
-        ("Standard", 7),
+        ("MINIMAL", 4),
+        ("Standard", 6),
         ("STRICT", 9),
-        ("  minimal  ", 5),
-        ("  STANDARD  ", 7),
+        ("  minimal  ", 4),
+        ("  STANDARD  ", 6),
         ("  Strict  ", 9),
     ])
     def test_case_and_whitespace_normalized(
@@ -238,7 +249,7 @@ class TestSeedingLogLine:
         assert len(seeded) == 1
         msg = seeded[0].getMessage()
         assert "profile=standard" in msg
-        assert "rule_count=7" in msg
+        assert "rule_count=6" in msg
         assert "instance=test_inst" in msg
 
 
@@ -265,7 +276,7 @@ class TestRepeatedCallIsolation:
         assert set(call_a_ids).isdisjoint(set(call_b_ids))
         # Mutating call_a doesn't affect call_b's rule list
         call_a.clear()
-        assert len(call_b) == 5
+        assert len(call_b) == 4
 
 
 # ============================================================
@@ -282,6 +293,6 @@ class TestBackwardsCompatAlias:
         monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "standard")
         via_alias = default_contract_rules("inst_a", "2026-05-22T00:00:00")
         # IDs differ per call but profile + count + content shape match
-        assert len(via_alias) == 7
+        assert len(via_alias) == 6
         # The alias literally IS the function
         assert default_contract_rules is default_covenant_rules
