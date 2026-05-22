@@ -86,6 +86,11 @@ ALWAYS_PINNED: set[str] = {
     # its tool surface when composing plans or recovering from
     # bind failures.
     "inspect_tools",
+    # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): the
+    # autonomous-improvement entry point. Pinned so the agent
+    # always has the capability surfaced ("any turn, you can
+    # ask me to improve myself").
+    "improve_kernos",
 }
 
 # Common MCP tools that get priority in the active window (not pinned, but preferred)

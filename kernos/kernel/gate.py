@@ -480,6 +480,15 @@ class DispatchGate:
             if scope == "personal":
                 return "soft_write"
             return "hard_write"
+        if tool_name == "improve_kernos":
+            # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): starts an
+            # autonomous attempt against Kernos's own source.
+            # hard_write: the attempt ultimately commits + pushes
+            # + restarts the process. Receipt-bound at the COMMIT
+            # gate (Step 5), not at attempt-start; this
+            # classification ensures the substrate gates the
+            # invocation through the full evaluate path.
+            return "hard_write"
         if tool_name in ("git_commit", "git_push"):
             # GIT-OPERATIONS-PRIMITIVES-V1 (2026-05-22): both
             # operations are hard_write — git_commit creates a

@@ -675,7 +675,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -803,6 +803,9 @@ class ReasoningService:
         # SELF-TEST-GATE-V1 (2026-05-22): pytest runner for
         # autonomous loop. workspace-guarded.
         "run_self_test_suite":                frozenset({"confirmed"}),
+        # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): autonomous
+        # improvement orchestrator entry point.
+        "improve_kernos":                     frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1387,6 +1390,18 @@ class ReasoningService:
                     handle_run_self_test_suite,
                 )
                 return await handle_run_self_test_suite(
+                    tool_input=tool_input,
+                    instance_id=request.instance_id,
+                    data_dir=os.environ.get("KERNOS_DATA_DIR", "./data"),
+                )
+            elif tool_name == "improve_kernos":
+                # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22):
+                # autonomous-improvement orchestrator entry point.
+                from kernos.kernel.improvement_loop_workflow import (
+                    handle_improve_kernos,
+                )
+                return await handle_improve_kernos(
+                    handler=getattr(self, "_handler", None),
                     tool_input=tool_input,
                     instance_id=request.instance_id,
                     data_dir=os.environ.get("KERNOS_DATA_DIR", "./data"),

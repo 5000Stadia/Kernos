@@ -156,6 +156,9 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.self_test_gate import (
         RUN_SELF_TEST_SUITE_TOOL,
     )
+    from kernos.kernel.improvement_loop_workflow import (
+        IMPROVE_KERNOS_TOOL,
+    )
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -249,6 +252,9 @@ def _import_kernel_schemas() -> list[dict]:
         # SELF-TEST-GATE-V1 (2026-05-22): curated smoke test
         # runner for the autonomous-improvement loop.
         RUN_SELF_TEST_SUITE_TOOL,
+        # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): the
+        # autonomous-improvement orchestrator entry point.
+        IMPROVE_KERNOS_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery
