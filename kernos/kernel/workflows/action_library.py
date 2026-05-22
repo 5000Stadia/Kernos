@@ -656,6 +656,20 @@ class AppendToLedgerAction:
         return all(last.get(k) == v for k, v in params["entry"].items())
 
 
+# DURABLE-APPROVAL-RECEIPTS-V1: a `RequestApprovalAction` workflow
+# verb is DEFERRED to a follow-up sub-spec. Codex code review found
+# two real blockers in the v1 attempt:
+#   1. The engine's CohortContext doesn't carry execution_id +
+#      gate_nonce today, so the receipt wouldn't bind to the gate.
+#   2. Workflow ref-resolver maps `{step.X.output.K}` to
+#      result.value, not result.receipt, so the documented predicate
+#      path wouldn't resolve to the new approval_id.
+# Both require engine surface changes that are bigger than this
+# sub-spec's scope. The receipts substrate is generic-callable
+# from any non-workflow code path (slash commands, future tools);
+# the workflow action verb lands in a follow-up that fixes the
+# engine surface alongside.
+
 # ---------------------------------------------------------------------------
 # Control-flow verbs (WORKFLOW-ORCHESTRATION-PRIMITIVES-V1)
 # ---------------------------------------------------------------------------

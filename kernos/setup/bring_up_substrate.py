@@ -123,6 +123,10 @@ class Substrate:
     reference_cohort: "CatalogingCohort"
     reference_ingestion_scanner: "IngestionScanner"
     reference_service: "ReferenceService"
+    # DURABLE-APPROVAL-RECEIPTS-V1 background expiry task. Cancelled
+    # in tear_down_substrate so the substrate has clean teardown
+    # discipline (Codex round-1-code finding 4 — was untracked + leaked).
+    approval_expiry_task: "Any" = None
 
 
 async def bring_up_substrate(
@@ -738,6 +742,57 @@ async def bring_up_substrate(
             _exc_lh,
         )
 
+    # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21): generic operator-
+    # approval primitive. Schema ensure + boot reconcile + background
+    # expiry pass. Generic substrate; useful beyond the autonomous
+    # improvement loop (any future hard_write capability needing
+    # durable operator approval reuses these primitives).
+    try:
+        from kernos.kernel import approval_receipts as _approvals
+        from kernos.kernel import event_stream as _event_stream_approvals
+        await _approvals.ensure_schema(data_dir)
+        # Boot reconcile: catches downtime expiries + re-emits any
+        # terminal-state receipts whose decision_emitted_at is NULL
+        # (decision event was queued but not flushed before the
+        # prior crash). Idempotent on clean shutdowns.
+        await _approvals.boot_reconcile(
+            data_dir=data_dir, event_stream=_event_stream_approvals,
+        )
+
+        # Background expiry pass — default 60s cadence. Failure-
+        # isolated per pass so a transient DB hiccup doesn't kill
+        # the background task.
+        import asyncio as _asyncio_approvals
+
+        async def _approval_expiry_loop():
+            while True:
+                try:
+                    await _approvals.expire_pass(
+                        data_dir=data_dir,
+                        event_stream=_event_stream_approvals,
+                    )
+                except Exception as _exc_pass:
+                    logger.warning(
+                        "APPROVAL_EXPIRY_PASS_FAILED exc=%s — "
+                        "continuing", _exc_pass,
+                    )
+                await _asyncio_approvals.sleep(60)
+
+        _approval_expiry_task = _asyncio_approvals.create_task(
+            _approval_expiry_loop(),
+        )
+        logger.info(
+            "APPROVAL_RECEIPTS_BRINGUP_OK schema=ensured "
+            "boot_reconcile=ran expiry_loop=started",
+        )
+    except Exception as _exc_ar:
+        logger.warning(
+            "APPROVAL_RECEIPTS_BRINGUP_FAILED error=%s — "
+            "substrate continues without durable approval primitive",
+            _exc_ar,
+        )
+        _approval_expiry_task = None
+
     # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19) + SUBSTRATE-PROVIDER-
     # INJECTION-V1 (2026-05-21): gateway-health is a SAFETY MONITOR;
     # it must run independently of self-improvement gating, and it
@@ -784,6 +839,7 @@ async def bring_up_substrate(
         reference_cohort=reference_cohort,
         reference_ingestion_scanner=reference_ingestion_scanner,
         reference_service=reference_service,
+        approval_expiry_task=_approval_expiry_task,
     )
 
 
@@ -877,6 +933,24 @@ async def _bring_up_gateway_health_observer(
 async def tear_down_substrate(substrate: Substrate) -> None:
     """Stop the substrate's components in reverse construction order.
     Best-effort: failures are logged but don't propagate."""
+    # DURABLE-APPROVAL-RECEIPTS-V1: cancel the background expiry task
+    # first so it doesn't race against the DB closing.
+    if substrate.approval_expiry_task is not None:
+        try:
+            substrate.approval_expiry_task.cancel()
+            import asyncio as _asyncio_td
+            try:
+                await _asyncio_td.wait_for(
+                    substrate.approval_expiry_task, timeout=2.0,
+                )
+            except (_asyncio_td.CancelledError, _asyncio_td.TimeoutError, Exception):
+                pass
+        except Exception as exc:
+            logger.warning(
+                "WTC v1 C5c-bringup teardown: approval_expiry_task "
+                "cancel raised: %s", exc,
+            )
+
     for label, coro_factory in (
         ("reference_cohort", substrate.reference_cohort.stop),
         ("reference_catalog", substrate.reference_catalog.stop),

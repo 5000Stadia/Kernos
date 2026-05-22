@@ -4350,6 +4350,19 @@ class MessageHandler:
                             response = "Only the instance owner can restart."
                     elif _cmd_lower == "/disconnect":
                         response = await self._handle_disconnect(primary_ctx)
+                    elif _cmd_lower.startswith("/approve "):
+                        # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21):
+                        # two-step CONFIRM contract per spec D3.
+                        # /approve <id>           → preview, no mutation
+                        # /approve <id> CONFIRM   → atomic CAS to approved
+                        response = await self._handle_approve_command(
+                            primary_ctx, _cmd,
+                        )
+                    elif _cmd_lower.startswith("/reject "):
+                        # /reject <id> <reason>   → single-step rejection
+                        response = await self._handle_reject_command(
+                            primary_ctx, _cmd,
+                        )
                     elif (
                         _cmd_lower == "/model"
                         or _cmd_lower.startswith("/model ")
@@ -5082,6 +5095,120 @@ class MessageHandler:
 
     # Pending wipe confirmations: {instance_id:member_id → wipe_type}
     _pending_wipe: dict[str, str] = {}
+
+    async def _handle_approve_command(self, ctx: TurnContext, cmd: str) -> str:
+        """DURABLE-APPROVAL-RECEIPTS-V1: two-step CONFIRM approval flow.
+
+        ``/approve <approval_id>`` — preview only (no mutation).
+        ``/approve <approval_id> CONFIRM`` — atomic CAS to approved.
+
+        Owner-only via the operator_member_id binding on the receipt
+        (defaults to KERNOS_OPERATOR_ACTOR_ID, which v1 treats as
+        the operator's member_id).
+        """
+        from kernos.kernel import approval_receipts as _approvals
+        from kernos.kernel import event_stream as _event_stream
+
+        parts = cmd.strip().split(maxsplit=2)
+        if len(parts) < 2:
+            return (
+                "Usage: `/approve <approval_id>` for preview, then "
+                "`/approve <approval_id> CONFIRM` to actually approve."
+            )
+        approval_id = parts[1].strip()
+        confirm_token = parts[2].strip() if len(parts) > 2 else ""
+
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+        instance_id = ctx.instance_id
+
+        receipt = await _approvals.get_receipt(
+            data_dir=data_dir, approval_id=approval_id,
+        )
+        if receipt is None:
+            return f"Approval `{approval_id}` not found."
+        if receipt["instance_id"] != instance_id:
+            return f"Approval `{approval_id}` belongs to a different instance."
+
+        # Owner-guard BOTH paths (Codex round-1-code finding 2):
+        # the preview must NOT reveal request_summary to a non-
+        # designated-operator member. Verify identity before any
+        # surface — same check as the mutation path.
+        invoking_member = ctx.member_id or ""
+        if (
+            receipt["operator_member_id"]
+            and receipt["operator_member_id"] != invoking_member
+        ):
+            return "Approval restricted to designated operator."
+        # Belt-and-suspenders: require owner role (per spec D3).
+        # Defends against an env-var rebind mid-attempt.
+        if hasattr(self, '_instance_db') and self._instance_db and invoking_member:
+            _member = await self._instance_db.get_member(invoking_member)
+            if not _member or _member.get("role") != "owner":
+                return "Approval restricted to designated operator."
+
+        # Preview path (no CONFIRM token)
+        if confirm_token != "CONFIRM":
+            if receipt["state"] != "pending":
+                return (
+                    f"Approval `{approval_id}` is **{receipt['state']}**, "
+                    f"not pending. No action taken."
+                )
+            return (
+                f"About to approve: **{receipt['request_summary']}**\n"
+                f"(kind=`{receipt['kind']}`, expires_at=`{receipt['expires_at']}`)\n\n"
+                f"Reply `/approve {approval_id} CONFIRM` to proceed.\n\n"
+                f"_Note: the CONFIRM step is independent — sending "
+                f"CONFIRM without first running the preview also "
+                f"approves. Use the preview to verify the summary."
+                f"_"
+            )
+
+        # Confirm path
+        ok, message = await _approvals.approve(
+            data_dir=data_dir,
+            approval_id=approval_id,
+            instance_id=instance_id,
+            invoking_member_id=ctx.member_id or "",
+            event_stream=_event_stream,
+        )
+        return message
+
+    async def _handle_reject_command(self, ctx: TurnContext, cmd: str) -> str:
+        """DURABLE-APPROVAL-RECEIPTS-V1: single-step rejection.
+
+        ``/reject <approval_id> <reason>``. Reason is the rest of the
+        message after the approval_id (required so the operator's
+        intent is captured in state_reason).
+        """
+        from kernos.kernel import approval_receipts as _approvals
+        from kernos.kernel import event_stream as _event_stream
+
+        parts = cmd.strip().split(maxsplit=2)
+        if len(parts) < 3:
+            return "Usage: `/reject <approval_id> <reason>`"
+        approval_id = parts[1].strip()
+        reason = parts[2].strip()
+
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+        instance_id = ctx.instance_id
+
+        # Belt-and-suspenders owner-role check (Codex round-1-code
+        # finding 2): matches the approve path.
+        invoking_member = ctx.member_id or ""
+        if hasattr(self, '_instance_db') and self._instance_db and invoking_member:
+            _member = await self._instance_db.get_member(invoking_member)
+            if not _member or _member.get("role") != "owner":
+                return "Approval restricted to designated operator."
+
+        ok, message = await _approvals.reject(
+            data_dir=data_dir,
+            approval_id=approval_id,
+            instance_id=instance_id,
+            invoking_member_id=invoking_member,
+            reason=reason,
+            event_stream=_event_stream,
+        )
+        return message
 
     async def _handle_disconnect(self, ctx: TurnContext) -> str:
         """Disconnect the current platform channel from the member's account."""
