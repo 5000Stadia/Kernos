@@ -4379,6 +4379,15 @@ class MessageHandler:
                         response = await self._handle_posture_command(
                             primary_ctx, _cmd,
                         )
+                    elif (
+                        _cmd_lower == "/tools"
+                        or _cmd_lower.startswith("/tools ")
+                    ):
+                        # TOOL-INTROSPECTION-V1 (2026-05-22):
+                        # owner-only structured catalog listing.
+                        response = await self._handle_tools_command(
+                            primary_ctx, _cmd,
+                        )
                     elif _cmd_lower.startswith("/approve "):
                         # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21):
                         # two-step CONFIRM contract per spec D3.
@@ -5540,6 +5549,59 @@ class MessageHandler:
             f"seeded {seeded} from `{new_profile}`. User-stated + "
             f"evolved rules preserved."
         )
+
+    async def _handle_tools_command(
+        self, ctx: TurnContext, cmd: str,
+    ) -> str:
+        """TOOL-INTROSPECTION-V1 (2026-05-22): owner-only
+        structured catalog listing.
+
+        Forms:
+          ``/tools`` — full catalog listing grouped by source.
+          ``/tools <name>`` — detail view for one tool.
+          ``/tools source=<value>`` — filter by source.
+          ``/tools classification=<value>`` — filter by gate class
+            (best-effort; classification storage lands in a future
+            spec).
+          ``/tools status=<value>`` — filter by status (reserved).
+        """
+        from kernos.kernel.tool_introspection import (
+            render_operator_detail, render_operator_listing,
+        )
+        # Owner check (mirrors /posture pattern).
+        if not self._instance_db or not ctx.member_id:
+            return "Tool listing isn't available in this environment."
+        _member = await self._instance_db.get_member(ctx.member_id)
+        if not _member or _member.get("role") != "owner":
+            return "Catalog inspection is owner-only."
+
+        parts = cmd.strip().split(maxsplit=1)
+        if len(parts) == 1:
+            return render_operator_listing(self._tool_catalog)
+        arg = parts[1].strip()
+        # filter form: key=value
+        if "=" in arg and " " not in arg:
+            key, value = arg.split("=", 1)
+            key = key.strip().lower()
+            value = value.strip()
+            if key == "source":
+                return render_operator_listing(
+                    self._tool_catalog, filter_source=value,
+                )
+            if key == "classification":
+                return render_operator_listing(
+                    self._tool_catalog, filter_classification=value,
+                )
+            if key == "status":
+                return render_operator_listing(
+                    self._tool_catalog, filter_status=value,
+                )
+            return (
+                f"Unknown filter `{key}`. Try `source=`, "
+                f"`classification=`, or `status=`."
+            )
+        # detail form: /tools <name>
+        return render_operator_detail(self._tool_catalog, arg)
 
     async def _handle_disconnect(self, ctx: TurnContext) -> str:
         """Disconnect the current platform channel from the member's account."""

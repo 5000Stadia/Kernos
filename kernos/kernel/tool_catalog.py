@@ -81,6 +81,11 @@ ALWAYS_PINNED: set[str] = {
     # availability doesn't mean ease-of-fire.
     "dump_context",
     "restart_self",
+    # TOOL-INTROSPECTION-V1 (2026-05-22): agent-facing prose
+    # catalog reader. Pinned so the agent can always introspect
+    # its tool surface when composing plans or recovering from
+    # bind failures.
+    "inspect_tools",
 }
 
 # Common MCP tools that get priority in the active window (not pinned, but preferred)

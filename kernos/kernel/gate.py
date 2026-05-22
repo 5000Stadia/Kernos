@@ -359,6 +359,10 @@ class DispatchGate:
             # doesn't mutate substrate state — the file is an
             # artifact, like inspect_state's return value).
             "dump_context",
+            # TOOL-INTROSPECTION-V1 (2026-05-22): pure read of the
+            # catalog metadata. No state mutation. Composes prose
+            # from get_metadata; agent reads the sentence.
+            "inspect_tools",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads

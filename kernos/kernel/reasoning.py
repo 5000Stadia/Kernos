@@ -675,7 +675,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools"}
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -788,6 +788,9 @@ class ReasoningService:
         # agent-callable equivalents. System-space-gated at dispatch.
         "dump_context":                       frozenset({"confirmed"}),
         "restart_self":                       frozenset({"confirmed"}),
+        # TOOL-INTROSPECTION-V1 (2026-05-22): natural-prose
+        # catalog reader. Pure read; confirmed path only.
+        "inspect_tools":                      frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1325,6 +1328,23 @@ class ReasoningService:
                     reason=tool_input.get("reason", "") or "",
                     confirm=bool(tool_input.get("confirm", False)),
                     instance_id=request.instance_id,
+                )
+            elif tool_name == "inspect_tools":
+                # TOOL-INTROSPECTION-V1 (2026-05-22): natural-prose
+                # catalog reader. Reads catalog from handler;
+                # composes the sentence substrate-side so the agent
+                # gets English, not structured data.
+                from kernos.kernel.tool_introspection import (
+                    handle_inspect_tools,
+                )
+                _catalog = None
+                handler = getattr(self, "_handler", None)
+                if handler is not None:
+                    _catalog = getattr(handler, "_tool_catalog", None)
+                return handle_inspect_tools(
+                    catalog=_catalog,
+                    focus=str(tool_input.get("focus", "") or ""),
+                    capability=str(tool_input.get("capability", "") or ""),
                 )
             elif tool_name == "set_chain_model":
                 _gate_msg = self._assert_admin_space(request, "set_chain_model")
