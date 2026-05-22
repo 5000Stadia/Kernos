@@ -112,6 +112,14 @@ class ReasoningRequest:
     # backward compat for non-handler ReasoningRequest construction
     # sites (scheduler, plan execution, test fixtures).
     cognitive_context: Any = None
+    # TOOL-AUDIT-NORMALIZATION-V1 (2026-05-22): when the live
+    # dispatcher constructs a canonical audit entry, it passes
+    # the entry_id through here so downstream paths (workspace
+    # service-bound dispatch, future audit emitters) can detect
+    # "canonical entry already exists, suppress my own emission."
+    # Empty string = no canonical entry (e.g., direct kernel-tool
+    # paths that don't flow through the live dispatcher).
+    audit_entry_id: str = ""
 
 
 # GateResult and ApprovalToken extracted to kernos/kernel/gate.py (re-exported above)

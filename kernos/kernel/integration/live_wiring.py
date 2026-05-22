@@ -613,7 +613,16 @@ class LiveIntegrationDispatcher:
                 "is_error": True,
             }
 
-        # FOLD 8 — emit tool.called before dispatch.
+        # TOOL-AUDIT-NORMALIZATION-V1 (2026-05-22): canonical
+        # audit entry id generated at dispatch start. Threaded
+        # through the request (built below) so downstream paths
+        # suppress their own emission. Single audit write at end
+        # of dispatch (success or failure path).
+        import uuid as _uuid_audit
+        audit_entry_id = _uuid_audit.uuid4().hex
+
+        # FOLD 8 — emit tool.called before dispatch (now carries
+        # audit_entry_id so event consumers can join with audit).
         await self._emit_event({
             "type": "tool.called",
             "instance_id": instance_id,
@@ -622,9 +631,15 @@ class LiveIntegrationDispatcher:
             "classification": classification,
             "seam": seam_label,
             "escalated": is_escalated,
+            "audit_entry_id": audit_entry_id,
         })
 
         request = self._request_factory(tool_id, args, inputs)
+        if request is not None and hasattr(request, "audit_entry_id"):
+            try:
+                request.audit_entry_id = audit_entry_id  # type: ignore[attr-defined]
+            except Exception:
+                pass
         try:
             result_text = await self._execute_tool(
                 tool_id, dict(args or {}), request,
@@ -641,14 +656,21 @@ class LiveIntegrationDispatcher:
                 "error": str(exc),
                 "seam": seam_label,
                 "escalated": is_escalated,
+                "audit_entry_id": audit_entry_id,
             })
-            await self._emit_audit({
-                "type": "tool_call_failed",
-                "instance_id": instance_id,
-                "tool_id": tool_id,
-                "error": str(exc),
-                "escalated": is_escalated,
-            })
+            # Canonical audit entry (failure path).
+            await self._emit_canonical_audit(
+                entry_id=audit_entry_id,
+                instance_id=instance_id,
+                member_id=getattr(inputs, "member_id", "") or "",
+                space_id=getattr(inputs, "space_id", "") or "",
+                tool_id=tool_id,
+                tool_input=args or {},
+                classification=classification,
+                success=False,
+                error=str(exc)[:300],
+                escalated=is_escalated,
+            )
             return {"error": str(exc), "is_error": True}
 
         if isinstance(result_text, str):
@@ -658,7 +680,7 @@ class LiveIntegrationDispatcher:
         else:
             result_dict = {"text": str(result_text)}
 
-        # FOLD 8 — emit tool.result + audit after successful dispatch.
+        # FOLD 8 — emit tool.result + canonical audit after success.
         await self._emit_event({
             "type": "tool.result",
             "instance_id": instance_id,
@@ -666,14 +688,22 @@ class LiveIntegrationDispatcher:
             "is_error": False,
             "seam": seam_label,
             "escalated": is_escalated,
+            "audit_entry_id": audit_entry_id,
         })
-        await self._emit_audit({
-            "type": "tool_call_succeeded",
-            "instance_id": instance_id,
-            "tool_id": tool_id,
-            "classification": classification,
-            "escalated": is_escalated,
-        })
+        # TOOL-AUDIT-NORMALIZATION-V1: single canonical entry,
+        # replaces the legacy "tool_call_succeeded" dict.
+        await self._emit_canonical_audit(
+            entry_id=audit_entry_id,
+            instance_id=instance_id,
+            member_id=getattr(inputs, "member_id", "") or "",
+            space_id=getattr(inputs, "space_id", "") or "",
+            tool_id=tool_id,
+            tool_input=args or {},
+            classification=classification,
+            success=True,
+            error="",
+            escalated=is_escalated,
+        )
         return result_dict
 
     async def _emit_event(self, payload: dict) -> None:
@@ -684,7 +714,78 @@ class LiveIntegrationDispatcher:
         except Exception:
             logger.exception("DISPATCHER_EVENT_EMIT_FAILED")
 
+    async def _emit_canonical_audit(
+        self, *,
+        entry_id: str,
+        instance_id: str,
+        member_id: str,
+        space_id: str,
+        tool_id: str,
+        tool_input: dict,
+        classification: str,
+        success: bool,
+        error: str,
+        escalated: bool = False,
+    ) -> None:
+        """TOOL-AUDIT-NORMALIZATION-V1 (2026-05-22): emit one
+        canonical ``ToolInvocationAuditEntry`` for the dispatch.
+        Populated from catalog metadata when available; falls
+        back to dispatch-time signals when catalog doesn't carry
+        it. Replaces the legacy ``tool_call_succeeded`` /
+        ``tool_call_failed`` dict shapes."""
+        if self._audit_emitter is None:
+            return
+        from datetime import datetime, timezone
+        from kernos.kernel.tool_audit import build_audit_entry
+        catalog = getattr(self._gate, "_catalog", None)
+        meta = None
+        if catalog is not None:
+            try:
+                get_meta = getattr(catalog, "get_metadata", None)
+                if callable(get_meta):
+                    meta = get_meta(tool_id)
+            except Exception:
+                meta = None
+        service_id = (meta or {}).get("service_id", "") if meta else ""
+        # audit_category defaults to the gate's classification when
+        # the catalog doesn't carry a richer category. Operators see
+        # the classification in the audit which is more useful than
+        # an empty field.
+        audit_category = classification or "unknown"
+        try:
+            entry = build_audit_entry(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                instance_id=instance_id,
+                member_id=member_id,
+                space_id=space_id,
+                tool_name=tool_id,
+                operation="",  # not yet resolved at this seam
+                service_id=service_id or "",
+                authority=(),
+                audit_category=audit_category,
+                payload=tool_input or {},
+                success=success,
+                error=error,
+            )
+            payload = entry.to_dict()
+            # Attach the canonical entry_id so audit consumers can
+            # join with tool.called / tool.result events.
+            payload["audit_entry_id"] = entry_id
+            # Preserve the escalation signal (was on the legacy
+            # shape; operator-relevant for distinguishing writes
+            # routed through the integration seam).
+            payload["escalated"] = escalated
+            await self._audit_emitter(payload)
+        except Exception:
+            logger.exception(
+                "DISPATCHER_CANONICAL_AUDIT_EMIT_FAILED tool=%s",
+                tool_id,
+            )
+
     async def _emit_audit(self, entry: dict) -> None:
+        # Legacy helper retained for any caller still using the
+        # raw-dict shape (none in production after
+        # TOOL-AUDIT-NORMALIZATION-V1; kept for safety + tests).
         if self._audit_emitter is None:
             return
         try:

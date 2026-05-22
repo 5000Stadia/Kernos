@@ -311,8 +311,13 @@ async def test_integration_dispatcher_escalates_soft_write_to_execute_tool():
     assert "live_integration_dispatcher_escalated" in seams
     assert "live_integration_dispatcher" not in seams
     assert all(e.get("escalated") is True for e in events)
+    # TOOL-AUDIT-NORMALIZATION-V1: canonical-shape audit with the
+    # escalated flag preserved on the payload (legacy
+    # "tool_call_succeeded" type retired).
     assert any(
-        a.get("type") == "tool_call_succeeded" and a.get("escalated") is True
+        a.get("type") == "tool_call"
+        and a.get("success") is True
+        and a.get("escalated") is True
         for a in audits
     )
 
@@ -367,7 +372,16 @@ async def test_integration_dispatcher_emits_tool_called_and_result_events():
     types = [e.get("type") for e in events]
     assert "tool.called" in types
     assert "tool.result" in types
-    assert any(a.get("type") == "tool_call_succeeded" for a in audit_entries)
+    # TOOL-AUDIT-NORMALIZATION-V1 (2026-05-22): legacy
+    # "tool_call_succeeded" dict shape replaced by canonical
+    # ToolInvocationAuditEntry. Check the new shape: type="tool_call",
+    # success=True, audit_entry_id present.
+    assert any(
+        a.get("type") == "tool_call"
+        and a.get("success") is True
+        and a.get("audit_entry_id")
+        for a in audit_entries
+    )
 
 
 @pytest.mark.asyncio
@@ -398,7 +412,16 @@ async def test_integration_dispatcher_emits_failure_events_on_dispatch_error():
     result_events = [e for e in events if e.get("type") == "tool.result"]
     assert len(result_events) == 1
     assert result_events[0].get("is_error") is True
-    assert any(a.get("type") == "tool_call_failed" for a in audits)
+    # TOOL-AUDIT-NORMALIZATION-V1: canonical-shape failure audit
+    # (type=tool_call, success=False, audit_entry_id present, error
+    # populated).
+    assert any(
+        a.get("type") == "tool_call"
+        and a.get("success") is False
+        and a.get("audit_entry_id")
+        and a.get("error")
+        for a in audits
+    )
 
 
 # ---------------------------------------------------------------------------

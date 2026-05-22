@@ -971,6 +971,7 @@ class WorkspaceManager:
         data_dir: str,
         *,
         member_id: str = "",
+        audit_entry_id: str = "",
     ) -> str:
         """Execute a workspace-built tool by calling its implementation.
 
@@ -1010,6 +1011,7 @@ class WorkspaceManager:
                 tool_input=tool_input,
                 member_id=member_id,
                 entry=entry,
+                audit_entry_id=audit_entry_id,
             )
 
         home_space = getattr(entry, "home_space", "")
@@ -1181,6 +1183,7 @@ class WorkspaceManager:
         tool_input: dict,
         member_id: str,
         entry: Any,
+        audit_entry_id: str = "",
     ) -> str:
         """Service-bound tool execution path per WORKSHOP-EXTERNAL-SERVICE-PRIMITIVE.
 
@@ -1281,6 +1284,7 @@ class WorkspaceManager:
                 payload=clean_input,
                 success=False,
                 error=str(exc)[:300],
+                audit_entry_id=audit_entry_id,
             )
             return json.dumps({"error": str(exc)})
 
@@ -1329,7 +1333,8 @@ class WorkspaceManager:
             except ValueError:
                 pass
 
-        # Step 5: emit audit entry.
+        # Step 5: emit audit entry (skipped when canonical entry
+        # already exists upstream — TOOL-AUDIT-NORMALIZATION-V1).
         await self._emit_audit(
             instance_id=instance_id,
             member_id=member_id,
@@ -1339,6 +1344,7 @@ class WorkspaceManager:
             payload=clean_input,
             success=success,
             error=error_text,
+            audit_entry_id=audit_entry_id,
         )
 
         # Step 6: return JSON.
@@ -1358,9 +1364,19 @@ class WorkspaceManager:
         payload: dict,
         success: bool,
         error: str = "",
+        audit_entry_id: str = "",
     ) -> None:
         """Write a workshop-primitive-shaped audit entry. Best effort —
-        log a warning on failure rather than blocking the tool result."""
+        log a warning on failure rather than blocking the tool result.
+
+        TOOL-AUDIT-NORMALIZATION-V1 (2026-05-22): when
+        ``audit_entry_id`` is set, the canonical entry is being
+        constructed upstream by the live dispatcher; this path
+        skips its own emission to avoid double-audit.
+        """
+        if audit_entry_id:
+            # Canonical entry already in flight upstream; suppress.
+            return
         if self._audit is None:
             return
         try:
