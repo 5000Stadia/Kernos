@@ -81,6 +81,11 @@ ALWAYS_PINNED: set[str] = {
     # availability doesn't mean ease-of-fire.
     "dump_context",
     "restart_self",
+    # POSTURE-PREFLIGHT-V1 (2026-05-22): the preflight tool's
+    # contract is "the agent can always ask about surfacing."
+    # If it were itself evictable, the contract would fail
+    # exactly when most needed (budget-pressure turn).
+    "inspect_tool_availability",
 }
 
 

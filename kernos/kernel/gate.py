@@ -257,6 +257,9 @@ class DispatchGate:
             # doesn't mutate substrate state — the file is an
             # artifact, like inspect_state's return value).
             "dump_context",
+            # POSTURE-PREFLIGHT-V1 (2026-05-22): pure read of the
+            # per-turn surfacing snapshot. No state mutation.
+            "inspect_tool_availability",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads

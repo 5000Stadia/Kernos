@@ -771,6 +771,57 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         _tier, len(tools), _total)
     ctx.tools = tools
 
+    # POSTURE-PREFLIGHT-V1 (2026-05-22): freeze per-turn
+    # surfacing snapshot so inspect_tool_availability can
+    # answer mid-turn "is tool X surfaced" queries.
+    from kernos.messages.surfacing_snapshot import (
+        SurfacingSnapshot, ToolSurfacingEntry,
+    )
+    _snap_entries: dict[str, ToolSurfacingEntry] = {}
+    _pinned_names = {t.get("name", "") for t in pinned_tools}
+    _active_names = {t.get("name", "") for t in active_tools}
+    _evicted_set = set(_evicted)
+    _all_catalog = handler._tool_catalog.get_names()
+
+    def _source_for(name: str) -> str:
+        if name in _kernel_tool_map:
+            return "kernel"
+        for cap in handler.registry.get_all():
+            if name in (cap.tools or []):
+                return "mcp_capability"
+        if name in _all_catalog:
+            return "stock"
+        return "unknown"
+
+    for _n in _pinned_names:
+        _snap_entries[_n] = ToolSurfacingEntry(
+            name=_n, tier="pinned", source=_source_for(_n),
+        )
+    for _n in _active_names:
+        _snap_entries[_n] = ToolSurfacingEntry(
+            name=_n, tier="active", source=_source_for(_n),
+        )
+    for _n in _evicted_set:
+        _snap_entries[_n] = ToolSurfacingEntry(
+            name=_n, tier="absent", source=_source_for(_n),
+            reason_if_absent="evicted_for_budget",
+        )
+    for _n in _disabled_tool_names:
+        # disabled-service tools win over the catalog default.
+        _snap_entries[_n] = ToolSurfacingEntry(
+            name=_n, tier="absent", source=_source_for(_n),
+            reason_if_absent="disabled_service",
+        )
+    for _n in _all_catalog:
+        if _n not in _snap_entries:
+            _snap_entries[_n] = ToolSurfacingEntry(
+                name=_n, tier="catalog", source=_source_for(_n),
+            )
+    handler._surfacing_snapshot = SurfacingSnapshot(
+        entries=_snap_entries,
+        turn_id=getattr(ctx, "turn_id", "") or "",
+    )
+
     # Build system prompt blocks (Cognitive UI grammar)
     capability_prompt = handler.registry.build_tool_directory(space=active_space)
 

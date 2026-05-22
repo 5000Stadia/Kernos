@@ -152,9 +152,12 @@ class TestPhaseFilesHaveSensibleSize:
         # pair promotion, and the tool.withheld_from_surface
         # event-emit sites in the surfacing loop. ~30 LOC of
         # substrate-tier additions, not unrelated creep.
+        # Raised once more at POSTURE-PREFLIGHT-V1 (2026-05-22) for
+        # the per-turn surfacing-snapshot capture (~50 LOC) the
+        # inspect_tool_availability tool queries.
         ("provision", 30, 200),
         ("route", 80, 250),
-        ("assemble", 400, 1150),
+        ("assemble", 400, 1200),
         ("reason", 20, 100),
         ("consequence", 50, 200),
         ("persist", 150, 400),
