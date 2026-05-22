@@ -146,9 +146,6 @@ def _import_kernel_schemas() -> list[dict]:
         DUMP_CONTEXT_TOOL,
         RESTART_SELF_TOOL,
     )
-    from kernos.kernel.inspect_tool_availability import (
-        INSPECT_TOOL_AVAILABILITY_TOOL,
-    )
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -226,9 +223,6 @@ def _import_kernel_schemas() -> list[dict]:
         # System-space-gated at dispatch time.
         DUMP_CONTEXT_TOOL,
         RESTART_SELF_TOOL,
-        # POSTURE-PREFLIGHT-V1 (2026-05-22): preflight
-        # surfacing check. Pinned + read-only.
-        INSPECT_TOOL_AVAILABILITY_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery

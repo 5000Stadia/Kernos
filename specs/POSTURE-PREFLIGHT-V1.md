@@ -1,10 +1,43 @@
-# POSTURE-PREFLIGHT-V1
+# POSTURE-PREFLIGHT-V1 — REJECTED (2026-05-22)
 
 **Date:** 2026-05-22
-**Status:** Draft for review (deferred sub-spec of
-  `KERNOS-DEFAULT-POSTURE-V1` D5; spun out of
-  `POSTURE-SURFACING-CALIBRATION-V1`).
-**Scope:** New agent-callable kernel tool
+**Status:** REJECTED post-implementation. Reverted in the
+  same-day batch that introduced the end-of-assemble
+  predictive scan. Spec retained as a record of the failed
+  shape + the architectural lesson.
+
+**Why rejected:** The premise of tool surfacing is to
+minimize agent context bloat by putting only relevant tools
+in front of the agent. This spec proposed an agent-callable
+tool the agent would invoke to check whether other tools
+were surfaced — adding a full turn (LLM call + tokens) for
+the agent to query state that the surfacing system was
+already trying to get right. Self-defeating: if surfacing
+works, preflight is redundant; if surfacing fails, preflight
+adds the exact friction the surfacing system was designed to
+prevent.
+
+**Replacement:** Move the existing catalog-scan LLM call to
+the END of assemble (after the rest of the agent's context is
+built) so it ranks the catalog against the full assembled
+context. Agent never needs to ask about surfacing because the
+surfacer has already seen the full trajectory and pre-staged
+the right set. Predictive surfacing via existing LLM call, no
+agent-visible surface.
+
+**Process lesson:** A parent design spec's named sub-spec
+isn't sufficient justification for the sub-spec on its own.
+Each sub-spec must earn its weight against the problem
+statement, including re-checking the load-bearing question
+that may have been deferred at the parent level. Codex review
+on the parent ratified the architecture; that did not
+substitute for first-principles review at sub-spec time.
+
+---
+
+## Original spec (preserved for reference)
+
+**Original scope:** New agent-callable kernel tool
   `inspect_tool_availability` backed by a per-turn
   surfacing snapshot. Agent can ask the substrate
   "is tool X currently surfaced?" before either calling

@@ -505,7 +505,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         ALWAYS_PINNED, COMMON_MCP_NAMES, TOOL_TOKEN_BUDGET, SURFACER_SCHEMA,
         CO_SURFACING_PAIRS,
     )
-    from kernos.messages.intent_classifier import classify_intent
 
     _kernel_tool_map: dict[str, dict] = dict(kernel_tool_schema_map())
     if not handler._retrieval:
@@ -655,34 +654,82 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             if schema and _add_tool(schema):
                 candidates.append((schema, 0))  # highest priority in system space
 
-    # Tier 2: Catalog scan for this turn's intent
+    # Tier 2: Catalog scan for this turn's intent (trajectory-aware)
+    #
+    # POSTURE-PREDICTIVE-SURFACING-V1 (2026-05-22): the scan now sees
+    # the recent conversation trajectory in addition to the current
+    # user message. Lets the LLM make obvious next-tool inferences
+    # ("agent just called canvas_create → page_write is the likely
+    # next move") natively, without preflight checks or regex hints.
+    # Replaces the rejected POSTURE-PREFLIGHT-V1 agent-callable
+    # surface with substrate-side prediction.
     _msg_text = (message.content or "").strip()
     _unsurfaced = handler._tool_catalog.get_names() - _added
     if _msg_text and len(_msg_text) > 5 and _unsurfaced:
         catalog_text = handler._tool_catalog.build_catalog_text(exclude=_added)
         if catalog_text:
-            # POSTURE-SURFACING-CALIBRATION-V1 (2026-05-22): local
-            # intent classifier biases the ranker without an extra
-            # LLM call. Empty set → no hint, preserving prior behavior.
-            _intents = classify_intent(_msg_text)
-            _intent_hint = ""
-            if _intents:
-                _intent_hint = (
-                    f"\n\nThe user's intent appears to be: "
-                    f"{', '.join(sorted(_intents))}. Prefer tools whose "
-                    f"declared effect class matches one of these intents."
+            # Build trajectory digest from the recent conversation
+            # already assembled into space_messages. Capture both
+            # raw text and tool-call signals so the scan sees what
+            # the agent has been doing, not just what was just said.
+            _traj_lines: list[str] = []
+            _recent_tool_calls: list[str] = []
+            for _m in (space_messages or [])[-6:]:
+                _role = _m.get("role", "?")
+                _content = _m.get("content", "")
+                if isinstance(_content, str):
+                    if _content:
+                        _traj_lines.append(f"{_role}: {_content[:200]}")
+                elif isinstance(_content, list):
+                    for _b in _content:
+                        if not isinstance(_b, dict):
+                            continue
+                        _btype = _b.get("type", "")
+                        if _btype == "text":
+                            _txt = _b.get("text", "")
+                            if _txt:
+                                _traj_lines.append(f"{_role}: {_txt[:200]}")
+                        elif _btype == "tool_use":
+                            _tn = _b.get("name", "")
+                            if _tn:
+                                _recent_tool_calls.append(_tn)
+                                _traj_lines.append(
+                                    f"{_role}: [called tool: {_tn}]"
+                                )
+            _trajectory_block = ""
+            if _traj_lines:
+                _trajectory_block = (
+                    "\n\nRecent conversation (oldest → newest):\n"
+                    + "\n".join(_traj_lines)
+                )
+            _recent_tools_block = ""
+            if _recent_tool_calls:
+                _recent_tools_block = (
+                    "\n\nTools the agent has called this session "
+                    "(most recent last): "
+                    + ", ".join(_recent_tool_calls[-8:])
                 )
             try:
                 import json as _json
                 scan_result = await handler.reasoning.complete_simple(
                     system_prompt=(
-                        "Given the user's message, select which additional tools from the catalog "
-                        "are needed. Only select tools directly relevant. Return empty array if "
-                        "the loaded tools are sufficient.\n\n"
+                        "You are picking which catalog tools to surface to "
+                        "the agent for its NEXT response. Predict from the "
+                        "conversation trajectory + the current message "
+                        "what the agent will most plausibly need. "
+                        "Examples: an agent that just created a canvas will "
+                        "likely write pages to it; an agent that's been "
+                        "calling page_read may want page_search. Only "
+                        "select tools directly relevant — empty array if "
+                        "the already-loaded set is sufficient.\n\n"
                         f"Already loaded: {sorted(_added)}"
-                        + _intent_hint
                     ),
-                    user_content=f"User message: \"{_msg_text[:300]}\"\n\nTool catalog:\n{catalog_text}",
+                    user_content=(
+                        f"Current user message: \"{_msg_text[:400]}\""
+                        f"{_trajectory_block}"
+                        f"{_recent_tools_block}"
+                        f"\n\nTool catalog:\n{catalog_text}"
+                    ),
                     output_schema=SURFACER_SCHEMA,
                     max_tokens=128,
                     prefer_cheap=True,
@@ -770,57 +817,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     logger.info("TOOL_SURFACING: tier=%s surfaced=%d total_available=%d",
         _tier, len(tools), _total)
     ctx.tools = tools
-
-    # POSTURE-PREFLIGHT-V1 (2026-05-22): freeze per-turn
-    # surfacing snapshot so inspect_tool_availability can
-    # answer mid-turn "is tool X surfaced" queries.
-    from kernos.messages.surfacing_snapshot import (
-        SurfacingSnapshot, ToolSurfacingEntry,
-    )
-    _snap_entries: dict[str, ToolSurfacingEntry] = {}
-    _pinned_names = {t.get("name", "") for t in pinned_tools}
-    _active_names = {t.get("name", "") for t in active_tools}
-    _evicted_set = set(_evicted)
-    _all_catalog = handler._tool_catalog.get_names()
-
-    def _source_for(name: str) -> str:
-        if name in _kernel_tool_map:
-            return "kernel"
-        for cap in handler.registry.get_all():
-            if name in (cap.tools or []):
-                return "mcp_capability"
-        if name in _all_catalog:
-            return "stock"
-        return "unknown"
-
-    for _n in _pinned_names:
-        _snap_entries[_n] = ToolSurfacingEntry(
-            name=_n, tier="pinned", source=_source_for(_n),
-        )
-    for _n in _active_names:
-        _snap_entries[_n] = ToolSurfacingEntry(
-            name=_n, tier="active", source=_source_for(_n),
-        )
-    for _n in _evicted_set:
-        _snap_entries[_n] = ToolSurfacingEntry(
-            name=_n, tier="absent", source=_source_for(_n),
-            reason_if_absent="evicted_for_budget",
-        )
-    for _n in _disabled_tool_names:
-        # disabled-service tools win over the catalog default.
-        _snap_entries[_n] = ToolSurfacingEntry(
-            name=_n, tier="absent", source=_source_for(_n),
-            reason_if_absent="disabled_service",
-        )
-    for _n in _all_catalog:
-        if _n not in _snap_entries:
-            _snap_entries[_n] = ToolSurfacingEntry(
-                name=_n, tier="catalog", source=_source_for(_n),
-            )
-    handler._surfacing_snapshot = SurfacingSnapshot(
-        entries=_snap_entries,
-        turn_id=getattr(ctx, "turn_id", "") or "",
-    )
 
     # Build system prompt blocks (Cognitive UI grammar)
     capability_prompt = handler.registry.build_tool_directory(space=active_space)
