@@ -20,6 +20,67 @@ _OPENAI_SIMPLE_MODEL = "gpt-4o"
 _OPENAI_CHEAP_MODEL = "gpt-4o-mini"
 
 
+def _force_strict_object_schema(schema: Any) -> Any:
+    """Recursively ensure every ``type: "object"`` level in a JSON
+    schema declares ``additionalProperties: false``.
+
+    OpenAI Codex's responses endpoint tightened JSON-schema
+    validation 2026-05-22: previously-accepted schemas now fail with
+    "In context=(<path>), 'additionalProperties' is required to be
+    supplied and to be false."
+
+    Normalizing here at the provider boundary keeps every caller
+    source-compatible. Handles the three nesting paths the API
+    actually walks:
+
+      * Object schemas (recurse into ``properties.*``).
+      * Array schemas (recurse into ``items``, ``prefixItems``).
+      * Composition: ``oneOf`` / ``anyOf`` / ``allOf`` (recurse into
+        each branch).
+
+    Returns a NEW dict; the input is not mutated so callers can
+    keep using their module-level schema constants.
+    """
+    if isinstance(schema, list):
+        return [_force_strict_object_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = dict(schema)
+    schema_type = out.get("type")
+    if schema_type == "object":
+        # Force additionalProperties: false at this level regardless
+        # of what (if anything) the caller declared. The API requires
+        # false, not just present.
+        out["additionalProperties"] = False
+        if "properties" in out and isinstance(out["properties"], dict):
+            out["properties"] = {
+                k: _force_strict_object_schema(v)
+                for k, v in out["properties"].items()
+            }
+    if schema_type == "array":
+        if "items" in out:
+            out["items"] = _force_strict_object_schema(out["items"])
+        if "prefixItems" in out:
+            out["prefixItems"] = [
+                _force_strict_object_schema(item)
+                for item in out["prefixItems"]
+            ]
+    for composition_key in ("oneOf", "anyOf", "allOf"):
+        if composition_key in out and isinstance(out[composition_key], list):
+            out[composition_key] = [
+                _force_strict_object_schema(branch)
+                for branch in out[composition_key]
+            ]
+    # $defs / definitions can also carry object schemas
+    for defs_key in ("$defs", "definitions"):
+        if defs_key in out and isinstance(out[defs_key], dict):
+            out[defs_key] = {
+                k: _force_strict_object_schema(v)
+                for k, v in out[defs_key].items()
+            }
+    return out
+
+
 class OpenAICodexProvider(Provider):
     """ChatGPT Codex OAuth provider — uses chatgpt.com/backend-api/codex/responses.
 
@@ -545,11 +606,23 @@ class OpenAICodexProvider(Provider):
         # missing; the consumer backend treats absent text as a malformed
         # request on the codex/responses endpoint.
         if output_schema:
+            # 2026-05-22: OpenAI Codex API tightened JSON-schema
+            # validation — every ``type: object`` level must declare
+            # ``additionalProperties: false`` explicitly. Production
+            # was hitting:
+            #   "In context=(), 'additionalProperties' is required to
+            #    be supplied and to be false."
+            # on schemas authored before the API change. Substrate-side
+            # normalization at the provider boundary keeps every caller
+            # source-compatible without per-schema edits across the
+            # codebase. Recurses through nested objects + properties
+            # + items.
+            normalized_schema = _force_strict_object_schema(output_schema)
             body["text"] = {
                 "format": {
                     "type": "json_schema",
                     "name": "output",
-                    "schema": output_schema,
+                    "schema": normalized_schema,
                 }
             }
         else:
