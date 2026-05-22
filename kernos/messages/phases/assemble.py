@@ -503,7 +503,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     from kernos.kernel.kernel_tool_registry import kernel_tool_schema_map
     from kernos.kernel.tool_catalog import (
         ALWAYS_PINNED, COMMON_MCP_NAMES, TOOL_TOKEN_BUDGET, SURFACER_SCHEMA,
-        CO_SURFACING_PAIRS,
     )
 
     _kernel_tool_map: dict[str, dict] = dict(kernel_tool_schema_map())
@@ -533,39 +532,18 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     # surfacer scan as well. Catalog entries themselves stay
     # registered so `kernos services list` can show them as
     # available-but-disabled.
-    _disabled_tool_names: set[str] = set()
     try:
         _service_store = handler._workspace.service_state_store()
         _disabled_services = _service_store.disabled_service_ids()
-        _disabled_tool_names = set(
+        _added.update(
             handler._tool_catalog.disabled_tool_names(_disabled_services)
         )
-        _added.update(_disabled_tool_names)
     except Exception:  # defensive — surfacing must not fail on store errors
         logger.warning(
             "TOOL_SURFACING: failed to read service_state for disabled-filter; "
             "continuing without filter",
             exc_info=True,
         )
-    # POSTURE-SURFACING-CALIBRATION-V1 (2026-05-22): emit a
-    # withhold receipt per disabled-service tool. Operators can
-    # grep tool.withheld_from_surface events to detect missing
-    # tools blocked by configuration.
-    for _disabled_name in _disabled_tool_names:
-        try:
-            await emit_event(
-                handler.events,
-                EventType.TOOL_WITHHELD_FROM_SURFACE,
-                instance_id, active_space_id,
-                payload={
-                    "tool_name": _disabled_name,
-                    "reason": "disabled_service",
-                    "tier_attempted": "pinned",
-                    "turn_id": getattr(ctx, "turn_id", "") or "",
-                },
-            )
-        except Exception:
-            pass  # best-effort per kernel emit convention
 
     def _add_tool(schema: dict) -> bool:
         name = schema.get("name", "")
@@ -753,23 +731,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             except Exception as exc:
                 logger.warning("TOOL_SURFACING: catalog scan failed: %s", exc)
 
-    # POSTURE-SURFACING-CALIBRATION-V1 (2026-05-22): co-surfacing.
-    # When one tool in a registered pair appears in the candidate
-    # list, auto-promote the other before the active-zone fill loop.
-    # Closes the "I can read canvas but can't write" surface gap.
-    _candidate_names = {schema.get("name", "") for schema, _ in candidates}
-    for _pair_a, _pair_b in CO_SURFACING_PAIRS:
-        if _pair_a in _candidate_names and _pair_b not in _added:
-            _pair_schema = _kernel_tool_map.get(_pair_b) or handler.registry.get_tool_schema(_pair_b)
-            if _pair_schema and _add_tool(_pair_schema):
-                candidates.append((_pair_schema, 0))
-                logger.info("TOOL_CO_SURFACING: paired %s → %s", _pair_a, _pair_b)
-        if _pair_b in _candidate_names and _pair_a not in _added:
-            _pair_schema = _kernel_tool_map.get(_pair_a) or handler.registry.get_tool_schema(_pair_a)
-            if _pair_schema and _add_tool(_pair_schema):
-                candidates.append((_pair_schema, 0))
-                logger.info("TOOL_CO_SURFACING: paired %s → %s", _pair_b, _pair_a)
-
     # Sort candidates by eviction priority (ascending = keep first)
     candidates.sort(key=lambda x: x[1])
 
@@ -784,23 +745,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             _active_tokens += tokens
         else:
             _evicted.append(schema.get("name", "?"))
-            # POSTURE-SURFACING-CALIBRATION-V1: emit a withhold
-            # receipt per evicted tool. Best-effort emit — surfacing
-            # never fails on event-stream errors per kernel convention.
-            try:
-                await emit_event(
-                    handler.events,
-                    EventType.TOOL_WITHHELD_FROM_SURFACE,
-                    instance_id, active_space_id,
-                    payload={
-                        "tool_name": schema.get("name", ""),
-                        "reason": "evicted_for_budget",
-                        "tier_attempted": "active",
-                        "turn_id": getattr(ctx, "turn_id", "") or "",
-                    },
-                )
-            except Exception:
-                pass
 
     # Assemble final tool list: pinned first (sorted), then active (sorted)
     pinned_tools.sort(key=lambda t: t.get("name", ""))

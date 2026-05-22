@@ -83,22 +83,6 @@ ALWAYS_PINNED: set[str] = {
     "restart_self",
 }
 
-
-# POSTURE-SURFACING-CALIBRATION-V1 (2026-05-22): co-surfacing
-# pairs. When one tool in a pair is in the active candidate
-# list, the other is auto-promoted before the active-zone fill
-# loop. Closes the "I can read canvas but can't write to it"
-# surface gap without per-tool eviction handling.
-#
-# v1 ships unconditional pair-promote — the "recent canvas
-# context" gating from POSTURE-V1's spec text is reserved for
-# a future refinement. Observe whether spurious promotions
-# happen before adding the conditional.
-CO_SURFACING_PAIRS: list[tuple[str, str]] = [
-    ("canvas_create", "page_write"),
-    ("canvas_read", "page_write"),
-]
-
 # Common MCP tools that get priority in the active window (not pinned, but preferred)
 COMMON_MCP_NAMES: set[str] = {
     "get-current-time",

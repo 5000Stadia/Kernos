@@ -1,7 +1,16 @@
 # POSTURE-SURFACING-CALIBRATION-V1
 
 **Date:** 2026-05-22
-**Status:** Draft for review (sub-spec of `KERNOS-DEFAULT-POSTURE-V1`)
+**Status:** SUPERSEDED (2026-05-22). Originally shipped as
+  `b31991b`; substantially reverted in the same-day audit that
+  followed the PREFLIGHT-V1 rejection. All three pieces (intent
+  classifier, co-surfacing pair, withhold-from-surface events)
+  removed in favor of trajectory-aware predictive surfacing
+  via the assemble-phase catalog scan (see the same-day commit
+  enriching the scan with conversation trajectory). Spec
+  retained as a record of the failed shape + the lesson:
+  hint-pump for a downstream LLM call is weaker than handing
+  the LLM the actual signal it needs.
 **Scope:** Three changes to the assemble-phase tool surfacer
   (`kernos/messages/phases/assemble.py:484+`):
 
