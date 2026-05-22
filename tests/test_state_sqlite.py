@@ -107,7 +107,11 @@ class TestKnowledge:
 
 
 class TestCovenants:
-    async def test_add_and_get(self, store):
+    async def test_add_and_get(self, store, monkeypatch):
+        # POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): pin against strict
+        # so this round-trip persistence check still exercises the
+        # full pre-change 9-rule seed shape.
+        monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
         rules = default_covenant_rules("t1", _now())
         for r in rules:
             await store.add_contract_rule(r)

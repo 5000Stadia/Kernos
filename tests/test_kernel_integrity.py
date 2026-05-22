@@ -124,7 +124,8 @@ async def test_restart_profile_survives(tmp_path):
     assert loaded.status == "active"
 
 
-async def test_restart_contracts_survive(tmp_path):
+async def test_restart_contracts_survive(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     store = JsonStateStore(tmp_path)
     for rule in default_contract_rules("t1", _now()):
         await store.add_contract_rule(rule)
@@ -331,7 +332,8 @@ async def test_shadow_archive_noop_for_missing_conversation(tmp_path):
 # ============================================================================
 
 
-def test_default_contract_rules_count():
+def test_default_contract_rules_count(monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     assert len(default_contract_rules("t1", _now())) == 9
 
 
@@ -347,7 +349,8 @@ def test_default_contract_rules_correct_tenant():
     assert all(r.instance_id == "t1" for r in default_contract_rules("t1", _now()))
 
 
-def test_default_contract_rules_type_breakdown():
+def test_default_contract_rules_type_breakdown(monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     rules = default_contract_rules("t1", _now())
     assert len([r for r in rules if r.rule_type == "must_not"]) == 3
     assert len([r for r in rules if r.rule_type == "must"]) == 2
@@ -355,8 +358,10 @@ def test_default_contract_rules_type_breakdown():
     assert len([r for r in rules if r.rule_type == "escalation"]) == 1
 
 
-async def test_newinstance_provisioned_with_seven_default_rules(tmp_path):
-    """Handler provisioning a new tenant creates 7 default contract rules."""
+async def test_newinstance_provisioned_with_seven_default_rules(tmp_path, monkeypatch):
+    """Handler provisioning a new tenant creates 9 default contract rules
+    under the strict posture profile (the pre-POSTURE-V1 default)."""
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     handler, mock_provider, events, state = _make_real_handler(tmp_path)
     mock_provider.complete.return_value = _mock_response("Hello!")
 

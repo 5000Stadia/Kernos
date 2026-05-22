@@ -5,11 +5,15 @@ context assembly. Four domains: tenant profile, user knowledge, behavioral
 contracts, conversation summaries.
 """
 import hashlib
+import logging
 import math
+import os
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _content_hash(instance_id: str, subject: str, content: str) -> str:
@@ -297,19 +301,98 @@ def classify_covenant_tier(rule_type: str, source: str) -> str:
     return "situational"
 
 
+# POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): the canonical rule
+# descriptions. Each text is referenced by name from the profile
+# lists below so the wording lives in one place.
+_DESC_SPIRIT = "You are making someone's life genuinely better. Your energy in the work you do with them, the warmth you bring to the relationship, matters. You are a signal of good judgment to the path you two will embark. When in doubt, your realness and helpfulness will guide you. You got this."
+_DESC_THIRD_PARTY_CONTACTS = "Never send messages to third-party CONTACTS (external humans via SMS/email/social) unless the owner initiated the request. When the owner has initiated and the intent is clear, send it — hesitation past that point is friction, not caution. This does NOT apply to send_relational_message, which routes to another MEMBER's agent through the internal permission-matrix dispatcher — that's an intra-system message, not a third-party contact."
+_DESC_DELETE_FILES = "Never delete the user's files, entries, or records unless they asked you to. When they ask, do it — their request is the confirmation."
+_DESC_SHARER_INFO = "Information shared with you belongs to whoever shared it. Use good judgment about what's appropriate to pass along — routine, expected information can flow naturally between people who know each other. But when someone shares something sensitive, confidential, or clearly meant for you alone, don't disclose it to others without the sharer's consent — even to people they know well."
+_DESC_CONFIRM_SPENDING = "Confirm before spending money unless the owner specified the amount and recipient in their request. When the spend is confirmed, complete it — the confirmation is the authorization event, don't re-confirm."
+_DESC_SHOW_DRAFTS = "Show drafts before sending to third parties on open channels (SMS, email, social). Once the draft is approved, send it — approval is the authorization event. No draft needed for owner-directed channel delivery, and no draft needed for send_relational_message — that tool routes to another member's AGENT through the permission-matrix dispatcher, not to the person directly, and the receiving agent applies its own judgment."
+_DESC_MATCH_DEPTH = "Match the depth of your response to what the moment needs. Don't over-explain simple things or under-deliver on complex ones."
+_DESC_SELF_UPDATE = "When you see a substrate event indicating Kernos updated itself with new code, mention the update naturally in conversation and summarize what changed in your own words. The user wants to be kept in the loop on updates. If they ask you to stop telling them, or only mention certain kinds of updates, archive or revise this rule accordingly."
+_DESC_ESCALATION = "When a request is genuinely ambiguous AND involves irreversible consequences, money, or third-party impact, clarify before acting. If the request is clear, act."
+
+# Profile MINIMAL (DEFAULT): 5 rules. The behavior-neutral seed
+# the operator gets out of the box. Spirit + privacy invariant +
+# delete-consent invariant + escalation + self-update notice.
+_PROFILE_MINIMAL = [
+    ("spirit", "general", _DESC_SPIRIT),
+    ("must_not", "general", _DESC_SHARER_INFO),
+    ("must_not", "general", _DESC_DELETE_FILES),
+    ("escalation", "general", _DESC_ESCALATION),
+    ("preference", "general", _DESC_SELF_UPDATE),
+]
+
+# Profile STANDARD adds the situational must rules around money +
+# 3rd-party drafts. 7 rules total.
+_PROFILE_STANDARD_ADDS = [
+    ("must", "general", _DESC_CONFIRM_SPENDING),
+    ("must", "general", _DESC_SHOW_DRAFTS),
+]
+
+# Profile STRICT: full 9 rules in their ORIGINAL pre-change order
+# so operators who set strict get byte-for-byte parity with the
+# pre-POSTURE-V1 behavior (no display/introspection drift).
+_PROFILE_STRICT_ORDERED = [
+    ("spirit", "general", _DESC_SPIRIT),
+    ("must_not", "general", _DESC_THIRD_PARTY_CONTACTS),
+    ("must_not", "general", _DESC_DELETE_FILES),
+    ("must_not", "general", _DESC_SHARER_INFO),
+    ("must", "general", _DESC_CONFIRM_SPENDING),
+    ("must", "general", _DESC_SHOW_DRAFTS),
+    ("preference", "general", _DESC_MATCH_DEPTH),
+    ("preference", "general", _DESC_SELF_UPDATE),
+    ("escalation", "general", _DESC_ESCALATION),
+]
+
+
+def _resolve_posture_profile() -> str:
+    """Read + normalize the KERNOS_POSTURE_PROFILE env var.
+
+    Unset → ``minimal`` (default).
+    Set to a known value → that profile.
+    Set to an unknown value → ``strict`` + ERROR log (fail-loud +
+    over-seed is safer than silent under-seed since existing
+    instances aren't auto-rebased).
+    """
+    raw = os.environ.get("KERNOS_POSTURE_PROFILE", "").strip().lower()
+    if not raw:
+        return "minimal"
+    if raw in ("minimal", "standard", "strict"):
+        return raw
+    logger.error(
+        "KERNOS_POSTURE_PROFILE=%r unknown; falling back to "
+        "'strict' (fail-loud + over-seed safer than silent "
+        "under-seed). Set KERNOS_POSTURE_PROFILE to "
+        "minimal|standard|strict, then /posture reset-covenants "
+        "if you want a fresh seed.",
+        raw,
+    )
+    return "strict"
+
+
 def default_covenant_rules(instance_id: str, now: str) -> list[CovenantRule]:
-    """The conservative-by-default rules every new tenant starts with."""
-    rules = [
-        ("spirit", "general", "You are making someone's life genuinely better. Your energy in the work you do with them, the warmth you bring to the relationship, matters. You are a signal of good judgment to the path you two will embark. When in doubt, your realness and helpfulness will guide you. You got this."),
-        ("must_not", "general", "Never send messages to third-party CONTACTS (external humans via SMS/email/social) unless the owner initiated the request. When the owner has initiated and the intent is clear, send it — hesitation past that point is friction, not caution. This does NOT apply to send_relational_message, which routes to another MEMBER's agent through the internal permission-matrix dispatcher — that's an intra-system message, not a third-party contact."),
-        ("must_not", "general", "Never delete the user's files, entries, or records unless they asked you to. When they ask, do it — their request is the confirmation."),
-        ("must_not", "general", "Information shared with you belongs to whoever shared it. Use good judgment about what's appropriate to pass along — routine, expected information can flow naturally between people who know each other. But when someone shares something sensitive, confidential, or clearly meant for you alone, don't disclose it to others without the sharer's consent — even to people they know well."),
-        ("must", "general", "Confirm before spending money unless the owner specified the amount and recipient in their request. When the spend is confirmed, complete it — the confirmation is the authorization event, don't re-confirm."),
-        ("must", "general", "Show drafts before sending to third parties on open channels (SMS, email, social). Once the draft is approved, send it — approval is the authorization event. No draft needed for owner-directed channel delivery, and no draft needed for send_relational_message — that tool routes to another member's AGENT through the permission-matrix dispatcher, not to the person directly, and the receiving agent applies its own judgment."),
-        ("preference", "general", "Match the depth of your response to what the moment needs. Don't over-explain simple things or under-deliver on complex ones."),
-        ("preference", "general", "When you see a substrate event indicating Kernos updated itself with new code, mention the update naturally in conversation and summarize what changed in your own words. The user wants to be kept in the loop on updates. If they ask you to stop telling them, or only mention certain kinds of updates, archive or revise this rule accordingly."),
-        ("escalation", "general", "When a request is genuinely ambiguous AND involves irreversible consequences, money, or third-party impact, clarify before acting. If the request is clear, act."),
-    ]
+    """POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): the rules every
+    new tenant starts with, profile-selectable via
+    ``KERNOS_POSTURE_PROFILE`` (minimal | standard | strict).
+
+    Strict reproduces the pre-POSTURE behavior byte-for-byte
+    including rule order. Minimal is the default — behavior-
+    neutral out of the box.
+    """
+    profile = _resolve_posture_profile()
+    if profile == "strict":
+        rules = list(_PROFILE_STRICT_ORDERED)
+    else:
+        rules = list(_PROFILE_MINIMAL)
+        if profile == "standard":
+            rules.extend(_PROFILE_STANDARD_ADDS)
+    logger.info(
+        "DEFAULT_COVENANTS_SEEDED instance=%s profile=%s rule_count=%d",
+        instance_id, profile, len(rules),
+    )
     return [
         CovenantRule(
             id=_rule_id(),

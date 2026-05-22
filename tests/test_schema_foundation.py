@@ -299,8 +299,15 @@ def test_default_contract_rules_alias():
     assert all(isinstance(r, CovenantRule) for r in rules)
 
 
-def test_default_covenant_rules_sets_enforcement_tier():
-    """New default rules have enforcement_tier set appropriately."""
+def test_default_covenant_rules_sets_enforcement_tier(monkeypatch):
+    """New default rules have enforcement_tier set appropriately.
+
+    POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): the default seed is
+    now profile-aware (minimal=5, standard=7, strict=9). This test
+    pins enforcement-tier wiring against the strict profile so the
+    full type set (must/must_not/preference/escalation) is exercised.
+    """
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     rules = default_covenant_rules("t1", _now())
     by_type = {r.rule_type: r for r in rules}
     assert by_type["preference"].enforcement_tier == "silent"
@@ -345,7 +352,7 @@ def test_covenant_rule_loads_from_old_json(tmp_path):
     asyncio.get_event_loop().run_until_complete(_check())
 
 
-def test_default_covenant_rules_updated_wording():
+def test_default_covenant_rules_updated_wording(monkeypatch):
     """New tenants get the current covenant wording.
 
     Note: RELATIONAL-MESSAGING clarified the third-party rule to exclude
@@ -356,7 +363,12 @@ def test_default_covenant_rules_updated_wording():
     negative rule with its positive complement. Each negative in this
     set now includes an explicit "when X, do it" counterpart in the
     same rule string.
+
+    POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): pinned to strict so the
+    full historical wording set (including spending/drafts/depth) is
+    exercised. The minimal default no longer carries those rules.
     """
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     rules = default_covenant_rules("t1", _now())
     descs = [r.description for r in rules]
     assert any("third-party CONTACTS" in d and "owner initiated" in d for d in descs)

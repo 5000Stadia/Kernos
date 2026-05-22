@@ -154,7 +154,11 @@ def test_format_contracts_empty():
     assert _format_contracts([]) == ""
 
 
-def test_format_contracts_includes_all_types():
+def test_format_contracts_includes_all_types(monkeypatch):
+    # POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): pin against strict
+    # so all rule types (must/must_not/preference/escalation) are
+    # present in the seed. Minimal default omits must/preference.
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     now = _now()
     rules = default_contract_rules("t1", now)
     result = _format_contracts(rules)

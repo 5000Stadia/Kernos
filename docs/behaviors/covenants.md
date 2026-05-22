@@ -1,6 +1,6 @@
 # Covenants
 
-Covenants are behavioral rules that guide agent actions. They define what the agent must do, must not do, prefers, and when to escalate. Every tenant starts with seven default rules. Users add rules through natural conversation.
+Covenants are behavioral rules that guide agent actions. They define what the agent must do, must not do, prefers, and when to escalate. Every tenant starts with a profile-selected set of default rules (5, 7, or 9 depending on `KERNOS_POSTURE_PROFILE`). Users add rules through natural conversation.
 
 ## How Covenants Are Created
 
@@ -20,17 +20,24 @@ Each `CovenantRule` (`kernos/kernel/state.py`) has:
 - **source** — `default` (system), `user_stated`, or `evolved`
 - **layer** — `principle` (hard boundary) or `practice` (flexible guidance)
 
-## Default Rules
+## Default Rules — Posture Profile
 
-Every new tenant gets seven default covenants:
+Per `POSTURE-SEEDED-COVENANTS-V1` (2026-05-22), the default
+covenant seed is profile-selectable via the
+`KERNOS_POSTURE_PROFILE` env var. Three profiles:
 
-1. Confirm before sending messages to external parties
-2. Never share the user's personal data with third parties without permission
-3. Respect data privacy — don't store sensitive information unnecessarily
-4. Flag unexpected costs before proceeding
-5. Defer to the user on decisions about their relationships
-6. Be concise — prefer brief responses unless detail is requested
-7. Escalate when unsure — ask rather than guess
+- `minimal` (DEFAULT) — 5 rules: spirit + privacy-belongs-to-sharer + don't-delete-without-asking + escalation + self-update-notice. The behavior-neutral posture.
+- `standard` — 7 rules: minimal + confirm-spending + show-drafts-to-3rd-parties.
+- `strict` — 9 rules: standard + match-depth-preference + never-send-3rd-party-contacts-unless-owner-initiated. Reproduces the pre-POSTURE-V1 default exactly.
+
+Existing instances are NOT auto-rebased when the env changes;
+the seed runs only on first-boot of a NEW instance. Reset
+existing instances via the `/posture reset-covenants <profile>`
+slash command (lands in `POSTURE-CONFIGURATION-V1`).
+
+The canonical rule descriptions live in `kernos/kernel/state.py`
+as module-level constants (`_DESC_*`). All profile lists
+reference these by name so the wording lives in one place.
 
 ## Post-Write Validation
 

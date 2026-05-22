@@ -205,7 +205,11 @@ async def test_update_knowledge_shadow_archive(tmp_path):
 # --- Behavioral Contracts ---
 
 
-def test_default_contract_rules_count():
+def test_default_contract_rules_count(monkeypatch):
+    # POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): default is now
+    # profile-aware. Pin against strict to preserve original
+    # 9-rule count assertion (5 minimal + 7 standard + 9 strict).
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     now = _now()
     rules = default_contract_rules("t1", now)
     assert len(rules) == 9  # 8 base + 1 update-notification (INFORMING-V1)
@@ -223,7 +227,8 @@ def test_default_contract_rules_source():
     assert all(r.source == "default" for r in rules)
 
 
-def test_default_contract_rules_has_must_nots():
+def test_default_contract_rules_has_must_nots(monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     now = _now()
     rules = default_contract_rules("t1", now)
     must_nots = [r for r in rules if r.rule_type == "must_not"]
@@ -236,7 +241,8 @@ def test_default_contract_rules_correct_tenant():
     assert all(r.instance_id == "sms:+15555550100" for r in rules)
 
 
-async def test_add_and_get_contract_rules(tmp_path):
+async def test_add_and_get_contract_rules(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     store = JsonStateStore(tmp_path)
     now = _now()
     for rule in default_contract_rules("t1", now):
@@ -246,7 +252,8 @@ async def test_add_and_get_contract_rules(tmp_path):
     assert len(all_rules) == 9
 
 
-async def test_get_contract_rules_by_type(tmp_path):
+async def test_get_contract_rules_by_type(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     store = JsonStateStore(tmp_path)
     now = _now()
     for rule in default_contract_rules("t1", now):
@@ -257,7 +264,8 @@ async def test_get_contract_rules_by_type(tmp_path):
     assert all(r.rule_type == "must_not" for r in must_nots)
 
 
-async def test_get_contract_rules_active_only(tmp_path):
+async def test_get_contract_rules_active_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     store = JsonStateStore(tmp_path)
     now = _now()
     rules = default_contract_rules("t1", now)

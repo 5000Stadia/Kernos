@@ -227,7 +227,8 @@ async def test_contractsinstance_a_invisible_to_b(tmp_path):
     assert await store.get_contract_rules("tenant_b") == []
 
 
-async def test_contracts_default_provisioning_isolated(tmp_path):
+async def test_contracts_default_provisioning_isolated(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     store = JsonStateStore(tmp_path)
     for rule in default_contract_rules("tenant_a", _now()):
         await store.add_contract_rule(rule)
@@ -235,8 +236,9 @@ async def test_contracts_default_provisioning_isolated(tmp_path):
     assert len(await store.get_contract_rules("tenant_a")) == 9
 
 
-async def test_contract_update_a_does_not_affect_b(tmp_path):
+async def test_contract_update_a_does_not_affect_b(tmp_path, monkeypatch):
     """CRITICAL: update_contract_rule with Tenant A's rule_id must NOT touch Tenant B's data."""
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     store = JsonStateStore(tmp_path)
     rules_a = default_contract_rules("tenant_a", _now())
     rules_b = default_contract_rules("tenant_b", _now())

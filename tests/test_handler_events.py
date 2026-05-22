@@ -405,7 +405,10 @@ async def test_handler_error_event_has_error_type():
 # ---------------------------------------------------------------------------
 
 
-async def test_newinstance_gets_profile_and_default_contracts(tmp_path):
+async def test_newinstance_gets_profile_and_default_contracts(tmp_path, monkeypatch):
+    # POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): pin against strict so
+    # the full pre-change 9-rule seed lands. New default is minimal (5).
+    monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
     handler, mock_provider, events, state = _make_real_handler(tmp_path)
     mock_provider.complete.return_value = _mock_provider_response("Hello!")
 
