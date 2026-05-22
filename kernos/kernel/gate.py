@@ -190,6 +190,13 @@ class DispatchGate:
             # produce downstream code changes but those are tracked
             # downstream, not at this surface).
             "ask_coding_session",
+            # 2026-05-22: request_space_action was registered as a
+            # kernel tool but missing from the gate classification
+            # table — live-integration dispatcher refused it as
+            # 'unknown'. It writes a bounded typed mutation request
+            # to another space; reversible (the target space's runner
+            # can reject) → soft_write.
+            "request_space_action",
         }
 
         if tool_name in _KERNEL_READS:

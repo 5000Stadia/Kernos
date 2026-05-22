@@ -54,6 +54,39 @@ class TestToolAliasCanonicalizer:
         assert canonical == "manage_plan"
         assert repaired is True
 
+    def test_namespaced_request_space_action_alias(self):
+        """2026-05-22 hallucination: namespaced
+        external_code_consultation.request_space_action → real
+        request_space_action."""
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        canonical, repaired = canonicalize_tool_name(
+            "external_code_consultation.request_space_action",
+        )
+        assert canonical == "request_space_action"
+        assert repaired is True
+
+    def test_repository_inspection_report_alias(self):
+        """2026-05-22 hallucination: repository_inspection.report
+        → ask_coding_session (closest general-purpose investigator)."""
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        canonical, repaired = canonicalize_tool_name(
+            "repository_inspection.report",
+        )
+        assert canonical == "ask_coding_session"
+        assert repaired is True
+
+    def test_gate_classifies_request_space_action_as_soft_write(self):
+        """2026-05-22: request_space_action was missing from the
+        gate classification table, causing live-integration dispatcher
+        to refuse it as unknown. Now classified as soft_write."""
+        from kernos.kernel.gate import DispatchGate
+        gate = DispatchGate(
+            reasoning_service=None, registry=None, state=None, events=None,
+        )
+        assert gate.classify_tool_effect(
+            "request_space_action", None, None,
+        ) == "soft_write"
+
     def test_canonical_name_passes_through(self):
         from kernos.kernel.tool_aliases import canonicalize_tool_name
         canonical, repaired = canonicalize_tool_name("manage_plan")

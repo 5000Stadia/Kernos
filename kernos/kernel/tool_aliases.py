@@ -32,6 +32,16 @@ _TOOL_ALIASES: dict[str, str] = {
     # (intended action='continue' or workspace-side artifact write,
     # but neither tool exists by that name).
     "workspace_plan_artifact_write": "manage_plan",
+    # 2026-05-22 canvas test: agent hallucinated a namespaced
+    # cross-space dispatch — intended request_space_action.
+    "external_code_consultation.request_space_action": "request_space_action",
+    # Same agent batch — the bot tried a generic "give me a
+    # repo inspection report" name. No exact canonical lives at
+    # the same surface; ask_coding_session is the closest
+    # general-purpose external-investigator. Repair to that so
+    # the call at least reaches a working surface; the agent's
+    # `question` parameter still carries the inspection intent.
+    "repository_inspection.report": "ask_coding_session",
 }
 
 
