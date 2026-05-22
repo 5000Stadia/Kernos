@@ -31,6 +31,15 @@ from kernos.kernel.spaces import ContextSpace
 from kernos.kernel.state import InstanceProfile
 
 
+# POSTURE-EVALUATION-MODES-V1 (2026-05-22): pin every test in
+# this file to the pre-V1 'balanced' mode so existing assertions
+# about reason='confirm' on ambiguous responses still hold. New
+# mode-aware coverage lives in test_posture_evaluation_modes.py.
+@pytest.fixture(autouse=True)
+def _pin_gate_mode_balanced(monkeypatch):
+    monkeypatch.setenv("KERNOS_GATE_MODE", "balanced")
+
+
 # --- Helper factories ---
 
 def _make_service(tool_effects: dict[str, str] | None = None) -> ReasoningService:

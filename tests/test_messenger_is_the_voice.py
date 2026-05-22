@@ -26,6 +26,14 @@ import pytest
 from kernos.kernel.gate import DispatchGate, GateResult
 
 
+# POSTURE-EVALUATION-MODES-V1 (2026-05-22): pin to pre-V1
+# 'balanced' so existing assertions about reason='confirm' on
+# CONFIRM responses still hold under the new default permissive.
+@pytest.fixture(autouse=True)
+def _pin_gate_mode_balanced(monkeypatch):
+    monkeypatch.setenv("KERNOS_GATE_MODE", "balanced")
+
+
 def _make_gate(*, must_not_rules=None):
     """Build a DispatchGate against async-mocked dependencies."""
     reasoning = MagicMock()

@@ -5,6 +5,13 @@ from kernos.kernel.gate import DispatchGate, GateResult
 from kernos.kernel.state import InstanceProfile
 
 
+# POSTURE-EVALUATION-MODES-V1 (2026-05-22): pin to pre-V1
+# 'balanced' so existing assertions about CONFIRM-as-block hold.
+@pytest.fixture(autouse=True)
+def _pin_gate_mode_balanced(monkeypatch):
+    monkeypatch.setenv("KERNOS_GATE_MODE", "balanced")
+
+
 def _make_gate():
     reasoning = MagicMock()
     reasoning.complete_simple = AsyncMock(return_value="CONFIRM")

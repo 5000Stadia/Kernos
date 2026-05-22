@@ -10,12 +10,116 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from kernos.kernel.event_types import EventType
 from kernos.kernel.events import EventStream, emit_event
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# POSTURE-EVALUATION-MODES-V1 (2026-05-22)
+# ============================================================
+
+
+@dataclass(frozen=True)
+class GateModePolicy:
+    """Per-mode tuning of DispatchGate.evaluate's behavior.
+
+    Read at construction time. The policy is consulted at three
+    branch points: reactive-soft_write bypass eligibility, the
+    model system-prompt preamble, and the fallback for ambiguous
+    model responses (CONFIRM or unparseable).
+    """
+
+    name: str  # "permissive" | "balanced" | "strict"
+
+    # Bypass-rule overrides
+    reactive_soft_write_auto_proceed: bool
+
+    # Reserved for future spec: explicit "user named this exact
+    # action" signal would unlock auto-bypass for hard_write
+    # under permissive mode. v1 holds False across ALL modes
+    # per POSTURE-V1 D3 Codex round 2 finding 1.
+    reactive_hard_write_auto_proceed: bool
+
+    # System-prompt preamble injected at the top of
+    # _evaluate_model's system_prompt. Biases the model without
+    # overriding APPROVE/CONFIRM/CONFLICT decision criteria.
+    prompt_preamble: str
+
+    # What to do when the model returns CONFIRM or an
+    # unparseable response (the "ambiguous" branch).
+    # CLARIFY is NEVER subject to this — it always blocks
+    # with reason="clarify".
+    ambiguous_fallback: Literal["proceed", "confirm", "refuse"]
+
+
+_POLICY_PERMISSIVE = GateModePolicy(
+    name="permissive",
+    reactive_soft_write_auto_proceed=True,
+    reactive_hard_write_auto_proceed=False,
+    prompt_preamble=(
+        "POSTURE: permissive. Default to APPROVE unless a covenant "
+        "clearly blocks the action. If the user's intent is plausibly "
+        "served by this action, approve. Reserve CONFIRM for actions "
+        "that clearly exceed the user's request.\n\n"
+    ),
+    ambiguous_fallback="proceed",
+)
+
+_POLICY_BALANCED = GateModePolicy(
+    name="balanced",
+    reactive_soft_write_auto_proceed=True,
+    reactive_hard_write_auto_proceed=False,
+    prompt_preamble=(
+        "POSTURE: balanced. Default to APPROVE for reactive actions "
+        "matching the user's request. Use CONFIRM when the action "
+        "exceeds the request or affects parties beyond the user.\n\n"
+    ),
+    ambiguous_fallback="confirm",
+)
+
+_POLICY_STRICT = GateModePolicy(
+    name="strict",
+    reactive_soft_write_auto_proceed=False,
+    reactive_hard_write_auto_proceed=False,
+    prompt_preamble=(
+        "POSTURE: strict. Default to CONFIRM unless the action is "
+        "read-only or the user named this exact action verbatim in "
+        "their current message. Bias toward asking.\n\n"
+    ),
+    ambiguous_fallback="refuse",
+)
+
+_GATE_MODES: dict[str, GateModePolicy] = {
+    "permissive": _POLICY_PERMISSIVE,
+    "balanced": _POLICY_BALANCED,
+    "strict": _POLICY_STRICT,
+}
+
+
+def _resolve_gate_mode_policy() -> GateModePolicy:
+    """Read + normalize ``KERNOS_GATE_MODE``.
+
+    Unset → ``permissive`` (default, behavior-neutral).
+    Known value → that mode.
+    Unknown value → ``strict`` + ERROR log (fail-loud + fall-safe).
+    Silent permissive on a typo would silently loosen the gate.
+    """
+    raw = os.environ.get("KERNOS_GATE_MODE", "").strip().lower()
+    if not raw:
+        return _POLICY_PERMISSIVE
+    if raw in _GATE_MODES:
+        return _GATE_MODES[raw]
+    logger.error(
+        "KERNOS_GATE_MODE=%r unknown; falling back to 'strict' "
+        "(fail-loud + fall-safe). Set KERNOS_GATE_MODE to "
+        "permissive|balanced|strict.",
+        raw,
+    )
+    return _POLICY_STRICT
 
 
 def _action_keywords(tool_name: str, tool_input: dict) -> list[str]:
@@ -90,6 +194,29 @@ class DispatchGate:
         # Per-turn denial tracking: {tool_name: consecutive_block_count}
         self._denial_counts: dict[str, int] = {}
         self._denial_limit = int(os.environ.get("KERNOS_GATE_DENIAL_LIMIT", "3"))
+        # POSTURE-EVALUATION-MODES-V1 (2026-05-22): mode policy
+        # consulted at reactive-soft_write bypass, _evaluate_model
+        # preamble, and the ambiguous-branch fallback.
+        self._mode_policy: GateModePolicy = _resolve_gate_mode_policy()
+        logger.info(
+            "GATE_MODE_RESOLVED mode=%s ambiguous_fallback=%s "
+            "reactive_soft_write_bypass=%s",
+            self._mode_policy.name,
+            self._mode_policy.ambiguous_fallback,
+            self._mode_policy.reactive_soft_write_auto_proceed,
+        )
+
+    def set_mode_policy(self, policy: GateModePolicy) -> None:
+        """Swap the active gate mode policy (used by future
+        ``/posture mode`` slash command per
+        ``POSTURE-CONFIGURATION-V1``). v1 has no in-process
+        caller; provided so the contract is stable for the
+        follow-up spec."""
+        self._mode_policy = policy
+        logger.info(
+            "GATE_MODE_SWAPPED mode=%s ambiguous_fallback=%s",
+            policy.name, policy.ambiguous_fallback,
+        )
 
     def classify_tool_effect(
         self, tool_name: str, active_space: Any, tool_input: dict[str, Any] | None = None,
@@ -406,7 +533,13 @@ class DispatchGate:
         # reversible (soft_write), skip the gate model.  The user established
         # intent through conversation — don't second-guess it.
         # must_not covenants still block; hard_write/unknown still go to model.
-        if is_reactive and effect == "soft_write":
+        # POSTURE-EVALUATION-MODES-V1 (2026-05-22): strict mode disables
+        # this bypass — every soft_write goes through model evaluation.
+        if (
+            is_reactive
+            and effect == "soft_write"
+            and self._mode_policy.reactive_soft_write_auto_proceed
+        ):
             # Reactive soft_write: user requested this action. Only fall through
             # to the gate model if a must_not rule MENTIONS this tool or capability.
             has_relevant_blocking_rule = False
@@ -506,8 +639,12 @@ class DispatchGate:
         action_desc = self._describe_action(tool_name, tool_input)
         tool_description = self._get_tool_description(tool_name)
 
+        # POSTURE-EVALUATION-MODES-V1 (2026-05-22): mode preamble
+        # injected at the top of the system_prompt to bias the
+        # model toward the configured posture.
         system_prompt = (
-            "You are a safety gate for an AI assistant's actions.\n\n"
+            self._mode_policy.prompt_preamble
+            + "You are a safety gate for an AI assistant's actions.\n\n"
             "FIRST, determine: is this action a direct fulfillment of the user's "
             "current request? The user's request IS the authorization — do not "
             "re-confirm what the user already asked for.\n\n"
@@ -576,10 +713,29 @@ class DispatchGate:
                 proposed_action=action_desc, conflicting_rule=conflicting_rule, raw_response=raw,
             )
         if first_word == "CLARIFY":
+            # CLARIFY is the model's explicit "genuinely ambiguous"
+            # signal — NEVER subject to ambiguous_fallback. Always
+            # blocks with reason="clarify" regardless of mode.
             return GateResult(
                 allowed=False, reason="clarify", method="model_check",
                 proposed_action=action_desc, raw_response=raw,
             )
+        # POSTURE-EVALUATION-MODES-V1 (2026-05-22): ambiguous
+        # branch (model said CONFIRM or returned junk) — fallback
+        # depends on the configured mode.
+        if self._mode_policy.ambiguous_fallback == "proceed":
+            return GateResult(
+                allowed=True, reason="approved_by_mode",
+                method=f"mode_{self._mode_policy.name}",
+                raw_response=raw,
+            )
+        if self._mode_policy.ambiguous_fallback == "refuse":
+            return GateResult(
+                allowed=False, reason="refused_by_mode",
+                method=f"mode_{self._mode_policy.name}",
+                proposed_action=action_desc, raw_response=raw,
+            )
+        # ambiguous_fallback == "confirm" — preserve prior behavior.
         return GateResult(
             allowed=False, reason="confirm", method="model_check",
             proposed_action=action_desc, raw_response=raw,
