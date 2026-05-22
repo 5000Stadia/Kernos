@@ -1,7 +1,7 @@
 {
   "file_path": "docs/behaviors/covenants.md",
-  "source_hash": "d0177f2e9fbfd74333366280f8a0a270d892a3f77fb45d817ba03a709e462c1b",
-  "generated_at": "2026-05-06T17:59:20.626567+00:00",
+  "source_hash": "547c429525d3ccc5ae1de3fbcadd7fa163a63754e7b8e763895e6ae077720c7b",
+  "generated_at": "2026-05-22T17:12:19.065606+00:00",
   "sections": [
     {
       "section_title": "How Covenants Are Created",
@@ -11,39 +11,39 @@
     },
     {
       "section_title": "Rule Structure",
-      "one_line": "CovenantRule fields and metadata for defining rule behavior and scope",
+      "one_line": "CovenantRule fields and how rule type, scope, source, and enforcement are defined",
       "line_start": 11,
       "line_end": 22
     },
     {
-      "section_title": "Default Rules",
-      "one_line": "Default tenant covenants for messaging, privacy, cost warnings, brevity, and escalation",
+      "section_title": "Default Rules — Posture Profile",
+      "one_line": "Default posture covenant profiles and how to select or reset the seed for new instances",
       "line_start": 23,
-      "line_end": 34
+      "line_end": 49
     },
     {
       "section_title": "Post-Write Validation",
-      "one_line": "Post-write rule validation for duplicates, conflicts, supersession, and rewrites",
-      "line_start": 35,
-      "line_end": 43
+      "one_line": "Automatic validation of new rules for superseding, merging, conflict detection, and rewrites",
+      "line_start": 50,
+      "line_end": 58
     },
     {
       "section_title": "manage_covenants Tool",
-      "one_line": "Managing covenant rules: list active rules, update them, or soft-remove them",
-      "line_start": 44,
-      "line_end": 54
+      "one_line": "Covenant rule management: list active rules, soft-remove them, or update with audit trail",
+      "line_start": 59,
+      "line_end": 69
     },
     {
       "section_title": "Instruction Classification",
-      "one_line": "Classifying instructions as enforced behavioral constraints or standing automation rules",
-      "line_start": 55,
-      "line_end": 61
+      "one_line": "Tier 2 instruction types and their mapping to covenant rules or standing orders",
+      "line_start": 70,
+      "line_end": 76
     },
     {
       "section_title": "Code Locations",
-      "one_line": "Module paths for covenant rules, contract parsing, validation, and gate enforcement",
-      "line_start": 62,
-      "line_end": 70
+      "one_line": "Source file paths for covenant parsing, validation, and gate enforcement code",
+      "line_start": 77,
+      "line_end": 85
     }
   ]
 }

@@ -134,6 +134,42 @@ class ToolCatalog:
     def get(self, name: str) -> CatalogEntry | None:
         return self._entries.get(name)
 
+    def get_metadata(self, name: str) -> dict | None:
+        """Return a normalized metadata dict for a tool, or None if
+        not in the catalog.
+
+        LIVE-DISPATCH-UNBLOCKER-V1 Phase D (2026-05-22): structured
+        read API consumed by the dispatch gate (amortization
+        tool_hash dimension), the future TOOL-INTROSPECTION-V1
+        surfaces, and the future TOOL-AUDIT-NORMALIZATION-V1
+        canonical-entry construction. Single source of truth for
+        per-tool metadata that callers used to fish out of CatalogEntry
+        attributes directly.
+
+        Fields returned:
+            name, source, description, registered_at,
+            service_id, registration_hash, descriptor_file,
+            home_space, force_registered.
+
+        Returns ``None`` when the tool isn't in the catalog so
+        callers can distinguish "not registered" from "registered
+        without optional metadata."
+        """
+        entry = self._entries.get(name)
+        if entry is None:
+            return None
+        return {
+            "name": entry.name,
+            "source": entry.source,
+            "description": entry.description,
+            "registered_at": entry.registered_at,
+            "service_id": entry.service_id,
+            "registration_hash": entry.registration_hash,
+            "descriptor_file": entry.descriptor_file,
+            "home_space": entry.home_space,
+            "force_registered": entry.force_registered,
+        }
+
     def get_all(self) -> list[CatalogEntry]:
         return list(self._entries.values())
 

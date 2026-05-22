@@ -199,12 +199,17 @@ class DispatchGate:
         state: Any,              # StateStore for covenant queries
         events: EventStream,
         mcp: Any = None,         # MCPClientManager for tool descriptions
+        catalog: Any = None,     # ToolCatalog for metadata reads (Phase D)
     ) -> None:
         self._reasoning = reasoning_service
         self._registry = registry
         self._state = state
         self._events = events
         self._mcp = mcp
+        # LIVE-DISPATCH-UNBLOCKER-V1 Phase D: catalog reference for
+        # metadata reads (amortization tool_hash, future diagnostic
+        # surface, future TOOL-INTROSPECTION-V1 consumer).
+        self._catalog = catalog
         self._approval_tokens: dict[str, ApprovalToken] = {}
         # Per-turn denial tracking: {tool_name: consecutive_block_count}
         self._denial_counts: dict[str, int] = {}
@@ -276,12 +281,12 @@ class DispatchGate:
         kernel/MCP tools use tool_name as the stability marker
         (their identity IS stable across calls)."""
         tool_hash = tool_name  # default for kernel + MCP
-        if self._registry is not None:
+        if self._catalog is not None:
             try:
-                get_meta = getattr(self._registry, "get_metadata", None)
+                get_meta = getattr(self._catalog, "get_metadata", None)
                 if callable(get_meta):
                     meta = get_meta(tool_name) or {}
-                    h = meta.get("registration_hash") or ""
+                    h = (meta.get("registration_hash") or "").strip()
                     if h:
                         tool_hash = h
             except Exception:

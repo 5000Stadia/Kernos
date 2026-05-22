@@ -377,12 +377,22 @@ class ReasoningService:
     def _get_gate(self) -> DispatchGate:
         """Lazy gate creation — registry/state set after construction."""
         if not hasattr(self, '_gate') or self._gate is None:
+            # LIVE-DISPATCH-UNBLOCKER-V1 Phase D (2026-05-22):
+            # gate reads ToolCatalog metadata for amortization
+            # tool_hash + future diagnostic surfacing. Pulled from
+            # the handler when present (the handler holds the
+            # canonical catalog instance).
+            catalog = None
+            handler = getattr(self, "_handler", None)
+            if handler is not None:
+                catalog = getattr(handler, "_tool_catalog", None)
             self._gate = DispatchGate(
                 reasoning_service=self,
                 registry=getattr(self, '_registry', None),
                 state=getattr(self, '_state', None),
                 events=getattr(self, '_events', None),
                 mcp=getattr(self, '_mcp', None),
+                catalog=catalog,
             )
         return self._gate
 

@@ -124,6 +124,15 @@ class EventType(str, Enum):
     TOOL_REGISTRATION_APPROVED = "tool.registration_approved"
     # Payload: name, classification, request_id, space_id, actor
 
+    # LIVE-DISPATCH-UNBLOCKER-V1 Phase C (2026-05-22): emitted when
+    # the live dispatch can't bind a tool call (unclassified, not
+    # registered, evicted, etc.). Payload mirrors
+    # BindingFailureDiagnostic.to_payload(). Lets operators trace
+    # opaque "tool not found" symptoms to a structured attribution.
+    TOOL_BINDING_FAILURE = "tool.binding_failure"
+    # Payload: tool_id, status, expected_source, gate_class,
+    #          last_registration_hash, reason_omitted, + tool-specific extras
+
     # --- Phase 3C: Proactive Awareness ---
     PROACTIVE_INSIGHT = "proactive.insight"
     # Payload: whisper_id, insight_text, delivery_class, source_space_id,

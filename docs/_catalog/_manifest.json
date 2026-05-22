@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-10T09:50:48.019448+00:00",
+  "generated_at": "2026-05-22T17:12:19.099016+00:00",
   "entries": {
     "docs/ADAPTER-GUIDE.md": {
       "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
@@ -11,11 +11,11 @@
       "artifact_path": "docs/_catalog/CROSS-SPACE-REQUESTS.json"
     },
     "docs/EXTERNAL-AGENTS.md": {
-      "source_hash": "997ac161da4064df10320328344284114b8af48aeffb3a691a6bfe755473f962",
+      "source_hash": "9ce560fc1a5669b46f6e5c05bbf53ca86b8be843df3173fe5fe04526684236c9",
       "artifact_path": "docs/_catalog/EXTERNAL-AGENTS.json"
     },
     "docs/TECHNICAL-ARCHITECTURE.md": {
-      "source_hash": "2a7bb5e50531ad05072a5fb7e804250b5f8a6221ab7a74f677eba00e4f7838d0",
+      "source_hash": "0321936f2ef6d64b5268614ef31c4c6df7c42b5164a582a6c3f31b4792ed2793",
       "artifact_path": "docs/_catalog/TECHNICAL-ARCHITECTURE.json"
     },
     "docs/TESTING-PATTERN.md": {
@@ -155,7 +155,7 @@
       "artifact_path": "docs/_catalog/audits/RESPONSE-FIDELITY-V1-PHASE-1-audit.json"
     },
     "docs/behaviors/covenants.md": {
-      "source_hash": "d0177f2e9fbfd74333366280f8a0a270d892a3f77fb45d817ba03a709e462c1b",
+      "source_hash": "547c429525d3ccc5ae1de3fbcadd7fa163a63754e7b8e763895e6ae077720c7b",
       "artifact_path": "docs/_catalog/behaviors/covenants.json"
     },
     "docs/behaviors/dispatch-gate.md": {

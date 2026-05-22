@@ -82,6 +82,76 @@ logger = logging.getLogger(__name__)
 _FALLBACK_CLASSIFICATION = "unknown"
 
 
+async def _emit_binding_failure_executor_result(
+    *, tool_id: str, gate: Any, instance_id: str,
+    status: str, classification: str,
+) -> "ToolExecutionResult":
+    """LIVE-DISPATCH-UNBLOCKER-V1 Phase C — LiveExecutor binding
+    failure path. Build the structured diagnostic, emit
+    ``tool.binding_failure``, return ToolExecutionResult with
+    natural-prose error for the agent."""
+    from kernos.kernel.dispatch_diagnostics import (
+        build_diagnostic, compose_agent_prose,
+    )
+    diagnostic = build_diagnostic(
+        tool_id=tool_id,
+        catalog=getattr(gate, "_catalog", None),
+        registry=getattr(gate, "_registry", None),
+        explicit_status=status,  # type: ignore[arg-type]
+        classification=classification,
+    )
+    events = getattr(gate, "_events", None)
+    if events is not None:
+        try:
+            from kernos.kernel.event_types import EventType
+            from kernos.kernel.events import emit_event
+            await emit_event(
+                events, EventType.TOOL_BINDING_FAILURE,
+                instance_id, "live_executor",
+                payload=diagnostic.to_payload(),
+            )
+        except Exception:
+            pass  # best-effort; never fail the dispatcher on event emit
+    return ToolExecutionResult(
+        output={"error": compose_agent_prose(diagnostic)},
+        is_error=True, corrective_signal="",
+    )
+
+
+async def _emit_binding_failure_dispatcher_result(
+    *, tool_id: str, gate: Any, instance_id: str,
+    status: str, classification: str,
+) -> dict:
+    """Same as ``_emit_binding_failure_executor_result`` but
+    returns the dict shape the LiveIntegrationDispatcher uses."""
+    from kernos.kernel.dispatch_diagnostics import (
+        build_diagnostic, compose_agent_prose,
+    )
+    diagnostic = build_diagnostic(
+        tool_id=tool_id,
+        catalog=getattr(gate, "_catalog", None),
+        registry=getattr(gate, "_registry", None),
+        explicit_status=status,  # type: ignore[arg-type]
+        classification=classification,
+    )
+    events = getattr(gate, "_events", None)
+    if events is not None:
+        try:
+            from kernos.kernel.event_types import EventType
+            from kernos.kernel.events import emit_event
+            await emit_event(
+                events, EventType.TOOL_BINDING_FAILURE,
+                instance_id, "live_integration_dispatcher",
+                payload=diagnostic.to_payload(),
+            )
+        except Exception:
+            pass
+    return {
+        "error": compose_agent_prose(diagnostic),
+        "is_error": True,
+    }
+
+
 def _gate_refusal_prose(gate_result: Any) -> str:
     """Compose natural-prose refusal text from a gate result.
 
@@ -307,16 +377,15 @@ class LiveExecutor:
                 corrective_signal="",
             )
         if not classification or classification == "unknown":
-            return ToolExecutionResult(
-                output={
-                    "error": (
-                        f"Dispatch refused: tool {inputs.tool_id!r} "
-                        f"not classified by the dispatch gate "
-                        f"(classification={classification!r})."
-                    ),
-                },
-                is_error=True,
-                corrective_signal="",
+            # LIVE-DISPATCH-UNBLOCKER-V1 Phase C: structured
+            # diagnostic + agent-facing prose. Operator gets the
+            # event-stream payload; agent gets the sentence.
+            return await _emit_binding_failure_executor_result(
+                tool_id=inputs.tool_id,
+                gate=self._gate,
+                instance_id=inputs.instance_id,
+                status="blocked_by_gate_classification",
+                classification=classification or "unknown",
             )
 
         # LIVE-DISPATCH-UNBLOCKER-V1 (2026-05-22) Phase A: full
@@ -474,14 +543,20 @@ class LiveIntegrationDispatcher:
         # reads, with seam label flipped so audits can tell escalations
         # apart from native read traffic.
         if not classification or classification == "unknown":
-            return {
-                "error": (
-                    f"Dispatch refused: tool {tool_id!r} not classified "
-                    f"by the dispatch gate "
-                    f"(classification={classification!r})."
-                ),
-                "is_error": True,
-            }
+            # LIVE-DISPATCH-UNBLOCKER-V1 Phase C: structured
+            # diagnostic + agent-facing prose.
+            inst_id = (
+                getattr(inputs, "instance_id", "")
+                if inputs is not None
+                else ""
+            )
+            return await _emit_binding_failure_dispatcher_result(
+                tool_id=tool_id,
+                gate=self._gate,
+                instance_id=inst_id,
+                status="blocked_by_gate_classification",
+                classification=classification or "unknown",
+            )
 
         is_escalated = classification != "read"
         seam_label = (

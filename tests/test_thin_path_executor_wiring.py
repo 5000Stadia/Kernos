@@ -185,7 +185,12 @@ async def test_live_executor_refuses_unknown_classification():
     result = await executor.execute(_inputs(tool_id="manage_members"))
 
     assert result.is_error is True
-    assert "not classified" in result.output.get("error", "").lower()
+    # LIVE-DISPATCH-UNBLOCKER-V1 Phase C (2026-05-22): error text
+    # is now natural prose composed by dispatch_diagnostics —
+    # "isn't classified for safe dispatch" instead of legacy
+    # "not classified by the dispatch gate."
+    err = result.output.get("error", "").lower()
+    assert "classif" in err  # both old and new phrasings mention classification
     execute_tool.assert_not_called()
 
 
