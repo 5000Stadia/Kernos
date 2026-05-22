@@ -74,6 +74,15 @@ class ToolExecutionInputs:
     member_id: str
     space_id: str
     turn_id: str
+    # LIVE-DISPATCH-UNBLOCKER-V1 (2026-05-22) Phase A: fields the
+    # live-path gate.evaluate() consults. Defaults preserve every
+    # existing caller; the live dispatcher populates them from
+    # turn context (the only seams that consult evaluate today).
+    agent_reasoning: str = ""
+    is_reactive: bool = True
+    approval_token_id: str = ""
+    user_message: str = ""
+    recent_messages: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)

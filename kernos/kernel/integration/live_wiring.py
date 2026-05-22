@@ -82,6 +82,49 @@ logger = logging.getLogger(__name__)
 _FALLBACK_CLASSIFICATION = "unknown"
 
 
+def _gate_refusal_prose(gate_result: Any) -> str:
+    """Compose natural-prose refusal text from a gate result.
+
+    Per [[agent-facing-natural-simplicity]]: the agent reads
+    English, not status codes. The structured reason field stays
+    in the event log + audit for operator inspection; this layer
+    just composes the sentence the agent receives in its tool
+    error output.
+
+    LIVE-DISPATCH-UNBLOCKER-V1 (2026-05-22) Phase A.
+    """
+    reason = getattr(gate_result, "reason", "") or ""
+    proposed = getattr(gate_result, "proposed_action", "") or ""
+    conflict = getattr(gate_result, "conflicting_rule", "") or ""
+    if reason == "covenant_conflict" and conflict:
+        return (
+            f"A standing rule prevents that action: {conflict}"
+        )
+    if reason == "clarify":
+        action = proposed or "what was requested"
+        return (
+            f"The action is ambiguous — clarify the user's intent "
+            f"before retrying ({action})."
+        )
+    if reason == "confirm":
+        action = proposed or "this action"
+        return (
+            f"Operator confirmation needed before {action}. Ask "
+            f"the user to confirm, then retry."
+        )
+    if reason == "refused_by_mode":
+        return (
+            "Operator's strict posture is blocking this action "
+            "outright. Try a clearer formulation or skip the step."
+        )
+    if reason == "denial_limit":
+        return (
+            "Too many consecutive blocks for this tool this turn. "
+            "Step back and reconsider the approach."
+        )
+    return "Action blocked by the dispatch gate."
+
+
 # ===========================================================================
 # 1. LiveDescriptorLookup
 # ===========================================================================
@@ -276,6 +319,52 @@ class LiveExecutor:
                 corrective_signal="",
             )
 
+        # LIVE-DISPATCH-UNBLOCKER-V1 (2026-05-22) Phase A: full
+        # policy gate now runs on the live path. Mode policy
+        # modulates bias (permissive / balanced / strict);
+        # amortization layer (Phase B) collapses repeated-call
+        # interaction cost; binding-failure diagnostics (Phase C)
+        # shape failed-binding output.
+        try:
+            gate_result = await self._gate.evaluate(
+                tool_name=inputs.tool_id,
+                tool_input=dict(inputs.arguments or {}),
+                effect=classification,
+                agent_reasoning=inputs.agent_reasoning,
+                instance_id=inputs.instance_id,
+                active_space_id=inputs.space_id,
+                is_reactive=inputs.is_reactive,
+                approval_token_id=inputs.approval_token_id,
+                messages=list(inputs.recent_messages),
+                user_message=inputs.user_message,
+            )
+        except Exception as exc:
+            logger.warning(
+                "EXECUTOR_GATE_EVALUATE_FAILED: tool=%s err=%s",
+                inputs.tool_id, exc,
+            )
+            return ToolExecutionResult(
+                output={
+                    "error": (
+                        f"Dispatch refused: gate evaluation raised "
+                        f"for tool {inputs.tool_id!r}. {exc}"
+                    ),
+                },
+                is_error=True,
+                corrective_signal="",
+            )
+        if not gate_result.allowed:
+            # Compose a natural-prose error per
+            # [[agent-facing-natural-simplicity]] — the agent reads
+            # English, not a status code. The structured reason
+            # lives in the gate event log for operator inspection.
+            agent_text = _gate_refusal_prose(gate_result)
+            return ToolExecutionResult(
+                output={"error": agent_text},
+                is_error=True,
+                corrective_signal="",
+            )
+
         request = self._request_factory(inputs)
         try:
             result_text = await self._execute_tool(
@@ -410,6 +499,43 @@ class LiveIntegrationDispatcher:
             if inputs is not None
             else ""
         )
+
+        # LIVE-DISPATCH-UNBLOCKER-V1 (2026-05-22) Phase A: full
+        # policy gate now runs on this seam too. Same shape as
+        # LiveExecutor — fields pulled from inputs (with sensible
+        # defaults for legacy callers that haven't been threaded
+        # through yet).
+        try:
+            gate_result = await self._gate.evaluate(
+                tool_name=tool_id,
+                tool_input=dict(args or {}),
+                effect=classification,
+                agent_reasoning=getattr(inputs, "agent_reasoning", "") or "",
+                instance_id=instance_id,
+                active_space_id=getattr(inputs, "space_id", "") or "",
+                is_reactive=getattr(inputs, "is_reactive", True),
+                approval_token_id=getattr(inputs, "approval_token_id", "") or "",
+                messages=list(getattr(inputs, "recent_messages", ()) or ()),
+                user_message=getattr(inputs, "user_message", "") or "",
+            )
+        except Exception as exc:
+            logger.warning(
+                "DISPATCHER_GATE_EVALUATE_FAILED: tool=%s err=%s",
+                tool_id, exc,
+            )
+            return {
+                "error": (
+                    f"Dispatch refused: gate evaluation raised for "
+                    f"tool {tool_id!r}. {exc}"
+                ),
+                "is_error": True,
+            }
+        if not gate_result.allowed:
+            return {
+                "error": _gate_refusal_prose(gate_result),
+                "is_error": True,
+            }
+
         # FOLD 8 — emit tool.called before dispatch.
         await self._emit_event({
             "type": "tool.called",

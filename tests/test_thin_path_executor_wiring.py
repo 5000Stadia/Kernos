@@ -27,6 +27,7 @@ from kernos.kernel.enactment.dispatcher import (
     ToolExecutionInputs,
     ToolExecutionResult,
 )
+from kernos.kernel.gate import GateResult
 from kernos.kernel.integration.live_wiring import (
     LiveDescriptorLookup,
     LiveExecutor,
@@ -46,6 +47,21 @@ def _inputs(tool_id: str = "list-events", args: dict | None = None) -> ToolExecu
         space_id="space-x",
         turn_id="turn-x",
     )
+
+
+def _gate(
+    classification: str = "read", *, allowed: bool = True,
+    reason: str = "approved",
+) -> MagicMock:
+    """LIVE-DISPATCH-UNBLOCKER-V1 Phase A: tests now need to stub
+    both classify_tool_effect (sync) AND evaluate (async). Helper
+    bundles the two so test sites stay terse."""
+    gate = MagicMock()
+    gate.classify_tool_effect.return_value = classification
+    gate.evaluate = AsyncMock(return_value=GateResult(
+        allowed=allowed, reason=reason, method="model_check",
+    ))
+    return gate
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +127,7 @@ def test_descriptor_lookup_handles_none_catalog():
 async def test_live_executor_dispatches_classified_tool_successfully():
     """Pin: known classified tool dispatches, result is wrapped into
     ToolExecutionResult with output text + is_error=False."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "read"
+    gate = _gate("read")
     execute_tool = AsyncMock(return_value="meeting at 2pm")
 
     executor = LiveExecutor(
@@ -132,8 +147,7 @@ async def test_live_executor_classifies_with_actual_arguments_not_none():
     """Pin (Fold 3 contract): the gate is called with the actual
     call arguments, not None. This is the canonical safety boundary
     for action-dependent tools."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "read"
+    gate = _gate("read")
     execute_tool = AsyncMock(return_value="ok")
 
     executor = LiveExecutor(
@@ -160,8 +174,7 @@ async def test_live_executor_refuses_unknown_classification():
     """Pin: 'unknown' classification → refuse to execute, return
     error result. Closes the action-dependent gap from Batch 1
     Codex review."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "unknown"
+    gate = _gate("unknown")
     execute_tool = AsyncMock()
 
     executor = LiveExecutor(
@@ -200,8 +213,7 @@ async def test_live_executor_returns_error_result_on_dispatch_failure():
     """Pin: when execute_tool raises, the executor returns an error
     ToolExecutionResult rather than re-raising. The turn never tears
     down on a single tool failure."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "read"
+    gate = _gate("read")
     execute_tool = AsyncMock(side_effect=RuntimeError("backend exploded"))
 
     executor = LiveExecutor(
@@ -224,8 +236,7 @@ async def test_live_executor_returns_error_result_on_dispatch_failure():
 async def test_integration_dispatcher_positional_call_succeeds_for_classified_tool():
     """Pin: positional (tool_id, args, inputs) signature dispatches
     classified tools and returns the integration-runner shape dict."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "read"
+    gate = _gate("read")
     execute_tool = AsyncMock(return_value="result text")
 
     dispatcher = LiveIntegrationDispatcher(
@@ -243,8 +254,7 @@ async def test_integration_dispatcher_refuses_unknown_classification_legacy():
     error dict — refusal is reserved for the gate's 'unknown' verdict
     after the read-only contract was relaxed. Matches LiveExecutor's
     posture at the full-machinery seam."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "unknown"
+    gate = _gate("unknown")
     execute_tool = AsyncMock()
 
     dispatcher = LiveIntegrationDispatcher(
@@ -276,8 +286,7 @@ async def test_integration_dispatcher_escalates_soft_write_to_execute_tool():
     async def audit_emitter(e):
         audits.append(e)
 
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "soft_write"
+    gate = _gate("soft_write")
     execute_tool = AsyncMock(return_value="note saved")
 
     dispatcher = LiveIntegrationDispatcher(
@@ -309,8 +318,7 @@ async def test_integration_dispatcher_escalates_hard_write_to_execute_tool():
     than refusing. The seam-label + escalated flag still mark it as
     an escalation; consumers filtering on those signals see all
     non-read traffic uniformly."""
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "hard_write"
+    gate = _gate("hard_write")
     execute_tool = AsyncMock(return_value="deleted")
 
     dispatcher = LiveIntegrationDispatcher(
@@ -339,8 +347,7 @@ async def test_integration_dispatcher_emits_tool_called_and_result_events():
     async def audit_emitter(entry):
         audit_entries.append(entry)
 
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "read"
+    gate = _gate("read")
     execute_tool = AsyncMock(return_value="ok")
 
     dispatcher = LiveIntegrationDispatcher(
@@ -371,8 +378,7 @@ async def test_integration_dispatcher_emits_failure_events_on_dispatch_error():
     async def audit_emitter(e):
         audits.append(e)
 
-    gate = MagicMock()
-    gate.classify_tool_effect.return_value = "read"
+    gate = _gate("read")
     execute_tool = AsyncMock(side_effect=RuntimeError("backend fail"))
 
     dispatcher = LiveIntegrationDispatcher(
