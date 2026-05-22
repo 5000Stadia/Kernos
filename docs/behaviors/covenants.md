@@ -31,9 +31,17 @@ covenant seed is profile-selectable via the
 - `strict` — 9 rules: standard + match-depth-preference + never-send-3rd-party-contacts-unless-owner-initiated + self-update-notice. Reproduces the pre-POSTURE-V1 default exactly (the self-update preference lives only in strict; minimal + standard treat it as opt-in via slash command or env override).
 
 Existing instances are NOT auto-rebased when the env changes;
-the seed runs only on first-boot of a NEW instance. Reset
-existing instances via the `/posture reset-covenants <profile>`
-slash command (lands in `POSTURE-CONFIGURATION-V1`).
+the seed runs only on first-boot of a NEW instance. Per
+`POSTURE-CONFIGURATION-V1` (2026-05-22), the owner can rebase
+an existing instance at runtime via:
+
+  - `/posture` — show current resolved profile + gate mode + source
+  - `/posture profile <name>` — persist a new profile (affects FUTURE seeds only)
+  - `/posture mode <name>` — persist + live-apply a new gate mode
+  - `/posture reset-covenants <profile>` — preview the drop+reseed; append ` CONFIRM` to execute. User-stated + evolved covenants are preserved.
+
+Persisted values live in the `instance_posture` table and
+override env at every read; missing rows fall through to env.
 
 The canonical rule descriptions live in `kernos/kernel/state.py`
 as module-level constants (`_DESC_*`). All profile lists

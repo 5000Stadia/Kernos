@@ -153,11 +153,12 @@ class TestInvalidEnvFailsLoud:
             "minimal (5) — silent under-seed is dangerous because "
             "existing-instances-not-touched policy doesn't auto-retry"
         )
-        # ERROR log was emitted
+        # ERROR log was emitted. POSTURE-CONFIGURATION-V1 reworded
+        # the log to "posture profile '...' (source=env) unknown".
         errors = [
             r for r in caplog.records
             if r.levelno == logging.ERROR
-            and "KERNOS_POSTURE_PROFILE" in r.getMessage()
+            and "posture profile" in r.getMessage()
         ]
         assert errors, "must log ERROR on invalid env value"
         assert "bogus" in errors[0].getMessage()

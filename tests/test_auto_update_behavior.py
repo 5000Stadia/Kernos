@@ -244,7 +244,14 @@ class TestQueuePendingWhisperVerboseGate:
 
 
 class TestDefaultUpdateCovenant:
-    def test_covenant_ships_in_default_rules(self):
+    def test_covenant_ships_in_default_rules(self, monkeypatch):
+        # POSTURE-SEEDED-COVENANTS-V1 + 2026-05-22 trim: the
+        # self-update preference was moved out of the minimal
+        # default (now opt-in territory) but stays in strict
+        # for pre-POSTURE byte-for-byte parity. Pin to strict
+        # so the contract — "the self-update rule still exists
+        # somewhere as a default" — holds.
+        monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
         from kernos.kernel.state import default_covenant_rules
 
         rules = default_covenant_rules("inst1", "2026-05-01T00:00:00Z")
@@ -265,7 +272,9 @@ class TestDefaultUpdateCovenant:
         assert rule.active is True
         assert rule.rule_type == "preference"
 
-    def test_covenant_text_invites_user_revision(self):
+    def test_covenant_text_invites_user_revision(self, monkeypatch):
+        # Self-update rule lives in the strict profile post-2026-05-22 trim.
+        monkeypatch.setenv("KERNOS_POSTURE_PROFILE", "strict")
         # The covenant should explicitly tell the agent (and through
         # the agent's reading, the user) that the rule is editable.
         from kernos.kernel.state import default_covenant_rules

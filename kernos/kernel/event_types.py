@@ -105,6 +105,14 @@ class EventType(str, Enum):
     TOOL_UNINSTALLED = "tool.uninstalled"
     # Payload: capability_name
 
+    # POSTURE-CONFIGURATION-V1 (2026-05-22): emitted when the
+    # /posture slash command mutates the persisted instance_posture
+    # row. Lets the operator log + future friction observer track
+    # posture drift over time.
+    POSTURE_CHANGED = "posture.changed"
+    # Payload: field ("posture_profile" | "gate_mode"), old,
+    #          new, actor (member_id)
+
     # --- Phase 3C: Proactive Awareness ---
     PROACTIVE_INSIGHT = "proactive.insight"
     # Payload: whisper_id, insight_text, delivery_class, source_space_id,

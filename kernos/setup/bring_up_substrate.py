@@ -793,6 +793,39 @@ async def bring_up_substrate(
         )
         _approval_expiry_task = None
 
+    # POSTURE-CONFIGURATION-V1 (2026-05-22): apply persisted
+    # gate_mode from instance_posture if present. The gate's
+    # __init__ resolves env-only; this hook lets persisted
+    # operator config take precedence, surviving restart /
+    # execv / self-update.
+    try:
+        _kernos_instance_id = os.environ.get("KERNOS_INSTANCE_ID", "").strip()
+        if _kernos_instance_id and handler._instance_db is not None:
+            _posture_row = await handler._instance_db.get_instance_posture(
+                _kernos_instance_id,
+            )
+            _persisted_mode = (_posture_row.get("gate_mode") or "").strip()
+            if _persisted_mode:
+                from kernos.kernel.gate import get_mode_policy_by_name
+                _policy = get_mode_policy_by_name(_persisted_mode)
+                if _policy is not None:
+                    handler.reasoning._get_gate().set_mode_policy(_policy)
+                    logger.info(
+                        "POSTURE_BRINGUP applied persisted gate_mode=%s",
+                        _persisted_mode,
+                    )
+                else:
+                    logger.warning(
+                        "POSTURE_BRINGUP persisted gate_mode=%r unknown; "
+                        "leaving env-derived default",
+                        _persisted_mode,
+                    )
+    except Exception as _exc_pc:
+        logger.warning(
+            "POSTURE_BRINGUP_FAILED error=%s — substrate continues "
+            "with env-derived gate mode", _exc_pc,
+        )
+
     # GATEWAY-HEALTH-OBSERVER-V1 (2026-05-19) + SUBSTRATE-PROVIDER-
     # INJECTION-V1 (2026-05-21): gateway-health is a SAFETY MONITOR;
     # it must run independently of self-improvement gating, and it

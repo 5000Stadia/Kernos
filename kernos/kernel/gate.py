@@ -100,6 +100,19 @@ _GATE_MODES: dict[str, GateModePolicy] = {
 }
 
 
+def get_mode_policy_by_name(name: str) -> GateModePolicy | None:
+    """POSTURE-CONFIGURATION-V1 (2026-05-22): look up a policy
+    by its mode name. Used by ``/posture mode`` to translate
+    operator input + the bring-up hook that applies persisted
+    mode at startup.
+
+    Returns ``None`` if ``name`` isn't a recognized mode.
+    Whitespace + case are normalized.
+    """
+    key = (name or "").strip().lower()
+    return _GATE_MODES.get(key)
+
+
 def _resolve_gate_mode_policy() -> GateModePolicy:
     """Read + normalize ``KERNOS_GATE_MODE``.
 

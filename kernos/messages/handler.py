@@ -2193,7 +2193,27 @@ class MessageHandler:
         )
         await self.state.save_instance_profile(instance_id, new_profile)
 
-        for rule in default_contract_rules(instance_id, now):
+        # POSTURE-CONFIGURATION-V1 (2026-05-22): if an
+        # instance_posture row carries a persisted profile,
+        # seed from it (overrides env). For fresh instances
+        # the row is empty → falls through to env / default.
+        # Defensive: not all handlers wire _instance_db (tests,
+        # headless modes); gracefully no-op.
+        _persisted_profile = ""
+        _instance_db = getattr(self, "_instance_db", None)
+        if _instance_db is not None:
+            try:
+                _posture_row = await _instance_db.get_instance_posture(
+                    instance_id,
+                )
+                _persisted_profile = _posture_row.get("posture_profile") or ""
+            except Exception as _exc:
+                logger.warning(
+                    "POSTURE: persisted profile lookup failed: %s", _exc,
+                )
+        for rule in default_contract_rules(
+            instance_id, now, profile_override=_persisted_profile,
+        ):
             await self.state.add_contract_rule(rule)
 
         try:
@@ -4350,6 +4370,15 @@ class MessageHandler:
                             response = "Only the instance owner can restart."
                     elif _cmd_lower == "/disconnect":
                         response = await self._handle_disconnect(primary_ctx)
+                    elif (
+                        _cmd_lower == "/posture"
+                        or _cmd_lower.startswith("/posture ")
+                    ):
+                        # POSTURE-CONFIGURATION-V1 (2026-05-22):
+                        # owner-only posture mutation + status.
+                        response = await self._handle_posture_command(
+                            primary_ctx, _cmd,
+                        )
                     elif _cmd_lower.startswith("/approve "):
                         # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21):
                         # two-step CONFIRM contract per spec D3.
@@ -5209,6 +5238,262 @@ class MessageHandler:
             event_stream=_event_stream,
         )
         return message
+
+    async def _handle_posture_command(
+        self, ctx: TurnContext, cmd: str,
+    ) -> str:
+        """POSTURE-CONFIGURATION-V1 (2026-05-22): owner-only
+        posture mutation + status.
+
+        Forms:
+          ``/posture`` — show current resolved values + sources.
+          ``/posture profile <minimal|standard|strict>`` —
+            set the persisted covenant profile (affects FUTURE
+            seeds only; existing covenants stay).
+          ``/posture mode <permissive|balanced|strict>`` — set
+            the persisted gate mode + apply to the live gate.
+          ``/posture reset-covenants <profile>`` — preview the
+            destructive reseed. Reply
+            ``/posture reset-covenants <profile> CONFIRM`` to
+            execute.
+        """
+        # Owner check (mirrors /restart + /approve patterns).
+        if not self._instance_db or not ctx.member_id:
+            return "Posture management is not available."
+        _member = await self._instance_db.get_member(ctx.member_id)
+        if not _member or _member.get("role") != "owner":
+            return "Posture management restricted to the instance owner."
+
+        _VALID_PROFILES = ("minimal", "standard", "strict")
+        _VALID_MODES = ("permissive", "balanced", "strict")
+
+        parts = cmd.strip().split()
+        # No subcommand → status display.
+        if len(parts) == 1:
+            return await self._handle_posture_status(ctx)
+
+        sub = parts[1].lower()
+
+        if sub == "profile":
+            if len(parts) < 3:
+                return (
+                    "Usage: `/posture profile <minimal|standard|strict>`"
+                )
+            new_value = parts[2].lower()
+            if new_value not in _VALID_PROFILES:
+                return (
+                    f"Unknown profile {new_value!r}. "
+                    f"Valid: {' | '.join(_VALID_PROFILES)}."
+                )
+            return await self._posture_set_field(
+                ctx, "posture_profile", new_value,
+                note="affects FUTURE covenant seeds only — existing "
+                "covenants stay until /posture reset-covenants runs.",
+            )
+
+        if sub == "mode":
+            if len(parts) < 3:
+                return (
+                    "Usage: `/posture mode <permissive|balanced|strict>`"
+                )
+            new_value = parts[2].lower()
+            if new_value not in _VALID_MODES:
+                return (
+                    f"Unknown mode {new_value!r}. "
+                    f"Valid: {' | '.join(_VALID_MODES)}."
+                )
+            msg = await self._posture_set_field(
+                ctx, "gate_mode", new_value,
+                note="applied to the live gate immediately.",
+            )
+            # Apply to live gate.
+            try:
+                from kernos.kernel.gate import get_mode_policy_by_name
+                _policy = get_mode_policy_by_name(new_value)
+                if _policy is not None:
+                    self.reasoning._get_gate().set_mode_policy(_policy)
+            except Exception as _exc:
+                logger.warning(
+                    "POSTURE: live gate update failed: %s", _exc,
+                )
+                msg += (
+                    "\n\n(Note: persisted but live-gate update "
+                    "failed; restart will apply it.)"
+                )
+            return msg
+
+        if sub == "reset-covenants":
+            if len(parts) < 3:
+                return (
+                    "Usage: `/posture reset-covenants "
+                    "<minimal|standard|strict>` (preview), then "
+                    "append ` CONFIRM` to execute."
+                )
+            new_profile = parts[2].lower()
+            if new_profile not in _VALID_PROFILES:
+                return (
+                    f"Unknown profile {new_profile!r}. "
+                    f"Valid: {' | '.join(_VALID_PROFILES)}."
+                )
+            is_confirm = (
+                len(parts) >= 4 and parts[3].upper() == "CONFIRM"
+            )
+            return await self._posture_reset_covenants(
+                ctx, new_profile, is_confirm,
+            )
+
+        return (
+            f"Unknown subcommand `{sub}`. "
+            "Try `/posture`, `/posture profile <name>`, "
+            "`/posture mode <name>`, or "
+            "`/posture reset-covenants <name>`."
+        )
+
+    async def _handle_posture_status(self, ctx: TurnContext) -> str:
+        """Render current resolved posture + its sources."""
+        instance_id = ctx.instance_id
+        row = await self._instance_db.get_instance_posture(instance_id)
+        env_profile = os.environ.get("KERNOS_POSTURE_PROFILE", "").strip()
+        env_mode = os.environ.get("KERNOS_GATE_MODE", "").strip()
+
+        def _resolve(persisted: str | None, env_val: str, default: str) -> tuple[str, str]:
+            if persisted:
+                return persisted, "persisted"
+            if env_val:
+                return env_val, "env"
+            return default, "default"
+
+        profile_value, profile_source = _resolve(
+            row.get("posture_profile"), env_profile, "minimal",
+        )
+        mode_value, mode_source = _resolve(
+            row.get("gate_mode"), env_mode, "permissive",
+        )
+        lines = [
+            "**Posture**",
+            f"- profile: `{profile_value}` (source: {profile_source})",
+            f"- mode: `{mode_value}` (source: {mode_source})",
+        ]
+        if row.get("last_updated_at"):
+            lines.append(
+                f"- last updated: {row['last_updated_at']} "
+                f"by `{row.get('last_updated_by', '?')}`"
+            )
+        return "\n".join(lines)
+
+    async def _posture_set_field(
+        self, ctx: TurnContext, field: str, value: str, note: str,
+    ) -> str:
+        """Shared helper for /posture profile + /posture mode.
+        Writes the persisted row + emits the POSTURE_CHANGED event.
+        """
+        instance_id = ctx.instance_id
+        actor = ctx.member_id or "owner"
+        # Capture old value for the event payload.
+        old_row = await self._instance_db.get_instance_posture(instance_id)
+        old_value = old_row.get(field)
+        now = utc_now()
+        await self._instance_db.set_instance_posture_field(
+            instance_id=instance_id,
+            field=field,
+            value=value,
+            actor_member_id=actor,
+            now=now,
+        )
+        try:
+            await emit_event(
+                self.events,
+                EventType.POSTURE_CHANGED,
+                instance_id, "handler",
+                payload={
+                    "field": field,
+                    "old": old_value,
+                    "new": value,
+                    "actor": actor,
+                },
+            )
+        except Exception as _exc:
+            logger.warning("POSTURE_CHANGED event emit failed: %s", _exc)
+        return (
+            f"Posture {field} set to `{value}`. {note}"
+        )
+
+    async def _posture_reset_covenants(
+        self, ctx: TurnContext, new_profile: str, is_confirm: bool,
+    ) -> str:
+        """Two-step destructive reseed of the default covenants.
+        Mirrors the /wipe exact-phrase confirm pattern."""
+        instance_id = ctx.instance_id
+        # Count current default rules so the preview is accurate.
+        current_rules = await self.state.get_contract_rules(instance_id)
+        default_count = sum(
+            1 for r in current_rules if getattr(r, "source", "") == "default"
+        )
+        if not is_confirm:
+            return (
+                f"**Reset preview**: drop {default_count} default "
+                f"covenant(s) and re-seed from `{new_profile}`. "
+                f"User-stated + evolved rules are preserved.\n\n"
+                f"Reply `/posture reset-covenants {new_profile} CONFIRM` "
+                f"to execute."
+            )
+        # Execute: archive defaults + seed fresh.
+        from kernos.kernel.state import default_covenant_rules
+        archived = 0
+        for r in current_rules:
+            if getattr(r, "source", "") == "default" and r.active:
+                try:
+                    await self.state.update_contract_rule(
+                        instance_id, r.id, {"active": False},
+                    )
+                    archived += 1
+                except Exception as _exc:
+                    logger.warning(
+                        "POSTURE_RESET: archive of %s failed: %s",
+                        r.id, _exc,
+                    )
+        # Persist the new profile choice.
+        actor = ctx.member_id or "owner"
+        now = utc_now()
+        await self._instance_db.set_instance_posture_field(
+            instance_id=instance_id,
+            field="posture_profile",
+            value=new_profile,
+            actor_member_id=actor,
+            now=now,
+        )
+        seeded = 0
+        for rule in default_covenant_rules(
+            instance_id, now, profile_override=new_profile,
+        ):
+            try:
+                await self.state.add_contract_rule(rule)
+                seeded += 1
+            except Exception as _exc:
+                logger.warning(
+                    "POSTURE_RESET: seed of %s failed: %s",
+                    getattr(rule, "id", "?"), _exc,
+                )
+        try:
+            await emit_event(
+                self.events,
+                EventType.POSTURE_CHANGED,
+                instance_id, "handler",
+                payload={
+                    "field": "covenants_reset",
+                    "old_default_count": default_count,
+                    "new_default_count": seeded,
+                    "profile": new_profile,
+                    "actor": actor,
+                },
+            )
+        except Exception as _exc:
+            logger.warning("POSTURE_CHANGED reset emit failed: %s", _exc)
+        return (
+            f"Covenants reset: archived {archived} default rule(s), "
+            f"seeded {seeded} from `{new_profile}`. User-stated + "
+            f"evolved rules preserved."
+        )
 
     async def _handle_disconnect(self, ctx: TurnContext) -> str:
         """Disconnect the current platform channel from the member's account."""

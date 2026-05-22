@@ -187,6 +187,19 @@ CREATE TABLE IF NOT EXISTS model_overrides (
         OR (override_provider IS NOT NULL AND override_model IS NOT NULL)
     )
 );
+
+-- POSTURE-CONFIGURATION-V1 (2026-05-22): operator-facing
+-- posture config that persists across restart / execv /
+-- self-update. Single row per instance. NULL fields fall
+-- through to env / hardcoded defaults (non-NULL fields
+-- override env). Lazy: missing row treated as all-NULL.
+CREATE TABLE IF NOT EXISTS instance_posture (
+    instance_id      TEXT PRIMARY KEY,
+    posture_profile  TEXT,
+    gate_mode        TEXT,
+    last_updated_at  TEXT,
+    last_updated_by  TEXT
+);
 """
 
 
@@ -807,6 +820,72 @@ class InstanceDB:
         )
         await self._conn.commit()
         logger.info("Platform config stored: %s → %s", platform, list(config.keys()))
+
+    # --- Instance Posture (POSTURE-CONFIGURATION-V1) ---
+
+    async def get_instance_posture(self, instance_id: str) -> dict:
+        """Read the operator-set posture row.
+
+        Returns ``{posture_profile, gate_mode, last_updated_at,
+        last_updated_by}`` with values possibly ``None``. Missing
+        row → all-None dict (lazy migration for instances that
+        pre-date this spec).
+        """
+        empty = {
+            "posture_profile": None,
+            "gate_mode": None,
+            "last_updated_at": None,
+            "last_updated_by": None,
+        }
+        if not self._conn:
+            return empty
+        async with self._conn.execute(
+            "SELECT posture_profile, gate_mode, last_updated_at, last_updated_by "
+            "FROM instance_posture WHERE instance_id=?",
+            (instance_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return empty
+        return {
+            "posture_profile": row[0],
+            "gate_mode": row[1],
+            "last_updated_at": row[2],
+            "last_updated_by": row[3],
+        }
+
+    async def set_instance_posture_field(
+        self, instance_id: str, field: str, value: str | None,
+        actor_member_id: str, now: str,
+    ) -> None:
+        """UPDATE a single posture field. Creates the row if absent."""
+        if not self._conn:
+            return
+        if field not in ("posture_profile", "gate_mode"):
+            raise ValueError(f"unknown posture field {field!r}")
+        # INSERT-OR-UPDATE with explicit column targeting.
+        await self._conn.execute(
+            "INSERT INTO instance_posture "
+            "(instance_id, posture_profile, gate_mode, "
+            " last_updated_at, last_updated_by) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(instance_id) DO UPDATE SET "
+            f"  {field}=excluded.{field}, "
+            "   last_updated_at=excluded.last_updated_at, "
+            "   last_updated_by=excluded.last_updated_by",
+            (
+                instance_id,
+                value if field == "posture_profile" else None,
+                value if field == "gate_mode" else None,
+                now,
+                actor_member_id,
+            ),
+        )
+        await self._conn.commit()
+        logger.info(
+            "POSTURE_CHANGED instance=%s field=%s new=%r actor=%s",
+            instance_id, field, value, actor_member_id,
+        )
 
     # --- Member Profiles ---
 

@@ -352,41 +352,54 @@ _PROFILE_STRICT_ORDERED = [
 ]
 
 
-def _resolve_posture_profile() -> str:
-    """Read + normalize the KERNOS_POSTURE_PROFILE env var.
+def _resolve_posture_profile(profile_override: str = "") -> str:
+    """Read + normalize the posture profile.
 
-    Unset → ``minimal`` (default).
-    Set to a known value → that profile.
-    Set to an unknown value → ``strict`` + ERROR log (fail-loud +
-    over-seed is safer than silent under-seed since existing
-    instances aren't auto-rebased).
+    Resolution order:
+      1. ``profile_override`` if non-empty (from persisted
+         ``instance_posture`` row per POSTURE-CONFIGURATION-V1).
+      2. ``KERNOS_POSTURE_PROFILE`` env var.
+      3. ``minimal`` hardcoded default.
+
+    Invalid value at any layer → ``strict`` + ERROR log
+    (fail-loud + over-seed is safer than silent under-seed
+    since existing instances aren't auto-rebased).
     """
-    raw = os.environ.get("KERNOS_POSTURE_PROFILE", "").strip().lower()
+    raw = (profile_override or "").strip().lower()
+    source = "persisted"
+    if not raw:
+        raw = os.environ.get("KERNOS_POSTURE_PROFILE", "").strip().lower()
+        source = "env"
     if not raw:
         return "minimal"
     if raw in ("minimal", "standard", "strict"):
         return raw
     logger.error(
-        "KERNOS_POSTURE_PROFILE=%r unknown; falling back to "
+        "posture profile %r (source=%s) unknown; falling back to "
         "'strict' (fail-loud + over-seed safer than silent "
-        "under-seed). Set KERNOS_POSTURE_PROFILE to "
-        "minimal|standard|strict, then /posture reset-covenants "
-        "if you want a fresh seed.",
-        raw,
+        "under-seed). Valid: minimal|standard|strict.",
+        raw, source,
     )
     return "strict"
 
 
-def default_covenant_rules(instance_id: str, now: str) -> list[CovenantRule]:
+def default_covenant_rules(
+    instance_id: str, now: str, profile_override: str = "",
+) -> list[CovenantRule]:
     """POSTURE-SEEDED-COVENANTS-V1 (2026-05-22): the rules every
     new tenant starts with, profile-selectable via
     ``KERNOS_POSTURE_PROFILE`` (minimal | standard | strict).
+
+    POSTURE-CONFIGURATION-V1 (2026-05-22): ``profile_override``
+    lets callers pass an operator-persisted posture profile that
+    wins over env. Empty string → fall through to env-based
+    resolution (preserves prior behavior).
 
     Strict reproduces the pre-POSTURE behavior byte-for-byte
     including rule order. Minimal is the default — behavior-
     neutral out of the box.
     """
-    profile = _resolve_posture_profile()
+    profile = _resolve_posture_profile(profile_override)
     if profile == "strict":
         rules = list(_PROFILE_STRICT_ORDERED)
     else:
