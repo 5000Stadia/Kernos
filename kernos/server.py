@@ -1146,6 +1146,28 @@ async def on_ready():
             exc,
         )
 
+    # DISCORD-RATE-LIMIT-DEFERRED-DELIVERY (2026-05-23): start the
+    # background flusher that drains queued chunks when the
+    # Discord 429 cool-off clears. Without this, responses
+    # generated during a cool-off were silently lost from the
+    # user's perspective even though the conv-log on disk had them.
+    global _flusher_task
+    if _flusher_task is None or _flusher_task.done():
+        try:
+            import asyncio as _flusher_asyncio
+            _flusher_task = _flusher_asyncio.create_task(
+                _dropped_delivery_flusher_loop(),
+            )
+            logger.info(
+                "DISCORD_DELIVERY_FLUSHER_STARTED poll=%ss",
+                _FLUSHER_POLL_SEC,
+            )
+        except Exception as _exc_flusher:
+            logger.warning(
+                "DISCORD_DELIVERY_FLUSHER_START_FAILED exc=%s",
+                _exc_flusher,
+            )
+
     # SYSTEM-REFERENCE-CANVAS-SEED: idempotent first-boot seeding of
     # System Reference + Our Procedures canvases. Safe to call on every
     # boot; skips canvases that already exist. Per-member My Tools seed
@@ -1574,10 +1596,43 @@ _DISCORD_PAUSE_SCHEDULE_SEC: list[int] = [
 _discord_pause_until: float = 0.0
 _discord_429_streak: int = 0
 
+# DISCORD-RATE-LIMIT-DEFERRED-DELIVERY (2026-05-23): when _send_safely
+# drops a chunk during cool-off (case (a) / (b) per on_message), the
+# response text was generated + persisted to conv-log on disk, but
+# Discord delivery silently failed. Without follow-up the user sees
+# the pause notice + then never receives the reply that was queued
+# behind it.
+#
+# Queue (channel.id → list of (channel, chunk_text, queued_at)) +
+# background flusher task that polls every few seconds; when
+# _is_discord_paused() flips False, drains the queue with a brief
+# "here are the messages I had queued" header.
+_dropped_deliveries: dict[int, list[tuple[Any, str, float]]] = {}
+_flusher_task: Any = None
+_FLUSHER_POLL_SEC: float = 5.0
+
 
 def _is_discord_paused() -> bool:
     """True when the bot should skip all Discord API calls."""
     return _time_module.time() < _discord_pause_until
+
+
+def _register_dropped_delivery(channel: Any, chunk: str) -> None:
+    """Queue a dropped chunk for later delivery when cool-off ends.
+
+    DISCORD-RATE-LIMIT-DEFERRED-DELIVERY (2026-05-23).
+    """
+    if channel is None or not chunk:
+        return
+    cid = getattr(channel, "id", None)
+    if cid is None:
+        return
+    bucket = _dropped_deliveries.setdefault(cid, [])
+    bucket.append((channel, chunk, _time_module.time()))
+    logger.info(
+        "DISCORD_DELIVERY_DEFERRED channel=%s queued_chunks=%d",
+        cid, len(bucket),
+    )
 
 
 def _seconds_until_resume() -> int:
@@ -1676,8 +1731,16 @@ async def _send_safely(channel, content: str) -> bool:
 
     On rate limit, response content is NOT logged in full — keeps
     the console one-liner. Conv-log on disk already has it.
+
+    DISCORD-RATE-LIMIT-DEFERRED-DELIVERY (2026-05-23): on any
+    cool-off-related failure, the chunk is queued via
+    _register_dropped_delivery() so the background flusher
+    delivers it once Discord cools off. Without this, replies
+    generated during pause were silently lost from the user's
+    perspective even though the conv-log on disk had them.
     """
     if _is_discord_paused():
+        _register_dropped_delivery(channel, content)
         return False
     try:
         await channel.send(content)
@@ -1685,12 +1748,102 @@ async def _send_safely(channel, content: str) -> bool:
         return True
     except discord.RateLimited:
         _register_discord_429("send 429")
+        _register_dropped_delivery(channel, content)
         return False
     except discord.HTTPException as exc:
         if exc.status == 429:
             _register_discord_429("send 429")
+            _register_dropped_delivery(channel, content)
             return False
         raise
+
+
+async def _flush_dropped_deliveries_once() -> int:
+    """Drain ``_dropped_deliveries`` if cool-off has cleared.
+
+    Returns the count of chunks successfully delivered. Safe to
+    call when cool-off is still active (early-returns 0). Each
+    channel gets a single resume header followed by its queued
+    chunks. On per-chunk send failure (e.g., transient 429
+    re-fires), the chunk is re-queued for the next pass.
+
+    DISCORD-RATE-LIMIT-DEFERRED-DELIVERY (2026-05-23).
+    """
+    if _is_discord_paused():
+        return 0
+    if not _dropped_deliveries:
+        return 0
+    import asyncio as _flush_asyncio
+    delivered = 0
+    # Snapshot + clear before sending so re-failures re-queue cleanly.
+    snapshot = dict(_dropped_deliveries)
+    _dropped_deliveries.clear()
+    for cid, entries in snapshot.items():
+        if not entries:
+            continue
+        channel = entries[0][0]
+        # One short header per channel before the queued chunks.
+        oldest = entries[0][2]
+        wait_s = max(0, int(_time_module.time() - oldest))
+        header = (
+            f"↩️ Cool-off ended after ~{wait_s}s. "
+            f"Delivering {len(entries)} message(s) I had queued for you "
+            f"during the Discord rate-limit pause."
+        )
+        try:
+            await channel.send(header)
+            _register_discord_call_succeeded()
+        except discord.HTTPException as exc:
+            if exc.status == 429:
+                _register_discord_429("flush header 429")
+            # Re-queue everything; retry next pass.
+            _dropped_deliveries.setdefault(cid, []).extend(entries)
+            continue
+        except discord.RateLimited:
+            _register_discord_429("flush header 429")
+            _dropped_deliveries.setdefault(cid, []).extend(entries)
+            continue
+        # Drain the queued chunks. Inter-chunk delay re-used.
+        for idx, (_channel, chunk, _ts) in enumerate(entries):
+            if idx > 0 and DISCORD_INTERCHUNK_DELAY_SEC > 0:
+                await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
+            try:
+                await channel.send(chunk)
+                _register_discord_call_succeeded()
+                delivered += 1
+            except (discord.RateLimited, discord.HTTPException) as exc:
+                status = getattr(exc, "status", None)
+                if status == 429 or isinstance(exc, discord.RateLimited):
+                    _register_discord_429("flush chunk 429")
+                # Re-queue remaining chunks for the next pass.
+                _dropped_deliveries.setdefault(cid, []).extend(
+                    entries[idx:],
+                )
+                break
+    if delivered:
+        logger.info(
+            "DISCORD_DELIVERY_FLUSHED chunks=%d remaining_channels=%d",
+            delivered, len(_dropped_deliveries),
+        )
+    return delivered
+
+
+async def _dropped_delivery_flusher_loop() -> None:
+    """Background polling loop: when cool-off clears, drain the
+    deferred-delivery queue. Started once from on_ready.
+
+    DISCORD-RATE-LIMIT-DEFERRED-DELIVERY (2026-05-23).
+    """
+    import asyncio as _flush_asyncio
+    while True:
+        try:
+            await _flush_dropped_deliveries_once()
+        except Exception as exc:
+            logger.warning(
+                "DISCORD_DELIVERY_FLUSHER_ERROR exc=%s — continuing",
+                exc,
+            )
+        await _flush_asyncio.sleep(_FLUSHER_POLL_SEC)
 
 
 async def _send_pause_notice_to_channel(channel) -> None:
@@ -1916,9 +2069,12 @@ async def on_message(message):
                     await _send_safely(
                         message.channel, _truncation_notice,
                     )
-            # case (a) is implicit: no notice attempt because cool-off
-            # was already active before this turn; pause-notice was
-            # surfaced when cool-off first activated.
+            # case (a): cool-off was already active when we tried to
+            # send this turn's response. DISCORD-RATE-LIMIT-DEFERRED-
+            # DELIVERY (2026-05-23) queues the chunks for the flusher,
+            # so the user WILL see them when the cool-off ends — no
+            # need to spam another pause notice here. The flusher
+            # surfaces its own "↩️ Cool-off ended" header on delivery.
             break
         _delivered += 1
 
