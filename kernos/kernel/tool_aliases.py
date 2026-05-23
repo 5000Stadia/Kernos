@@ -42,6 +42,13 @@ _TOOL_ALIASES: dict[str, str] = {
     # the call at least reaches a working surface; the agent's
     # `question` parameter still carries the inspection intent.
     "repository_inspection.report": "ask_coding_session",
+    # 2026-05-23 improve_kernos soak: after one successful
+    # improve_kernos(...) call, the agent retried with two
+    # dotted-namespace variants that don't exist. Both intended
+    # the same surface — start a new autonomous-improvement
+    # attempt. Repair to the canonical name so the retry lands.
+    "kernel.autonomous_improvement.start_attempt": "improve_kernos",
+    "kernel.autonomous_improvement": "improve_kernos",
 }
 
 

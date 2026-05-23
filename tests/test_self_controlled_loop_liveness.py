@@ -75,6 +75,26 @@ class TestToolAliasCanonicalizer:
         assert canonical == "ask_coding_session"
         assert repaired is True
 
+    def test_autonomous_improvement_start_attempt_alias(self):
+        """2026-05-23 improve_kernos soak: dotted-namespace retry
+        kernel.autonomous_improvement.start_attempt → improve_kernos."""
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        canonical, repaired = canonicalize_tool_name(
+            "kernel.autonomous_improvement.start_attempt",
+        )
+        assert canonical == "improve_kernos"
+        assert repaired is True
+
+    def test_autonomous_improvement_namespace_alias(self):
+        """2026-05-23 improve_kernos soak: bare-namespace variant
+        kernel.autonomous_improvement → improve_kernos."""
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        canonical, repaired = canonicalize_tool_name(
+            "kernel.autonomous_improvement",
+        )
+        assert canonical == "improve_kernos"
+        assert repaired is True
+
     def test_gate_classifies_request_space_action_as_soft_write(self):
         """2026-05-22: request_space_action was missing from the
         gate classification table, causing live-integration dispatcher
