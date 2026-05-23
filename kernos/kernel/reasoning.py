@@ -899,12 +899,22 @@ class ReasoningService:
         # known model-hallucinated tool names before routing. Keeps
         # critical kernel primitives (manage_plan) reachable even when
         # the model picks the wrong name. See kernos/kernel/tool_aliases.py.
-        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        from kernos.kernel.tool_aliases import (
+            canonicalize_tool_name,
+            emit_alias_repair_receipt,
+        )
         _canonical_name, _was_repaired = canonicalize_tool_name(tool_name)
         if _was_repaired:
             logger.info(
-                "TOOL_ALIAS_REPAIR alias=%s canonical=%s",
+                "TOOL_ALIAS_REPAIR alias=%s canonical=%s context=dispatch",
                 tool_name, _canonical_name,
+            )
+            await emit_alias_repair_receipt(
+                self._events,
+                instance_id=request.instance_id,
+                requested=tool_name,
+                canonical=_canonical_name,
+                context="dispatch",
             )
             tool_name = _canonical_name
         if tool_name in self._KERNEL_TOOLS:

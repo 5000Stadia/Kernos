@@ -126,6 +126,79 @@ class TestToolAliasCanonicalizer:
         assert repaired is False
 
 
+class TestAliasRepairReceiptV1:
+    """TOOL-ALIAS-RECEIPT-V1 (2026-05-23): every alias repair at the
+    dispatch ingress leaves a first-class TOOL_ALIAS_REPAIRED event in
+    the stream. Telemetry corpus for the semantic-action-envelope
+    redesign."""
+
+    @pytest.mark.asyncio
+    async def test_emit_alias_repair_receipt_emits_event(self):
+        from unittest.mock import AsyncMock
+        from kernos.kernel.tool_aliases import emit_alias_repair_receipt
+        from kernos.kernel.event_types import EventType
+
+        events = AsyncMock()
+        events.emit = AsyncMock()
+        await emit_alias_repair_receipt(
+            events,
+            instance_id="t1",
+            requested="kernel.autonomous_improvement",
+            canonical="improve_kernos",
+            context="dispatch",
+        )
+        # emit_event() wraps events.emit; verify emit was called
+        # with an Event whose type matches the alias-receipt slot.
+        assert events.emit.await_count == 1
+        evt = events.emit.await_args.args[0]
+        assert evt.type == EventType.TOOL_ALIAS_REPAIRED.value
+        assert evt.instance_id == "t1"
+        assert evt.payload["requested"] == "kernel.autonomous_improvement"
+        assert evt.payload["canonical"] == "improve_kernos"
+        assert evt.payload["context"] == "dispatch"
+        assert evt.source == "kernel.tool_aliases"
+
+    @pytest.mark.asyncio
+    async def test_emit_alias_repair_receipt_handles_none_events(self):
+        """Best-effort: None events handle (pre-init / test paths)
+        MUST NOT raise."""
+        from kernos.kernel.tool_aliases import emit_alias_repair_receipt
+        # Just shouldn't raise.
+        await emit_alias_repair_receipt(
+            None,
+            instance_id="t1", requested="x", canonical="y",
+            context="dispatch",
+        )
+
+    @pytest.mark.asyncio
+    async def test_emit_alias_repair_receipt_swallows_emit_failure(self):
+        """Per kernel architecture: event emission is best-effort;
+        a failure MUST NOT break dispatch."""
+        from unittest.mock import AsyncMock
+        from kernos.kernel.tool_aliases import emit_alias_repair_receipt
+
+        events = AsyncMock()
+        events.emit = AsyncMock(side_effect=RuntimeError("db gone"))
+        # Should swallow + log, not raise.
+        await emit_alias_repair_receipt(
+            events,
+            instance_id="t1", requested="x", canonical="y",
+            context="dispatch",
+        )
+
+    def test_reasoning_dispatch_emits_receipt_ast_guard(self):
+        """AST guard: reasoning.execute_tool's alias-repair block
+        MUST call emit_alias_repair_receipt. Catches a future
+        deletion of the receipt wiring."""
+        src = (_REPO_ROOT / "kernos/kernel/reasoning.py").read_text(
+            encoding="utf-8",
+        )
+        assert "emit_alias_repair_receipt" in src, (
+            "reasoning.py lost its alias-receipt emission — "
+            "TOOL-ALIAS-RECEIPT-V1 wiring missing"
+        )
+
+
 class TestAliasRepairIngressPoints:
     """AST guards: the two ingress points named in the spec
     (reasoning.py execute_tool, gate.py classify_tool_effect) must

@@ -65,4 +65,52 @@ def canonicalize_tool_name(name: str) -> tuple[str, bool]:
     return (canonical, True)
 
 
-__all__ = ["canonicalize_tool_name"]
+async def emit_alias_repair_receipt(
+    events,
+    *,
+    instance_id: str,
+    requested: str,
+    canonical: str,
+    context: str,
+) -> None:
+    """Emit a structured TOOL_ALIAS_REPAIRED event.
+
+    TOOL-ALIAS-RECEIPT-V1 (2026-05-23). Each repair leaves a
+    first-class event in the stream so we have telemetry on
+    *which* cognitive name-shapes the agent reaches for + how
+    often, rather than burying the repair in a single log line.
+    That corpus is the input for SEMANTIC-ACTION-ENVELOPE-V1
+    design.
+
+    Per kernel architecture, event emission is best-effort: a
+    failure here MUST NOT break dispatch. Caller passes the
+    events handle (may be None for tests / pre-init paths).
+    """
+    if events is None:
+        return
+    try:
+        from kernos.kernel.event_types import EventType
+        from kernos.kernel.events import emit_event
+        await emit_event(
+            events,
+            EventType.TOOL_ALIAS_REPAIRED,
+            instance_id or "",
+            "kernel.tool_aliases",
+            payload={
+                "requested": requested,
+                "canonical": canonical,
+                "context": context,
+            },
+        )
+    except Exception:
+        # Best-effort: never break dispatch over a receipt failure.
+        import logging
+        logging.getLogger(__name__).warning(
+            "TOOL_ALIAS_RECEIPT_EMIT_FAILED requested=%s canonical=%s "
+            "context=%s",
+            requested, canonical, context,
+            exc_info=True,
+        )
+
+
+__all__ = ["canonicalize_tool_name", "emit_alias_repair_receipt"]

@@ -133,6 +133,16 @@ class EventType(str, Enum):
     # Payload: tool_id, status, expected_source, gate_class,
     #          last_registration_hash, reason_omitted, + tool-specific extras
 
+    # TOOL-ALIAS-RECEIPT-V1 (2026-05-23): emitted on every alias
+    # canonicalization at either ingress point (gate.classify_tool_effect
+    # or reasoning.execute_tool). Captures the model's cognitive
+    # composition vs. our canonical surface so the substrate has
+    # telemetry to inform a future semantic-action-envelope
+    # redesign. Stop guessing from grep — read the receipts.
+    TOOL_ALIAS_REPAIRED = "tool.alias_repaired"
+    # Payload: requested (str), canonical (str), context
+    #          ("dispatch" | "classify")
+
     # --- Phase 3C: Proactive Awareness ---
     PROACTIVE_INSIGHT = "proactive.insight"
     # Payload: whisper_id, insight_text, delivery_class, source_space_id,

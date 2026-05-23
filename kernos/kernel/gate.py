@@ -336,6 +336,17 @@ class DispatchGate:
         from kernos.kernel.tool_aliases import canonicalize_tool_name
         _canonical_name, _was_repaired = canonicalize_tool_name(tool_name)
         if _was_repaired:
+            # TOOL-ALIAS-RECEIPT-V1 (2026-05-23): log here for trace
+            # parity. The first-class TOOL_ALIAS_REPAIRED event is
+            # emitted at the dispatch ingress in reasoning.execute_tool
+            # because classify_tool_effect is sync and the receipt
+            # path is async; classify-only repairs (e.g., concurrency-
+            # safe checks) leave a log line but no event.
+            import logging as _gate_logging
+            _gate_logging.getLogger(__name__).info(
+                "TOOL_ALIAS_REPAIR alias=%s canonical=%s context=classify",
+                tool_name, _canonical_name,
+            )
             tool_name = _canonical_name
         _KERNEL_READS = {
             "remember", "remember_details", "list_files", "read_file",
