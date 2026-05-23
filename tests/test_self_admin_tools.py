@@ -225,6 +225,111 @@ class TestHandleDumpContextTool:
         assert "include_content" in props
         assert props["include_content"]["type"] == "boolean"
 
+    def test_falls_back_to_reasoning_cache_when_request_empty(
+        self, tmp_path, monkeypatch,
+    ):
+        """2026-05-23 fix: when the tool is dispatched via the live-
+        dispatch path, the ReasoningRequest carries empty
+        system_prompt/messages/tools (minimal-request from the
+        live-dispatch factory). Without the fallback, the dump's
+        summary line reports ~0 tokens despite a real prior turn
+        having loaded substrate state. Fix: ReasoningService caches
+        the last reasoning payload per instance; the tool falls
+        back to that when the dispatch-time request is empty."""
+        from kernos.kernel.self_admin_tools import handle_dump_context_tool
+        from kernos.kernel.reasoning import (
+            _set_active_reasoning_service,
+            get_active_reasoning_service,
+        )
+
+        # Construct a stub reasoning service with a cached payload
+        class _StubReasoning:
+            def get_last_reasoning_payload(self, instance_id):
+                if instance_id == "real_inst":
+                    return {
+                        "system_prompt": "CACHED_SYSTEM_PROMPT" * 30,
+                        "messages": [
+                            {"role": "user", "content": "cached msg"}
+                        ],
+                        "tools": [
+                            {"name": "cached_tool",
+                             "description": "x" * 50}
+                        ],
+                        "system_prompt_static": "STATIC",
+                        "system_prompt_dynamic": "DYNAMIC",
+                    }
+                return {}
+
+        prior = get_active_reasoning_service()
+        try:
+            _set_active_reasoning_service(_StubReasoning())
+
+            class _EmptyRequest:
+                """Mimics the live-dispatch factory's minimal request."""
+                instance_id = "real_inst"
+                system_prompt = ""
+                messages = []
+                tools = []
+                system_prompt_static = ""
+                system_prompt_dynamic = ""
+
+            monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+            result = handle_dump_context_tool(
+                request=_EmptyRequest(), include_content=True,
+            )
+            # The fallback hydrated the dump from the cache —
+            # non-zero token counts + cached content visible.
+            assert "cached msg" in result
+            assert "cached_tool" in result
+            # Summary line shows real token estimates, not 0
+            assert "tokens (" in result
+            # System prompt section non-empty
+            assert "CACHED_SYSTEM_PROMPT" in result
+        finally:
+            _set_active_reasoning_service(prior)
+
+    def test_cache_fallback_skipped_when_request_has_payload(
+        self, tmp_path, monkeypatch,
+    ):
+        """Cache is ONLY consulted when the dispatch-time request is
+        empty — the slash-command path (which DOES populate the
+        request fully) must not get its real payload overwritten by
+        a stale cache entry."""
+        from kernos.kernel.self_admin_tools import handle_dump_context_tool
+        from kernos.kernel.reasoning import (
+            _set_active_reasoning_service,
+            get_active_reasoning_service,
+        )
+
+        class _StubReasoning:
+            def get_last_reasoning_payload(self, instance_id):
+                return {
+                    "system_prompt": "STALE_CACHE_VALUE",
+                    "messages": [],
+                    "tools": [],
+                }
+
+        prior = get_active_reasoning_service()
+        try:
+            _set_active_reasoning_service(_StubReasoning())
+
+            class _PopulatedRequest:
+                instance_id = "i"
+                system_prompt = "FRESH_REQUEST_VALUE"
+                messages = [{"role": "user", "content": "fresh"}]
+                tools = [{"name": "fresh_tool"}]
+                system_prompt_static = ""
+                system_prompt_dynamic = ""
+
+            monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+            result = handle_dump_context_tool(
+                request=_PopulatedRequest(), include_content=True,
+            )
+            assert "FRESH_REQUEST_VALUE" in result
+            assert "STALE_CACHE_VALUE" not in result
+        finally:
+            _set_active_reasoning_service(prior)
+
 
 # ===========================================================================
 # handle_restart_self_tool — two-call confirmation

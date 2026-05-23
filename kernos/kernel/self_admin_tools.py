@@ -298,15 +298,45 @@ def handle_dump_context_tool(
             request.instance_id, reason,
         )
     system_prompt = getattr(request, "system_prompt", "") or ""
-    messages = getattr(request, "messages", []) or []
-    tools = getattr(request, "tools", []) or []
+    messages = list(getattr(request, "messages", []) or [])
+    tools = list(getattr(request, "tools", []) or [])
+    system_prompt_static = getattr(request, "system_prompt_static", "") or ""
+    system_prompt_dynamic = getattr(request, "system_prompt_dynamic", "") or ""
+    # 2026-05-23 dump_context accounting fix: when the tool is
+    # dispatched via the live-dispatch path, the ReasoningRequest
+    # is constructed by _live_request_factory with empty
+    # system_prompt/messages/tools (those aren't needed for normal
+    # tool dispatch). For dump_context we DO need them or the
+    # summary line reports 0 tokens. Fall back to the reasoning
+    # service's cached last-payload (set in reason()) when the
+    # passed-in request is empty.
+    if not (system_prompt or messages or tools):
+        from kernos.kernel.reasoning import (
+            get_active_reasoning_service,
+        )
+        reasoning_svc = get_active_reasoning_service()
+        if reasoning_svc is not None:
+            instance_id = getattr(request, "instance_id", "") or ""
+            cached = reasoning_svc.get_last_reasoning_payload(instance_id)
+            if cached:
+                system_prompt = system_prompt or cached.get("system_prompt", "")
+                messages = messages or cached.get("messages", []) or []
+                tools = tools or cached.get("tools", []) or []
+                system_prompt_static = (
+                    system_prompt_static
+                    or cached.get("system_prompt_static", "")
+                )
+                system_prompt_dynamic = (
+                    system_prompt_dynamic
+                    or cached.get("system_prompt_dynamic", "")
+                )
     dump_path = write_context_dump(
         system_prompt=system_prompt,
         messages=messages,
         tools=tools,
         instance_id=getattr(request, "instance_id", "") or "",
-        system_prompt_static=getattr(request, "system_prompt_static", "") or "",
-        system_prompt_dynamic=getattr(request, "system_prompt_dynamic", "") or "",
+        system_prompt_static=system_prompt_static,
+        system_prompt_dynamic=system_prompt_dynamic,
         omit_conversation_note=True,
     )
 

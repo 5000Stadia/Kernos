@@ -72,6 +72,26 @@ from kernos.kernel.gate import DispatchGate, GateResult, ApprovalToken  # re-exp
 # ---------------------------------------------------------------------------
 
 
+# 2026-05-23 dump_context accounting fix: single-process active-
+# ReasoningService registry. ReasoningService.__init__ self-
+# registers; static helpers (handle_dump_context_tool) reach the
+# active instance via get_active_reasoning_service() to read the
+# cached last-payload without import-cycle pressure.
+_ACTIVE_REASONING_SERVICE: Any = None
+
+
+def _set_active_reasoning_service(svc: Any) -> None:
+    global _ACTIVE_REASONING_SERVICE
+    _ACTIVE_REASONING_SERVICE = svc
+
+
+def get_active_reasoning_service() -> Any:
+    """Return the most-recently-constructed ReasoningService, or None.
+    Used by static helpers that need access to per-instance reasoning
+    caches without a direct reference."""
+    return _ACTIVE_REASONING_SERVICE
+
+
 @dataclass
 class ReasoningRequest:
     """Everything the ReasoningService needs to run a reasoning turn."""
@@ -309,6 +329,20 @@ class ReasoningService:
         )
         # Hybrid token counting: real input_tokens from last principal reasoning call per-instance
         self._last_real_input_tokens: dict[str, int] = {}  # instance_id → tokens
+        # 2026-05-23 dump_context accounting fix: cache the most-recent
+        # reasoning payload per instance so tool-dispatched dump_context
+        # (which receives a minimal ReasoningRequest from the live-
+        # dispatch _request_factory with empty system_prompt/messages/
+        # tools) can render an accurate token + char summary. Each
+        # entry replaces the prior — bounded by instance count, not
+        # turn count.
+        self._last_reasoning_payload: dict[str, dict] = {}
+        # Self-register as the active reasoning service so
+        # static helpers (e.g. handle_dump_context_tool) can
+        # reach this instance without import-cycle gymnastics.
+        # Single-process Kernos = one ReasoningService; last
+        # constructed wins.
+        _set_active_reasoning_service(self)
         # Pre-flight chain-skip support — lazily-loaded model registry
         # cards keyed by model name. Loaded once per ReasoningService
         # lifetime; refreshes happen out-of-process via `python -m
@@ -506,6 +540,17 @@ class ReasoningService:
         if space_id not in self._loaded_tools:
             self._loaded_tools[space_id] = set()
         self._loaded_tools[space_id].add(tool_name)
+
+    def get_last_reasoning_payload(self, instance_id: str) -> dict:
+        """Return the most-recent reasoning payload for this instance
+        (system_prompt, messages, tools, system_prompt_static,
+        system_prompt_dynamic). Empty dict if no reason() call has
+        fired yet for this instance.
+
+        Consumers: ``handle_dump_context_tool`` falls back to this
+        when the dispatch-time ReasoningRequest carries empty payload
+        fields (live-dispatch factory provides a minimal request)."""
+        return self._last_reasoning_payload.get(instance_id, {})
 
     def get_last_real_input_tokens(self, instance_id: str) -> int:
         """Return the real input_tokens from the last principal reasoning call, or 0."""
@@ -2783,6 +2828,21 @@ class ReasoningService:
         )
 
     async def reason(self, request: ReasoningRequest) -> ReasoningResult:
+        """Run a full reasoning turn through the decoupled turn runner."""  # noqa: D401
+        # 2026-05-23 dump_context accounting fix: cache the payload
+        # so tool-dispatched dump_context can render accurate token
+        # counts. See get_last_reasoning_payload().
+        if request.instance_id:
+            self._last_reasoning_payload[request.instance_id] = {
+                "system_prompt": request.system_prompt or "",
+                "messages": list(request.messages or []),
+                "tools": list(request.tools or []),
+                "system_prompt_static": request.system_prompt_static or "",
+                "system_prompt_dynamic": request.system_prompt_dynamic or "",
+            }
+        return await self._reason_impl(request)
+
+    async def _reason_impl(self, request: ReasoningRequest) -> ReasoningResult:
         """Run a full reasoning turn through the decoupled turn runner.
 
         The signature and return shape are unchanged from the pre-CCV1
