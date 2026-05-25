@@ -52,6 +52,27 @@ class TestSchemasRegistered:
         assert "reason" in props
         assert "confirm" in props
 
+    def test_restart_self_description_names_turn_boundary(self):
+        """RESTART-SELF-TURN-BOUNDARY-CLARITY (2026-05-25). The
+        description must unambiguously tell the agent that calls
+        AFTER restart_self in the same response are dropped, and
+        that follow-up work in a multi-step instruction has to wait
+        for a new turn post-restart. Surfaced after Kernos called
+        restart_self as step (1) of a 3-step verification blip
+        and silently lost steps (2) and (3)."""
+        from kernos.kernel.self_admin_tools import RESTART_SELF_TOOL
+        desc = RESTART_SELF_TOOL["description"]
+        # Strong process-terminating language
+        assert "PROCESS-TERMINATING" in desc
+        assert "HARD TURN-BOUNDARY" in desc
+        # Explicit multi-step guidance
+        assert "multi-step instruction" in desc
+        assert "CANNOT execute" in desc
+        # Re-engagement contract
+        assert "re-prompt" in desc
+        # Confirmation pattern's role in enforcing turn-boundary
+        assert "FINAL action" in desc or "only action" in desc
+
 
 # ===========================================================================
 # write_context_dump — the file-writing helper
