@@ -95,6 +95,18 @@ class TestToolAliasCanonicalizer:
         assert canonical == "improve_kernos"
         assert repaired is True
 
+    def test_advisory_spec_retrieval_consult_alias(self):
+        """2026-05-24 spec alignment check: agent reached for
+        advisory_spec_retrieval_consult to read a repo spec.
+        No advisory-variant tool exists; canonical surface is
+        plain consult (advisory mode via prompt framing)."""
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        canonical, repaired = canonicalize_tool_name(
+            "advisory_spec_retrieval_consult",
+        )
+        assert canonical == "consult"
+        assert repaired is True
+
     def test_gate_classifies_request_space_action_as_soft_write(self):
         """2026-05-22: request_space_action was missing from the
         gate classification table, causing live-integration dispatcher

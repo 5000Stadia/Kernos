@@ -49,6 +49,11 @@ _TOOL_ALIASES: dict[str, str] = {
     # attempt. Repair to the canonical name so the retry lands.
     "kernel.autonomous_improvement.start_attempt": "improve_kernos",
     "kernel.autonomous_improvement": "improve_kernos",
+    # 2026-05-24 spec alignment check: agent reached for an
+    # advisory variant of consult to read a repo spec. No such
+    # tool — closest surface is plain consult (advisory-mode is
+    # achievable via prompt framing rather than a separate tool).
+    "advisory_spec_retrieval_consult": "consult",
 }
 
 
