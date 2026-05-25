@@ -515,9 +515,15 @@ MANAGE_CAPABILITIES_TOOL = {
 READ_SOURCE_TOOL = {
     "name": "read_source",
     "description": (
-        "Read Kernos source code. Use when the user asks how something works "
-        "technically or wants to see implementation details. Only reads files "
-        "within the kernos/ package directory."
+        "Read a file from the Kernos repository. Allowed roots: "
+        "the kernos/ package (source code), specs/ (architecture "
+        "specs), and docs/ (technical documentation). Use when the "
+        "user asks how something works technically, when you need "
+        "to read your own architecture specs, or to check "
+        "implementation details. Paths starting with kernos/, "
+        "specs/, or docs/ are interpreted relative to the repo "
+        "root; bare paths like 'kernel/awareness.py' stay relative "
+        "to kernos/ for backward compatibility."
     ),
     "input_schema": {
         "type": "object",
@@ -525,17 +531,23 @@ READ_SOURCE_TOOL = {
             "path": {
                 "type": "string",
                 "description": (
-                    "Relative path within the kernos/ package. "
-                    "Examples: 'kernel/awareness.py', 'kernel/reasoning.py', "
-                    "'messages/handler.py', 'capability/registry.py'"
+                    "Repo-relative or kernos-relative path. "
+                    "Examples: 'kernel/awareness.py' (resolves to "
+                    "kernos/kernel/awareness.py), "
+                    "'specs/SELF-IMPROVEMENT-CLOSURE-V1.md', "
+                    "'docs/TECHNICAL-ARCHITECTURE.md', "
+                    "'kernos/messages/handler.py' (explicit-root form)."
                 ),
             },
             "section": {
                 "type": "string",
                 "description": (
                     "Optional class or function name to extract. "
-                    "Examples: 'AwarenessEvaluator', 'run_time_pass', '_gate_tool_call'. "
-                    "If omitted, returns the full file."
+                    "Examples: 'AwarenessEvaluator', 'run_time_pass', "
+                    "'_gate_tool_call'. If omitted, returns the full "
+                    "file. Section extraction works on .py files; "
+                    "for markdown specs/docs, omit and read the full "
+                    "file."
                 ),
             },
         },
@@ -704,35 +716,78 @@ SOUL_UPDATABLE_FIELDS = {"agent_name", "emoji", "personality_notes", "communicat
 
 
 def read_source(path: str, section: str = "") -> str:
-    """Read Kernos source code. Returns file contents or extracted section.
+    """Read a file from the Kernos repository.
 
-    Security: only allows reads within the kernos/ package directory.
-    Rejects paths with '..', absolute paths, or paths outside kernos/.
+    Allowed roots:
+      - kernos/  (source code) — backward-compatible bare paths like
+        'kernel/awareness.py' resolve here.
+      - specs/   (architecture specs) — explicit prefix required.
+      - docs/    (technical documentation) — explicit prefix required.
+
+    Path semantics:
+      - If path starts with 'kernos/', 'specs/', or 'docs/', it is
+        interpreted relative to the repo root.
+      - Otherwise the path is treated as kernos-relative (preserves
+        prior callers that wrote 'kernel/awareness.py' meaning
+        'kernos/kernel/awareness.py').
+
+    Security: rejects absolute paths, rejects path traversal ('..'),
+    and ensures the resolved path lives within one of the allowed
+    roots. Self-improvement spec reads against specs/ land cleanly
+    via 'specs/SPEC-NAME.md'.
     """
     import importlib
     from pathlib import Path
 
     # Security: reject absolute paths
     if path.startswith("/") or path.startswith("\\"):
-        return "Error: Absolute paths are not allowed. Use a relative path like 'kernel/awareness.py'."
+        return (
+            "Error: Absolute paths are not allowed. Use a relative "
+            "path like 'kernel/awareness.py' or "
+            "'specs/MY-SPEC.md'."
+        )
 
     # Security: reject path traversal
     if ".." in path:
         return "Error: Path traversal ('..') is not allowed."
 
-    # Resolve kernos package root
+    # Compute allowed roots
     kernos_root = Path(importlib.import_module("kernos").__file__).parent
-    target = (kernos_root / path).resolve()
+    repo_root = kernos_root.parent
+    specs_root = repo_root / "specs"
+    docs_root = repo_root / "docs"
+    allowed_roots = (kernos_root, specs_root, docs_root)
 
-    # Security: ensure resolved path is within kernos/
-    if not str(target).startswith(str(kernos_root)):
-        return "Error: Path resolves outside the kernos/ package directory."
+    # Resolve target. Explicit-root prefixes anchor against repo_root;
+    # bare paths anchor against kernos_root for backward compatibility.
+    if path.startswith(("kernos/", "specs/", "docs/")):
+        target = (repo_root / path).resolve()
+    else:
+        target = (kernos_root / path).resolve()
+
+    # Security: must resolve within one of the allowed roots.
+    if not any(
+        str(target) == str(root) or str(target).startswith(str(root) + "/")
+        for root in allowed_roots
+    ):
+        return (
+            "Error: Path resolves outside the allowed roots "
+            "(kernos/, specs/, docs/)."
+        )
+
+    # Report a repo-relative path in error messages so the agent
+    # sees what was actually attempted, regardless of which root it
+    # anchored against.
+    try:
+        display_path = target.relative_to(repo_root)
+    except ValueError:
+        display_path = target
 
     if not target.exists():
-        return f"Error: File not found: kernos/{path}"
+        return f"Error: File not found: {display_path}"
 
     if not target.is_file():
-        return f"Error: Not a file: kernos/{path}"
+        return f"Error: Not a file: {display_path}"
 
     if target.suffix not in (".py", ".md", ".txt", ".json", ".toml", ".yaml", ".yml"):
         return f"Error: Unsupported file type: {target.suffix}"
@@ -764,7 +819,7 @@ def read_source(path: str, section: str = "") -> str:
             break
 
     if start_idx is None:
-        return f"Error: Section '{section}' not found in kernos/{path}"
+        return f"Error: Section '{section}' not found in {display_path}"
 
     # Find end: next definition at same or lower indent level
     result_lines = [lines[start_idx]]

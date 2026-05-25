@@ -88,6 +88,70 @@ class TestReadSourceSecurity:
         if "not found" not in result:
             assert "Error" in result
 
+
+# ---------------------------------------------------------------------------
+# read_source: extended roots (specs/ + docs/)
+# 2026-05-24 fundamental-capability-repair: Kernos couldn't read its
+# own SELF-IMPROVEMENT-CLOSURE-V1 spec because read_source was scoped
+# to kernos/ only. specs/ and docs/ now reachable.
+# ---------------------------------------------------------------------------
+
+
+class TestReadSourceExtendedRoots:
+    def test_read_spec_via_explicit_specs_prefix(self):
+        """specs/SELF-IMPROVEMENT-CLOSURE-V1.md is reachable via
+        the explicit specs/ prefix."""
+        result = _read_source("specs/SELF-IMPROVEMENT-CLOSURE-V1.md")
+        assert not result.startswith("Error")
+        assert "SELF-IMPROVEMENT-CLOSURE-V1" in result
+
+    def test_read_doc_via_explicit_docs_prefix(self):
+        """docs/TECHNICAL-ARCHITECTURE.md is reachable via the
+        explicit docs/ prefix."""
+        result = _read_source("docs/TECHNICAL-ARCHITECTURE.md")
+        # File should exist + contain a recognizable heading
+        assert not result.startswith("Error")
+
+    def test_read_kernos_explicit_prefix_works(self):
+        """Explicit kernos/ prefix resolves to the package — symmetric
+        with specs/ and docs/."""
+        result = _read_source("kernos/kernel/awareness.py")
+        # Real reads return source code, not an "Error: ..." prefix.
+        # File content may contain the word "Error" inside (exception
+        # handling, etc.), so check the start of the response only.
+        assert not result.startswith("Error")
+        assert "class" in result or "def" in result
+
+    def test_bare_path_still_works_for_back_compat(self):
+        """Bare paths like 'kernel/awareness.py' (no explicit prefix)
+        continue to resolve relative to kernos/ — preserves all
+        existing callers."""
+        result = _read_source("kernel/awareness.py")
+        assert not result.startswith("Error")
+        assert "class" in result or "def" in result
+
+    def test_specs_path_traversal_rejected(self):
+        """Even with specs/ prefix, path traversal stays rejected."""
+        result = _read_source("specs/../etc/passwd")
+        assert "Error" in result
+
+    def test_unrelated_top_level_dir_rejected(self):
+        """Paths not in {kernos/, specs/, docs/} are rejected even if
+        they exist at the repo root (e.g., tests/, data/)."""
+        result = _read_source("tests/test_self_knowledge.py")
+        # 'tests' is not in allowed prefixes; it'll resolve to
+        # kernos/tests/test_self_knowledge.py via the back-compat
+        # fallback. That file doesn't exist → not found.
+        assert "Error" in result
+
+    def test_nonexistent_spec_gives_clean_error(self):
+        """A nonexistent spec path returns a clear not-found error
+        showing the resolved location."""
+        result = _read_source("specs/NONEXISTENT-V1.md")
+        assert "Error" in result
+        assert "not found" in result
+        assert "specs/NONEXISTENT-V1.md" in result
+
     def test_directory_rejected(self):
         result = _read_source("kernel")
         assert "Error" in result
