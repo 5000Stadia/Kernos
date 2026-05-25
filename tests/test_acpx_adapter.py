@@ -798,3 +798,121 @@ class TestKillTree:
     def test_handles_nonexistent_pid_gracefully(self):
         from kernos.kernel.external_agents.acpx_adapter import _kill_tree
         assert _kill_tree(9_999_999) == 0
+
+
+# ===========================================================================
+# _read_lines_unbounded — ACPX-DRAIN-OVERRUN-FIX-V1 (2026-05-24)
+#
+# Repro for the bug Kernos hit on 2026-05-24 during a spec alignment
+# check: claude_code emitted a JSON-RPC event with inlined spec content
+# that exceeded asyncio's default 64 KiB per-line limit, the stdout
+# drain raised LimitOverrunError, drain_incomplete was set, and the
+# substrate surfaced ConsultationFailed. The helper sidesteps the
+# limit by reading bytes in chunks and splitting on b"\n" manually.
+# ===========================================================================
+
+
+class TestReadLinesUnbounded:
+    @pytest.mark.asyncio
+    async def test_yields_normal_lines_with_trailing_newline(self):
+        """Short lines yielded one at a time, each with trailing \\n."""
+        import asyncio
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"hello\nworld\n")
+        reader.feed_eof()
+        lines = [line async for line in _read_lines_unbounded(reader)]
+        assert lines == [b"hello\n", b"world\n"]
+
+    @pytest.mark.asyncio
+    async def test_handles_line_over_64kib_without_raising(self):
+        """The bug repro: a single line exceeding the default 64 KiB
+        StreamReader limit. async-for-line raises LimitOverrunError;
+        the helper handles it cleanly."""
+        import asyncio
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        # 100 KiB of content followed by a newline → one giant line.
+        giant_payload = b"X" * (100 * 1024)
+        reader = asyncio.StreamReader()
+        reader.feed_data(giant_payload + b"\n")
+        reader.feed_eof()
+        lines = [line async for line in _read_lines_unbounded(reader)]
+        assert len(lines) == 1
+        assert lines[0] == giant_payload + b"\n"
+        assert len(lines[0]) == (100 * 1024) + 1
+
+    @pytest.mark.asyncio
+    async def test_handles_eof_mid_line_yields_residual(self):
+        """If the stream ends without a trailing newline, the
+        partial last line is still yielded so content isn't dropped."""
+        import asyncio
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"complete\nresidual-no-newline")
+        reader.feed_eof()
+        lines = [line async for line in _read_lines_unbounded(reader)]
+        assert lines == [b"complete\n", b"residual-no-newline"]
+
+    @pytest.mark.asyncio
+    async def test_handles_none_reader_returns_immediately(self):
+        """None reader (e.g., process started with stdout=None)
+        produces zero lines without raising."""
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        lines = [line async for line in _read_lines_unbounded(None)]
+        assert lines == []
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_stream(self):
+        """EOF immediately with no bytes produces zero lines."""
+        import asyncio
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        lines = [line async for line in _read_lines_unbounded(reader)]
+        assert lines == []
+
+    @pytest.mark.asyncio
+    async def test_line_split_across_multiple_read_chunks(self):
+        """A line larger than chunk_size accumulates across multiple
+        read() calls in the buffer before being yielded."""
+        import asyncio
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        # Force small chunk_size to verify cross-chunk accumulation.
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"abc" * 100 + b"\n")  # 300-byte line
+        reader.feed_eof()
+        lines = [
+            line async for line in _read_lines_unbounded(
+                reader, chunk_size=64,
+            )
+        ]
+        assert lines == [b"abc" * 100 + b"\n"]
+
+    @pytest.mark.asyncio
+    async def test_mixed_small_and_giant_lines(self):
+        """Realistic ACPX shape: many small JSON-RPC events
+        interspersed with one giant agent_message_chunk that has
+        inlined file contents."""
+        import asyncio
+        from kernos.kernel.external_agents.acpx_adapter import (
+            _read_lines_unbounded,
+        )
+        small = b'{"jsonrpc":"2.0","method":"ping"}\n'
+        giant = b"X" * (80 * 1024) + b"\n"
+        reader = asyncio.StreamReader()
+        reader.feed_data(small + giant + small + small)
+        reader.feed_eof()
+        lines = [line async for line in _read_lines_unbounded(reader)]
+        assert lines == [small, giant, small, small]

@@ -36,7 +36,7 @@ import logging
 import os
 import shutil
 import uuid
-from typing import Any
+from typing import Any, AsyncIterator
 
 from kernos.kernel.external_agents.errors import (
     ConsultationFailed,
@@ -277,6 +277,57 @@ class _ParseFailure(Exception):
     JSON. Used to distinguish 'blank line / control output' (skip
     silently) from 'malformed JSON' (count + skip). Codex review fold
     #5."""
+
+
+async def _read_lines_unbounded(
+    reader: asyncio.StreamReader | None,
+    chunk_size: int = 65536,
+) -> AsyncIterator[bytes]:
+    """Async iterator over lines from ``reader`` with NO per-line limit.
+
+    ACPX-DRAIN-OVERRUN-FIX-V1 (2026-05-24). The default
+    ``asyncio.StreamReader`` enforces a 64 KiB per-line limit;
+    ``async for line in reader`` raises ``LimitOverrunError`` ("Separator
+    is found, but chunk is longer than limit") when a single line exceeds
+    it. Coding-agent JSON-RPC events can carry inlined file contents that
+    routinely breach 64 KiB — for instance, asking Claude Code to read a
+    multi-hundred-line spec produces a single ``session/update`` event
+    well over the limit. The drain task then crashes, ``drain_incomplete``
+    is set, and the substrate surfaces ``ConsultationFailed`` to the
+    agent — even though the underlying process was healthy.
+
+    This helper reads bytes in fixed-size chunks, buffers them, and
+    splits on ``b"\\n"`` manually, sidestepping the per-line limit
+    entirely. Each yielded line includes its trailing newline (parity
+    with the ``async for line in reader`` shape it replaces). EOF flushes
+    any residual buffered bytes as a final unterminated line so partial
+    last-line content isn't dropped. Cancellation propagates from
+    ``reader.read()`` cleanly.
+
+    chunk_size defaults to 64 KiB — matching asyncio's default high-water
+    so memory profile is unchanged in the common case where lines are
+    small. Lines larger than chunk_size accumulate across multiple reads
+    in the buffer.
+    """
+    if reader is None:
+        return
+    buffer = bytearray()
+    while True:
+        chunk = await reader.read(chunk_size)
+        if not chunk:
+            # EOF — flush any remaining buffered bytes as a final line.
+            if buffer:
+                yield bytes(buffer)
+                buffer.clear()
+            return
+        buffer.extend(chunk)
+        while True:
+            newline_idx = buffer.find(b"\n")
+            if newline_idx == -1:
+                break
+            line = bytes(buffer[: newline_idx + 1])
+            del buffer[: newline_idx + 1]
+            yield line
 
 
 def _parse_ndjson_event(line: str) -> dict[str, Any] | None:
@@ -536,9 +587,10 @@ async def _ensure_session(
     stderr_chunks: list[bytes] = []
 
     async def _read_pipe(reader, sink) -> None:
-        if reader is None:
-            return
-        async for line in reader:
+        # ACPX-DRAIN-OVERRUN-FIX-V1: use the unbounded helper instead
+        # of ``async for line in reader`` so >64 KiB lines don't crash
+        # the drain. Same fix applied to the dispatch-side drains.
+        async for line in _read_lines_unbounded(reader):
             sink.append(line)
 
     drain_stdout = asyncio.create_task(_read_pipe(proc.stdout, stdout_chunks))
@@ -893,7 +945,13 @@ async def dispatch(
         nonlocal event_count, last_stop_reason, parse_errors
         nonlocal last_event_at, last_event_kind
         assert proc.stdout is not None
-        async for raw_line in proc.stdout:
+        # ACPX-DRAIN-OVERRUN-FIX-V1: coding-agent JSON-RPC events can
+        # exceed asyncio's default 64 KiB per-line limit when they
+        # inline file contents (e.g. claude_code reading a multi-
+        # hundred-line spec). Use the unbounded helper so the drain
+        # task can't crash with LimitOverrunError — that was surfacing
+        # to callers as opaque ConsultationFailed at the substrate.
+        async for raw_line in _read_lines_unbounded(proc.stdout):
             try:
                 line = raw_line.decode("utf-8", errors="replace")
             except Exception:
@@ -933,8 +991,12 @@ async def dispatch(
         # stdout so a noisy child can't block on a full stderr
         # pipe (which would cause a false timeout on otherwise-
         # healthy dispatches).
+        # ACPX-DRAIN-OVERRUN-FIX-V1: stderr can also exceed the 64
+        # KiB per-line limit (less common, but possible on Python
+        # traceback dumps with embedded source); using the unbounded
+        # helper here for symmetry with stdout.
         assert proc.stderr is not None
-        async for raw_line in proc.stderr:
+        async for raw_line in _read_lines_unbounded(proc.stderr):
             stderr_chunks.append(raw_line)
 
     # Descendant-tracking task: walks /proc/<acpx_pid>/.../children
