@@ -133,7 +133,7 @@ implementation builds against.
 
 ---
 
-**Date:** 2026-05-26 (v3 after Codex round-2 fold)
+**Date:** 2026-05-26 (v4 after Codex round-3 fold)
 **Status:** Draft for review
 **Scope:** New test layer at `tests/substrate_soak/` plus a
   smoke-gate extension in `kernos/kernel/self_test_gate.py` that
@@ -159,7 +159,7 @@ runs only three substrate files; the parent autonomy spec
 expected autonomy-loop e2e + after-boot live probe that never
 landed.
 
-This spec adds the missing layer. Seven probes that exercise
+This spec adds the missing layer. Eight probes that exercise
 substrate composition at the boundaries that have proven
 load-bearing for production correctness.
 
@@ -773,8 +773,10 @@ that calls after `restart_self` in the same response are
 dropped. The mutation would be "revert the description"; the
 soak suite cannot catch a description regression because it
 does not exercise model interpretation of the description (no
-real model dispatch in the deterministic suite — see Q3
-constraint). This fix stays unit-test-only (the
+real model dispatch in the deterministic suite per the
+"Probes are deterministic — no real external providers"
+principle in the Design principles section above). This fix
+stays unit-test-only (the
 `test_restart_self_description_names_turn_boundary` regression
 pin at `tests/test_self_admin_tools.py`). Codex round-2
 flagged the inconsistency with "all seven would be caught" —
