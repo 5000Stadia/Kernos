@@ -454,6 +454,11 @@ class IntegrationRunner:
                     inputs=inputs,
                     cohort_refs=cohort_refs,
                     attempt=attempt,
+                    # INTEGRATION-RETRY-WITH-FEEDBACK-V1: pass all
+                    # prior failures so the next attempt's prompt
+                    # tells the model what to address. Empty tuple
+                    # on attempt 1.
+                    prior_attempt_failures=tuple(attempts_history),
                 )
             except IntegrationAttemptFailed as exc:
                 last_failure = exc
@@ -545,10 +550,22 @@ class IntegrationRunner:
         inputs: IntegrationInputs,
         cohort_refs: tuple[str, ...],
         attempt: int,
+        prior_attempt_failures: tuple["IntegrationAttemptFailed", ...] = (),
     ) -> Briefing:
         """One synthesis attempt. Returns a successful Briefing or
         raises :class:`IntegrationAttemptFailed`. Each attempt builds
         fresh chain state so the model gets a clean shot.
+
+        INTEGRATION-RETRY-WITH-FEEDBACK-V1 (2026-05-25):
+        ``prior_attempt_failures`` carries the failure summaries from
+        all previously-failed attempts in the same synthesis. The
+        prompt assembly weaves those into a "your prior attempts
+        failed because X; address this now" block so the model has
+        actionable feedback. Without this, retries were wasting
+        budget by replaying identical prompts and hitting identical
+        validation errors (3x ProposeTool.reason failures observed
+        in production today). Empty tuple == first attempt; the
+        block is suppressed.
         """
         start = self._clock()
         tools_called: list[str] = []
@@ -568,7 +585,9 @@ class IntegrationRunner:
         # Section 4a: Collect phase.
         collect_started = self._clock()
         system_prompt = build_system_prompt()
-        chain_messages = self._build_initial_messages(inputs)
+        chain_messages = self._build_initial_messages(
+            inputs, prior_attempt_failures=prior_attempt_failures,
+        )
         integration_tools = self._build_integration_tools(inputs.surfaced_tools)
         phase_durations_ms["collect"] = _ms_since(collect_started, self._clock)
 
@@ -795,7 +814,10 @@ class IntegrationRunner:
     # ----- prompt + tool list assembly -----
 
     def _build_initial_messages(
-        self, inputs: IntegrationInputs
+        self,
+        inputs: IntegrationInputs,
+        *,
+        prior_attempt_failures: tuple["IntegrationAttemptFailed", ...] = (),
     ) -> list[dict[str, Any]]:
         thread_text = _render_conversation_thread(inputs.conversation_thread)
         cohort_block = _render_cohort_outputs(
@@ -805,7 +827,36 @@ class IntegrationRunner:
         surfaced_block = _render_surfaced_tools(inputs.surfaced_tools)
         spaces_block = _render_context_spaces(inputs.active_context_spaces)
 
+        # INTEGRATION-RETRY-WITH-FEEDBACK-V1 (2026-05-25): when this
+        # is a retry attempt, prepend a block summarizing why prior
+        # attempts failed so the model has actionable feedback rather
+        # than replaying the same prompt blind. Without this, retries
+        # observed in production wasted budget on identical 3x
+        # failures (e.g. all 3 attempts hitting the same
+        # ProposeTool.reason validation error).
+        retry_block = ""
+        if prior_attempt_failures:
+            lines: list[str] = [
+                "<prior_attempt_failures>",
+                (
+                    f"You have already made {len(prior_attempt_failures)} "
+                    "failed attempt(s) at this synthesis. Each failure "
+                    "is listed below with the substrate's reason. "
+                    "Address these specifically in your next briefing — "
+                    "do not repeat the same mistake."
+                ),
+                "",
+            ]
+            for i, failure in enumerate(prior_attempt_failures, start=1):
+                lines.append(
+                    f"Attempt {i} failed at component "
+                    f"'{failure.component}': {failure.reason}"
+                )
+            lines.append("</prior_attempt_failures>\n")
+            retry_block = "\n".join(lines) + "\n"
+
         body = (
+            f"{retry_block}"
             "<conversation_thread>\n"
             f"{thread_text}\n"
             "</conversation_thread>\n\n"

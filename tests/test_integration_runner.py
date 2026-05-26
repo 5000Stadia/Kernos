@@ -1500,3 +1500,128 @@ async def test_runner_allows_behavioral_instruction_without_quoting_restricted()
     assert secret not in serialised["presence_directive"]
     for ci in serialised["relevant_context"]:
         assert secret not in ci["summary"]
+
+
+# ---------------------------------------------------------------------------
+# INTEGRATION-RETRY-WITH-FEEDBACK-V1 (2026-05-25)
+#
+# Surfaced when Kernos hit 3 identical ProposeTool.reason validation
+# failures during the spec alignment soak. The retry harness was
+# replaying the same prompt blindly, wasting budget. Fix: thread
+# prior-attempt failures into the next attempt's prompt so the model
+# sees actionable feedback.
+# ---------------------------------------------------------------------------
+
+
+def test_build_initial_messages_first_attempt_has_no_retry_block():
+    """First attempt (empty prior_attempt_failures) gets no retry
+    block — the prompt looks exactly like the pre-spec shape."""
+    runner, _ = _make_runner()
+    msgs = runner._build_initial_messages(_make_inputs())
+    body = msgs[0]["content"]
+    assert "<prior_attempt_failures>" not in body
+    assert "failed at component" not in body
+
+
+def test_build_initial_messages_retry_includes_prior_failure():
+    """When prior_attempt_failures is non-empty, the body prepends
+    a <prior_attempt_failures> block naming each component +
+    reason. Model sees actionable feedback rather than blind replay."""
+    from kernos.kernel.integration.runner import (
+        IntegrationAttemptFailed, BudgetState,
+    )
+    runner, _ = _make_runner()
+    failure = IntegrationAttemptFailed(
+        component="briefing_validation",
+        reason="ProposeTool.reason must be a non-empty string",
+        iterations=1,
+        phase_durations_ms={},
+        tools_called=[],
+        budget_state=BudgetState(),
+    )
+    msgs = runner._build_initial_messages(
+        _make_inputs(),
+        prior_attempt_failures=(failure,),
+    )
+    body = msgs[0]["content"]
+    assert "<prior_attempt_failures>" in body
+    assert "</prior_attempt_failures>" in body
+    # Names the count, component, and reason
+    assert "1 failed attempt" in body or "1 failed attempt(s)" in body
+    assert "briefing_validation" in body
+    assert "ProposeTool.reason must be a non-empty string" in body
+    # Tells model to address specifically (not just retry blind)
+    assert "Address these specifically" in body
+    assert "do not repeat" in body.lower()
+
+
+def test_build_initial_messages_retry_lists_all_prior_failures():
+    """When multiple prior attempts failed, all are listed in order."""
+    from kernos.kernel.integration.runner import (
+        IntegrationAttemptFailed, BudgetState,
+    )
+    runner, _ = _make_runner()
+    failures = (
+        IntegrationAttemptFailed(
+            component="briefing_validation",
+            reason="ProposeTool.reason must be a non-empty string",
+            iterations=1,
+            phase_durations_ms={},
+            tools_called=[],
+            budget_state=BudgetState(),
+        ),
+        IntegrationAttemptFailed(
+            component="integration_timeout",
+            reason="exceeded 30s wall-clock budget",
+            iterations=2,
+            phase_durations_ms={},
+            tools_called=["inspect_state:iter1"],
+            budget_state=BudgetState(),
+        ),
+    )
+    msgs = runner._build_initial_messages(
+        _make_inputs(), prior_attempt_failures=failures,
+    )
+    body = msgs[0]["content"]
+    assert "2 failed attempt(s)" in body
+    assert "Attempt 1 failed at component 'briefing_validation'" in body
+    assert "Attempt 2 failed at component 'integration_timeout'" in body
+    # Order preserved
+    assert body.index("Attempt 1") < body.index("Attempt 2")
+
+
+@pytest.mark.asyncio
+async def test_retry_loop_feeds_prior_failure_into_next_attempt():
+    """End-to-end: the chain caller's first invocation gets a prompt
+    with no retry block; the second invocation gets a prompt that
+    references the first attempt's failure reason."""
+    bodies_seen: list[str] = []
+
+    async def chain(system, messages, tools, max_tokens, **_):
+        bodies_seen.append(messages[0]["content"])
+        if len(bodies_seen) == 1:
+            # First attempt: model returns an invalid finalize that
+            # will fail briefing validation (empty presence_directive
+            # on a respond_only kind).
+            return _resp(_finalize_block({
+                "relevant_context": [],
+                "filtered_context": [],
+                "decided_action": {"kind": "respond_only"},
+                "presence_directive": "",  # invalid
+            }))
+        # Second attempt: valid briefing.
+        return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
+
+    runner, _ = _make_runner(
+        chain_caller=chain,
+        config=IntegrationConfig(max_retries=2),
+    )
+    briefing = await runner.run(_make_inputs())
+    # Success on second attempt
+    assert briefing is not None
+    assert len(bodies_seen) == 2
+    # First attempt: no retry block
+    assert "<prior_attempt_failures>" not in bodies_seen[0]
+    # Second attempt: retry block with first-attempt failure
+    assert "<prior_attempt_failures>" in bodies_seen[1]
+    assert "briefing_validation" in bodies_seen[1]
