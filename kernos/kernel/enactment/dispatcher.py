@@ -38,6 +38,7 @@ drains, never clears. The handler owns the drain.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
 from dataclasses import dataclass, field
@@ -281,6 +282,53 @@ class StepDispatcher:
         step = inputs.step
         briefing = inputs.briefing
         start = self._clock()
+
+        # TOOL-ALIAS-RECEIPT-V1 extension (2026-05-25): canonicalize
+        # the requested tool name BEFORE descriptor lookup. The prior
+        # alias-repair wirings at reasoning.execute_tool and
+        # gate.classify_tool_effect don't cover this surface — the
+        # enactment dispatcher is a third ingress that bypasses both.
+        # Surfaced when Verification B of the SELF-IMPROVEMENT-CLOSURE
+        # alignment soak observed advisory_spec_retrieval_consult
+        # failing as "not registered with the workshop" even though
+        # the alias dict maps it to consult.
+        #
+        # Repair shape: canonicalize, log, emit the standard
+        # TOOL_ALIAS_REPAIRED receipt event, then rebuild the step
+        # with the canonical tool_id so the rest of the dispatcher's
+        # plumbing (descriptor lookup, operation resolution, audit
+        # trail) sees the canonical name uniformly. The receipt event
+        # preserves the model's original name for telemetry corpus.
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        _canonical_name, _was_repaired = canonicalize_tool_name(
+            step.tool_id,
+        )
+        if _was_repaired:
+            logger.info(
+                "TOOL_ALIAS_REPAIR alias=%s canonical=%s context=enactment",
+                step.tool_id, _canonical_name,
+            )
+            if self._event is not None:
+                try:
+                    await self._event(
+                        {
+                            "type": "tool.alias_repaired",
+                            "instance_id": getattr(
+                                briefing, "instance_id", "",
+                            ),
+                            "requested": step.tool_id,
+                            "canonical": _canonical_name,
+                            "context": "enactment",
+                        }
+                    )
+                except Exception:
+                    logger.warning(
+                        "TOOL_ALIAS_RECEIPT_EMIT_FAILED requested=%s "
+                        "canonical=%s context=enactment",
+                        step.tool_id, _canonical_name,
+                        exc_info=True,
+                    )
+            step = dataclasses.replace(step, tool_id=_canonical_name)
 
         descriptor = self._lookup.descriptor_for(step.tool_id)
 

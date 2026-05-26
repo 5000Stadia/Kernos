@@ -20,6 +20,7 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -761,3 +762,176 @@ async def test_duration_ms_populated_on_success():
         StepDispatchInputs(step=_step(), briefing=_briefing())
     )
     assert result.duration_ms >= 0
+
+
+# ---------------------------------------------------------------------------
+# Alias-repair at enactment dispatcher (2026-05-25)
+#
+# Verification B of the SELF-IMPROVEMENT-CLOSURE alignment soak observed
+# advisory_spec_retrieval_consult failing as "not registered with the
+# workshop" — the prior alias-repair wirings at reasoning.execute_tool
+# and gate.classify_tool_effect don't cover this surface. The enactment
+# dispatcher is a third ingress that must consult the alias dict before
+# descriptor lookup.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_known_alias_canonicalized_before_descriptor_lookup(
+    monkeypatch,
+):
+    """When the requested tool_id matches a known alias, the dispatcher
+    canonicalizes it BEFORE descriptor_for() is called. The lookup
+    therefore receives the canonical name and finds the descriptor."""
+    # Use an existing real alias from the shipped dict to avoid
+    # coupling this test to internal alias-dict mutations.
+    from kernos.kernel.tool_aliases import canonicalize_tool_name
+    alias, canonical = "advisory_spec_retrieval_consult", "consult"
+    # Sanity: the alias entry is present in the production dict.
+    repaired_name, was_repaired = canonicalize_tool_name(alias)
+    assert was_repaired is True
+    assert repaired_name == canonical
+
+    lookup = _StubLookup({canonical: _descriptor(
+        name=canonical,
+        operations=(
+            OperationClassification(
+                operation="consult",
+                classification=GateClassification.SOFT_WRITE,
+            ),
+        ),
+    )})
+    executor = _StubExecutor(ToolExecutionResult(output={"ok": True}))
+    dispatcher = StepDispatcher(
+        executor=executor, descriptor_lookup=lookup,
+    )
+    briefing = _briefing()
+    # The action envelope only allows "email"; widen it for this test.
+    briefing = dataclasses.replace(
+        briefing,
+        action_envelope=ActionEnvelope(
+            intended_outcome="advisory consult",
+            allowed_tool_classes=("consult",),
+            allowed_operations=("consult",),
+        ),
+    )
+
+    result = await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(
+                tool_id=alias, tool_class="consult",
+                operation_name="consult", arguments={},
+            ),
+            briefing=briefing,
+        )
+    )
+    # Repair landed: the dispatcher reached the executor through the
+    # canonical name (no "tool not registered" failure).
+    assert result.completed is True
+    assert result.error_summary == ""
+    # Executor saw the canonical name, not the alias.
+    assert len(executor.calls) == 1
+    assert executor.calls[0].tool_id == canonical
+
+
+@pytest.mark.asyncio
+async def test_alias_repair_emits_receipt_event():
+    """Per TOOL-ALIAS-RECEIPT-V1: every alias canonicalization emits a
+    tool.alias_repaired event with requested/canonical/context fields.
+    The enactment ingress uses context='enactment'."""
+    captured: list[dict] = []
+
+    async def _capture_event(payload: dict) -> None:
+        captured.append(payload)
+
+    lookup = _StubLookup({"consult": _descriptor(
+        name="consult",
+        operations=(
+            OperationClassification(
+                operation="consult",
+                classification=GateClassification.SOFT_WRITE,
+            ),
+        ),
+    )})
+    executor = _StubExecutor(ToolExecutionResult(output={}))
+    dispatcher = StepDispatcher(
+        executor=executor, descriptor_lookup=lookup,
+        event_emitter=_capture_event,
+    )
+    briefing = dataclasses.replace(
+        _briefing(),
+        action_envelope=ActionEnvelope(
+            intended_outcome="x",
+            allowed_tool_classes=("consult",),
+            allowed_operations=("consult",),
+        ),
+    )
+
+    await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(
+                tool_id="advisory_spec_retrieval_consult",
+                tool_class="consult",
+                operation_name="consult",
+                arguments={},
+            ),
+            briefing=briefing,
+        )
+    )
+
+    repair_events = [
+        e for e in captured if e.get("type") == "tool.alias_repaired"
+    ]
+    assert len(repair_events) == 1
+    evt = repair_events[0]
+    assert evt["requested"] == "advisory_spec_retrieval_consult"
+    assert evt["canonical"] == "consult"
+    assert evt["context"] == "enactment"
+
+
+@pytest.mark.asyncio
+async def test_canonical_name_passes_through_unchanged():
+    """When the tool_id is already canonical (not in the alias dict),
+    the dispatcher does NOT emit a repair event and the executor sees
+    the same name the step carried in."""
+    captured: list[dict] = []
+
+    async def _capture_event(payload: dict) -> None:
+        captured.append(payload)
+
+    lookup = _StubLookup({"email_send": _descriptor()})
+    executor = _StubExecutor(ToolExecutionResult(output={}))
+    dispatcher = StepDispatcher(
+        executor=executor, descriptor_lookup=lookup,
+        event_emitter=_capture_event,
+    )
+    await dispatcher.dispatch(
+        StepDispatchInputs(step=_step(), briefing=_briefing())
+    )
+    # No alias_repaired events for canonical names.
+    repair_events = [
+        e for e in captured if e.get("type") == "tool.alias_repaired"
+    ]
+    assert repair_events == []
+    assert executor.calls[0].tool_id == "email_send"
+
+
+@pytest.mark.asyncio
+async def test_unknown_non_alias_tool_still_returns_not_registered():
+    """An unknown tool_id that is NOT in the alias dict still fails
+    as 'not registered with the workshop' — alias-repair doesn't
+    fabricate descriptors for unknown names."""
+    lookup = _StubLookup({})  # no descriptors at all
+    executor = _StubExecutor(ToolExecutionResult(output={}))
+    dispatcher = StepDispatcher(
+        executor=executor, descriptor_lookup=lookup,
+    )
+    result = await dispatcher.dispatch(
+        StepDispatchInputs(
+            step=_step(tool_id="some_truly_unknown_tool_42"),
+            briefing=_briefing(),
+        )
+    )
+    assert result.completed is False
+    assert result.failure_kind is FailureKind.NON_TRANSIENT
+    assert "not registered" in result.error_summary
