@@ -42,9 +42,14 @@ production whether the substrate still functions as a whole.
 
 After this spec: the same fix lands, AND a suite of substrate
 round-trip soaks runs as part of the same merge gate. If the
-round-trip soak fails, the commit doesn't merge. The seven bugs
-we just shipped fixes for would all have been caught pre-merge
-by these soaks (each one corresponds to a probe in the suite).
+round-trip soak fails, the commit doesn't merge. Six of the
+seven runtime-substrate bugs we just shipped fixes for would
+have been caught pre-merge by these soaks (each one corresponds
+to a probe in the suite). The seventh —
+`restart_self` description clarity (`5cec074`) — was a
+tool-description text fix and is honestly out of scope for
+substrate soak coverage; it stays unit-test-only. See the
+explicit exclusion rationale in the AC6 mutation matrix.
 
 The soak suite is not a replacement for unit tests. It's an
 additional layer that asserts *composition* — that the substrate
@@ -128,13 +133,15 @@ implementation builds against.
 
 ---
 
-**Date:** 2026-05-26 (v2 after Codex round-1 fold)
+**Date:** 2026-05-26 (v3 after Codex round-2 fold)
 **Status:** Draft for review
 **Scope:** New test layer at `tests/substrate_soak/` plus a
   smoke-gate extension in `kernos/kernel/self_test_gate.py` that
-  runs the seven probes pre-merge AND as part of the
-  post-bring-up health check. Seven probes shipping in v1, named
-  for the boundaries that surfaced in the 2026-05-25 session.
+  runs the eight probes pre-merge AND as part of the
+  post-bring-up health check. Eight probes shipping in v1 (seven
+  named for boundaries that surfaced in the 2026-05-25 session,
+  plus loop-health-completion which closes a gap from the parent
+  autonomy spec).
 **Estimated size:** ~600 LOC test files + ~150 LOC smoke-gate
   extension + ~50 LOC fixtures.
 
@@ -230,7 +237,7 @@ load-bearing for production correctness.
 
 **Missing — what this spec adds:**
 - A dedicated `tests/substrate_soak/` directory containing the
-  seven probe modules.
+  eight probe modules.
 - A `SubstrateSoakRunner` helper in
   `kernos/kernel/self_test_gate.py` that drives the probes
   with shared fixtures (deterministic model/tool fakes,
@@ -604,7 +611,7 @@ New helper in `kernos/kernel/self_test_gate.py`:
 
 ```python
 class SubstrateSoakRunner:
-    """Drives the seven substrate-soak probes with shared
+    """Drives the eight substrate-soak probes with shared
     fixtures. Probes are deterministic — hard fakes injected at
     well-defined seams; no real models, no real ACPX, no real
     Discord. A probe failure points at Kernos's substrate, not
@@ -760,6 +767,21 @@ Mutation table:
 This is the "would this probe have caught the bug" proof —
 not informal verification, an executable matrix.
 
+**Explicit exclusion: `5cec074` (`restart_self` description
+clarity).** This was a tool-description text change to clarify
+that calls after `restart_self` in the same response are
+dropped. The mutation would be "revert the description"; the
+soak suite cannot catch a description regression because it
+does not exercise model interpretation of the description (no
+real model dispatch in the deterministic suite — see Q3
+constraint). This fix stays unit-test-only (the
+`test_restart_self_description_names_turn_boundary` regression
+pin at `tests/test_self_admin_tools.py`). Codex round-2
+flagged the inconsistency with "all seven would be caught" —
+the suite catches the six runtime-substrate fixes; the
+seventh is a description fix and is honestly out of scope for
+substrate soak coverage.
+
 **AC7 — GitHub Actions workflow + local script gate on the
 single canonical contract.** Both invoke
 `python -m kernos.kernel.self_test_gate --include-soak`. PR
@@ -787,6 +809,27 @@ merges.** `scripts/run_live_provider_soak.sh` invokes one
 real ACPX dispatch end-to-end (claude-code or codex,
 configurable). Documented as on-demand + scheduled-only;
 explicitly excluded from CI merge gates.
+
+**AC11 — CLI wrapper exists at
+`python -m kernos.kernel.self_test_gate`.** Codex round-2
+confirmed this entry point does NOT currently exist
+(`kernos/kernel/self_test_gate.py` ends at line 301 with no
+`__main__` / `argparse` / `include_soak` references). This
+spec adds the CLI as an explicit deliverable. Contract:
+- `python -m kernos.kernel.self_test_gate --include-soak
+  --json` runs the smoke gate + soak suite via the same
+  `handle_run_self_test_suite(include_soak=True)` code path
+  the kernel-tool dispatch uses.
+- Exit code 0 on full pass; non-zero on any failure
+  (smoke OR soak).
+- `--json` flag emits machine-readable result for CI
+  consumption; default is human-readable.
+- Per-probe outcomes surface in the JSON output under
+  `soak_results[probe_name]`.
+
+Without this AC the "single canonical contract" design
+principle is unenforceable — CI would have to re-implement
+the soak path.
 
 ## Tracked follow-up specs (Codex round-1 Q8 commitment)
 
@@ -871,10 +914,9 @@ probe makes the duplication safe in the interim.
 **Routing this spec:** drafted under founder green-light to
 move from whack-a-mole bug-fixing to structural hardening.
 Round-1 Codex review returned YELLOW with substantive folds;
-this v2 incorporates all 10 areas (probe-shape fixes for 1,
-4, 6; AC2 + AC6 strengthening; deterministic-constraint
-clarification; autonomous-mutation gate; path corrections;
-single-canonical-CI-contract; new Probe 8; tracked follow-up
-specs for dispatch + health consolidation). Awaits Codex
-round-2 verification per [[multi-round-codex-convergence]]
-then founder ratification per [[push-approval-semantics]].
+v2 incorporated all 10 areas. Round-2 returned YELLOW with 3
+small folds (restart_self exclusion rationale, CLI wrapper as
+explicit AC11, stale "seven" → "eight" cleanup); this v3
+incorporates all 3. Awaits Codex round-3 verification per
+[[multi-round-codex-convergence]] then founder ratification
+per [[push-approval-semantics]].
