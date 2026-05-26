@@ -949,6 +949,15 @@ async def _bring_up_gateway_health_observer(
             last_on_message_provider=(
                 gateway_health_providers.last_on_message_provider
             ),
+            # DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25):
+            # forward the new provider if callers wired it. None
+            # for back-compat with callers that haven't updated
+            # their GatewayHealthProviders instance.
+            any_socket_event_ts_provider=getattr(
+                gateway_health_providers,
+                "any_socket_event_ts_provider",
+                None,
+            ),
             runner_inspector=None,  # V1.5 wires this
         )
         await _gw_observer.start()

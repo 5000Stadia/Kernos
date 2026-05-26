@@ -124,6 +124,7 @@ def _make_observer(
     runner_inspector=None, store=None, tmp_path=None,
     last_on_message=0.0,
     past_warmup=True,
+    any_socket_event_ts=None,
 ):
     obs = GatewayHealthObserver(
         instance_id="test_inst",
@@ -134,6 +135,10 @@ def _make_observer(
         message_create_counter=mc_counter,
         runner_inspector=runner_inspector,
         last_on_message_provider=lambda: last_on_message,
+        any_socket_event_ts_provider=(
+            (lambda: any_socket_event_ts)
+            if any_socket_event_ts is not None else None
+        ),
     )
     if past_warmup:
         # Backdate the start marker so _uptime_sec returns a value
@@ -620,7 +625,8 @@ class TestDetectGatewayDeaf:
         assert obs._detect_gateway_deaf(now) is None
 
     def test_deaf_pattern_emits_signal(self, tmp_path):
-        """MESSAGE_CREATE seen but on_message stale → deaf gateway."""
+        """PATTERN A — MESSAGE_CREATE seen but on_message stale →
+        deaf gateway (parser broken)."""
         now = time.time()
         counter = _MessageCreateCounter(window_sec=600)
         counter.record(now - 100)
@@ -633,6 +639,93 @@ class TestDetectGatewayDeaf:
         assert signal is not None
         assert signal.signal_type == "DISCORD_GATEWAY_DEAF"
         assert "MESSAGE_CREATE" in signal.description
+        assert "pattern=parser_broken" in signal.evidence
+
+    # ─── DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25) ─────────
+    # PATTERN B — total socket silence. Surfaced when the bot ran
+    # 100+ minutes with zero socket events of any type after
+    # restart. Pre-spec the detector early-returned on mc_count==0
+    # and missed this entirely. Now it checks any_socket_event_ts
+    # first and emits the signal with pattern=total_socket_silence
+    # evidence.
+
+    def test_pattern_b_total_socket_silence_emits_signal(self, tmp_path):
+        """Bug repro: ZERO socket events in deaf window. Pre-spec
+        this returned None silently; now it must surface DEAF."""
+        now = time.time()
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=now - 1200,  # 20 min silence vs 600s window
+            tmp_path=tmp_path,
+        )
+        signal = obs._detect_gateway_deaf(now)
+        assert signal is not None
+        assert signal.signal_type == "DISCORD_GATEWAY_DEAF"
+        assert "total silence" in signal.description.lower() or \
+               "not delivered any socket event" in signal.description
+        assert "pattern=total_socket_silence" in signal.evidence
+
+    def test_pattern_b_recent_any_socket_event_returns_none(self, tmp_path):
+        """Any socket event in window → healthy; no pattern-B alarm."""
+        now = time.time()
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=now - 30,  # 30s ago, well inside window
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_gateway_deaf(now) is None
+
+    def test_pattern_b_zero_timestamp_skipped(self, tmp_path):
+        """If any_socket_event_ts == 0 (bot just started, no events
+        yet), don't false-positive — give bot warm-up time."""
+        now = time.time()
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=0.0,
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_gateway_deaf(now) is None
+
+    def test_pattern_b_no_provider_falls_back_to_pattern_a_only(
+        self, tmp_path,
+    ):
+        """When any_socket_event_ts_provider is None (test fixtures
+        / legacy callers), the new pattern-B check is skipped and
+        the old pattern-A logic alone runs."""
+        now = time.time()
+        # No mc_counter, no any-socket provider → both paths skip,
+        # detector returns None (back-compat preserved).
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=None,
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_gateway_deaf(now) is None
+
+    def test_pattern_b_wins_over_pattern_a_when_both_could_fire(
+        self, tmp_path,
+    ):
+        """Sequencing: pattern B (total silence) is the more severe
+        diagnostic so it surfaces first. If somehow both conditions
+        held (total silence AND stale on_message AND mc_count > 0
+        from earlier), pattern B's evidence wins."""
+        now = time.time()
+        counter = _MessageCreateCounter(window_sec=600)
+        # Old MESSAGE_CREATE outside window won't count anyway.
+        # But add a recent one to make pattern A theoretically fireable
+        # too — pattern B should still take precedence because the
+        # any-socket-silence check runs first.
+        counter.record(now - 50)
+        obs = _make_observer(
+            mc_counter=counter,
+            last_inbound=now - 3600,  # pattern A would fire on this
+            any_socket_event_ts=now - 1200,  # pattern B fires on this
+            tmp_path=tmp_path,
+        )
+        signal = obs._detect_gateway_deaf(now)
+        assert signal is not None
+        # Pattern B's evidence in the signal
+        assert "pattern=total_socket_silence" in signal.evidence
 
 
 class TestDetectRunnerStuck:

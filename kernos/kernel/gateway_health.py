@@ -141,6 +141,13 @@ class GatewayHealthProviders:
     inbound_event_ts_provider: Callable[[], float]
     last_on_message_provider: Callable[[], float]
     message_create_counter: "_MessageCreateCounter | None"
+    # DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25): timestamp of
+    # the last gateway socket event of ANY type. Lets the observer
+    # distinguish "gateway deaf — no events at all" from "gateway
+    # quiet — no message events in particular." Default None for
+    # back-compat with callers that don't pass it; observer
+    # skips the new-pattern detection in that case.
+    any_socket_event_ts_provider: Callable[[], float] | None = None
 
 
 class GatewayHealthObserver:
@@ -177,6 +184,7 @@ class GatewayHealthObserver:
         runner_inspector: Callable[[], list[tuple[str, float]]] | None = None,
         poll_interval_sec: int = _POLL_INTERVAL_SEC,
         last_on_message_provider: Callable[[], float] | None = None,
+        any_socket_event_ts_provider: Callable[[], float] | None = None,
     ) -> None:
         self._instance_id = instance_id
         self._data_dir = data_dir
@@ -184,6 +192,13 @@ class GatewayHealthObserver:
         self._latency_provider = latency_provider
         self._inbound_event_ts_provider = inbound_event_ts_provider
         self._message_create_counter = message_create_counter
+        # DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25): None when
+        # callers haven't wired the provider (test fixtures, legacy
+        # bring-up paths). When set, _detect_gateway_deaf adds a
+        # second branch that catches "gateway received zero socket
+        # events of any kind" — the failure mode the original
+        # MESSAGE_CREATE-vs-on_message comparison cannot see.
+        self._any_socket_event_ts_provider = any_socket_event_ts_provider
         self._runner_inspector = runner_inspector
         self._poll_interval_sec = max(1, poll_interval_sec)
         self._task: asyncio.Task | None = None
@@ -633,16 +648,68 @@ class GatewayHealthObserver:
             )
 
     def _detect_gateway_deaf(self, now: float) -> FrictionSignal | None:
-        """MESSAGE_CREATE socket events observed but on_message
-        hasn't fired in the configured window → discord.py parser
-        layer is broken (or our handler is broken). Per Codex's
-        2026-05-19 analysis this is rare in stock discord.py but
-        possible; if it happens we want loud signal."""
+        """Two failure modes both surface as DISCORD_GATEWAY_DEAF:
+
+        PATTERN A — parser-broken (Codex 2026-05-19 RCA):
+          MESSAGE_CREATE socket events observed but on_message
+          hasn't fired in the deaf window. The gateway is
+          delivering events; discord.py's parser layer or our
+          handler is broken.
+
+        PATTERN B — gateway-totally-silent
+        (DISCORD-GATEWAY-DEAFNESS-DETECT-V1, 2026-05-25):
+          ZERO socket events of any type in the deaf window. The
+          gateway connection is up at the heartbeat level but
+          dispatch is completely dead. Surfaced 2026-05-25 when
+          the bot ran 100+ minutes after restart with no on_message
+          events AND no MESSAGE_CREATE counter activity — the
+          original detector early-returned on mc_count==0 and
+          silently missed the failure for the entire duration.
+
+        Both patterns emit the same signal_type so the existing
+        friction pattern lifecycle handles them uniformly; evidence
+        names which pattern fired.
+        """
+        # ─── PATTERN B: total socket silence ──────────────────────
+        # Check this FIRST because it dominates when the gateway is
+        # fully dead — pattern A's mc_count check would early-return
+        # otherwise and hide the failure.
+        if self._any_socket_event_ts_provider is not None:
+            last_any = self._any_socket_event_ts_provider()
+            if last_any > 0:
+                silence_sec = now - last_any
+                if silence_sec > _GATEWAY_DEAF_WINDOW_SEC:
+                    return FrictionSignal(
+                        signal_type="DISCORD_GATEWAY_DEAF",
+                        description=(
+                            f"Discord gateway has not delivered any "
+                            f"socket event in {silence_sec:.0f}s "
+                            f"(threshold {_GATEWAY_DEAF_WINDOW_SEC}s). "
+                            f"Connected guild bots receive presence/"
+                            f"typing events constantly; total silence "
+                            f"this long indicates the gateway is "
+                            f"dispatch-dead despite a healthy heartbeat."
+                        ),
+                        evidence=[
+                            f"any_socket_silence_sec={silence_sec:.0f}",
+                            f"window_sec={_GATEWAY_DEAF_WINDOW_SEC}",
+                            "pattern=total_socket_silence",
+                        ],
+                        context={
+                            "space": "",
+                            "member_id": "",
+                            "window_sec": _GATEWAY_DEAF_WINDOW_SEC,
+                            "pattern": "total_socket_silence",
+                        },
+                        heuristic=False,
+                    )
+
+        # ─── PATTERN A: parser broken ─────────────────────────────
         if self._message_create_counter is None:
             return None  # not wired (test fixtures, etc.)
         mc_count = self._message_create_counter.count_in_window(now)
         if mc_count == 0:
-            return None  # no recent message-creates; can't tell deaf from idle
+            return None  # no recent message-creates; pattern A doesn't apply
         last_on_message = self._inbound_event_ts_provider()
         if last_on_message <= 0:
             # Bot just started; no on_message events yet. Don't
@@ -662,11 +729,13 @@ class GatewayHealthObserver:
                 f"message_create_count_in_window={mc_count}",
                 f"on_message_idle_sec={idle_sec:.0f}",
                 f"window_sec={_GATEWAY_DEAF_WINDOW_SEC}",
+                "pattern=parser_broken",
             ],
             context={
                 "space": "",
                 "member_id": "",
                 "window_sec": _GATEWAY_DEAF_WINDOW_SEC,
+                "pattern": "parser_broken",
             },
             heuristic=False,
         )

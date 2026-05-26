@@ -275,3 +275,82 @@ class TestWatchdogTick:
         # tick fired (strike counter behavior we'd see on tick
         # is "stay at 0" for healthy ticks).
         assert server_module._gateway_unhealthy_strikes == 0
+
+
+# ===========================================================================
+# DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25)
+#
+# Repro for the 2026-05-25 production failure: bot ran 100+ minutes
+# after restart with healthy heartbeats but zero on_message events.
+# The watchdog's pre-spec check only looked at client.latency, so a
+# deaf gateway with healthy heartbeats passed all checks. This test
+# pins that the watchdog now ALSO checks for prolonged total socket
+# silence as a distinct unhealthy condition.
+# ===========================================================================
+
+
+class TestSocketSilenceDeafDetection:
+    def test_recent_socket_event_is_healthy(self, server_module):
+        """When socket events arrived inside the deaf window,
+        latency-OK + recent-event = healthy."""
+        import time as _t
+        with patch.object(server_module, "client", _StubClient(0.05)):
+            server_module._last_any_socket_event_ts = _t.time()
+            unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
+        assert unhealthy is False
+        assert "OK" in reason
+
+    def test_stale_socket_event_is_unhealthy_despite_latency_ok(
+        self, server_module, monkeypatch,
+    ):
+        """Bug repro: latency is FINE but no socket events for longer
+        than the deaf window. Pre-spec, this passed as healthy. Now
+        it must surface as unhealthy with the silence reason."""
+        import time as _t
+        # Set deaf window low so test runs fast.
+        monkeypatch.setattr(
+            server_module, "_DISCORD_DEAF_SILENCE_WINDOW_SEC", 1,
+        )
+        with patch.object(server_module, "client", _StubClient(0.05)):
+            # Backdate the last-event timestamp beyond the window.
+            server_module._last_any_socket_event_ts = _t.time() - 5
+            unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
+        assert unhealthy is True
+        assert "no socket events received for" in reason
+        assert "gateway deaf despite latency" in reason
+
+    def test_zero_deaf_window_disables_silence_check(
+        self, server_module, monkeypatch,
+    ):
+        """Operator escape hatch: setting the window to 0 disables
+        the silence check entirely (diagnostic sessions where you
+        want to inspect a deaf bot instead of having it restart)."""
+        import time as _t
+        monkeypatch.setattr(
+            server_module, "_DISCORD_DEAF_SILENCE_WINDOW_SEC", 0,
+        )
+        with patch.object(server_module, "client", _StubClient(0.05)):
+            # Last event WAY in the past
+            server_module._last_any_socket_event_ts = 1.0
+            unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
+        assert unhealthy is False
+        assert "OK" in reason
+
+    def test_silence_check_runs_after_latency_check(
+        self, server_module, monkeypatch,
+    ):
+        """Sequencing: bad latency surfaces FIRST as the unhealthy
+        reason, not the silence reason. This keeps the existing
+        watchdog-latency strike behavior unchanged for the heartbeat
+        failure mode; the silence path only fires when latency is OK."""
+        import time as _t
+        monkeypatch.setattr(
+            server_module, "_DISCORD_DEAF_SILENCE_WINDOW_SEC", 1,
+        )
+        with patch.object(server_module, "client", _StubClient(120.0)):
+            server_module._last_any_socket_event_ts = _t.time() - 5
+            unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
+        assert unhealthy is True
+        # Latency message wins
+        assert "exceeds threshold" in reason
+        assert "no socket events" not in reason

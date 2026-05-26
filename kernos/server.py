@@ -3,6 +3,9 @@ import json
 import logging
 import os
 import shutil
+import time as _time_module  # promoted to top so module-level globals
+# (e.g. _last_any_socket_event_ts) can initialize from time.time();
+# the legacy import-line later in the file is harmless re-import.
 from pathlib import Path
 
 import sys
@@ -417,6 +420,34 @@ _DISCORD_WATCHDOG_DISABLE: bool = (
 _last_inbound_event_ts: float = 0.0
 _gateway_unhealthy_strikes: int = 0
 
+# DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25). The watchdog
+# previously only checked client.latency, which a deaf gateway can
+# pass cleanly — heartbeats go through while message events don't.
+# Repro: 2026-05-25 the bot ran for 100+ minutes after restart with
+# zero on_message events, healthy heartbeats, neither watchdog nor
+# observer fired. Both detection layers were blind to "gateway
+# connected but receiving zero socket events of any kind."
+#
+# _last_any_socket_event_ts is bumped from on_socket_event_type for
+# EVERY event type (MESSAGE_CREATE, PRESENCE_UPDATE, TYPING_START,
+# READY, RESUMED, etc.) — gateway-level ground truth. A connected
+# bot in any guild with members will receive presence/typing events
+# constantly; total silence over the deaf window is a hard fault
+# distinct from heartbeat-only failure.
+#
+# Bumped to current time on bot startup so the warmup window starts
+# from process boot, not from epoch-zero (which would false-positive
+# instantly).
+_last_any_socket_event_ts: float = _time_module.time()
+# Deaf window: how long total socket silence is tolerated before the
+# watchdog treats it as unhealthy. Default matches the observer's
+# KERNOS_GATEWAY_DEAF_WINDOW_SEC (600s) so the two layers stay in
+# sync on what counts as "deaf." Set to 0 to disable the socket-
+# silence check entirely (escape hatch for diagnostic sessions).
+_DISCORD_DEAF_SILENCE_WINDOW_SEC: int = int(
+    os.getenv("KERNOS_DISCORD_DEAF_SILENCE_WINDOW_SEC", "600")
+)
+
 # HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1 (2026-05-20). Pure
 # on_message timestamp used by the gateway-health heartbeat
 # cross-check. MUST be bumped ONLY from inside the on_message body
@@ -448,7 +479,9 @@ def _bump_on_message_only_ts() -> None:
 def _is_gateway_heartbeat_unhealthy() -> tuple[bool, str]:
     """Return ``(unhealthy, reason)``. The heartbeat is unhealthy
     when ``client.latency`` is non-finite or grossly exceeds the
-    expected Discord gateway heartbeat interval (~41.25s)."""
+    expected Discord gateway heartbeat interval (~41.25s) OR when
+    no socket events of any type have arrived within the deaf
+    silence window (DISCORD-GATEWAY-DEAFNESS-DETECT-V1)."""
     import math
     try:
         latency = client.latency  # seconds, float
@@ -469,6 +502,23 @@ def _is_gateway_heartbeat_unhealthy() -> tuple[bool, str]:
             f"client.latency={latency:.1f}s exceeds threshold "
             f"{_DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC}s"
         )
+
+    # DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25): heartbeat
+    # latency is fine but the gateway might be deaf to dispatch.
+    # If we've received zero socket events of ANY type within the
+    # deaf silence window, the gateway is effectively disconnected
+    # at the message level even though the heartbeat channel works.
+    # Connected guild bots get presence/typing/etc. events
+    # constantly; total silence over this window is a hard fault.
+    if _DISCORD_DEAF_SILENCE_WINDOW_SEC > 0:
+        silence_sec = _time_module.time() - _last_any_socket_event_ts
+        if silence_sec > _DISCORD_DEAF_SILENCE_WINDOW_SEC:
+            return True, (
+                f"no socket events received for {silence_sec:.0f}s "
+                f"(threshold {_DISCORD_DEAF_SILENCE_WINDOW_SEC}s) — "
+                f"gateway deaf despite latency={latency:.3f}s"
+            )
+
     return False, f"latency={latency:.3f}s OK"
 
 
@@ -1122,6 +1172,15 @@ async def on_ready():
             inbound_event_ts_provider=lambda: _last_inbound_event_ts,
             last_on_message_provider=lambda: _last_on_message_only_ts,
             message_create_counter=_message_create_counter,
+            # DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25):
+            # ground truth for "any socket event of any type."
+            # The observer's _detect_gateway_deaf uses this to
+            # catch the gateway-totally-silent failure mode that
+            # the MESSAGE_CREATE-vs-on_message comparison can't
+            # see when both counters are at zero.
+            any_socket_event_ts_provider=(
+                lambda: _last_any_socket_event_ts
+            ),
         )
         _substrate = await bring_up_substrate(
             data_dir=data_dir,
@@ -1882,7 +1941,16 @@ async def on_socket_event_type(event_type: str):
     """Fired by discord.py BEFORE parser dispatch. We count
     MESSAGE_CREATE events here as a gateway-level ground truth:
     if these fire but on_message doesn't, the parser/dispatcher
-    layer is broken (Codex 2026-05-19 RCA)."""
+    layer is broken (Codex 2026-05-19 RCA).
+
+    DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25): ALSO bump
+    _last_any_socket_event_ts on every event regardless of type.
+    The watchdog uses this as ground truth for "is the gateway
+    delivering anything at all" — distinguishing a deaf gateway
+    (heartbeats fine, dispatch dead) from a normal idle bot.
+    """
+    global _last_any_socket_event_ts
+    _last_any_socket_event_ts = _time_module.time()
     if event_type == "MESSAGE_CREATE":
         _message_create_counter.record(_time_module.time())
 
