@@ -814,6 +814,38 @@ async def bring_up_substrate(
                 "— continuing without autonomy loop",
                 _exc_si,
             )
+
+        # USER-INITIATED-IMPROVEMENT-TRIGGER-V1 (2026-05-27):
+        # register the user-initiated loop workflow alongside the
+        # threshold-based self_improvement workflow. Same architect-
+        # actor gating; same WTC runtime; uses the same engine. Fires
+        # on user.fix_authorization_received events emitted by the
+        # /fix slash command handler.
+        try:
+            from kernos.kernel.workflows.user_initiated_improvement_helper import (
+                register_user_initiated_improvement_workflow,
+            )
+            _uii_workflow_id = (
+                await register_user_initiated_improvement_workflow(
+                    engine=execution_engine,
+                    architect_ctx=_architect_ctx_si,
+                    instance_id=_si_instance_id,
+                    trigger_runtime=runtime,
+                    operator_actor_id=_operator_actor_id_si,
+                )
+            )
+            logger.info(
+                "USER_INITIATED_IMPROVEMENT_AUTONOMY_LOOP_LIVE "
+                "workflow_id=%s instance_id=%s",
+                _uii_workflow_id, _si_instance_id,
+            )
+        except Exception as _exc_uii:
+            logger.warning(
+                "USER_INITIATED_IMPROVEMENT_AUTONOMY_LOOP_BRINGUP_FAILED "
+                "error=%s — /fix slash command will emit events but no "
+                "workflow will fire to handle them",
+                _exc_uii,
+            )
     elif _architect_actor_id_si and not _operator_actor_id_si:
         logger.info(
             "SELF_IMPROVEMENT_AUTONOMY_LOOP_SKIPPED: "
