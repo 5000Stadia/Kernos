@@ -218,6 +218,32 @@ class SubstrateSoakRunner:
         """Run a single probe by name. For targeted retries +
         operator-driven post-mortems."""
         probe_start = time.monotonic()
+        # SUBSTRATE-SELF-TEST-V1 v1.1 (2026-05-27): the probes live
+        # at `tests/substrate_soak/` for pytest discovery, but the
+        # bot runs via `python kernos/server.py` which puts only
+        # `kernos/` on sys.path — `tests/` at the repo root is not
+        # importable in production. Ensure the repo root is on
+        # sys.path before importing the probe module so the same
+        # path works in pytest AND production bring-up.
+        #
+        # Caught by the substrate-soak itself on its first live
+        # deployment: every probe failed with "No module named
+        # 'tests'" and the post-bring-up hook surfaced
+        # SUBSTRATE_SELF_TEST_FAILED loud + activated the AC9
+        # autonomous-mutation gate. The spec working as designed.
+        import sys as _sys
+        from pathlib import Path as _Path
+        try:
+            import kernos as _kernos
+            _repo_root = str(
+                _Path(_kernos.__file__).resolve().parent.parent
+            )
+            if _repo_root not in _sys.path:
+                _sys.path.insert(0, _repo_root)
+        except Exception:
+            # Best-effort; if this fails the import below will
+            # raise the same ImportError pytest would see.
+            pass
         try:
             module = importlib.import_module(
                 f"tests.substrate_soak.{probe_name}",

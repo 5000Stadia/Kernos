@@ -415,6 +415,69 @@ class TestIncludeSoakSchema:
 # ============================================================
 
 
+class TestRepoRootSysPathFix:
+    """SUBSTRATE-SELF-TEST-V1 v1.1 (2026-05-27): regression pin
+    for the production sys.path bug. When the bot runs via
+    `python kernos/server.py`, sys.path[0] is the kernos package
+    dir and the repo root containing `tests/` is NOT on the path.
+    SubstrateSoakRunner.run_probe must add the repo root to
+    sys.path before importing probe modules so the same code path
+    works in pytest AND production.
+
+    Caught by the substrate-soak itself on its first live
+    deployment: every probe failed with "No module named 'tests'".
+    This test simulates that bot-runtime by stripping the repo
+    root from sys.path before invoking run_probe; if the runner's
+    sys.path injection is removed, this test fails.
+    """
+
+    @pytest.mark.asyncio
+    async def test_probe_loads_with_repo_root_missing_from_syspath(
+        self, monkeypatch,
+    ):
+        """Strip the repo root from sys.path (mirrors what the bot
+        sees when launched via `python kernos/server.py`); verify
+        SubstrateSoakRunner still loads + runs a real probe."""
+        import sys
+        from pathlib import Path
+        import kernos as _kernos
+
+        repo_root = str(Path(_kernos.__file__).resolve().parent.parent)
+
+        # Remove the repo root from sys.path AND from sys.modules
+        # cache so the next import attempt has to re-resolve via
+        # SubstrateSoakRunner's path injection.
+        original_syspath = list(sys.path)
+        stripped = [p for p in sys.path if p != repo_root]
+        monkeypatch.setattr(sys, "path", stripped)
+
+        # Also clear any pre-cached tests.* modules so the import
+        # actually has to resolve via sys.path.
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith("tests.substrate_soak."):
+                monkeypatch.delitem(sys.modules, mod_name, raising=False)
+            elif mod_name == "tests" or mod_name == "tests.substrate_soak":
+                monkeypatch.delitem(sys.modules, mod_name, raising=False)
+
+        # Run the simplest real probe (self-knowledge) — if the
+        # repo-root sys.path fix is missing, this would fail with
+        # ImportError ("No module named 'tests'") just like the
+        # production bug did.
+        runner = SubstrateSoakRunner(
+            probe_names=("self_knowledge_invariant",),
+        )
+        result = await runner.run_probe("self_knowledge_invariant")
+
+        assert result.passed is True, (
+            f"Probe failed — likely the repo-root sys.path "
+            f"injection regressed. failure_reason: "
+            f"{result.failure_reason!r}. Original production "
+            f"symptom was 'No module named tests' when bot ran "
+            f"via `python kernos/server.py`."
+        )
+        assert "import failed" not in result.failure_reason
+
+
 class TestCliWrapper:
     def test_cli_no_include_soak_flag_returns_3(self, capsys):
         """Standalone CLI without --include-soak exits 3
