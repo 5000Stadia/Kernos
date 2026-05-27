@@ -815,17 +815,16 @@ def _cli_main() -> int:
         return 3
 
     # CLI runs the soak ONCE via SubstrateSoakRunner.run_all().
-    # We also call the handler in soak-only mode for the prose
-    # rendering, BUT we derive both ok/exit and per-probe data
+    # All output paths (JSON, human prose, exit code) derive
     # from the single canonical SoakSuiteResult — never from
     # two distinct runs (Codex round-2 code review fix: pre-fix
     # the CLI ran soak twice, risking divergent results between
-    # prose and JSON output).
-    #
-    # The handler call here is purely for the prose-rendering
-    # path; in production the handler runs its own soak via
-    # the orchestrator dispatch and the CLI/CI never sees
-    # double-execution risk.
+    # prose and JSON output). Prose is composed locally via
+    # _format_soak_result_prose; the handler isn't invoked from
+    # the CLI path. The handler runs the soak through its own
+    # invocation surface (orchestrator dispatch, post-bring-up
+    # hook); CLI bypasses it intentionally to keep single-run
+    # consistency tight.
     async def _run_cli_soak() -> SoakSuiteResult:
         runner = SubstrateSoakRunner()
         return await runner.run_all()
