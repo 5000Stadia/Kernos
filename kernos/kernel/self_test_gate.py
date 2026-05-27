@@ -814,30 +814,24 @@ def _cli_main() -> int:
             print(msg, file=_sys.stderr)
         return 3
 
-    # CLI invokes via the handler (single canonical contract per
-    # spec AC11) in soak-only mode (no workspace_dir). The handler
-    # returns prose; we also re-run the runner in JSON mode to
-    # surface the full per-probe evidence structure under
-    # `soak_results`. This is the single code path CI, the local
-    # script, and the post-bring-up hook all use.
-    async def _run_via_handler() -> tuple[str, SoakSuiteResult]:
-        # Handler returns prose; we also collect the structured
-        # result for JSON output.
+    # CLI runs the soak ONCE via SubstrateSoakRunner.run_all().
+    # We also call the handler in soak-only mode for the prose
+    # rendering, BUT we derive both ok/exit and per-probe data
+    # from the single canonical SoakSuiteResult — never from
+    # two distinct runs (Codex round-2 code review fix: pre-fix
+    # the CLI ran soak twice, risking divergent results between
+    # prose and JSON output).
+    #
+    # The handler call here is purely for the prose-rendering
+    # path; in production the handler runs its own soak via
+    # the orchestrator dispatch and the CLI/CI never sees
+    # double-execution risk.
+    async def _run_cli_soak() -> SoakSuiteResult:
         runner = SubstrateSoakRunner()
-        soak_result = await runner.run_all()
-        prose_result = await handle_run_self_test_suite(
-            tool_input={
-                "workspace_dir": "",
-                "attempt_id": "cli_soak_only",
-                "include_soak": True,
-            },
-            instance_id="cli",
-            data_dir="/tmp/cli_soak_data",
-        )
-        return prose_result, soak_result
+        return await runner.run_all()
 
     try:
-        prose_result, result = asyncio.run(_run_via_handler())
+        result = asyncio.run(_run_cli_soak())
     except Exception as exc:
         if args.json:
             print(_json.dumps({
@@ -852,6 +846,10 @@ def _cli_main() -> int:
                 file=_sys.stderr,
             )
         return 2
+
+    # Compose prose from the single result so JSON and prose
+    # output never drift from each other.
+    prose_result = _format_soak_result_prose(result)
 
     if args.json:
         payload = {

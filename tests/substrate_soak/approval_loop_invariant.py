@@ -183,14 +183,25 @@ async def run_probe() -> ProbeResult:
     duration_ms = int((time.monotonic() - start) * 1000)
 
     # Pass conditions:
-    # - the canonical 4-event sequence reached the ledger
+    # - the canonical 4-event sequence reached the ledger IN ORDER
+    #   (Codex round-2 fold: pre-fix this checked membership only,
+    #   not order — a regression that emitted them out-of-sequence
+    #   would have passed)
     # - approval receipt round-tripped with correct binding fields
-    cond_events = (
-        "workspace_created" in event_kinds
-        and "spec_iteration" in event_kinds
-        and "impl_iteration" in event_kinds
-        and "approval_requested" in event_kinds
+    expected_sequence = (
+        "workspace_created",
+        "spec_iteration",
+        "impl_iteration",
+        "approval_requested",
     )
+
+    def _is_ordered_subsequence(seq, needle):
+        """True iff every element of `needle` appears in `seq`
+        in the same relative order."""
+        it = iter(seq)
+        return all(any(x == n for x in it) for n in needle)
+
+    cond_events = _is_ordered_subsequence(event_kinds, expected_sequence)
     cond_attempt = (binding_attempt_id == attempt_id)
     cond_parent_sha = (
         isinstance(binding_expected_parent_sha, str)

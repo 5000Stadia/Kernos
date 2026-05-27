@@ -161,17 +161,24 @@ async def run_probe() -> ProbeResult:
     cond_alias = (was_repaired and canonical_check == expected_canonical)
     cond_gate = (gate_classification != "unknown")
     cond_dispatcher_ran = alias_repair_seen
-    cond_execute = (
-        # Either succeeded or raised after dispatching — both
-        # prove the dispatcher actually ran. Empty result text
-        # ⇒ dispatcher short-circuited before canonicalize,
-        # which would be a real regression.
-        bool(execute_result)
+    # Per Codex round-2 fold: just `bool(execute_result)` would
+    # pass on any non-empty early error (gate denial, conflict,
+    # etc.) — that doesn't prove the dispatcher actually routed
+    # to the canonical handler branch. Assert the specific
+    # canonical-branch return string from reasoning.py:1052-1056
+    # ("Self-directed execution is not available.") which only
+    # fires when the dispatcher reaches manage_plan's branch
+    # without a wired handler. This pins "alias canonicalized AND
+    # dispatcher routed to canonical name AND reached its
+    # handler branch."
+    result_str = str(execute_result)
+    cond_route_to_handler = (
+        "Self-directed execution is not available." in result_str
     )
 
     all_passed = (
         cond_alias and cond_gate
-        and cond_dispatcher_ran and cond_execute
+        and cond_dispatcher_ran and cond_route_to_handler
     )
 
     failure_reason = ""
@@ -191,8 +198,13 @@ async def run_probe() -> ProbeResult:
                 f"dispatcher_alias_repair_event_missing "
                 f"(captured={len(captured_events)} events)"
             )
-        if not cond_execute:
-            failed.append("dispatcher_short_circuited")
+        if not cond_route_to_handler:
+            failed.append(
+                f"route_to_canonical_handler_branch "
+                f"(got={result_str[:200]!r}; expected canonical "
+                f"manage_plan branch return 'Self-directed "
+                f"execution is not available.')"
+            )
         failure_reason = (
             f"agent-round-trip umbrella invariant violated: "
             f"{', '.join(failed)}. Dispatcher composition seam "
