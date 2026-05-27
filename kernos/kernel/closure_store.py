@@ -690,6 +690,178 @@ def clear_probe_runners() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Seed invariants (architect-curated)
+# ---------------------------------------------------------------------------
+
+
+TOOL_AVAILABILITY_HONESTY_INVARIANT_ID = "tool-availability-honesty"
+
+
+TOOL_AVAILABILITY_HONESTY_STATEMENT = (
+    "If the substrate's tool catalog registers a tool, that tool "
+    "must be classifiable by the dispatch gate AND dispatchable "
+    "through the kernel-tool execution path (or the MCP execution "
+    "path for MCP-sourced tools). Tools present in the catalog "
+    "but unclassifiable / unreachable represent a silent "
+    "capability-claim vs callability divergence."
+)
+
+
+async def seed_v1_invariants(
+    store: "ClosureStore", *, instance_id: str,
+) -> dict[str, bool]:
+    """Idempotent: insert the v1 architect-curated invariants for
+    this instance. Returns ``{invariant_id: newly_created}``."""
+    out: dict[str, bool] = {}
+    out[TOOL_AVAILABILITY_HONESTY_INVARIANT_ID] = (
+        await store.upsert_invariant(
+            instance_id=instance_id,
+            invariant_id=TOOL_AVAILABILITY_HONESTY_INVARIANT_ID,
+            statement=TOOL_AVAILABILITY_HONESTY_STATEMENT,
+            owner="architect",
+            status="active",
+        )
+    )
+    return out
+
+
+# Architect-curated v1 friction_pattern_invariant link rows. Each
+# entry says: "pattern X is a symptom of invariant Y being
+# violated." Pattern seed lives in
+# kernos.setup.seed_friction_patterns; invariant seed lives in
+# seed_v1_invariants() above. The link binds the two.
+_V1_PATTERN_INVARIANT_LINKS: tuple[tuple[str, str, str], ...] = (
+    # (pattern_id, invariant_id, relation)
+    (
+        "capability-catalog-dispatch-divergence",
+        TOOL_AVAILABILITY_HONESTY_INVARIANT_ID,
+        "violates",
+    ),
+)
+
+
+async def seed_v1_pattern_invariant_links(
+    store: "ClosureStore", *, instance_id: str,
+) -> dict[str, bool]:
+    """Idempotent: insert v1 architect-curated friction_pattern_invariant
+    link rows. Returns ``{(pattern_id, invariant_id, relation): newly_created}``
+    flattened to string keys for log-friendliness.
+
+    Skips silently when either side of the link doesn't exist yet
+    (e.g. friction_pattern seed hasn't run, or pattern was
+    excluded). Operators / future specs can add links manually
+    via the link table once both sides exist.
+    """
+    out: dict[str, bool] = {}
+    for pattern_id, invariant_id, relation in _V1_PATTERN_INVARIANT_LINKS:
+        link_key = f"{pattern_id}::{invariant_id}::{relation}"
+        if await store.link_exists(
+            instance_id=instance_id,
+            pattern_id=pattern_id,
+            invariant_id=invariant_id,
+        ):
+            out[link_key] = False
+            continue
+        try:
+            await store.insert_link(
+                instance_id=instance_id,
+                pattern_id=pattern_id,
+                invariant_id=invariant_id,
+                relation=relation,
+            )
+            out[link_key] = True
+        except aiosqlite.IntegrityError:
+            # FK violation: pattern or invariant doesn't exist yet
+            # in this instance. Skip — operator can add the link
+            # manually once both sides are present.
+            out[link_key] = False
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Probe handlers
+# ---------------------------------------------------------------------------
+
+
+def build_tool_availability_honesty_probe(
+    *,
+    tool_catalog: Any,
+    dispatch_gate: Any,
+    get_dispatchable_kernel_tools: Callable[[], set[str]],
+) -> Callable[[dict, dict], tuple[bool, dict]]:
+    """Build the deterministic_introspection probe handler for the
+    Tool Availability Honesty invariant.
+
+    Walks every entry in ``tool_catalog.get_all()`` and verifies:
+        (a) ``dispatch_gate.classify_tool_effect(name)`` != "unknown"
+        (b) kernel-source tools are in
+            ``get_dispatchable_kernel_tools()``; MCP-source tools
+            have ``source == "mcp"`` or ``source.startswith("mcp:")``.
+
+    Any entry failing either check is a divergence. Pure in-memory
+    enumeration: no network, no subprocess, no SQLite writes.
+
+    Returns a probe runner with signature
+    ``(probe_payload: dict, evidence_context: dict) -> (bool, dict)``.
+    """
+
+    def _runner(payload: dict, ctx: dict) -> tuple[bool, dict]:
+        try:
+            entries = tool_catalog.get_all()
+        except Exception as exc:
+            return False, {
+                "error": f"catalog_get_all_raised: {type(exc).__name__}: {exc}",
+                "divergent_tools": [],
+                "checked_count": 0,
+            }
+        dispatchable = get_dispatchable_kernel_tools()
+        divergent: list[dict] = []
+        checked = 0
+        for entry in entries:
+            checked += 1
+            name = getattr(entry, "name", None) or (
+                entry.get("name", "") if isinstance(entry, dict) else ""
+            )
+            source = getattr(entry, "source", None) or (
+                entry.get("source", "")
+                if isinstance(entry, dict) else ""
+            )
+            if not name:
+                continue  # skip nameless rows (shouldn't happen)
+            classification = dispatch_gate.classify_tool_effect(
+                name, None, None,
+            )
+            if classification == "unknown":
+                divergent.append({
+                    "name": name,
+                    "source": source,
+                    "reason": "gate_classify_unknown",
+                })
+                continue
+            # Source-based dispatchability check.
+            if source == "mcp" or (
+                isinstance(source, str) and source.startswith("mcp:")
+            ):
+                continue  # MCP-routed; not in kernel-dispatch set
+            if name not in dispatchable:
+                divergent.append({
+                    "name": name,
+                    "source": source,
+                    "reason": (
+                        "not_in_dispatchable_kernel_tools "
+                        "(handler-branch missing or registry drift)"
+                    ),
+                })
+        return (len(divergent) == 0), {
+            "checked_count": checked,
+            "divergent_tools": divergent,
+            "divergent_count": len(divergent),
+        }
+
+    return _runner
+
+
+# ---------------------------------------------------------------------------
 # Tool schemas (agent-facing surface for the three closure tools).
 # Wired into the registrar at kernos.kernel.kernel_tool_registry.
 # ---------------------------------------------------------------------------

@@ -531,9 +531,9 @@ async def bring_up_substrate(
                 )
 
     # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): start the closure-
-    # machinery store so the autonomy-tool adapter can find a
-    # schema-ready handler._closure_store when the self_improvement
-    # workflow runs. start() is idempotent — repeat calls are safe.
+    # machinery store, seed v1 architect-curated invariants, and
+    # register the Tool Availability Honesty probe runner.
+    # start() + seed_v1_invariants are both idempotent.
     try:
         _closure_store_handler = getattr(handler, "_closure_store", None)
         if _closure_store_handler is not None:
@@ -541,6 +541,89 @@ async def bring_up_substrate(
             logger.info(
                 "CLOSURE_STORE_READY data_dir=%s", data_dir,
             )
+            # Seed v1 invariants + friction_pattern_invariant link
+            # rows (architect-curated; idempotent).
+            try:
+                from kernos.kernel.closure_store import (
+                    seed_v1_invariants,
+                    seed_v1_pattern_invariant_links,
+                )
+                _seed_inst = os.environ.get(
+                    "KERNOS_INSTANCE_ID", "",
+                ) or _substrate_instance_id
+                _seeded = await seed_v1_invariants(
+                    _closure_store_handler,
+                    instance_id=_seed_inst,
+                )
+                logger.info(
+                    "CLOSURE_INVARIANTS_SEEDED instance=%s seeded=%s",
+                    _seed_inst,
+                    {k: ("created" if v else "updated")
+                     for k, v in _seeded.items()},
+                )
+                # Link rows after invariants so FK targets exist.
+                _linked = await seed_v1_pattern_invariant_links(
+                    _closure_store_handler,
+                    instance_id=_seed_inst,
+                )
+                logger.info(
+                    "CLOSURE_PATTERN_INVARIANT_LINKS_SEEDED "
+                    "instance=%s linked=%s",
+                    _seed_inst,
+                    {k: ("created" if v else "skipped_or_existing")
+                     for k, v in _linked.items()},
+                )
+            except Exception as _exc_seed:
+                logger.warning(
+                    "CLOSURE_INVARIANTS_SEED_FAILED error=%s — "
+                    "substrate continues; operator can seed manually",
+                    _exc_seed,
+                )
+            # Register the Tool Availability Honesty probe runner.
+            # Resolves catalog + gate + dispatchability registry
+            # from handler refs (set during handler construction).
+            try:
+                from kernos.kernel.closure_store import (
+                    build_tool_availability_honesty_probe,
+                    register_probe_runner,
+                )
+                _tool_catalog = getattr(handler, "_tool_catalog", None)
+                _reasoning = getattr(handler, "reasoning", None)
+                # DispatchGate lives on the handler via various
+                # attribute names depending on construction path;
+                # try a few common ones.
+                _gate = (
+                    getattr(handler, "_dispatch_gate", None)
+                    or getattr(handler, "dispatch_gate", None)
+                )
+                if _tool_catalog is not None and _gate is not None \
+                        and _reasoning is not None:
+                    runner = build_tool_availability_honesty_probe(
+                        tool_catalog=_tool_catalog,
+                        dispatch_gate=_gate,
+                        get_dispatchable_kernel_tools=(
+                            _reasoning.get_dispatchable_kernel_tools
+                        ),
+                    )
+                    register_probe_runner(
+                        "deterministic_introspection", runner,
+                    )
+                    logger.info(
+                        "CLOSURE_PROBE_RUNNER_REGISTERED "
+                        "kind=deterministic_introspection"
+                    )
+                else:
+                    logger.info(
+                        "CLOSURE_PROBE_RUNNER_SKIPPED: missing one of "
+                        "tool_catalog/dispatch_gate/reasoning on "
+                        "handler; probe will refuse with infrastructure "
+                        "error until wired"
+                    )
+            except Exception as _exc_runner:
+                logger.warning(
+                    "CLOSURE_PROBE_RUNNER_REGISTER_FAILED error=%s",
+                    _exc_runner,
+                )
         else:
             logger.info(
                 "CLOSURE_STORE_SKIPPED: handler has no _closure_store "

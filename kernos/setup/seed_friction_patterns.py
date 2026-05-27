@@ -219,6 +219,32 @@ _STARTER_PATTERNS: tuple[_SeedPattern, ...] = (
         signal_type_keys=("CONNECTION_POOL_LEAK",),
         reactivation_threshold=5,
     ),
+    # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): the seed friction
+    # pattern linked to the Tool Availability Honesty invariant.
+    # v1 ships the pattern + invariant + probe machinery but does
+    # NOT auto-emit CAPABILITY_CATALOG_DISPATCH_DIVERGENCE signals
+    # via FrictionObserver — operator manually inserts the
+    # friction_pattern_invariant link row and exercises the
+    # closure flow. The follow-up CAPABILITY-CATALOG-DISPATCH-
+    # DETECTOR-V1 spec adds the auto-detector once operator
+    # evidence informs the right shape (post-turn dispatch
+    # failure observation vs periodic substrate-state audit).
+    _SeedPattern(
+        pattern_id="capability-catalog-dispatch-divergence",
+        display_name="Capability catalog vs dispatch divergence",
+        description=(
+            "A tool registered in the catalog is not reachable "
+            "via the dispatch path: classify_tool_effect returns "
+            "'unknown', or the tool has no handler branch in "
+            "execute_tool (kernel source) or no MCP route. Silent "
+            "capability-claim vs callability divergence — the "
+            "agent sees the tool in its surface but invocation "
+            "fails. v1 ships without an auto-detector; closure "
+            "exercised manually via operator-inserted link + probe."
+        ),
+        signal_type_keys=("CAPABILITY_CATALOG_DISPATCH_DIVERGENCE",),
+        reactivation_threshold=3,
+    ),
 )
 
 
