@@ -778,6 +778,45 @@ async def bring_up_substrate(
         )
         _soak_prose = _format_soak_result_prose(_soak_result)
 
+        # v1.2 durable artifact: write the result to a JSON sentinel
+        # file so operators (and the substrate-soak verification
+        # tooling) can inspect ground truth even when log emissions
+        # are dropped due to handler-detach races (discord.py
+        # setup_logging mutates root.handlers during bring-up; see
+        # GATEWAY_HEALTH_LOG_FILE_REATTACHED). The file is
+        # overwritten each boot — current state, not history.
+        try:
+            import json as _json_soak
+            from pathlib import Path as _Path_soak
+            _artifact_dir = _Path_soak("data/diagnostics")
+            _artifact_dir.mkdir(parents=True, exist_ok=True)
+            _artifact_path = _artifact_dir / "substrate_soak_last.json"
+            _artifact_path.write_text(_json_soak.dumps({
+                "all_passed": _soak_result.all_passed,
+                "total_duration_ms": _soak_result.total_duration_ms,
+                "failing_probes": list(
+                    _soak_result.failing_probe_names(),
+                ),
+                "per_probe": [
+                    {
+                        "probe_name": p.probe_name,
+                        "passed": p.passed,
+                        "duration_ms": p.duration_ms,
+                        "failure_reason": p.failure_reason,
+                    }
+                    for p in _soak_result.per_probe
+                ],
+            }, indent=2))
+            logger.info(
+                "SUBSTRATE_SELF_TEST_ARTIFACT_WRITTEN path=%s",
+                str(_artifact_path),
+            )
+        except Exception as _exc_artifact:
+            logger.warning(
+                "SUBSTRATE_SELF_TEST_ARTIFACT_WRITE_FAILED error=%s",
+                _exc_artifact,
+            )
+
         # Update the AC9 autonomous-mutation gate's health flag
         # so git_commit/push gate appropriately on this result.
         mark_substrate_health(
