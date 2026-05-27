@@ -14,9 +14,6 @@ import asyncio
 import time
 
 from kernos.kernel.self_test_gate import ProbeResult
-from kernos.kernel.external_agents.acpx_adapter import (
-    _read_lines_unbounded,
-)
 
 
 REQUIRED_BEHAVIORAL_KEYS = frozenset({
@@ -39,6 +36,15 @@ _GIANT_PAYLOAD_BYTES = 80 * 1024  # 80 KiB
 
 async def run_probe() -> ProbeResult:
     start = time.monotonic()
+
+    # Lazy import so monkeypatch.setattr on
+    # acpx_adapter._read_lines_unbounded reaches the actual
+    # function this probe uses (a module-level `from ... import`
+    # would bind to the original at probe-module load time and
+    # bypass mutations applied later).
+    from kernos.kernel.external_agents.acpx_adapter import (
+        _read_lines_unbounded,
+    )
 
     # Spawn a Python subprocess that prints one giant NDJSON line
     # then exits. The exact event shape doesn't matter for this

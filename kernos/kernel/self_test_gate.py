@@ -312,6 +312,73 @@ def _format_soak_result_prose(result: SoakSuiteResult) -> str:
 
 
 # ---------------------------------------------------------------------
+# AC9 — autonomous-mutation gate (SUBSTRATE-SELF-TEST-V1)
+# ---------------------------------------------------------------------
+
+
+class SubstrateUnhealthyError(RuntimeError):
+    """Raised when autonomous substrate mutation is attempted while
+    the most recent substrate-soak result is failed.
+
+    Per SUBSTRATE-SELF-TEST-V1 AC9: while a substrate.self_test_
+    failed event is the most recent self-test event in the stream,
+    autonomous-path git_commit + git_push refuse with this error.
+    Operator-initiated paths bypass the gate (they invoke git
+    directly rather than the kernel-tool handler).
+    """
+
+
+# Module-level health state. Updated by the post-bring-up hook in
+# bring_up_substrate.py after each soak run. Default True at
+# import time so callers don't get spurious "unhealthy" before
+# the first soak runs (e.g. during unit tests that don't bring
+# up the full substrate).
+_last_self_test_passed: bool = True
+_last_self_test_failing_probes: tuple[str, ...] = ()
+
+
+def mark_substrate_health(
+    passed: bool, failing_probes: tuple[str, ...] = (),
+) -> None:
+    """Update the module-level substrate-health flag. Called from
+    bring_up_substrate.py's post-bring-up hook after each soak.
+
+    Tests that exercise unhealthy paths can call this directly to
+    toggle state; the default is healthy=True.
+    """
+    global _last_self_test_passed, _last_self_test_failing_probes
+    _last_self_test_passed = passed
+    _last_self_test_failing_probes = tuple(failing_probes)
+
+
+def is_substrate_healthy() -> tuple[bool, tuple[str, ...]]:
+    """Return (healthy, failing_probe_names). Healthy means the
+    most recent soak passed AND no autonomous mutation should be
+    gated."""
+    return _last_self_test_passed, _last_self_test_failing_probes
+
+
+def check_substrate_healthy_or_raise(*, autonomous_path: str) -> None:
+    """Raise SubstrateUnhealthyError if the last soak failed.
+    Called from the top of autonomous-path mutating handlers
+    (git_commit, git_push) per AC9.
+
+    ``autonomous_path`` is the surface that's being gated, used
+    in the error message so the operator sees which tool was
+    refused (e.g. "git_commit", "git_push").
+    """
+    healthy, failing = is_substrate_healthy()
+    if not healthy:
+        raise SubstrateUnhealthyError(
+            f"{autonomous_path} refused: substrate-self-test "
+            f"most recent run failed. Failing probes: "
+            f"{', '.join(failing) if failing else '(unknown)'}. "
+            f"Autonomous mutation paused per SUBSTRATE-SELF-TEST-V1 "
+            f"AC9 until next soak passes."
+        )
+
+
+# ---------------------------------------------------------------------
 # Tool schema
 # ---------------------------------------------------------------------
 
@@ -744,5 +811,18 @@ def _cli_main() -> int:
 
 
 if __name__ == "__main__":
+    # Module-double-load fix: when invoked via
+    # `python -m kernos.kernel.self_test_gate`, this module loads
+    # as __main__. Probes import ProbeResult from
+    # kernos.kernel.self_test_gate — a separate module instance
+    # under Python's import system. The runner's
+    # `isinstance(result, ProbeResult)` check then compares
+    # __main__.ProbeResult vs kernos.kernel.self_test_gate.ProbeResult
+    # (different class objects → spurious "expected ProbeResult"
+    # failures across all probes).
+    #
+    # Fix: re-import _cli_main via the canonical module path so
+    # all isinstance checks use a single ProbeResult class object.
     import sys
-    sys.exit(_cli_main())
+    from kernos.kernel.self_test_gate import _cli_main as _canonical_cli
+    sys.exit(_canonical_cli())

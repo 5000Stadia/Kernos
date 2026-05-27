@@ -742,6 +742,104 @@ async def bring_up_substrate(
             _exc_lh,
         )
 
+    # SUBSTRATE-SELF-TEST-V1 (2026-05-26) post-bring-up hook.
+    # Run the 8-probe soak suite against the current process
+    # state once at bring-up. Loud signal on any failure; does
+    # NOT abort bring-up (per spec AC5 + Open Question 1 — emit
+    # signal + activate autonomous-mutation gate, not halt).
+    try:
+        from kernos.kernel.self_test_gate import (
+            SubstrateSoakRunner,
+            _format_soak_result_prose,
+            mark_substrate_health,
+        )
+        from kernos.kernel import event_stream as _event_stream_soak
+
+        _soak_runner = SubstrateSoakRunner()
+        _soak_result = await _soak_runner.run_all()
+        _soak_prose = _format_soak_result_prose(_soak_result)
+
+        # Update the AC9 autonomous-mutation gate's health flag
+        # so git_commit/push gate appropriately on this result.
+        mark_substrate_health(
+            passed=_soak_result.all_passed,
+            failing_probes=_soak_result.failing_probe_names(),
+        )
+
+        if _soak_result.all_passed:
+            logger.info(
+                "SUBSTRATE_SELF_TEST_PASSED probes=%d "
+                "total_duration_ms=%d",
+                len(_soak_result.per_probe),
+                _soak_result.total_duration_ms,
+            )
+            try:
+                await _event_stream_soak.emit(
+                    _loop_health_instance_id,
+                    "substrate.self_test_passed",
+                    {
+                        "probe_count": len(_soak_result.per_probe),
+                        "total_duration_ms": (
+                            _soak_result.total_duration_ms
+                        ),
+                        "per_probe_durations": {
+                            p.probe_name: p.duration_ms
+                            for p in _soak_result.per_probe
+                        },
+                    },
+                    space_id="",
+                )
+            except Exception:
+                pass
+        else:
+            logger.warning(
+                "SUBSTRATE_SELF_TEST_FAILED failing=%s "
+                "total_duration_ms=%d — substrate continues but "
+                "autonomous-mutation gate active until next pass",
+                _soak_result.failing_probe_names(),
+                _soak_result.total_duration_ms,
+            )
+            # Loud per-probe details for operator triage.
+            for _probe in _soak_result.per_probe:
+                if not _probe.passed:
+                    logger.warning(
+                        "SUBSTRATE_SELF_TEST_PROBE_FAIL probe=%s "
+                        "reason=%s",
+                        _probe.probe_name,
+                        _probe.failure_reason,
+                    )
+            try:
+                await _event_stream_soak.emit(
+                    _loop_health_instance_id,
+                    "substrate.self_test_failed",
+                    {
+                        "severity": "unhealthy",
+                        "failing_probes": list(
+                            _soak_result.failing_probe_names(),
+                        ),
+                        "total_duration_ms": (
+                            _soak_result.total_duration_ms
+                        ),
+                        "per_probe_outcomes": {
+                            p.probe_name: {
+                                "passed": p.passed,
+                                "duration_ms": p.duration_ms,
+                                "failure_reason": p.failure_reason,
+                            }
+                            for p in _soak_result.per_probe
+                        },
+                    },
+                    space_id="",
+                )
+            except Exception:
+                pass
+    except Exception as _exc_soak:
+        logger.warning(
+            "SUBSTRATE_SELF_TEST_BRINGUP_FAILED error=%s — "
+            "substrate continues without soak self-test result",
+            _exc_soak,
+        )
+
     # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21): generic operator-
     # approval primitive. Schema ensure + boot reconcile + background
     # expiry pass. Generic substrate; useful beyond the autonomous

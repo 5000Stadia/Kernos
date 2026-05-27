@@ -1,0 +1,40 @@
+name: substrate-soak
+
+# SUBSTRATE-SELF-TEST-V1 (2026-05-26). Runs the 8-probe soak suite
+# via the single canonical contract on every push to a branch with
+# an open PR + every merge to main. Failure blocks merge.
+#
+# This workflow invokes the SAME `python -m kernos.kernel.
+# self_test_gate --include-soak` entry point that the local
+# developer script (scripts/run_substrate_soak.sh) and the
+# post-bring-up hook (kernos/setup/bring_up_substrate.py) call.
+# One contract, no drift.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  substrate-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run substrate soak suite (single canonical contract)
+        run: |
+          python -m kernos.kernel.self_test_gate --include-soak --json

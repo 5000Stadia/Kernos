@@ -411,6 +411,20 @@ async def handle_git_commit(
     *, tool_input: dict, instance_id: str, data_dir: str,
 ) -> str:
     from kernos.kernel import approval_receipts as _approvals
+    from kernos.kernel.self_test_gate import (
+        SubstrateUnhealthyError,
+        check_substrate_healthy_or_raise,
+    )
+
+    # SUBSTRATE-SELF-TEST-V1 AC9: autonomous-mutation gate.
+    # When the most recent substrate-soak failed, refuse
+    # autonomous git_commit calls. Operator-initiated paths
+    # (manual git CLI) bypass this entirely — the gate is on
+    # the kernel-tool dispatch surface only.
+    try:
+        check_substrate_healthy_or_raise(autonomous_path="git_commit")
+    except SubstrateUnhealthyError as exc:
+        return str(exc)
 
     workspace_dir = tool_input.get("workspace_dir", "")
     message = tool_input.get("message", "")
@@ -570,6 +584,16 @@ async def handle_git_push(
     *, tool_input: dict, instance_id: str, data_dir: str,
 ) -> str:
     from kernos.kernel import approval_receipts as _approvals
+    from kernos.kernel.self_test_gate import (
+        SubstrateUnhealthyError,
+        check_substrate_healthy_or_raise,
+    )
+
+    # SUBSTRATE-SELF-TEST-V1 AC9: autonomous-mutation gate.
+    try:
+        check_substrate_healthy_or_raise(autonomous_path="git_push")
+    except SubstrateUnhealthyError as exc:
+        return str(exc)
 
     workspace_dir = tool_input.get("workspace_dir", "")
     target_branch = tool_input.get("target_branch", "") or "main"
