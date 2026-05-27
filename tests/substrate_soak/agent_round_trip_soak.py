@@ -38,6 +38,9 @@ REQUIRED_SUBSTRATE_KEYS = frozenset({
 async def run_probe() -> ProbeResult:
     start = time.monotonic()
 
+    # Lazy imports so mutations to canonicalize_tool_name +
+    # gate classification reach the actual functions this probe
+    # uses (module-level imports bind at probe-module load time).
     from kernos.kernel.gate import DispatchGate
     from kernos.kernel.tool_aliases import canonicalize_tool_name
 

@@ -820,11 +820,22 @@ async def bring_up_substrate(
                         "total_duration_ms": (
                             _soak_result.total_duration_ms
                         ),
+                        # Per spec AC5 + Codex round-1 fold:
+                        # failed events MUST include
+                        # behavioral_evidence + substrate_evidence
+                        # so operators can triage without a
+                        # second tool call.
                         "per_probe_outcomes": {
                             p.probe_name: {
                                 "passed": p.passed,
                                 "duration_ms": p.duration_ms,
                                 "failure_reason": p.failure_reason,
+                                "behavioral_evidence": (
+                                    p.behavioral_evidence
+                                ),
+                                "substrate_evidence": (
+                                    p.substrate_evidence
+                                ),
                             }
                             for p in _soak_result.per_probe
                         },

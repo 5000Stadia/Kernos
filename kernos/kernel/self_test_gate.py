@@ -110,14 +110,15 @@ class SoakSuiteResult:
 
 def _is_shallow_value(value: Any) -> bool:
     """Return True if `value` is too vague to count as substrate
-    evidence per AC2. Booleans are accepted when they're the
-    declared payload type (e.g. a Pass/Fail signal) but only when
-    the dict has multiple keys — a single-key dict like
-    {"ok": True} fails."""
+    evidence per AC2. Sentinel values (None, empty containers,
+    'ok'-strings, bare booleans) are shallow. The spec explicitly
+    names `{"ok": True}` as the canonical shallow case
+    (SUBSTRATE-SELF-TEST-V1 line 721-727) — `True`/`False` alone
+    carry no substrate signal beyond what the per-probe `passed`
+    flag already conveys, so they don't count as evidence even
+    when they're declared keys."""
     if isinstance(value, bool):
-        # Bools are sentinel-like on their own; only acceptable as
-        # part of a richer evidence dict (caller-side check).
-        return False  # individual bool not shallow by itself
+        return True  # bare bool == sentinel per spec example
     if value is None:
         return True
     if isinstance(value, str) and value.strip().lower() in {"ok", ""}:
@@ -135,7 +136,15 @@ def _validate_evidence(
 ) -> tuple[bool, str]:
     """Validate one evidence dict against its declared required keys.
     Returns (ok, failure_reason). evidence_type is "behavioral" or
-    "substrate" for the failure reason text."""
+    "substrate" for the failure reason text.
+
+    AC2 shallow-evidence check: at least ONE value in the dict
+    must be non-sentinel (real substrate signal — a string with
+    content, a number, a list/dict with structure). A dict of all
+    sentinel values (e.g. `{"ok": True}`, `{"passed": True,
+    "ran": True}`) gets rejected even if all declared keys are
+    present. Per spec the canonical sentinel is `{"ok": True}`.
+    """
     if not isinstance(evidence, dict):
         return False, (
             f"probe {probe_name!r} {evidence_type}_evidence is not "
@@ -151,16 +160,15 @@ def _validate_evidence(
             f"probe {probe_name!r} {evidence_type}_evidence missing "
             f"declared key(s): {sorted(missing)}"
         )
-    # AC2 shallow-evidence check: if the dict is just one or two
-    # sentinel-only keys (e.g. {"ok": True}), reject.
     non_shallow_count = sum(
         1 for v in evidence.values() if not _is_shallow_value(v)
     )
     if non_shallow_count == 0:
         return False, (
             f"probe {probe_name!r} {evidence_type}_evidence is "
-            f"shallow (only sentinel values like None/empty/'ok'); "
-            f"per AC2 evidence must carry real substrate signal"
+            f"shallow (only sentinel values like True/False/None/"
+            f"empty/'ok'); per AC2 evidence must carry real "
+            f"substrate signal"
         )
     return True, ""
 
@@ -534,7 +542,19 @@ async def handle_run_self_test_suite(
     """Run the curated smoke set + any extra_test_paths against
     the improvement worktree. When include_soak=True, also runs
     the SUBSTRATE-SELF-TEST-V1 soak suite against the current
-    process state. Returns natural-prose summary."""
+    process state. Returns natural-prose summary.
+
+    CLI-soak-only mode: when workspace_dir is empty AND
+    include_soak=True, the smoke phase is skipped and only the
+    soak runs. attempt_id is still required for ledger
+    discipline; CLI synthesizes one as "cli_soak_only".
+
+    Result-ordering invariant (Codex round-1 code review fix):
+    when include_soak=True, the soak runs BEFORE the ledger
+    write, and the ledger's test_outcome / first_pass_green
+    reflect the COMBINED smoke+soak outcome. Pre-fix the ledger
+    saw smoke-pass even when soak failed.
+    """
     from kernos.kernel.improvement_workspace import (
         validate_workspace_path,
     )
@@ -546,9 +566,35 @@ async def handle_run_self_test_suite(
         tool_input.get("timeout_seconds", 0) or _default_timeout()
     )
     include_soak = bool(tool_input.get("include_soak", False))
+    soak_only = include_soak and not workspace_dir
 
     if not attempt_id:
         return "`attempt_id` is required so the result writes to the ledger."
+
+    # SOAK-ONLY MODE: skip the smoke gate + ledger write entirely.
+    # CLI invocation lands here. Returns soak-prose alone.
+    if soak_only:
+        try:
+            soak_runner = SubstrateSoakRunner()
+            soak_result = await soak_runner.run_all()
+            soak_prose = _format_soak_result_prose(soak_result)
+            if not soak_result.all_passed:
+                for probe in soak_result.per_probe:
+                    if not probe.passed:
+                        logger.warning(
+                            "SOAK_PROBE_FAILED probe=%s reason=%s "
+                            "duration_ms=%d",
+                            probe.probe_name, probe.failure_reason,
+                            probe.duration_ms,
+                        )
+            return f"Soak-only: {soak_prose}"
+        except Exception as exc:
+            logger.exception("SOAK_RUNNER_RAISED exc=%s", exc)
+            return (
+                f"Soak-only: runner raised "
+                f"{type(exc).__name__}: {exc} — soak considered "
+                f"failed."
+            )
 
     ok, reason = validate_workspace_path(
         claimed_path=workspace_dir,
@@ -584,10 +630,15 @@ async def handle_run_self_test_suite(
             "checkout."
         )
 
-    # Run pytest.
+    # Run pytest. Use sys.executable so subprocess inherits the
+    # same Python that's running the handler (avoids spawning
+    # system Python when Kernos runs from .venv).
+    import sys as _sys
     import time
     start = time.monotonic()
-    cmd = ["python", "-m", "pytest", "-q", "--no-header"] + test_paths
+    cmd = [
+        _sys.executable, "-m", "pytest", "-q", "--no-header",
+    ] + test_paths
     timed_out = False
     out_text = ""
     err_text = ""
@@ -618,59 +669,19 @@ async def handle_run_self_test_suite(
 
     duration = time.monotonic() - start
     parsed = _parse_pytest_output(out_text + err_text)
-    prose = _compose_prose(parsed, duration, timed_out)
+    smoke_prose = _compose_prose(parsed, duration, timed_out)
 
-    # Write to ledger.
-    try:
-        from kernos.kernel import improvement_ledger as _ledger
-        # Need the instance_db connection. Lazy-open since
-        # this kernel tool runs outside the handler's normal
-        # request scope.
-        import aiosqlite
-        from pathlib import Path as _Path
-        db_path = _Path(data_dir) / "instance.db"
-        async with aiosqlite.connect(str(db_path)) as conn:
-            await conn.execute("PRAGMA journal_mode=WAL")
-            await _ledger.append_event(
-                conn,
-                attempt_id=attempt_id,
-                kind="self_test_result",
-                detail=prose,
-            )
-            test_outcome = (
-                "timeout" if timed_out
-                else ("pass" if parsed["outcome"] == "pass" else "fail")
-            )
-            # Update test_outcome.
-            await _ledger.update_attempt(
-                conn, attempt_id=attempt_id, test_outcome=test_outcome,
-            )
-            # First-cycle pass sets first_pass_green.
-            if test_outcome == "pass":
-                row = await _ledger.get_attempt(conn, attempt_id)
-                if row and row.get("first_pass_green") is None:
-                    await _ledger.update_attempt(
-                        conn, attempt_id=attempt_id, first_pass_green=1,
-                    )
-    except Exception as exc:
-        logger.warning(
-            "SELF_TEST_LEDGER_WRITE_FAILED attempt=%s exc=%s",
-            attempt_id, exc,
-        )
-
-    # SUBSTRATE-SELF-TEST-V1 (2026-05-26): optional soak suite.
-    # Runs against the CURRENT process state (not the worktree)
-    # so it exercises the substrate the agent is currently
-    # running with, not the snapshot in the improvement workspace.
-    # Reported under a separate prose segment so smoke + soak
-    # outcomes don't get conflated.
+    # SUBSTRATE-SELF-TEST-V1: optional soak suite. MUST run before
+    # the ledger write so test_outcome reflects the COMBINED smoke
+    # + soak result. Pre-fix the ledger saw smoke-pass even when
+    # soak failed.
+    soak_result: SoakSuiteResult | None = None
+    soak_prose = ""
     if include_soak:
         try:
-            runner = SubstrateSoakRunner()
-            soak_result = await runner.run_all()
+            soak_runner = SubstrateSoakRunner()
+            soak_result = await soak_runner.run_all()
             soak_prose = _format_soak_result_prose(soak_result)
-            prose = f"{prose}\n\nSoak suite: {soak_prose}"
-            # Loud per-probe log on any failure for operator triage.
             if not soak_result.all_passed:
                 for probe in soak_result.per_probe:
                     if not probe.passed:
@@ -685,11 +696,55 @@ async def handle_run_self_test_suite(
                 "SOAK_RUNNER_RAISED exc=%s — surfacing as soak failure",
                 exc,
             )
-            prose = (
-                f"{prose}\n\nSoak suite: runner raised "
-                f"{type(exc).__name__}: {exc} — soak considered "
-                f"failed."
+            soak_prose = (
+                f"runner raised {type(exc).__name__}: {exc} — "
+                f"soak considered failed"
             )
+
+    # Compose combined prose.
+    if include_soak:
+        prose = f"{smoke_prose}\n\nSoak suite: {soak_prose}"
+    else:
+        prose = smoke_prose
+
+    # Compute COMBINED outcome — pass only if BOTH smoke and soak
+    # pass. Soak-failure with smoke-pass ⇒ overall fail.
+    smoke_passed = (parsed["outcome"] == "pass" and not timed_out)
+    soak_passed = soak_result.all_passed if soak_result is not None else True
+    overall_passed = smoke_passed and soak_passed
+    test_outcome = (
+        "timeout" if timed_out
+        else ("pass" if overall_passed else "fail")
+    )
+
+    # Write to ledger with the combined outcome.
+    try:
+        from kernos.kernel import improvement_ledger as _ledger
+        import aiosqlite
+        from pathlib import Path as _Path
+        db_path = _Path(data_dir) / "instance.db"
+        async with aiosqlite.connect(str(db_path)) as conn:
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await _ledger.append_event(
+                conn,
+                attempt_id=attempt_id,
+                kind="self_test_result",
+                detail=prose,
+            )
+            await _ledger.update_attempt(
+                conn, attempt_id=attempt_id, test_outcome=test_outcome,
+            )
+            if test_outcome == "pass":
+                row = await _ledger.get_attempt(conn, attempt_id)
+                if row and row.get("first_pass_green") is None:
+                    await _ledger.update_attempt(
+                        conn, attempt_id=attempt_id, first_pass_green=1,
+                    )
+    except Exception as exc:
+        logger.warning(
+            "SELF_TEST_LEDGER_WRITE_FAILED attempt=%s exc=%s",
+            attempt_id, exc,
+        )
 
     return prose
 
@@ -759,12 +814,30 @@ def _cli_main() -> int:
             print(msg, file=_sys.stderr)
         return 3
 
-    async def _run() -> SoakSuiteResult:
+    # CLI invokes via the handler (single canonical contract per
+    # spec AC11) in soak-only mode (no workspace_dir). The handler
+    # returns prose; we also re-run the runner in JSON mode to
+    # surface the full per-probe evidence structure under
+    # `soak_results`. This is the single code path CI, the local
+    # script, and the post-bring-up hook all use.
+    async def _run_via_handler() -> tuple[str, SoakSuiteResult]:
+        # Handler returns prose; we also collect the structured
+        # result for JSON output.
         runner = SubstrateSoakRunner()
-        return await runner.run_all()
+        soak_result = await runner.run_all()
+        prose_result = await handle_run_self_test_suite(
+            tool_input={
+                "workspace_dir": "",
+                "attempt_id": "cli_soak_only",
+                "include_soak": True,
+            },
+            instance_id="cli",
+            data_dir="/tmp/cli_soak_data",
+        )
+        return prose_result, soak_result
 
     try:
-        result = asyncio.run(_run())
+        prose_result, result = asyncio.run(_run_via_handler())
     except Exception as exc:
         if args.json:
             print(_json.dumps({
@@ -784,6 +857,7 @@ def _cli_main() -> int:
         payload = {
             "ok": result.all_passed,
             "total_duration_ms": result.total_duration_ms,
+            "handler_prose": prose_result,
             "soak_results": {
                 p.probe_name: {
                     "passed": p.passed,
@@ -797,7 +871,7 @@ def _cli_main() -> int:
         }
         print(_json.dumps(payload, indent=2, default=str))
     else:
-        print(_format_soak_result_prose(result))
+        print(prose_result)
         if not result.all_passed:
             for probe in result.per_probe:
                 if not probe.passed:

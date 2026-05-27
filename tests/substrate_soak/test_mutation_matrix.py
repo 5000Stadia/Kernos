@@ -212,6 +212,25 @@ MUTATION_MATRIX: list[tuple[str, callable, str]] = [
 ]
 
 
+# Mutations where overlapping substrate dependencies legitimately
+# cause more than one probe to fail. Per Codex round-2 fold, v1
+# accepts cross-coverage as long as it's documented and the
+# overlap set is enumerated. Anything NOT in this overlap map
+# must produce exactly-one attribution.
+_ACCEPTED_OVERLAP: dict[str, frozenset[str]] = {
+    # canonicalize-identity breaks both Probe 4 (canonicalization
+    # invariant — its core test) AND Probe 1 (umbrella probe
+    # asserts was_repaired==True on the same alias). v1 v3
+    # mutation table maps this mutation to Probe 4 (the more
+    # specific failure); Probe 1's coincident failure is real
+    # cross-coverage from sharing canonicalize_tool_name.
+    "canonicalize_identity": frozenset({
+        "dispatch_canonicalization_invariant",
+        "agent_round_trip_soak",
+    }),
+}
+
+
 @pytest.mark.parametrize(
     "mutation_name,mutation_fn,expected_failing_probe",
     MUTATION_MATRIX,
@@ -220,19 +239,44 @@ MUTATION_MATRIX: list[tuple[str, callable, str]] = [
 def test_mutation_matrix_attribution(
     monkeypatch, mutation_name, mutation_fn, expected_failing_probe,
 ):
-    """Each mutation MUST cause at least the mapped probe to fail.
-    v1 strictness: at-least (some mutations affect overlapping
-    substrate — that's accepted cross-coverage, not a defect)."""
+    """Each mutation MUST cause its mapped probe to fail (proves
+    sensitivity) AND must not cause unrelated probes to fail
+    (proves attribution).
+
+    v1 strictness: exactly-one attribution by default, with
+    _ACCEPTED_OVERLAP enumerating mutations where overlapping
+    substrate dependencies legitimately cause cross-coverage.
+    Codex round-3 found "at-least" hid real cross-row
+    contamination — strict mode is the right v1 default.
+    """
     mutation_fn(monkeypatch)
 
     runner = SubstrateSoakRunner()
     result = asyncio.run(runner.run_all())
 
-    failing = result.failing_probe_names()
+    failing = set(result.failing_probe_names())
+
+    # Mapped probe must fail.
     assert expected_failing_probe in failing, (
         f"Mutation {mutation_name!r} should have failed "
         f"{expected_failing_probe!r} but failing set was "
-        f"{failing}. Either the probe is not sensitive to this "
-        f"mutation (would not catch the regression) or the "
-        f"mutation isn't actually applying. Investigate."
+        f"{sorted(failing)}. Either the probe is not sensitive "
+        f"to this mutation (would not catch the regression) or "
+        f"the mutation isn't actually applying. Investigate."
+    )
+
+    # Attribution: failing set must equal expected (single probe)
+    # OR match the accepted-overlap entry if one exists.
+    expected_failing_set = _ACCEPTED_OVERLAP.get(
+        mutation_name, frozenset({expected_failing_probe}),
+    )
+    extra = failing - expected_failing_set
+    assert not extra, (
+        f"Mutation {mutation_name!r} failed extra unrelated "
+        f"probes: {sorted(extra)}. Expected failing set: "
+        f"{sorted(expected_failing_set)}. This is mutation-matrix "
+        f"contamination — likely a module-level import in a probe "
+        f"that didn't get reset between matrix rows, or a "
+        f"mutation that reaches farther than its mapped target. "
+        f"Investigate before declaring v1 shipped."
     )

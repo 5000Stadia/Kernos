@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 
 from kernos.kernel.self_test_gate import ProbeResult
-from kernos.kernel.tools.schemas import read_source
 
 
 REQUIRED_BEHAVIORAL_KEYS = frozenset({
@@ -49,6 +48,12 @@ def _compute_allowed_roots() -> dict:
 
 async def run_probe() -> ProbeResult:
     start = time.monotonic()
+
+    # Lazy import so monkeypatch.setattr on
+    # tools.schemas.read_source reaches the actual function this
+    # probe uses (module-level imports bind at probe-module load
+    # time and bypass mutations applied later).
+    from kernos.kernel.tools.schemas import read_source
 
     allowed_roots = _compute_allowed_roots()
 

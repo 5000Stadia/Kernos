@@ -22,10 +22,6 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 from kernos.kernel.self_test_gate import ProbeResult
-from kernos.kernel.tool_aliases import (
-    _TOOL_ALIASES,
-    canonicalize_tool_name,
-)
 
 
 REQUIRED_BEHAVIORAL_KEYS = frozenset({
@@ -45,7 +41,12 @@ async def _exercise_reasoning_ingress(
 ) -> list[dict]:
     """Verify reasoning's canonicalize+emit path. Captures events
     via a stub events handle. Returns the captured events."""
-    from kernos.kernel.tool_aliases import emit_alias_repair_receipt
+    # Lazy imports so mutations to canonicalize_tool_name reach
+    # the actual function this probe uses.
+    from kernos.kernel.tool_aliases import (
+        canonicalize_tool_name,
+        emit_alias_repair_receipt,
+    )
 
     captured: list = []
     events = MagicMock()
@@ -130,6 +131,8 @@ async def _exercise_enactment_ingress(
     """Verify enactment dispatcher's canonicalize+emit path.
     Mirrors the dispatcher's contract: canonicalize + emit
     tool.alias_repaired with context="enactment"."""
+    from kernos.kernel.tool_aliases import canonicalize_tool_name
+
     captured: list[dict] = []
 
     async def _capture_event(payload: dict) -> None:
@@ -162,6 +165,11 @@ async def _exercise_enactment_ingress(
 
 async def run_probe() -> ProbeResult:
     start = time.monotonic()
+
+    # Lazy import of the alias table so mutations to it (and
+    # to canonicalize_tool_name) reach the actual values this
+    # probe iterates.
+    from kernos.kernel.tool_aliases import _TOOL_ALIASES
 
     reasoning_events_per_alias: dict[str, int] = {}
     gate_log_lines_per_alias: dict[str, int] = {}

@@ -46,13 +46,15 @@ class TestIsShallowValue:
         assert _is_shallow_value("OK") is True
         assert _is_shallow_value("  Ok  ") is True
 
-    def test_bool_alone_not_shallow_via_value_check(self):
-        # A bare bool isn't shallow at the value level — the
-        # shallow check is whether the OVERALL dict has any
-        # non-sentinel values. Bools can be load-bearing
-        # (passed: True/False) when paired with other keys.
-        assert _is_shallow_value(True) is False
-        assert _is_shallow_value(False) is False
+    def test_bool_alone_is_shallow_per_spec(self):
+        """Per spec line 721-727, `{"ok": True}` is the canonical
+        shallow case AC2 must reject. After Codex round-1 code
+        review: bare bools are sentinel — they carry no signal
+        beyond the redundant passed/failed flag. Bools paired
+        with substantive content in a richer dict are OK; the
+        check is dict-level, not value-level."""
+        assert _is_shallow_value(True) is True
+        assert _is_shallow_value(False) is True
 
     def test_real_string_not_shallow(self):
         assert _is_shallow_value("actual evidence text") is False
