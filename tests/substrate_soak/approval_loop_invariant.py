@@ -1,27 +1,33 @@
 """Probe 7 — approval_loop_invariant (SUBSTRATE-SELF-TEST-V1).
 
-Asserts the approval-receipt substrate contract: request_approval
-creates a row with a binding payload that includes the expected
-fields (attempt_id, expected_parent_sha, expected_diff_hash for
-git_commit_authorization kind); get_receipt retrieves the row
-with binding payload intact.
+Runs the REAL ImprovementLoopOrchestrator end-to-end against a
+real ephemeral git repo + real ephemeral ledger + real
+approval_receipts substrate. Walks the full orchestrator path:
+workspace_created → spec_iteration → impl_iteration →
+approval_requested. Asserts the resulting approval receipt has
+the expected binding payload shape (attempt_id,
+expected_parent_sha, expected_diff_hash).
 
-v1 scope: tests the approval-receipt substrate contract directly
-rather than running the full improve_kernos orchestrator with a
-fake ACPX binary. The spec called for the full path with a
-fake-ACPX-shaped binary on PATH; standing that up properly is
-substantial follow-up work, and the substrate-fidelity intent
-of "approval loop invariant holds" is captured by verifying the
-receipt-binding shape that the orchestrator produces. The full
-orchestrator path is exercised by test_improvement_loop_workflow
-(stub consult); a fake-ACPX-binary probe is a follow-up.
+v1 scope: consult_fn is a stub returning canned convergence text
+(mirrors test_improvement_loop_workflow's pattern). The spec
+also called for a fake-ACPX-binary that exercises the real
+ACPX dispatch path; that's deferred to a follow-up because
+standing up a PATH-resolvable fake claude-code-shaped binary
+adds substantial fixture infrastructure. Per Codex round-1: the
+substrate-fidelity intent — "orchestrator walks the full path
+and produces a correctly-shaped binding receipt" — is captured
+by this probe even with stub consult.
 
-Regression bug: none specific — this is the umbrella probe that
-catches approval-receipt schema regressions.
+Regression bug: none specific — umbrella probe for orchestrator
+composition. Catches regressions across workspace setup, ledger
+events, approval-receipt binding shape, and orchestrator
+state-machine ordering.
 """
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -43,90 +49,155 @@ REQUIRED_SUBSTRATE_KEYS = frozenset({
 })
 
 
+def _init_repo(repo_dir: Path) -> None:
+    """Initialize a minimal git repo with one commit + an
+    origin remote (the orchestrator queries origin to compute
+    expected_parent_sha).
+    """
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main"],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "probe7@test.invalid"],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "probe7"],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+    (repo_dir / "README.md").write_text("probe7 test\n")
+    subprocess.run(
+        ["git", "add", "."],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "init"],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(repo_dir)],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+    subprocess.run(
+        ["git", "fetch", "origin"],
+        cwd=str(repo_dir), env=env, check=True,
+    )
+
+
+def _make_converging_consult():
+    """Stub consult_fn that returns convergence text on first
+    call (matches test_improvement_loop_workflow pattern)."""
+    async def _consult(*, target: str, prompt: str) -> str:
+        return "final spec content\n\nSTATUS: GREEN"
+    return _consult
+
+
 async def run_probe() -> ProbeResult:
     start = time.monotonic()
 
+    # Lazy imports so monkeypatches reach the substrate this
+    # probe exercises.
     from kernos.kernel import approval_receipts as _approvals
+    from kernos.kernel import improvement_ledger as _ledger
+    from kernos.kernel.improvement_loop_workflow import (
+        ImprovementLoopOrchestrator,
+    )
     from kernos.kernel.instance_db import InstanceDB
 
-    # Use an ephemeral data dir so this probe doesn't touch
-    # production state.
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp_path = Path(tmp_str)
         data_dir = str(tmp_path / "data")
         (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+        repo_dir = tmp_path / "repo"
+        _init_repo(repo_dir)
 
-        # Bring up the instance database schema (creates the
-        # approval_receipts table per ensure_schema).
+        # Stand up the substrate.
         db = InstanceDB(data_dir)
         await db.connect()
         await db.close()
         await _approvals.ensure_schema(data_dir=data_dir)
 
-        # Synthesize the binding payload the
-        # ImprovementLoopOrchestrator would create for a
-        # git_commit_authorization receipt. The shape MUST
-        # include attempt_id, expected_parent_sha,
-        # expected_diff_hash — that's the AC contract.
-        attempt_id = "att_probe7test01234"
-        binding_payload = {
-            "attempt_id": attempt_id,
-            "expected_parent_sha": (
-                "a1b2c3d4e5f6789012345678901234567890abcd"
-            ),
-            "expected_diff_hash": (
-                "sha256:1234567890abcdef1234567890abcdef"
-                "1234567890abcdef1234567890abcdef"
-            ),
-        }
-
-        # Request the approval — substrate creates the row.
-        approval_id = await _approvals.request_approval(
-            data_dir=data_dir,
+        # Real orchestrator, stub consult_fn (acknowledged v1
+        # scope concession per docstring above).
+        orch = ImprovementLoopOrchestrator(
             instance_id="probe7_test",
-            kind="git_commit_authorization",
-            requested_for_actor="substrate.improvement_loop",
-            operator_actor_id="probe7_operator",
-            request_summary="probe 7: approval-receipt invariant",
-            binding_payload=binding_payload,
-            single_use=True,
+            data_dir=data_dir,
+            live_repo_dir=str(repo_dir),
+            consult_fn=_make_converging_consult(),
         )
 
-        # Retrieve via get_receipt — substrate must round-trip
-        # the binding payload intact.
-        receipt = await _approvals.get_receipt(
-            data_dir=data_dir, approval_id=approval_id,
+        # Walk the full orchestrator path.
+        attempt_id = await orch.start_attempt(
+            spec_requirement="add a one-line comment to README",
         )
+        await orch.wait_for_running_tasks(timeout=15)
+
+        # Inspect the ledger for the canonical event sequence.
+        db = InstanceDB(data_dir)
+        await db.connect()
+        try:
+            events = await _ledger.get_attempt_events(
+                db._conn, attempt_id,
+            )
+            event_kinds = [e["kind"] for e in events]
+
+            # Find the approval_requested event to extract the
+            # approval_id, then load the receipt.
+            approval_id = ""
+            for e in events:
+                if e["kind"] == "approval_requested":
+                    detail = e.get("detail", "")
+                    if "approval_id=" in detail:
+                        approval_id = detail.split(
+                            "approval_id=",
+                        )[1].strip()
+                    break
+        finally:
+            await db.close()
 
         binding_attempt_id = ""
         binding_expected_parent_sha = ""
         binding_expected_diff_hash = ""
         receipt_kind = ""
-        if receipt is not None:
-            binding_json = receipt.get("binding_payload_json", "{}")
-            binding = json.loads(binding_json)
-            binding_attempt_id = binding.get("attempt_id", "")
-            binding_expected_parent_sha = binding.get(
-                "expected_parent_sha", "",
+        if approval_id:
+            receipt = await _approvals.get_receipt(
+                data_dir=data_dir, approval_id=approval_id,
             )
-            binding_expected_diff_hash = binding.get(
-                "expected_diff_hash", "",
-            )
-            receipt_kind = receipt.get("kind", "")
+            if receipt is not None:
+                binding_json = receipt.get(
+                    "binding_payload_json", "{}",
+                )
+                binding = json.loads(binding_json)
+                binding_attempt_id = binding.get("attempt_id", "")
+                binding_expected_parent_sha = binding.get(
+                    "expected_parent_sha", "",
+                )
+                binding_expected_diff_hash = binding.get(
+                    "expected_diff_hash", "",
+                )
+                receipt_kind = receipt.get("kind", "")
 
     duration_ms = int((time.monotonic() - start) * 1000)
 
     # Pass conditions:
-    # - receipt round-tripped with correct attempt_id
-    # - parent_sha looks like a 40-char hex
-    # - diff_hash starts with "sha256:"
-    # - kind is git_commit_authorization
+    # - the canonical 4-event sequence reached the ledger
+    # - approval receipt round-tripped with correct binding fields
+    cond_events = (
+        "workspace_created" in event_kinds
+        and "spec_iteration" in event_kinds
+        and "impl_iteration" in event_kinds
+        and "approval_requested" in event_kinds
+    )
     cond_attempt = (binding_attempt_id == attempt_id)
     cond_parent_sha = (
         isinstance(binding_expected_parent_sha, str)
         and len(binding_expected_parent_sha) == 40
         and all(
-            c in "0123456789abcdef" for c in binding_expected_parent_sha
+            c in "0123456789abcdef"
+            for c in binding_expected_parent_sha
         )
     )
     cond_diff_hash = (
@@ -136,18 +207,23 @@ async def run_probe() -> ProbeResult:
     cond_kind = (receipt_kind == "git_commit_authorization")
 
     all_passed = (
-        cond_attempt and cond_parent_sha
-        and cond_diff_hash and cond_kind
+        cond_events and cond_attempt
+        and cond_parent_sha and cond_diff_hash and cond_kind
     )
 
     failure_reason = ""
     if not all_passed:
         failed = []
+        if not cond_events:
+            failed.append(
+                f"event_sequence (got={event_kinds!r}; expected "
+                f"workspace_created + spec_iteration + "
+                f"impl_iteration + approval_requested)"
+            )
         if not cond_attempt:
             failed.append(
                 f"attempt_id_roundtrip "
-                f"(got={binding_attempt_id!r}, "
-                f"expected={attempt_id!r})"
+                f"(got={binding_attempt_id!r}, want={attempt_id!r})"
             )
         if not cond_parent_sha:
             failed.append(
@@ -163,13 +239,13 @@ async def run_probe() -> ProbeResult:
             failed.append(
                 f"receipt_kind "
                 f"(got={receipt_kind!r}, "
-                f"expected='git_commit_authorization')"
+                f"want='git_commit_authorization')"
             )
         failure_reason = (
             f"approval-loop invariant violated: {', '.join(failed)}. "
-            f"Likely regression of approval_receipts schema or "
-            f"binding payload round-trip — receipt cannot be "
-            f"trusted as a substrate contract."
+            f"Likely regression of ImprovementLoopOrchestrator path "
+            f"(workspace → ledger → approval receipt) or the "
+            f"binding-payload shape."
         )
 
     return ProbeResult(
@@ -179,8 +255,8 @@ async def run_probe() -> ProbeResult:
             "attempt_id": attempt_id,
             "approval_id": approval_id,
             "final_state": (
-                "receipt_round_tripped"
-                if cond_attempt else "receipt_corrupted"
+                "approval_received_with_binding"
+                if all_passed else "incomplete_or_corrupted"
             ),
         },
         substrate_evidence={
@@ -191,9 +267,7 @@ async def run_probe() -> ProbeResult:
             "binding_payload_expected_diff_hash": (
                 binding_expected_diff_hash
             ),
-            "ledger_event_kinds": [
-                "approval_requested_synthesized_for_probe",
-            ],
+            "ledger_event_kinds": event_kinds,
         },
         duration_ms=duration_ms,
         failure_reason=failure_reason,
