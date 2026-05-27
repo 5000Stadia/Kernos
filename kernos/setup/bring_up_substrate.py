@@ -59,6 +59,7 @@ should not block bot startup.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -747,6 +748,16 @@ async def bring_up_substrate(
     # state once at bring-up. Loud signal on any failure; does
     # NOT abort bring-up (per spec AC5 + Open Question 1 — emit
     # signal + activate autonomous-mutation gate, not halt).
+    #
+    # v1.2 (2026-05-26): step-by-step breadcrumb logs + 60s
+    # timeout + BaseException catch. The original hook returned
+    # silently on the first live deployment (no PASSED, no
+    # FAILED, no BRINGUP_FAILED) because (a) `except Exception`
+    # misses CancelledError when bring-up is racing the event
+    # loop, and (b) without per-step breadcrumbs there's no way
+    # to localize which await stalled. Hardened so the next
+    # silent-soak symptom is impossible.
+    logger.info("SUBSTRATE_SELF_TEST_HOOK_ENTERED")
     try:
         from kernos.kernel.self_test_gate import (
             SubstrateSoakRunner,
@@ -754,9 +765,17 @@ async def bring_up_substrate(
             mark_substrate_health,
         )
         from kernos.kernel import event_stream as _event_stream_soak
+        logger.info("SUBSTRATE_SELF_TEST_HOOK_IMPORTS_OK")
 
         _soak_runner = SubstrateSoakRunner()
-        _soak_result = await _soak_runner.run_all()
+        logger.info("SUBSTRATE_SELF_TEST_HOOK_RUNNER_BUILT")
+        _soak_result = await asyncio.wait_for(
+            _soak_runner.run_all(), timeout=60.0,
+        )
+        logger.info(
+            "SUBSTRATE_SELF_TEST_HOOK_RUN_RETURNED probes=%d",
+            len(_soak_result.per_probe),
+        )
         _soak_prose = _format_soak_result_prose(_soak_result)
 
         # Update the AC9 autonomous-mutation gate's health flag
@@ -844,12 +863,32 @@ async def bring_up_substrate(
                 )
             except Exception:
                 pass
-    except Exception as _exc_soak:
+    except asyncio.TimeoutError:
         logger.warning(
-            "SUBSTRATE_SELF_TEST_BRINGUP_FAILED error=%s — "
-            "substrate continues without soak self-test result",
-            _exc_soak,
+            "SUBSTRATE_SELF_TEST_BRINGUP_TIMEOUT timeout_s=60 — "
+            "soak ran past 60s in live process (CLI runs in <2s). "
+            "Substrate continues; some probe is interacting badly "
+            "with live event_stream/workflow engine. Investigate."
         )
+    except BaseException as _exc_soak:
+        # v1.2 catches BaseException (not just Exception) so
+        # CancelledError, KeyboardInterrupt, and SystemExit all
+        # surface. The original silent-soak symptom was a
+        # CancelledError swallowed by `except Exception`.
+        logger.warning(
+            "SUBSTRATE_SELF_TEST_BRINGUP_FAILED error=%s:%s — "
+            "substrate continues without soak self-test result",
+            type(_exc_soak).__name__, _exc_soak,
+        )
+        # CancelledError must re-raise so the surrounding task
+        # group is not held alive by a cancelled child.
+        if isinstance(_exc_soak, BaseException) and not isinstance(
+            _exc_soak, Exception,
+        ):
+            # Re-raise only true BaseException subclasses
+            # (CancelledError, KeyboardInterrupt, SystemExit).
+            # Plain Exception is logged and suppressed per AC5.
+            raise
 
     # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21): generic operator-
     # approval primitive. Schema ensure + boot reconcile + background
