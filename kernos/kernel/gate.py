@@ -388,6 +388,13 @@ class DispatchGate:
             # SELF-IMPROVEMENT-CLOSURE-V1 (AC9): read-only lookup
             # over friction_pattern_invariant. Pure DB read.
             "lookup_pattern_invariants",
+            # USER-INITIATED-IMPROVEMENT-TRIGGER-V1: read-only
+            # classification + validation of CC's investigation
+            # response. classify_proposed_fix is pure function;
+            # validate_investigation_response checks shape +
+            # raises on bad shape (no state mutation).
+            "classify_proposed_fix",
+            "validate_investigation_response",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -465,6 +472,15 @@ class DispatchGate:
             # lookup_pattern_invariants is read-only (in _KERNEL_READS).
             "record_closure_attempt",
             "run_closure_probe",
+            # USER-INITIATED-IMPROVEMENT-TRIGGER-V1: workflow
+            # tools that perform bounded soft writes.
+            # record_fix_authorization: SQLite insert (idempotent).
+            # maybe_run_closure_for_fix: composes run_closure_probe.
+            # surface_to_user: posts a structured message + writes
+            # diagnostic record.
+            "record_fix_authorization",
+            "maybe_run_closure_for_fix",
+            "surface_to_user",
         }
 
         if tool_name in _KERNEL_READS:

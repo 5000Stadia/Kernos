@@ -164,6 +164,38 @@ def _import_kernel_schemas() -> list[dict]:
         RECORD_CLOSURE_ATTEMPT_TOOL,
         RUN_CLOSURE_PROBE_TOOL,
     )
+    from kernos.kernel.fix_authorization import (
+        CLASSIFY_PROPOSED_FIX_TOOL,
+        MAYBE_RUN_CLOSURE_FOR_FIX_TOOL,
+        RECORD_FIX_AUTHORIZATION_TOOL,
+        VALIDATE_INVESTIGATION_RESPONSE_TOOL,
+    )
+    # surface_to_user lives inline (no surfaced schema beyond
+    # workflow-internal use; surfacing is substrate-internal
+    # and not part of the agent's tool catalog surface). It IS
+    # registered in _KERNEL_TOOLS + _DISPATCHABLE_KERNEL_TOOLS
+    # for dispatch correctness, but no schema export.
+    SURFACE_TO_USER_TOOL: dict = {
+        "name": "surface_to_user",
+        "description": (
+            "Post a structured message to a space "
+            "(investigation_started, investigation_outcome, "
+            "or fix_proposal). USER-INITIATED-IMPROVEMENT-"
+            "TRIGGER-V1 substrate-internal."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "space_id": {"type": "string"},
+                "member_id": {"type": "string"},
+                "message_kind": {"type": "string"},
+                "body": {"type": "string"},
+                "metadata": {"type": "object"},
+            },
+            "required": ["space_id", "message_kind"],
+            "additionalProperties": False,
+        },
+    }
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -270,6 +302,19 @@ def _import_kernel_schemas() -> list[dict]:
         LOOKUP_PATTERN_INVARIANTS_TOOL,
         RECORD_CLOSURE_ATTEMPT_TOOL,
         RUN_CLOSURE_PROBE_TOOL,
+        # USER-INITIATED-IMPROVEMENT-TRIGGER-V1 (2026-05-27):
+        # five workflow tools for the user-initiated repair
+        # loop. record_fix_authorization writes the
+        # fix_authorization table (soft_write); classify +
+        # validate are pure functions (read); maybe_run_closure
+        # composes closure-v1 primitives (soft_write);
+        # surface_to_user posts a structured message to a
+        # space (soft_write).
+        RECORD_FIX_AUTHORIZATION_TOOL,
+        CLASSIFY_PROPOSED_FIX_TOOL,
+        VALIDATE_INVESTIGATION_RESPONSE_TOOL,
+        MAYBE_RUN_CLOSURE_FOR_FIX_TOOL,
+        SURFACE_TO_USER_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery

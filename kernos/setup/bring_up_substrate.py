@@ -637,6 +637,34 @@ async def bring_up_substrate(
             _exc_closure_start,
         )
 
+    # USER-INITIATED-IMPROVEMENT-TRIGGER-V1 (2026-05-27): start
+    # the fix-authorization store so the user_initiated_improvement
+    # workflow can persist authorizations.
+    try:
+        _fa_store_handler = getattr(
+            handler, "_fix_authorization_store", None,
+        )
+        if _fa_store_handler is not None:
+            await _fa_store_handler.start(data_dir)
+            logger.info(
+                "FIX_AUTHORIZATION_STORE_READY data_dir=%s", data_dir,
+            )
+        else:
+            logger.info(
+                "FIX_AUTHORIZATION_STORE_SKIPPED: handler has no "
+                "_fix_authorization_store (KERNOS_FIX_AUTHORIZATION_"
+                "STORE opt-out or stub handler); user-initiated "
+                "improvement workflow tools will refuse with "
+                "friendly fallback"
+            )
+    except Exception as _exc_fa_start:
+        logger.warning(
+            "FIX_AUTHORIZATION_STORE_BRINGUP_FAILED error=%s — "
+            "user-initiated improvement loop unavailable; substrate "
+            "continues",
+            _exc_fa_start,
+        )
+
     # Spec 6 commit 7 / B3 fold: register the self_improvement
     # workflow + launch the autonomy-loop emitters in B3 order
     # (helper success BEFORE emitters launch so trigger predicates
@@ -1459,6 +1487,12 @@ def _call_tool_adapter(
         "lookup_pattern_invariants",
         "record_closure_attempt",
         "run_closure_probe",
+        # USER-INITIATED-IMPROVEMENT-TRIGGER-V1
+        "record_fix_authorization",
+        "classify_proposed_fix",
+        "validate_investigation_response",
+        "maybe_run_closure_for_fix",
+        "surface_to_user",
     })
 
     async def _dispatch(*, tool_id: str, args: dict,
@@ -1551,6 +1585,196 @@ def _call_tool_adapter(
                         instance_id=instance_id, member_id=member_id,
                         args=args,
                     )
+                # USER-INITIATED-IMPROVEMENT-TRIGGER-V1: the
+                # five fix-authorization workflow tools.
+                if tool_id in (
+                    "record_fix_authorization",
+                    "classify_proposed_fix",
+                    "validate_investigation_response",
+                    "maybe_run_closure_for_fix",
+                    "surface_to_user",
+                ):
+                    from kernos.kernel.fix_authorization import (
+                        InvestigationResponseMalformed,
+                        classify_proposed_fix as _classify_fix,
+                        maybe_run_closure_for_fix as _maybe_run_closure,
+                        record_fix_authorization as _record_fa,
+                        validate_investigation_response as _validate_ir,
+                    )
+                    if tool_id == "classify_proposed_fix":
+                        return await _classify_fix(
+                            instance_id=instance_id,
+                            proposed_fix_summary=args.get(
+                                "proposed_fix_summary", "",
+                            ),
+                            proposed_fix_diff=args.get(
+                                "proposed_fix_diff", "",
+                            ),
+                            touches_paths=args.get(
+                                "touches_paths", [],
+                            ) or [],
+                            external_action=args.get(
+                                "external_action", "",
+                            ),
+                        )
+                    if tool_id == "validate_investigation_response":
+                        # Raises on malformed → workflow aborts.
+                        return _validate_ir(
+                            investigation_outcome=args.get(
+                                "investigation_outcome", "",
+                            ),
+                            failure_mode=args.get(
+                                "failure_mode", "",
+                            ),
+                            proposed_fix_summary=args.get(
+                                "proposed_fix_summary", "",
+                            ),
+                            proposed_fix_diff=args.get(
+                                "proposed_fix_diff", "",
+                            ),
+                            external_action=args.get(
+                                "external_action", "",
+                            ),
+                            touches_paths=args.get(
+                                "touches_paths", [],
+                            ),
+                        )
+                    if tool_id == "record_fix_authorization":
+                        fa_store = getattr(
+                            handler, "_fix_authorization_store",
+                            None,
+                        )
+                        if fa_store is None:
+                            raise RuntimeError(
+                                "record_fix_authorization requires "
+                                "handler._fix_authorization_store; "
+                                "user-initiated improvement substrate "
+                                "not wired in bring-up"
+                            )
+                        return await _record_fa(
+                            store=fa_store,
+                            instance_id=instance_id,
+                            request_id=args.get("request_id", ""),
+                            requester_member_id=args.get(
+                                "requester_member_id", "",
+                            ),
+                            source_space_id=args.get(
+                                "source_space_id", "",
+                            ),
+                            target_hint=args.get(
+                                "target_hint", "",
+                            ),
+                            request_text=args.get(
+                                "request_text", "",
+                            ),
+                            trigger_surface=args.get(
+                                "trigger_surface", "slash:/fix",
+                            ),
+                        )
+                    if tool_id == "maybe_run_closure_for_fix":
+                        closure_store = getattr(
+                            handler, "_closure_store", None,
+                        )
+                        fp_store = getattr(
+                            handler, "_friction_pattern_store",
+                            None,
+                        )
+
+                        def _transition(**kwargs):
+                            if fp_store is None:
+                                return None
+                            return fp_store.transition_pattern_lifecycle(
+                                **kwargs,
+                            )
+
+                        events = getattr(
+                            handler, "_events", None,
+                        ) or getattr(
+                            handler, "_event_stream", None,
+                        )
+
+                        async def _emit(*, instance_id, event_type, payload):
+                            if events is None:
+                                return
+                            await events.emit(
+                                instance_id, event_type, payload,
+                                space_id="",
+                            )
+
+                        return await _maybe_run_closure(
+                            instance_id=instance_id,
+                            related_pattern_id=args.get(
+                                "related_pattern_id", "",
+                            ),
+                            active_epoch=int(
+                                args.get("active_epoch", 0) or 0,
+                            ),
+                            closure_store=closure_store,
+                            pattern_transition_fn=(
+                                _transition if fp_store is not None
+                                else None
+                            ),
+                            event_emit_fn=(
+                                _emit if events is not None else None
+                            ),
+                        )
+                    if tool_id == "surface_to_user":
+                        # v1: persistent diagnostic write.
+                        # Full channel-routing wiring deferred to
+                        # post-shipping iteration once the workflow
+                        # is soaked. Records every surfacing call
+                        # to data/<instance>/diagnostics/fix_authorizations/.
+                        import json as _json_st
+                        import os as _os_st
+                        from datetime import (
+                            datetime as _dt_st,
+                            timezone as _tz_st,
+                        )
+                        from pathlib import Path as _Path_st
+                        _ddir = _os_st.environ.get(
+                            "KERNOS_DATA_DIR", data_dir,
+                        )
+                        _iid_str = (
+                            instance_id.split(":")[-1]
+                            if ":" in instance_id else instance_id
+                        )
+                        _surface_dir = (
+                            _Path_st(_ddir)
+                            / f"discord_{_iid_str}"
+                            / "diagnostics"
+                            / "fix_authorizations"
+                        )
+                        _surface_dir.mkdir(
+                            parents=True, exist_ok=True,
+                        )
+                        _msg_kind = args.get("message_kind", "")
+                        _rid = (
+                            args.get("metadata", {})
+                            .get("request_id", "unknown")
+                        )
+                        _surface_file = _surface_dir / (
+                            f"surface_{_msg_kind}_{_rid}.json"
+                        )
+                        _payload = {
+                            "instance_id": instance_id,
+                            "space_id": args.get("space_id", ""),
+                            "member_id": args.get("member_id", ""),
+                            "message_kind": _msg_kind,
+                            "body": args.get("body", ""),
+                            "metadata": args.get("metadata", {}),
+                            "surfaced_at": _dt_st.now(
+                                _tz_st.utc,
+                            ).isoformat(),
+                        }
+                        _surface_file.write_text(
+                            _json_st.dumps(
+                                _payload, sort_keys=True, indent=2,
+                            ),
+                        )
+                        return {
+                            "surfaced_at": _payload["surfaced_at"],
+                            "diagnostic_path": str(_surface_file),
+                        }
                 if tool_id == "run_closure_probe":
                     # Build the optional callbacks lazily so
                     # workflow-adapter handlers stay decoupled

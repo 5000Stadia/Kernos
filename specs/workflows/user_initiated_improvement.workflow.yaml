@@ -1,0 +1,384 @@
+# USER-INITIATED-IMPROVEMENT-TRIGGER-V1 workflow.
+#
+# Opens an investigation immediately on explicit user fix
+# authorization (via /fix slash command or via the Kernos-
+# proposed-then-user-confirmed path). Investigates via the
+# coding-session bridge, classifies the proposed fix's scope,
+# routes to the appropriate gate weight, and surfaces the
+# outcome back to the source space.
+#
+# Hard boundary: substrate-tier merges remain gated. The
+# classifier is fail-closed; missing / malformed CC responses
+# route to substrate_tier (architect gate) or abort the
+# workflow.
+
+workflow_id: user_initiated_improvement
+instance_id: '{installer.instance_id}'
+name: User-initiated improvement loop
+description: |
+  Opens an investigation immediately on explicit user fix
+  authorization. Investigates via the coding-session bridge,
+  classifies the proposed fix's scope, routes to the
+  appropriate gate weight, and surfaces the outcome back to
+  the source space.
+version: "1.0"
+owner: architect
+instance_local: true
+
+bounds:
+  iteration_count: 1
+  wall_time_seconds: 86400
+
+verifier:
+  flavor: deterministic
+  check: terminated
+
+triggers:
+  - event_type: user.fix_authorization_received
+    event_selector:
+      op: AND
+      operands:
+        - op: eq
+          path: event_type
+          value: user.fix_authorization_received
+        - op: eq
+          path: instance_id
+          value: '{installer.instance_id}'
+        - op: exists
+          path: payload.request_id
+
+action_sequence:
+  - id: record_authorization
+    action_type: call_tool
+    parameters:
+      tool_id: record_fix_authorization
+      args:
+        request_id: '{idea_payload.request_id}'
+        requester_member_id: '{idea_payload.requester_member_id}'
+        source_space_id: '{idea_payload.source_space_id}'
+        target_hint: '{idea_payload.target_hint}'
+        request_text: '{idea_payload.request_text}'
+        trigger_surface: '{idea_payload.trigger_surface}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: surface_investigation_started
+    action_type: call_tool
+    parameters:
+      tool_id: surface_to_user
+      args:
+        space_id: '{idea_payload.source_space_id}'
+        member_id: '{idea_payload.requester_member_id}'
+        message_kind: investigation_started
+        body: 'I am investigating. I will surface what I find.'
+        metadata:
+          request_id: '{idea_payload.request_id}'
+          target_hint: '{idea_payload.target_hint}'
+          trigger_surface: '{idea_payload.trigger_surface}'
+    continuation_rules:
+      on_failure: continue
+
+  - id: investigate
+    action_type: call_tool
+    parameters:
+      tool_id: ask_coding_session_for_workflow
+      args:
+        target: claude_code
+        question: |
+          User authorized a fix via `{idea_payload.trigger_surface}`. Their request:
+            "{idea_payload.request_text}"
+            target_hint: "{idea_payload.target_hint}"
+
+          Investigate what is broken. Consider BOTH:
+            - External causes (the target system changed:
+              webpage restructured, API response shape
+              shifted, third-party rate limit hit, etc.)
+            - Internal causes (a Kernos bug, a stale
+              dependency, a configuration drift in data/,
+              etc.)
+
+          When you identify the failure, draft a fix. Your
+          response MUST populate these structured fields
+          (the workflow validates and aborts on missing
+          fields when investigation_outcome=completed):
+            - failure_mode: 1-line classification of WHAT broke
+            - external_cause_evidence: what suggests external
+            - internal_cause_evidence: what suggests internal
+            - evidence_refs: list of log paths, runtime trace
+              refs, commit SHAs you consulted
+            - proposed_fix_summary: 1-3 sentences
+            - proposed_fix_diff: unified-diff format if
+              internal; empty if external_only
+            - touches_paths: list of file paths the fix
+              modifies (the classifier ALSO walks the diff;
+              diff is authoritative on disagreement)
+            - external_action: description for external_only;
+              empty if internal
+            - related_pattern_id: optional friction_pattern_id
+              this fix remediates (empty when no known
+              pattern matches — closure machinery skips)
+
+          DO NOT apply substrate-tier changes (anything
+          touching kernos/, specs/, pyproject.toml, *.workflow.yaml,
+          scripts/, .env, .credentials/, *.db) yourself.
+          This workflow routes substrate-tier and sensitive-
+          path changes through the architect gate.
+        context:
+          request_id: '{idea_payload.request_id}'
+          _workflow_execution_id: '{workflow.execution_id}'
+          _workflow_gate_nonce: '{workflow.gate_nonce}'
+    continuation_rules:
+      on_failure: abort
+    gate_ref: await_investigation_response
+
+  - id: read_investigation_response
+    action_type: call_tool
+    parameters:
+      tool_id: read_coding_session_response_for_workflow
+      args:
+        request_id: '{step.investigate.value.request_id}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: validate_investigation_response
+    action_type: call_tool
+    parameters:
+      tool_id: validate_investigation_response
+      args:
+        investigation_outcome: '{step.read_investigation_response.value.investigation_outcome}'
+        failure_mode: '{step.read_investigation_response.value.failure_mode}'
+        proposed_fix_summary: '{step.read_investigation_response.value.proposed_fix_summary}'
+        proposed_fix_diff: '{step.read_investigation_response.value.proposed_fix_diff}'
+        external_action: '{step.read_investigation_response.value.external_action}'
+        touches_paths: '{step.read_investigation_response.value.touches_paths}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: classify_scope
+    action_type: call_tool
+    parameters:
+      tool_id: classify_proposed_fix
+      args:
+        proposed_fix_summary: '{step.read_investigation_response.value.proposed_fix_summary}'
+        proposed_fix_diff: '{step.read_investigation_response.value.proposed_fix_diff}'
+        touches_paths: '{step.read_investigation_response.value.touches_paths}'
+        external_action: '{step.read_investigation_response.value.external_action}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: branch_on_gate_weight
+    action_type: branch
+    parameters:
+      condition: '{step.classify_scope.value.requires_architect_gate}'
+      branch_on_true: request_architect_gate
+      branch_on_false: 'terminal:light_apply:apply_fix'
+    continuation_rules:
+      on_failure: abort
+
+  # ─── SUBSTRATE-TIER / SENSITIVE PATH (main sequence continues) ──
+  - id: request_architect_gate
+    action_type: call_tool
+    parameters:
+      tool_id: ask_coding_session_for_workflow
+      args:
+        target: claude_code
+        question: |
+          Architect-gate request from user-initiated fix
+          authorization. Scope={step.classify_scope.value.scope}
+          (sensitive_path_detected={step.classify_scope.value.sensitive_path_detected}).
+
+          Proposed fix:
+            {step.read_investigation_response.value.proposed_fix_summary}
+
+          Diff:
+            {step.read_investigation_response.value.proposed_fix_diff}
+
+          Files touched (union of self-reported + diff-derived):
+            {step.classify_scope.value.derived_paths}
+
+          Sensitive paths (if any):
+            {step.classify_scope.value.sensitive_paths}
+
+          User who authorized:
+            {idea_payload.requester_member_id}
+          Trigger surface:
+            {idea_payload.trigger_surface}
+
+          Apply ONLY if architect approves. Report the
+          architect's ratification + apply outcome.
+        context:
+          request_id: '{idea_payload.request_id}'
+          _workflow_execution_id: '{workflow.execution_id}'
+          _workflow_gate_nonce: '{workflow.gate_nonce}'
+    continuation_rules:
+      on_failure: abort
+    gate_ref: await_architect_ratification
+
+  - id: read_architect_response
+    action_type: call_tool
+    parameters:
+      tool_id: read_coding_session_response_for_workflow
+      args:
+        request_id: '{step.request_architect_gate.value.request_id}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: maybe_closure_substrate_path
+    action_type: call_tool
+    parameters:
+      tool_id: maybe_run_closure_for_fix
+      args:
+        related_pattern_id: '{step.read_investigation_response.value.related_pattern_id}'
+        active_epoch: '{step.read_investigation_response.value.related_pattern_active_epoch}'
+    continuation_rules:
+      on_failure: continue
+
+  - id: surface_architect_outcome
+    action_type: call_tool
+    parameters:
+      tool_id: surface_to_user
+      args:
+        space_id: '{idea_payload.source_space_id}'
+        member_id: '{idea_payload.requester_member_id}'
+        message_kind: investigation_outcome
+        body: |
+          Investigation complete. The fix touches Kernos
+          substrate ({step.classify_scope.value.scope}),
+          so I brought the patch to the architect gate.
+
+          Result: {step.read_architect_response.value.investigation_outcome}
+          Summary: {step.read_investigation_response.value.proposed_fix_summary}
+          Closure: {step.maybe_closure_substrate_path.value.closure_outcome}
+        metadata:
+          request_id: '{idea_payload.request_id}'
+          authorization_id: '{step.record_authorization.value.authorization_id}'
+          target_hint: '{idea_payload.target_hint}'
+          scope: '{step.classify_scope.value.scope}'
+          sensitive_path_detected: '{step.classify_scope.value.sensitive_path_detected}'
+          sensitive_paths: '{step.classify_scope.value.sensitive_paths}'
+          touches_paths: '{step.classify_scope.value.derived_paths}'
+          architect_outcome: '{step.read_architect_response.value.investigation_outcome}'
+          closure_outcome: '{step.maybe_closure_substrate_path.value.closure_outcome}'
+          closure_id: '{step.maybe_closure_substrate_path.value.closure_id}'
+          invariant_id: '{step.maybe_closure_substrate_path.value.invariant_id}'
+    continuation_rules:
+      on_failure: continue
+
+# ─── TERMINAL BRANCH: light_apply (config_data / external_only) ─
+terminal_branches:
+  light_apply:
+    - id: apply_fix
+      action_type: call_tool
+      parameters:
+        tool_id: ask_coding_session_for_workflow
+        args:
+          target: claude_code
+          question: |
+            Apply the proposed fix (scope={step.classify_scope.value.scope},
+            no substrate gate required). The fix has been
+            classified as either config_data or external_only.
+
+            Proposed fix:
+              {step.read_investigation_response.value.proposed_fix_summary}
+
+            Diff (if internal):
+              {step.read_investigation_response.value.proposed_fix_diff}
+
+            Files touched:
+              {step.classify_scope.value.derived_paths}
+
+            External action (if external_only):
+              {step.read_investigation_response.value.external_action}
+
+            Apply the fix and report outcome.
+          context:
+            request_id: '{idea_payload.request_id}'
+            _workflow_execution_id: '{workflow.execution_id}'
+            _workflow_gate_nonce: '{workflow.gate_nonce}'
+      continuation_rules:
+        on_failure: abort
+      gate_ref: await_light_apply_response
+
+    - id: read_apply_response
+      action_type: call_tool
+      parameters:
+        tool_id: read_coding_session_response_for_workflow
+        args:
+          request_id: '{step.apply_fix.value.request_id}'
+      continuation_rules:
+        on_failure: abort
+
+    - id: maybe_closure_light_path
+      action_type: call_tool
+      parameters:
+        tool_id: maybe_run_closure_for_fix
+        args:
+          related_pattern_id: '{step.read_investigation_response.value.related_pattern_id}'
+          active_epoch: '{step.read_investigation_response.value.related_pattern_active_epoch}'
+      continuation_rules:
+        on_failure: continue
+
+    - id: surface_light_outcome
+      action_type: call_tool
+      parameters:
+        tool_id: surface_to_user
+        args:
+          space_id: '{idea_payload.source_space_id}'
+          member_id: '{idea_payload.requester_member_id}'
+          message_kind: investigation_outcome
+          body: |
+            Investigation complete. Fix applied directly
+            ({step.classify_scope.value.scope} scope, no
+            architect gate needed).
+
+            Summary:
+              {step.read_investigation_response.value.proposed_fix_summary}
+
+            Files touched:
+              {step.classify_scope.value.derived_paths}
+
+            Apply outcome: {step.read_apply_response.value.investigation_outcome}
+            Closure: {step.maybe_closure_light_path.value.closure_outcome}
+          metadata:
+            request_id: '{idea_payload.request_id}'
+            authorization_id: '{step.record_authorization.value.authorization_id}'
+            target_hint: '{idea_payload.target_hint}'
+            scope: '{step.classify_scope.value.scope}'
+            touches_paths: '{step.classify_scope.value.derived_paths}'
+            apply_outcome: '{step.read_apply_response.value.investigation_outcome}'
+            closure_outcome: '{step.maybe_closure_light_path.value.closure_outcome}'
+            closure_id: '{step.maybe_closure_light_path.value.closure_id}'
+            invariant_id: '{step.maybe_closure_light_path.value.invariant_id}'
+      continuation_rules:
+        on_failure: continue
+
+approval_gates:
+  - gate_name: await_investigation_response
+    pause_reason: awaiting investigation response
+    approval_event_type: coding_consult.response_received
+    approval_event_predicate:
+      op: eq
+      path: payload.request_id
+      value: '{step.investigate.value.request_id}'
+    timeout_seconds: 86400
+    bound_behavior_on_timeout: abort_workflow
+
+  - gate_name: await_architect_ratification
+    pause_reason: awaiting architect ratification of substrate patch
+    approval_event_type: coding_consult.response_received
+    approval_event_predicate:
+      op: eq
+      path: payload.request_id
+      value: '{step.request_architect_gate.value.request_id}'
+    timeout_seconds: 86400
+    bound_behavior_on_timeout: abort_workflow
+
+  - gate_name: await_light_apply_response
+    pause_reason: awaiting light-apply response
+    approval_event_type: coding_consult.response_received
+    approval_event_predicate:
+      op: eq
+      path: payload.request_id
+      value: '{step.apply_fix.value.request_id}'
+    timeout_seconds: 86400
+    bound_behavior_on_timeout: abort_workflow

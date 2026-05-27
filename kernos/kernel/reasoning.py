@@ -720,7 +720,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants", "record_fix_authorization", "classify_proposed_fix", "validate_investigation_response", "maybe_run_closure_for_fix", "surface_to_user"}
 
     # SELF-IMPROVEMENT-CLOSURE-V1 (AC17): explicit dispatchability
     # registry. Every name in this set MUST have a concrete branch
@@ -775,6 +775,10 @@ class ReasoningService:
         # SELF-IMPROVEMENT-CLOSURE-V1
         "record_closure_attempt", "run_closure_probe",
         "lookup_pattern_invariants",
+        # USER-INITIATED-IMPROVEMENT-TRIGGER-V1
+        "record_fix_authorization", "classify_proposed_fix",
+        "validate_investigation_response",
+        "maybe_run_closure_for_fix", "surface_to_user",
     })
 
     def get_dispatchable_kernel_tools(self) -> set[str]:
@@ -928,6 +932,15 @@ class ReasoningService:
         "lookup_pattern_invariants":          frozenset({"confirmed"}),
         "record_closure_attempt":             frozenset({"confirmed"}),
         "run_closure_probe":                  frozenset({"confirmed"}),
+        # USER-INITIATED-IMPROVEMENT-TRIGGER-V1 (2026-05-27):
+        # fix-authorization workflow tools. Invoked from the
+        # user_initiated_improvement workflow; substrate-
+        # internal (not surfaced to agent loop path).
+        "record_fix_authorization":           frozenset({"confirmed"}),
+        "classify_proposed_fix":              frozenset({"confirmed"}),
+        "validate_investigation_response":    frozenset({"confirmed"}),
+        "maybe_run_closure_for_fix":          frozenset({"confirmed"}),
+        "surface_to_user":                    frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1619,10 +1632,236 @@ class ReasoningService:
                 return await self._handle_closure_tool(
                     tool_name, tool_input, request,
                 )
+            elif tool_name in (
+                "record_fix_authorization",
+                "classify_proposed_fix",
+                "validate_investigation_response",
+                "maybe_run_closure_for_fix",
+                "surface_to_user",
+            ):
+                # USER-INITIATED-IMPROVEMENT-TRIGGER-V1: dispatch
+                # the five fix-authorization workflow tools.
+                return await self._handle_fix_authorization_tool(
+                    tool_name, tool_input, request,
+                )
             else:
                 return f"Kernel tool '{tool_name}' not handled."
         else:
             return await self._mcp.call_tool(tool_name, tool_input)
+
+    async def _handle_fix_authorization_tool(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        request: "ReasoningRequest",
+    ) -> str:
+        """USER-INITIATED-IMPROVEMENT-TRIGGER-V1 dispatch helper
+        for the five fix-authorization workflow tools."""
+        import json as _json
+        from kernos.kernel.fix_authorization import (
+            FixAuthorizationError,
+            InvestigationResponseMalformed,
+            classify_proposed_fix,
+            maybe_run_closure_for_fix,
+            record_fix_authorization,
+            validate_investigation_response,
+        )
+
+        handler = getattr(self, "_handler", None)
+
+        try:
+            if tool_name == "classify_proposed_fix":
+                # Pure function; no substrate dependency.
+                result = await classify_proposed_fix(
+                    instance_id=request.instance_id,
+                    proposed_fix_summary=tool_input.get(
+                        "proposed_fix_summary", "",
+                    ),
+                    proposed_fix_diff=tool_input.get(
+                        "proposed_fix_diff", "",
+                    ),
+                    touches_paths=tool_input.get(
+                        "touches_paths", [],
+                    ) or [],
+                    external_action=tool_input.get(
+                        "external_action", "",
+                    ),
+                )
+                return _json.dumps(result, sort_keys=True)
+
+            if tool_name == "validate_investigation_response":
+                # Validation; raises InvestigationResponseMalformed
+                # on bad shape — workflow's on_failure: abort
+                # fires when this raises (vs returning an error
+                # string the workflow would treat as success).
+                # Intentionally NOT caught below so the raise
+                # propagates.
+                try:
+                    result = validate_investigation_response(
+                        investigation_outcome=tool_input.get(
+                            "investigation_outcome", "",
+                        ),
+                        failure_mode=tool_input.get(
+                            "failure_mode", "",
+                        ),
+                        proposed_fix_summary=tool_input.get(
+                            "proposed_fix_summary", "",
+                        ),
+                        proposed_fix_diff=tool_input.get(
+                            "proposed_fix_diff", "",
+                        ),
+                        external_action=tool_input.get(
+                            "external_action", "",
+                        ),
+                        touches_paths=tool_input.get(
+                            "touches_paths", [],
+                        ),
+                    )
+                except InvestigationResponseMalformed:
+                    raise   # re-raise so workflow aborts
+                return _json.dumps(result, sort_keys=True)
+
+            if tool_name == "record_fix_authorization":
+                fa_store = (
+                    getattr(handler, "_fix_authorization_store", None)
+                    if handler is not None else None
+                )
+                if fa_store is None:
+                    return (
+                        "Fix-authorization substrate is not "
+                        "available — fix_authorization_store "
+                        "hasn't been wired in this process."
+                    )
+                result = await record_fix_authorization(
+                    store=fa_store,
+                    instance_id=request.instance_id,
+                    request_id=tool_input.get("request_id", ""),
+                    requester_member_id=tool_input.get(
+                        "requester_member_id", "",
+                    ),
+                    source_space_id=tool_input.get(
+                        "source_space_id", "",
+                    ),
+                    target_hint=tool_input.get("target_hint", ""),
+                    request_text=tool_input.get("request_text", ""),
+                    trigger_surface=tool_input.get(
+                        "trigger_surface", "slash:/fix",
+                    ),
+                )
+                return _json.dumps(result, sort_keys=True)
+
+            if tool_name == "maybe_run_closure_for_fix":
+                # Composes closure-v1 primitives. Needs both
+                # closure_store (from handler) AND optional
+                # callbacks (resolved lazily).
+                closure_store = (
+                    getattr(handler, "_closure_store", None)
+                    if handler is not None else None
+                )
+                fp_store = (
+                    getattr(handler, "_friction_pattern_store", None)
+                    if handler is not None else None
+                )
+
+                def _transition(**kwargs):
+                    if fp_store is None:
+                        return None
+                    return fp_store.transition_pattern_lifecycle(
+                        **kwargs,
+                    )
+
+                events = (
+                    getattr(handler, "_events", None)
+                    or getattr(handler, "_event_stream", None)
+                ) if handler is not None else None
+
+                async def _emit(*, instance_id, event_type, payload):
+                    if events is None:
+                        return
+                    await events.emit(
+                        instance_id, event_type, payload,
+                        space_id="",
+                    )
+
+                result = await maybe_run_closure_for_fix(
+                    instance_id=request.instance_id,
+                    related_pattern_id=tool_input.get(
+                        "related_pattern_id", "",
+                    ),
+                    active_epoch=int(
+                        tool_input.get("active_epoch", 0),
+                    ),
+                    closure_store=closure_store,
+                    pattern_transition_fn=(
+                        _transition if fp_store is not None
+                        else None
+                    ),
+                    event_emit_fn=(
+                        _emit if events is not None else None
+                    ),
+                )
+                return _json.dumps(result, sort_keys=True)
+
+            if tool_name == "surface_to_user":
+                # v1: structured diagnostic write. The full
+                # routing-through-the-agent-response-path is
+                # deferred; v1 ships persistent diagnostic
+                # records so the user-facing surfacing can be
+                # observed and the operator can manually
+                # forward via channel post if needed. Wiring
+                # to the live channel send is a Phase D follow-
+                # on once the workflow is shipped + soaked.
+                import os as _os
+                from pathlib import Path as _Path
+                data_dir = _os.environ.get(
+                    "KERNOS_DATA_DIR", "./data",
+                )
+                space_id = tool_input.get("space_id", "")
+                message_kind = tool_input.get("message_kind", "")
+                _surface_dir = (
+                    _Path(data_dir)
+                    / f"discord_{request.instance_id.split(':')[-1] if ':' in request.instance_id else request.instance_id}"
+                    / "diagnostics"
+                    / "fix_authorizations"
+                )
+                _surface_dir.mkdir(parents=True, exist_ok=True)
+                _surface_file = _surface_dir / (
+                    f"surface_{message_kind}_"
+                    f"{tool_input.get('metadata', {}).get('request_id', 'unknown')}.json"
+                )
+                _payload = {
+                    "instance_id": request.instance_id,
+                    "space_id": space_id,
+                    "member_id": tool_input.get("member_id", ""),
+                    "message_kind": message_kind,
+                    "body": tool_input.get("body", ""),
+                    "metadata": tool_input.get("metadata", {}),
+                    "surfaced_at": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc,
+                    ).isoformat(),
+                }
+                _surface_file.write_text(
+                    _json.dumps(_payload, sort_keys=True, indent=2),
+                )
+                return _json.dumps({
+                    "surfaced_at": _payload["surfaced_at"],
+                    "diagnostic_path": str(_surface_file),
+                }, sort_keys=True)
+
+        except FixAuthorizationError as exc:
+            # InvestigationResponseMalformed is a subclass of
+            # FixAuthorizationError but we WANT it to propagate
+            # (handled inside the if-branch via explicit raise).
+            # All other FixAuthorizationError subclasses return
+            # a friendly string here.
+            if isinstance(exc, InvestigationResponseMalformed):
+                raise
+            return (
+                f"fix_authorization_error: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+        return f"Kernel tool '{tool_name}' not handled."
 
     async def _handle_closure_tool(
         self,

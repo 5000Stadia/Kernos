@@ -971,6 +971,15 @@ class MessageHandler:
         if os.getenv("KERNOS_CLOSURE_STORE", "1") == "1":
             self._closure_store = ClosureStore()
 
+        # USER-INITIATED-IMPROVEMENT-TRIGGER-V1 (2026-05-27): fix-
+        # authorization substrate. Mirrors closure_store pattern.
+        from kernos.kernel.fix_authorization import (
+            FixAuthorizationStore,
+        )
+        self._fix_authorization_store: FixAuthorizationStore | None = None
+        if os.getenv("KERNOS_FIX_AUTHORIZATION_STORE", "1") == "1":
+            self._fix_authorization_store = FixAuthorizationStore()
+
         async def _emit_friction_pattern_event(
             event_type: str, payload: dict,
         ) -> None:
@@ -4321,6 +4330,10 @@ class MessageHandler:
                         response = await self._handle_spaces(primary_ctx, _cmd)
                     elif _cmd_lower.startswith("/wipe"):
                         response = await self._handle_wipe(primary_ctx, _cmd)
+                    elif _cmd_lower.startswith("/fix"):
+                        response = await self._handle_fix_command(
+                            primary_ctx, primary_msg, _cmd,
+                        )
                     elif _cmd_lower == "/restart":
                         # Owner-only restart — works on all platforms
                         _is_owner = False
@@ -4972,6 +4985,118 @@ class MessageHandler:
 
             return "I'm not sure which tool or platform you're setting up. Start the connection process first, then say 'secure api' again."
         return None
+
+    async def _handle_fix_command(
+        self, ctx: TurnContext, msg: Any, raw_cmd: str,
+    ) -> str:
+        """USER-INITIATED-IMPROVEMENT-TRIGGER-V1 /fix slash command.
+
+        Emits ``user.fix_authorization_received`` event which fires
+        the ``user_initiated_improvement`` workflow. Workflow
+        handles investigation + classification + routing + surfacing.
+
+        Owner-only (fix authorization is sensitive — opens a
+        write-path investigation). Returns a short acknowledgement;
+        the workflow's own surfacing step delivers progress
+        updates.
+
+        Usage:
+          ``/fix``                  — uses recent space context
+          ``/fix <target string>``  — explicit target hint
+
+        Emission contract per spec section "New primitives":
+          - request_id: uuid4().hex
+          - requester_member_id, source_space_id from ctx
+          - target_hint: post-`/fix` text (stripped)
+          - request_text: the full raw_cmd
+          - trigger_surface: "slash:/fix" (v1; v1.1 may add
+            ":from_proposal" when a fix_proposal is in recent
+            context)
+          - surfaced_context: empty in v1 (recent-context
+            enrichment is a v1.1 follow-up)
+        """
+        # Owner check (fix authorization is sensitive). Mirrors
+        # the /restart pattern.
+        _is_owner = False
+        if (
+            hasattr(self, '_instance_db')
+            and self._instance_db
+            and ctx.member_id
+        ):
+            _m = await self._instance_db.get_member(ctx.member_id)
+            _is_owner = _m and _m.get("role") == "owner"
+        if not _is_owner:
+            return (
+                "`/fix` is owner-only — it authorizes write-path "
+                "investigation + repair. Ask the owner to "
+                "authorize."
+            )
+
+        # Extract target_hint from `/fix [target]`. Strip the
+        # leading `/fix` (with optional case variation).
+        parts = raw_cmd.strip().split(None, 1)
+        target_hint = parts[1].strip() if len(parts) > 1 else ""
+
+        import uuid as _uuid_fix
+        request_id = _uuid_fix.uuid4().hex
+
+        # v1: emit the authorization event. The workflow registry
+        # picks it up via the user.fix_authorization_received
+        # trigger. Best-effort: any emit failure is logged but
+        # does not block the user's experience.
+        try:
+            from kernos.kernel import event_stream as _event_stream_fix
+            await _event_stream_fix.emit(
+                ctx.instance_id,
+                "user.fix_authorization_received",
+                {
+                    "request_id": request_id,
+                    "requester_member_id": ctx.member_id or "",
+                    "request_text": raw_cmd,
+                    "target_hint": target_hint,
+                    "source_space_id": getattr(
+                        ctx, 'active_space_id', "",
+                    ) or "",
+                    "surfaced_context": [],
+                    "authorized_at": (
+                        __import__("datetime").datetime.now(
+                            __import__("datetime").timezone.utc,
+                        ).isoformat()
+                    ),
+                    "trigger_surface": "slash:/fix",
+                },
+                space_id=getattr(ctx, 'active_space_id', "") or "",
+            )
+            logger.info(
+                "FIX_AUTHORIZATION_EMITTED request_id=%s "
+                "member=%s target_hint=%r",
+                request_id, ctx.member_id, target_hint,
+            )
+        except Exception as exc:
+            logger.warning(
+                "FIX_AUTHORIZATION_EMIT_FAILED error=%s — "
+                "user-facing response still sent; workflow will "
+                "not fire",
+                exc,
+            )
+            return (
+                "I tried to authorize the investigation but "
+                f"hit an internal error ({type(exc).__name__}). "
+                "Try again, or check logs."
+            )
+
+        # Short acknowledgement; the workflow's
+        # surface_investigation_started step delivers the
+        # deeper progress update.
+        if target_hint:
+            return (
+                f"Authorized. Investigating: {target_hint!r}. "
+                f"I'll surface what I find."
+            )
+        return (
+            "Authorized. Investigating against recent context. "
+            "I'll surface what I find."
+        )
 
     async def _handle_dump(self, ctx: TurnContext) -> str:
         """Write the fully assembled context to a diagnostic file, skip reasoning.
