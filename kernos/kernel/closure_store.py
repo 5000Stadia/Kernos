@@ -689,6 +689,109 @@ def clear_probe_runners() -> None:
     _PROBE_RUNNERS.clear()
 
 
+# ---------------------------------------------------------------------------
+# Tool schemas (agent-facing surface for the three closure tools).
+# Wired into the registrar at kernos.kernel.kernel_tool_registry.
+# ---------------------------------------------------------------------------
+
+
+LOOKUP_PATTERN_INVARIANTS_TOOL: dict = {
+    "name": "lookup_pattern_invariants",
+    "description": (
+        "Return the invariants linked to a friction pattern. "
+        "Read-only. Returns has_invariants (bool), "
+        "primary_invariant_id (str, first by ASC ordering or "
+        "empty), and all_invariant_ids (list). Used by the "
+        "self_improvement workflow to branch between the "
+        "closure path (when invariants linked) and the legacy "
+        "fallback (when none)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "pattern_id": {
+                "type": "string",
+                "description": "Friction pattern_id to look up.",
+            },
+        },
+        "required": ["pattern_id"],
+        "additionalProperties": False,
+    },
+}
+
+
+RECORD_CLOSURE_ATTEMPT_TOOL: dict = {
+    "name": "record_closure_attempt",
+    "description": (
+        "Insert a ClosureAttempt row with outcome='pending'. "
+        "Idempotent on (instance_id, pattern_id, invariant_id, "
+        "active_epoch) — returns the existing closure_id when a "
+        "pending row already exists. Rejects unlinked "
+        "(pattern, invariant) pairs (the link table is the "
+        "single source of truth) and probe_kinds outside "
+        "READ_ONLY_PROBE_KINDS."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "pattern_id": {"type": "string"},
+            "invariant_id": {"type": "string"},
+            "active_epoch": {"type": "integer"},
+            "route": {
+                "type": "string",
+                "description": (
+                    "ROUTE_CLASSES member; v1 only "
+                    "code_change_via_cc is implemented."
+                ),
+            },
+            "route_payload": {"type": "object"},
+            "probe_kind": {
+                "type": "string",
+                "description": (
+                    "READ_ONLY_PROBE_KINDS member; v1 only "
+                    "deterministic_introspection."
+                ),
+            },
+            "probe_payload": {"type": "object"},
+            "probe_payload_version": {"type": "integer"},
+        },
+        "required": [
+            "pattern_id", "invariant_id", "active_epoch",
+            "route", "probe_kind", "probe_payload_version",
+        ],
+        "additionalProperties": False,
+    },
+}
+
+
+RUN_CLOSURE_PROBE_TOOL: dict = {
+    "name": "run_closure_probe",
+    "description": (
+        "Execute the stored probe for a ClosureAttempt. "
+        "Idempotent replay: when the attempt's outcome is NOT "
+        "'pending', returns the stored outcome + evidence with "
+        "replayed=True without re-running the probe. On probe "
+        "pass: transitions the friction pattern to 'resolved'. "
+        "On probe fail: pattern stays in current state; emits "
+        "closure.probe_failed with structured evidence."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "closure_id": {
+                "type": "string",
+                "description": (
+                    "closure_id returned by "
+                    "record_closure_attempt."
+                ),
+            },
+        },
+        "required": ["closure_id"],
+        "additionalProperties": False,
+    },
+}
+
+
 async def run_closure_probe(
     *,
     store: ClosureStore,

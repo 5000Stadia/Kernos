@@ -530,6 +530,30 @@ async def bring_up_substrate(
                     _exc_close,
                 )
 
+    # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): start the closure-
+    # machinery store so the autonomy-tool adapter can find a
+    # schema-ready handler._closure_store when the self_improvement
+    # workflow runs. start() is idempotent — repeat calls are safe.
+    try:
+        _closure_store_handler = getattr(handler, "_closure_store", None)
+        if _closure_store_handler is not None:
+            await _closure_store_handler.start(data_dir)
+            logger.info(
+                "CLOSURE_STORE_READY data_dir=%s", data_dir,
+            )
+        else:
+            logger.info(
+                "CLOSURE_STORE_SKIPPED: handler has no _closure_store "
+                "(KERNOS_CLOSURE_STORE opt-out or stub handler); "
+                "closure machinery will refuse with friendly fallback"
+            )
+    except Exception as _exc_closure_start:
+        logger.warning(
+            "CLOSURE_STORE_BRINGUP_FAILED error=%s — closure "
+            "machinery unavailable until restart; substrate continues",
+            _exc_closure_start,
+        )
+
     # Spec 6 commit 7 / B3 fold: register the self_improvement
     # workflow + launch the autonomy-loop emitters in B3 order
     # (helper success BEFORE emitters launch so trigger predicates
@@ -1348,6 +1372,10 @@ def _call_tool_adapter(
         "emit_autonomy_loop_event",
         "ask_coding_session_for_workflow",
         "read_coding_session_response_for_workflow",
+        # SELF-IMPROVEMENT-CLOSURE-V1
+        "lookup_pattern_invariants",
+        "record_closure_attempt",
+        "run_closure_probe",
     })
 
     async def _dispatch(*, tool_id: str, args: dict,
@@ -1399,6 +1427,87 @@ def _call_tool_adapter(
                     instance_id=instance_id, member_id=member_id,
                     args=args, data_dir=data_dir,
                 )
+            # SELF-IMPROVEMENT-CLOSURE-V1: closure-machinery handlers.
+            if tool_id in (
+                "lookup_pattern_invariants",
+                "record_closure_attempt",
+                "run_closure_probe",
+            ):
+                from kernos.kernel.workflows.closure_tools import (
+                    handle_lookup_pattern_invariants,
+                    handle_record_closure_attempt,
+                    handle_run_closure_probe,
+                )
+                closure_store = getattr(handler, "_closure_store", None)
+                if tool_id == "lookup_pattern_invariants":
+                    # Graceful degradation: when closure_store isn't
+                    # wired (KERNOS_CLOSURE_STORE=0 or test stub),
+                    # return has_invariants=False so the workflow's
+                    # branch_on_invariants routes to the legacy
+                    # fallback. Preserves the pre-spec behavior for
+                    # unaugmented patterns.
+                    if closure_store is None:
+                        return {
+                            "has_invariants": False,
+                            "primary_invariant_id": "",
+                            "all_invariant_ids": [],
+                        }
+                    return await handle_lookup_pattern_invariants(
+                        closure_store=closure_store,
+                        instance_id=instance_id, member_id=member_id,
+                        args=args,
+                    )
+                if closure_store is None:
+                    raise RuntimeError(
+                        f"{tool_id} requires handler._closure_store; "
+                        f"closure substrate not wired in bring-up"
+                    )
+                if tool_id == "record_closure_attempt":
+                    return await handle_record_closure_attempt(
+                        closure_store=closure_store,
+                        instance_id=instance_id, member_id=member_id,
+                        args=args,
+                    )
+                if tool_id == "run_closure_probe":
+                    # Build the optional callbacks lazily so
+                    # workflow-adapter handlers stay decoupled
+                    # from the friction-pattern store and event
+                    # stream.
+                    fp_store = getattr(
+                        handler, "_friction_pattern_store", None,
+                    )
+
+                    def _transition(**kwargs):
+                        if fp_store is None:
+                            return None
+                        return fp_store.transition_pattern_lifecycle(
+                            **kwargs,
+                        )
+
+                    events = getattr(handler, "_events", None) or (
+                        getattr(handler, "_event_stream", None)
+                    )
+
+                    async def _emit(*, instance_id, event_type, payload):
+                        if events is None:
+                            return
+                        await events.emit(
+                            instance_id, event_type, payload,
+                            space_id="",
+                        )
+
+                    return await handle_run_closure_probe(
+                        closure_store=closure_store,
+                        instance_id=instance_id, member_id=member_id,
+                        args=args,
+                        pattern_transition_fn=(
+                            _transition if fp_store is not None
+                            else None
+                        ),
+                        event_emit_fn=(
+                            _emit if events is not None else None
+                        ),
+                    )
         # Non-autonomy tools: adapt kwargs to reasoning.execute_tool's
         # signature (tool_name, tool_input, request). The CallToolAction
         # kwargs (tool_id, args, instance_id, member_id) don't map

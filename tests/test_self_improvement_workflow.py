@@ -36,6 +36,7 @@ from kernos.kernel.triggers.runtime import TriggerEvaluationRuntime
 from kernos.kernel.workflows.action_library import (
     ActionLibrary,
     AppendToLedgerAction,
+    BranchAction,
     CallToolAction,
     MarkStateAction,
     NotifyUserAction,
@@ -147,69 +148,130 @@ class TestSelfImprovementYaml:
         """V7.3 architect call: refs use Spec 4 canonical syntax —
         {idea_payload.X} for trigger payload, {step.id.value.X} for
         step values. The emit_outcome step uses dynamic
-        investigation_outcome ref per the architect's modification."""
+        investigation_outcome ref per the architect's modification.
+
+        SELF-IMPROVEMENT-CLOSURE-V1 update: the legacy single-path
+        action_sequence was split into a closure path (main
+        sequence) + a legacy_fallback terminal branch. The legacy
+        behavior is preserved under renamed step ids; assertions
+        target the legacy-fallback branch since that's the
+        equivalent of the pre-spec single path.
+        """
         import yaml
         with _workflow_yaml_path().open() as fp:
             descriptor = yaml.safe_load(fp)
         actions = {a["id"]: a for a in descriptor["action_sequence"]}
-        # record_recurrence uses idea_payload.pattern_id
+        # record_recurrence stays in the main sequence (runs first
+        # for both closure + legacy paths).
         rec_args = actions["record_recurrence"]["parameters"]["args"]
         assert rec_args["pattern_id"] == "{idea_payload.pattern_id}"
-        # ask_cc uses idea_payload.pattern_id + active_epoch
-        ask_args = actions["ask_cc"]["parameters"]["args"]
+
+        # The legacy ask_cc / read_response / emit_outcome live in
+        # terminal_branches.legacy_fallback now.
+        legacy = {
+            a["id"]: a for a in
+            descriptor["terminal_branches"]["legacy_fallback"]
+        }
+        ask_args = legacy["legacy_ask_cc"]["parameters"]["args"]
         assert "{idea_payload.pattern_id}" in ask_args["question"]
-        # read_response uses step.ask_cc.value.request_id
-        read_args = actions["read_response"]["parameters"]["args"]
-        assert read_args["request_id"] == "{step.ask_cc.value.request_id}"
-        # emit_outcome uses DYNAMIC outcome ref (architect's modification).
-        emit_args = actions["emit_outcome"]["parameters"]["args"]
-        assert emit_args["outcome"] == "{step.read_response.value.investigation_outcome}"
+        read_args = (
+            legacy["legacy_read_response"]["parameters"]["args"]
+        )
+        assert read_args["request_id"] == (
+            "{step.legacy_ask_cc.value.request_id}"
+        )
+        emit_args = (
+            legacy["legacy_emit_outcome"]["parameters"]["args"]
+        )
+        assert emit_args["outcome"] == (
+            "{step.legacy_read_response.value.investigation_outcome}"
+        )
         assert emit_args["addresses_friction_patterns"] == [
             "{idea_payload.pattern_id}"
         ]
 
     def test_yaml_gate_predicate_uses_canonical_refs(self):
+        """AC16: both closure and legacy paths declare their own
+        gate with distinct request_id-bound predicates."""
         import yaml
         with _workflow_yaml_path().open() as fp:
             descriptor = yaml.safe_load(fp)
         gates = {g["gate_name"]: g for g in descriptor["approval_gates"]}
-        gate = gates["await_cc_response"]
-        assert gate["approval_event_type"] == "coding_consult.response_received"
-        pred = gate["approval_event_predicate"]
-        assert pred["path"] == "payload.request_id"
-        assert pred["value"] == "{step.ask_cc.value.request_id}"
+
+        # Legacy path's gate is the equivalent of the pre-spec
+        # await_cc_response — preserved behavior under renamed
+        # gate_name.
+        gate_legacy = gates["await_cc_response_legacy"]
+        assert gate_legacy["approval_event_type"] == (
+            "coding_consult.response_received"
+        )
+        pred_legacy = gate_legacy["approval_event_predicate"]
+        assert pred_legacy["path"] == "payload.request_id"
+        assert pred_legacy["value"] == (
+            "{step.legacy_ask_cc.value.request_id}"
+        )
+
+        # Closure path's gate is new — distinct request_id binding.
+        gate_closure = gates["await_cc_response_closure"]
+        assert gate_closure["approval_event_type"] == (
+            "coding_consult.response_received"
+        )
+        pred_closure = gate_closure["approval_event_predicate"]
+        assert pred_closure["path"] == "payload.request_id"
+        assert pred_closure["value"] == (
+            "{step.ask_cc_closure.value.request_id}"
+        )
 
     def test_yaml_parses_via_spec4_descriptor_parser(self, tmp_path):
-        """Functional pin: the YAML survives _build_workflow with the
-        installer placeholders substituted. Pins integration with
-        Spec 4's descriptor parser + Spec 5 12th amendment plural
-        triggers shape."""
+        """Functional pin: the YAML survives _build_workflow with
+        the installer placeholders substituted. Pins integration
+        with Spec 4's descriptor parser + Spec 5 12th amendment
+        plural triggers shape.
+
+        SELF-IMPROVEMENT-CLOSURE-V1 (AC15): main sequence has 8
+        steps (record_recurrence + lookup_invariants + branch + 5
+        closure-path steps), terminal_branches.legacy_fallback has
+        4 steps, approval_gates has 2.
+        """
         import yaml
 
         from kernos.kernel.workflows.descriptor_parser import _build_workflow
 
         with _workflow_yaml_path().open() as fp:
             descriptor = yaml.safe_load(fp)
-        # Substitute placeholders so the descriptor's instance_id is
-        # a concrete value.
         descriptor = _substitute_installer_placeholders(
             descriptor, TEST_INSTANCE_ID,
         )
         wf = _build_workflow(descriptor)
-        # Plural triggers leave Workflow.trigger=None (12th amendment).
         assert wf.trigger is None
         assert wf.workflow_id == "self_improvement"
         assert wf.instance_id == TEST_INSTANCE_ID
-        # 5 actions in the action_sequence.
-        assert len(wf.action_sequence) == 5
+        # 8 actions in main action_sequence (closure path).
+        assert len(wf.action_sequence) == 8
         action_ids = [a.id for a in wf.action_sequence]
         assert action_ids == [
-            "record_recurrence", "ask_cc", "read_response",
-            "mark_resolved", "emit_outcome",
+            "record_recurrence",
+            "lookup_invariants",
+            "branch_on_invariants",
+            "record_closure_attempt",
+            "ask_cc_closure",
+            "read_response_closure",
+            "run_closure_probe",
+            "emit_outcome_closure",
         ]
-        # 1 approval gate.
-        assert len(wf.approval_gates) == 1
-        assert wf.approval_gates[0].gate_name == "await_cc_response"
+        # 4 actions in the legacy_fallback terminal branch.
+        legacy_steps = wf.terminal_branches["legacy_fallback"]
+        legacy_ids = [a.id for a in legacy_steps]
+        assert legacy_ids == [
+            "legacy_ask_cc", "legacy_read_response",
+            "legacy_mark_resolved", "legacy_emit_outcome",
+        ]
+        # Two approval gates (one per path).
+        gate_names = {g.gate_name for g in wf.approval_gates}
+        assert gate_names == {
+            "await_cc_response_closure",
+            "await_cc_response_legacy",
+        }
 
 
 # ===========================================================================
@@ -324,9 +386,29 @@ async def stack(tmp_path):
                 args=args,
                 data_dir=str(tmp_path),
             )
+        # SELF-IMPROVEMENT-CLOSURE-V1: closure tools. This test
+        # exercises the LEGACY fallback path (no invariants linked
+        # to the test pattern), so lookup_pattern_invariants returns
+        # has_invariants=False which routes to legacy_fallback.
+        # record_closure_attempt + run_closure_probe are unreachable
+        # on this path; surface a clear error if they're hit.
+        if tool_id == "lookup_pattern_invariants":
+            return {
+                "has_invariants": False,
+                "primary_invariant_id": "",
+                "all_invariant_ids": [],
+            }
+        if tool_id in ("record_closure_attempt", "run_closure_probe"):
+            raise RuntimeError(
+                f"{tool_id} reached in a legacy-only test fixture; "
+                f"closure path should not run when has_invariants=False"
+            )
         raise RuntimeError(f"unknown tool_id={tool_id!r}")
 
     lib.register(CallToolAction(tool_dispatch_fn=_tool_dispatch))
+    # SELF-IMPROVEMENT-CLOSURE-V1: branch verb needed for the
+    # has_invariants routing step.
+    lib.register(BranchAction())
     lib.register(AppendToLedgerAction(
         ledger_append_fn=_workflow_ledger_append_adapter(ledger),
         ledger_read_last_fn=_workflow_ledger_read_last_adapter(ledger),
@@ -682,16 +764,21 @@ class TestEndToEndAutonomyLoop:
                 f"expected exactly one emitter translation per "
                 f"activation episode; got {freq_emitter._emit_count}"
             )
-            # And: mark_resolved step output shows the transition
-            # committed to RESOLVED state at the tool layer.
+            # And: legacy_mark_resolved step output shows the
+            # transition committed to RESOLVED state at the tool
+            # layer. (Pre-SELF-IMPROVEMENT-CLOSURE-V1 this was
+            # `mark_resolved`; the legacy path's step is now
+            # renamed to legacy_mark_resolved and lives in the
+            # legacy_fallback terminal branch — same observable
+            # behavior, different step id.)
             async with stack["engine"]._db.execute(
                 "SELECT output_json FROM workflow_step_outputs "
-                "WHERE output_name = 'mark_resolved'",
+                "WHERE output_name = 'legacy_mark_resolved'",
             ) as cur:
                 mr_rows = [dict(r) for r in await cur.fetchall()]
             assert len(mr_rows) == 1, (
-                f"expected exactly one mark_resolved step output; "
-                f"got {len(mr_rows)}"
+                f"expected exactly one legacy_mark_resolved step "
+                f"output; got {len(mr_rows)}"
             )
             # Codex round-2 LOW 2 fold: substrate cardinality pins so
             # an extra duplicate workflow execution that aborts

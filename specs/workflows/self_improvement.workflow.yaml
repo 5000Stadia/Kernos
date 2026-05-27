@@ -80,68 +80,178 @@ action_sequence:
     continuation_rules:
       on_failure: abort
 
-  - id: ask_cc
+  # SELF-IMPROVEMENT-CLOSURE-V1: look up invariants linked to this
+  # pattern. If at least one link row exists in
+  # friction_pattern_invariant, the closure path runs (probe-
+  # verified resolution). If no link, the legacy fallback runs
+  # (CC-asked, pattern marked resolved on response — unchanged
+  # behavior for unaugmented patterns).
+  - id: lookup_invariants
+    action_type: call_tool
+    parameters:
+      tool_id: lookup_pattern_invariants
+      args:
+        pattern_id: '{idea_payload.pattern_id}'
+    continuation_rules:
+      on_failure: abort
+
+  - id: branch_on_invariants
+    action_type: branch
+    parameters:
+      condition: '{step.lookup_invariants.value.has_invariants}'
+      branch_on_true: record_closure_attempt
+      branch_on_false: 'terminal:legacy_fallback:legacy_ask_cc'
+    continuation_rules:
+      on_failure: abort
+
+  # ─── CLOSURE PATH (main sequence continues) ────────────────────
+  - id: record_closure_attempt
+    action_type: call_tool
+    parameters:
+      tool_id: record_closure_attempt
+      args:
+        pattern_id: '{idea_payload.pattern_id}'
+        invariant_id: '{step.lookup_invariants.value.primary_invariant_id}'
+        active_epoch: '{idea_payload.active_epoch}'
+        route: code_change_via_cc
+        route_payload: {}
+        probe_kind: deterministic_introspection
+        probe_payload: {}
+        probe_payload_version: 1
+    continuation_rules:
+      on_failure: abort
+
+  - id: ask_cc_closure
     action_type: call_tool
     parameters:
       tool_id: ask_coding_session_for_workflow
       args:
         target: claude_code
-        question: 'Address recurring friction pattern: {idea_payload.pattern_id}'
+        question: 'Address recurring friction pattern: {idea_payload.pattern_id} (invariant: {step.lookup_invariants.value.primary_invariant_id})'
         context:
-          # Pattern payload for the coding session itself.
           pattern_id: '{idea_payload.pattern_id}'
-          # Spec 4 gate-scoping fields. The bridge echoes these to
-          # the coding_consult.response_received event payload so the
-          # engine's gate match (_on_post_flush_for_gates) can verify
-          # the binding between this paused execution and the
-          # response event. Resolved at parameter time:
-          # {workflow.execution_id} → execution row PK;
-          # {workflow.gate_nonce} → engine-minted per-gate nonce.
+          invariant_id: '{step.lookup_invariants.value.primary_invariant_id}'
+          closure_id: '{step.record_closure_attempt.value.closure_id}'
           _workflow_execution_id: '{workflow.execution_id}'
           _workflow_gate_nonce: '{workflow.gate_nonce}'
     continuation_rules:
       on_failure: abort
-    gate_ref: await_cc_response
+    gate_ref: await_cc_response_closure
 
-  - id: read_response
+  - id: read_response_closure
     action_type: call_tool
     parameters:
       tool_id: read_coding_session_response_for_workflow
       args:
-        request_id: '{step.ask_cc.value.request_id}'
+        request_id: '{step.ask_cc_closure.value.request_id}'
     continuation_rules:
       on_failure: abort
 
-  - id: mark_resolved
+  - id: run_closure_probe
     action_type: call_tool
     parameters:
-      tool_id: transition_friction_pattern_lifecycle
+      tool_id: run_closure_probe
       args:
-        pattern_id: '{idea_payload.pattern_id}'
-        new_state: resolved
-        resolved_by_spec: self_improvement
+        closure_id: '{step.record_closure_attempt.value.closure_id}'
     continuation_rules:
       on_failure: abort
 
-  - id: emit_outcome
+  # AC10: legacy outcome field preserved with CC's investigation
+  # outcome string unchanged; closure_outcome added under
+  # extra_payload. Pattern transition to resolved happens INSIDE
+  # run_closure_probe on probe pass; on probe fail the pattern
+  # stays in current state and closure.probe_failed is emitted.
+  - id: emit_outcome_closure
     action_type: call_tool
     parameters:
       tool_id: emit_autonomy_loop_event
       args:
         workflow_id: self_improvement
-        outcome: '{step.read_response.value.investigation_outcome}'
+        outcome: '{step.read_response_closure.value.investigation_outcome}'
         addresses_friction_patterns:
           - '{idea_payload.pattern_id}'
+        extra_payload:
+          closure_outcome: '{step.run_closure_probe.value.outcome}'
+          closure_id: '{step.record_closure_attempt.value.closure_id}'
+          invariant_id: '{step.lookup_invariants.value.primary_invariant_id}'
     continuation_rules:
       on_failure: abort
 
+# ─── TERMINAL BRANCH: legacy_fallback ────────────────────────────
+# Reached only from branch_on_invariants on False. Cannot fall
+# through into main action_sequence after completion.
+terminal_branches:
+  legacy_fallback:
+    - id: legacy_ask_cc
+      action_type: call_tool
+      parameters:
+        tool_id: ask_coding_session_for_workflow
+        args:
+          target: claude_code
+          question: 'Address recurring friction pattern: {idea_payload.pattern_id}'
+          context:
+            pattern_id: '{idea_payload.pattern_id}'
+            _workflow_execution_id: '{workflow.execution_id}'
+            _workflow_gate_nonce: '{workflow.gate_nonce}'
+      continuation_rules:
+        on_failure: abort
+      gate_ref: await_cc_response_legacy
+
+    - id: legacy_read_response
+      action_type: call_tool
+      parameters:
+        tool_id: read_coding_session_response_for_workflow
+        args:
+          request_id: '{step.legacy_ask_cc.value.request_id}'
+      continuation_rules:
+        on_failure: abort
+
+    - id: legacy_mark_resolved
+      action_type: call_tool
+      parameters:
+        tool_id: transition_friction_pattern_lifecycle
+        args:
+          pattern_id: '{idea_payload.pattern_id}'
+          new_state: resolved
+          resolved_by_spec: self_improvement
+      continuation_rules:
+        on_failure: abort
+
+    - id: legacy_emit_outcome
+      action_type: call_tool
+      parameters:
+        tool_id: emit_autonomy_loop_event
+        args:
+          workflow_id: self_improvement
+          outcome: '{step.legacy_read_response.value.investigation_outcome}'
+          addresses_friction_patterns:
+            - '{idea_payload.pattern_id}'
+          extra_payload:
+            closure_outcome: no_invariant_fallback
+      continuation_rules:
+        on_failure: abort
+
+# AC16: both paths need their own gate declarations with distinct
+# request_id-bound predicates. The closure path's gate matches
+# step.ask_cc_closure.value.request_id; the legacy path's gate
+# matches step.legacy_ask_cc.value.request_id.
 approval_gates:
-  - gate_name: await_cc_response
-    pause_reason: awaiting coding session response
+  - gate_name: await_cc_response_closure
+    pause_reason: awaiting coding session response (closure path)
     approval_event_type: coding_consult.response_received
     approval_event_predicate:
       op: eq
       path: payload.request_id
-      value: '{step.ask_cc.value.request_id}'
+      value: '{step.ask_cc_closure.value.request_id}'
+    timeout_seconds: 86400
+    bound_behavior_on_timeout: abort_workflow
+
+  - gate_name: await_cc_response_legacy
+    pause_reason: awaiting coding session response (legacy path)
+    approval_event_type: coding_consult.response_received
+    approval_event_predicate:
+      op: eq
+      path: payload.request_id
+      value: '{step.legacy_ask_cc.value.request_id}'
     timeout_seconds: 86400
     bound_behavior_on_timeout: abort_workflow

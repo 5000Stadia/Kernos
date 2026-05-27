@@ -921,6 +921,13 @@ class ReasoningService:
         # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): autonomous
         # improvement orchestrator entry point.
         "improve_kernos":                     frozenset({"confirmed"}),
+        # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): closure-
+        # machinery tools. Invoked from the self_improvement
+        # workflow's closure path; not surfaced to the agent's
+        # "loop" path (purely substrate-internal).
+        "lookup_pattern_invariants":          frozenset({"confirmed"}),
+        "record_closure_attempt":             frozenset({"confirmed"}),
+        "run_closure_probe":                  frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------

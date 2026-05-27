@@ -159,6 +159,11 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.improvement_loop_workflow import (
         IMPROVE_KERNOS_TOOL,
     )
+    from kernos.kernel.closure_store import (
+        LOOKUP_PATTERN_INVARIANTS_TOOL,
+        RECORD_CLOSURE_ATTEMPT_TOOL,
+        RUN_CLOSURE_PROBE_TOOL,
+    )
     from kernos.kernel.files import FILE_TOOLS
     from kernos.kernel.members import MANAGE_MEMBERS_TOOL
     from kernos.kernel.note_this import NOTE_THIS_TOOL
@@ -255,6 +260,16 @@ def _import_kernel_schemas() -> list[dict]:
         # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): the
         # autonomous-improvement orchestrator entry point.
         IMPROVE_KERNOS_TOOL,
+        # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): closure-
+        # machinery tools used by the self_improvement workflow's
+        # closure path. lookup is read; record + run are
+        # soft_write (run_closure_probe wrapper writes the
+        # closure_attempt outcome + may transition the friction
+        # pattern lifecycle, though the probe HANDLER itself is
+        # read-only).
+        LOOKUP_PATTERN_INVARIANTS_TOOL,
+        RECORD_CLOSURE_ATTEMPT_TOOL,
+        RUN_CLOSURE_PROBE_TOOL,
     ])
     # REFERENCE-PRIMITIVE-V1 — seven new tools (request_reference,
     # store_reference, create_reference_collection + four recovery

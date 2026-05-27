@@ -961,6 +961,16 @@ class MessageHandler:
         if os.getenv("KERNOS_FRICTION_PATTERN_STORE", "1") == "1":
             self._friction_pattern_store = FrictionPatternStore()
 
+        # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): closure-machinery
+        # substrate. Same per-module-connection pattern as the
+        # friction-pattern store — own aiosqlite over shared
+        # instance.db. Bring-up calls `.start(data_dir)` later in
+        # `bring_up_substrate` so the constructor here stays light.
+        from kernos.kernel.closure_store import ClosureStore
+        self._closure_store: ClosureStore | None = None
+        if os.getenv("KERNOS_CLOSURE_STORE", "1") == "1":
+            self._closure_store = ClosureStore()
+
         async def _emit_friction_pattern_event(
             event_type: str, payload: dict,
         ) -> None:
