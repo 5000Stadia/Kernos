@@ -720,7 +720,77 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants"}
+
+    # SELF-IMPROVEMENT-CLOSURE-V1 (AC17): explicit dispatchability
+    # registry. Every name in this set MUST have a concrete branch
+    # in execute_tool that does NOT return the
+    # "Kernel tool '<name>' not handled." sentinel. Adding a name
+    # here without a handler breaks AC17's test
+    # (test_dispatchability_registry_honest). The substrate-parity
+    # probe (Tool Availability Honesty) reads this set via the
+    # public get_dispatchable_kernel_tools() helper rather than
+    # equating _KERNEL_TOOLS membership with dispatchability —
+    # because execute_tool returns the sentinel for any name in
+    # _KERNEL_TOOLS that lacks a real handler branch, which is
+    # exactly the catalog-vs-dispatch divergence the invariant
+    # catches.
+    _DISPATCHABLE_KERNEL_TOOLS: frozenset[str] = frozenset({
+        # Workspace files
+        "write_file", "read_file", "list_files", "delete_file",
+        # Memory + identity
+        "remember", "remember_details", "dismiss_whisper",
+        "read_source", "read_soul", "update_soul",
+        "note_this", "inspect_state",
+        # Covenants / capabilities / channels
+        "manage_covenants", "manage_capabilities",
+        "manage_channels", "send_to_channel", "manage_schedule",
+        # Planning + diagnostics
+        "request_tool", "execute_code", "manage_workspace",
+        "register_tool", "manage_plan", "read_runtime_trace",
+        "diagnose_issue", "propose_fix", "submit_spec",
+        "inspect_tools",
+        # Members + relational messaging
+        "manage_members", "send_relational_message",
+        "resolve_relational_message",
+        # Model + chain diagnostics
+        "set_chain_model", "diagnose_llm_chain", "diagnose_messenger",
+        # Canvas + reference
+        "canvas_list", "canvas_create", "page_read", "page_write",
+        "page_list", "page_search", "canvas_preference_extract",
+        "canvas_preference_confirm",
+        "request_reference", "store_reference",
+        "create_reference_collection", "move_reference_to_canvas",
+        "mark_reference_superseded", "quarantine_reference",
+        "restore_reference_from_quarantine",
+        # External agents + cross-space
+        "consult", "request_space_action",
+        "ask_coding_session", "read_coding_session_response",
+        # Self-admin
+        "dump_context", "restart_self",
+        # Git operations + self-test + autonomous improvement
+        "git_fetch", "git_rev_parse", "git_status",
+        "git_diff_for_review", "git_commit", "git_push",
+        "run_self_test_suite", "improve_kernos",
+        # SELF-IMPROVEMENT-CLOSURE-V1
+        "record_closure_attempt", "run_closure_probe",
+        "lookup_pattern_invariants",
+    })
+
+    def get_dispatchable_kernel_tools(self) -> set[str]:
+        """Return the set of tool names with confirmed dispatch
+        paths through ``execute_tool``. Public surface for
+        substrate-parity probes (SELF-IMPROVEMENT-CLOSURE-V1).
+
+        Contract: every returned name has a concrete handler branch
+        in ``execute_tool`` that does NOT return the
+        ``"Kernel tool '<name>' not handled."`` sentinel string.
+        The returned set is a subset of ``_KERNEL_TOOLS`` by
+        construction; names in ``_KERNEL_TOOLS`` but NOT in this
+        set represent registration drift and are exactly what the
+        Tool Availability Honesty invariant probe detects.
+        """
+        return set(self._DISPATCHABLE_KERNEL_TOOLS)
 
     # CLEANUP-BATCH-V1 item 11: kernel-tool dispatch path registry.
     #
@@ -1529,10 +1599,131 @@ class ReasoningService:
                 return await self._handle_reference_tool(
                     tool_name, tool_input, request,
                 )
+            elif tool_name in (
+                "record_closure_attempt",
+                "run_closure_probe",
+                "lookup_pattern_invariants",
+            ):
+                # SELF-IMPROVEMENT-CLOSURE-V1: dispatch the three
+                # closure-machinery tools through their named
+                # helpers in kernos.kernel.closure_store. The
+                # ClosureStore instance is resolved from the
+                # handler (set at bring-up).
+                return await self._handle_closure_tool(
+                    tool_name, tool_input, request,
+                )
             else:
                 return f"Kernel tool '{tool_name}' not handled."
         else:
             return await self._mcp.call_tool(tool_name, tool_input)
+
+    async def _handle_closure_tool(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        request: "ReasoningRequest",
+    ) -> str:
+        """SELF-IMPROVEMENT-CLOSURE-V1 dispatch helper for the three
+        closure-machinery tools (record_closure_attempt,
+        run_closure_probe, lookup_pattern_invariants).
+
+        Resolves :class:`ClosureStore` from ``handler._closure_store``
+        (set at bring-up). Returns a friendly string when the
+        substrate isn't bound — surfaces the gap rather than
+        crashing the turn.
+        """
+        import json as _json
+        from kernos.kernel.closure_store import (
+            ClosureStoreError,
+            lookup_pattern_invariants,
+            record_closure_attempt,
+            run_closure_probe,
+        )
+
+        store = None
+        handler = getattr(self, "_handler", None)
+        if handler is not None:
+            store = getattr(handler, "_closure_store", None)
+        if store is None:
+            return (
+                "Closure substrate is not available — "
+                "closure_store hasn't been wired in this process."
+            )
+
+        try:
+            if tool_name == "lookup_pattern_invariants":
+                result = await lookup_pattern_invariants(
+                    store=store,
+                    instance_id=request.instance_id,
+                    pattern_id=tool_input.get("pattern_id", ""),
+                )
+                return _json.dumps(result, sort_keys=True)
+
+            if tool_name == "record_closure_attempt":
+                result = await record_closure_attempt(
+                    store=store,
+                    instance_id=request.instance_id,
+                    pattern_id=tool_input.get("pattern_id", ""),
+                    invariant_id=tool_input.get("invariant_id", ""),
+                    active_epoch=int(
+                        tool_input.get("active_epoch", 0),
+                    ),
+                    route=tool_input.get("route", "code_change_via_cc"),
+                    route_payload=tool_input.get("route_payload") or {},
+                    probe_kind=tool_input.get(
+                        "probe_kind", "deterministic_introspection",
+                    ),
+                    probe_payload=tool_input.get("probe_payload") or {},
+                    probe_payload_version=int(
+                        tool_input.get("probe_payload_version", 1),
+                    ),
+                )
+                return _json.dumps(result, sort_keys=True)
+
+            if tool_name == "run_closure_probe":
+                # Lazily resolve the pattern-transition + event-emit
+                # callbacks so the handler can supply them without
+                # the closure_store knowing about friction patterns
+                # or the event stream.
+                fp_store = getattr(
+                    handler, "_friction_pattern_store", None,
+                )
+
+                def _transition(**kwargs):
+                    if fp_store is None:
+                        return None
+                    return fp_store.transition_pattern_lifecycle(
+                        **kwargs,
+                    )
+
+                events = getattr(handler, "_events", None) or getattr(
+                    handler, "_event_stream", None,
+                )
+
+                async def _emit(*, instance_id, event_type, payload):
+                    if events is None:
+                        return
+                    await events.emit(
+                        instance_id, event_type, payload, space_id="",
+                    )
+
+                result = await run_closure_probe(
+                    store=store,
+                    instance_id=request.instance_id,
+                    closure_id=tool_input.get("closure_id", ""),
+                    pattern_transition_fn=(
+                        _transition if fp_store is not None else None
+                    ),
+                    event_emit_fn=(
+                        _emit if events is not None else None
+                    ),
+                )
+                return _json.dumps(result, sort_keys=True)
+
+        except ClosureStoreError as exc:
+            return f"closure error: {type(exc).__name__}: {exc}"
+
+        return f"Kernel tool '{tool_name}' not handled."
 
     async def _handle_reference_tool(
         self,

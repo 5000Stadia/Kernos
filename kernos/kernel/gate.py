@@ -385,6 +385,9 @@ class DispatchGate:
             # SELF-TEST-GATE-V1 (2026-05-22): pytest runner, no
             # source mutation. workspace-guarded.
             "run_self_test_suite",
+            # SELF-IMPROVEMENT-CLOSURE-V1 (AC9): read-only lookup
+            # over friction_pattern_invariant. Pure DB read.
+            "lookup_pattern_invariants",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -452,6 +455,16 @@ class DispatchGate:
             # to another space; reversible (the target space's runner
             # can reject) → soft_write.
             "request_space_action",
+            # SELF-IMPROVEMENT-CLOSURE-V1 (AC9): closure-machinery
+            # tools. record_closure_attempt performs a bounded
+            # SQLite insert (idempotent on episode). run_closure_probe
+            # also soft_write — the PROBE HANDLER is read-only, but
+            # the wrapper updates closure_attempt outcome + may
+            # transition the friction pattern lifecycle to 'resolved'
+            # and emit a substrate event. Those are soft writes.
+            # lookup_pattern_invariants is read-only (in _KERNEL_READS).
+            "record_closure_attempt",
+            "run_closure_probe",
         }
 
         if tool_name in _KERNEL_READS:
