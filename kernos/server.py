@@ -1948,9 +1948,18 @@ async def on_socket_event_type(event_type: str):
     The watchdog uses this as ground truth for "is the gateway
     delivering anything at all" — distinguishing a deaf gateway
     (heartbeats fine, dispatch dead) from a normal idle bot.
+
+    DEAFNESS-DIAGNOSTIC-V1 (2026-05-26): log every socket event
+    type at DEBUG. Captures evidence for the upstream-deafness
+    investigation (#151) — if no SOCKET_EVENT_TYPE_FIRED lines
+    appear after a clean restart, the gateway is genuinely deaf
+    at Discord's end (not a substrate-side bug). DEBUG level so
+    the noise is opt-in via KERNOS_LOG_LEVEL=DEBUG; the bump-
+    timestamp behavior above is unaffected.
     """
     global _last_any_socket_event_ts
     _last_any_socket_event_ts = _time_module.time()
+    logger.debug("SOCKET_EVENT_TYPE_FIRED type=%s", event_type)
     if event_type == "MESSAGE_CREATE":
         _message_create_counter.record(_time_module.time())
 
