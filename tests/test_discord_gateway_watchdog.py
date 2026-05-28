@@ -300,24 +300,65 @@ class TestSocketSilenceDeafDetection:
         assert unhealthy is False
         assert "OK" in reason
 
-    def test_stale_socket_event_is_unhealthy_despite_latency_ok(
+    def test_stale_socket_event_with_healthy_latency_is_tolerated(
         self, server_module, monkeypatch,
     ):
-        """Bug repro: latency is FINE but no socket events for longer
-        than the deaf window. Pre-spec, this passed as healthy. Now
-        it must surface as unhealthy with the silence reason."""
+        """WATCHDOG-FALSE-POSITIVE-GUARD-V1 (2026-05-27): silence
+        alone is not enough to declare deaf when latency is healthy.
+        Pre-guard, this fired as unhealthy and killed low-traffic
+        bots during quiet hours. Now: silence with healthy latency
+        (50ms <= 5s corroborating threshold) is tolerated as
+        quiet-server-likely."""
         import time as _t
-        # Set deaf window low so test runs fast.
         monkeypatch.setattr(
             server_module, "_DISCORD_DEAF_SILENCE_WINDOW_SEC", 1,
         )
+        # Default corroborating threshold = 5.0s. Healthy 50ms <<
+        # corroborating, so silence is tolerated.
         with patch.object(server_module, "client", _StubClient(0.05)):
-            # Backdate the last-event timestamp beyond the window.
+            server_module._last_any_socket_event_ts = _t.time() - 5
+            unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
+        assert unhealthy is False
+        assert "quiet-server-likely" in reason
+
+    def test_stale_socket_event_AND_elevated_latency_is_unhealthy(
+        self, server_module, monkeypatch,
+    ):
+        """The corroboration case: long silence AND latency above
+        corroborating threshold (5s) → real deafness signal."""
+        import time as _t
+        monkeypatch.setattr(
+            server_module, "_DISCORD_DEAF_SILENCE_WINDOW_SEC", 1,
+        )
+        # Elevated latency (10s) is above corroborating (5s) but
+        # below hard threshold (60s) — so the silence path fires.
+        with patch.object(server_module, "client", _StubClient(10.0)):
             server_module._last_any_socket_event_ts = _t.time() - 5
             unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
         assert unhealthy is True
         assert "no socket events received for" in reason
-        assert "gateway deaf despite latency" in reason
+        assert "exceeds corroborating threshold" in reason
+
+    def test_corroborating_threshold_zero_restores_legacy_silence_only(
+        self, server_module, monkeypatch,
+    ):
+        """Operator escape hatch: setting corroborating threshold
+        to 0 restores the legacy silence-only check (silence alone
+        triggers unhealthy even with perfect latency)."""
+        import time as _t
+        monkeypatch.setattr(
+            server_module, "_DISCORD_DEAF_SILENCE_WINDOW_SEC", 1,
+        )
+        monkeypatch.setattr(
+            server_module,
+            "_DISCORD_DEAF_CORROBORATING_LATENCY_SEC",
+            0.0,
+        )
+        with patch.object(server_module, "client", _StubClient(0.05)):
+            server_module._last_any_socket_event_ts = _t.time() - 5
+            unhealthy, reason = server_module._is_gateway_heartbeat_unhealthy()
+        assert unhealthy is True
+        assert "no socket events received for" in reason
 
     def test_zero_deaf_window_disables_silence_check(
         self, server_module, monkeypatch,

@@ -440,12 +440,31 @@ _gateway_unhealthy_strikes: int = 0
 # instantly).
 _last_any_socket_event_ts: float = _time_module.time()
 # Deaf window: how long total socket silence is tolerated before the
-# watchdog treats it as unhealthy. Default matches the observer's
-# KERNOS_GATEWAY_DEAF_WINDOW_SEC (600s) so the two layers stay in
-# sync on what counts as "deaf." Set to 0 to disable the socket-
-# silence check entirely (escape hatch for diagnostic sessions).
+# watchdog treats it as unhealthy. Default bumped 600s → 1800s
+# (30 min) per WATCHDOG-FALSE-POSITIVE-GUARD-V1 (2026-05-27) after
+# repeated false-positive cycles on low-traffic instances where the
+# bot has only one or two active members. Connected Discord guild
+# bots get presence/typing events constantly only on busy servers;
+# personal-use instances can legitimately go silent for tens of
+# minutes. 30 min is conservative but still catches real deafness.
+# Set to 0 to disable the socket-silence check entirely.
 _DISCORD_DEAF_SILENCE_WINDOW_SEC: int = int(
-    os.getenv("KERNOS_DISCORD_DEAF_SILENCE_WINDOW_SEC", "600")
+    os.getenv("KERNOS_DISCORD_DEAF_SILENCE_WINDOW_SEC", "1800")
+)
+
+# WATCHDOG-FALSE-POSITIVE-GUARD-V1 (2026-05-27): corroboration
+# threshold for silence-based deafness. Silence alone is not enough
+# to declare deaf when the heartbeat is healthy — many real-world
+# silences are legitimate (quiet server, single user, off-hours).
+# Deafness via silence is only declared when latency is ALSO
+# degraded above this threshold (well below the hard latency cap
+# of 60s but well above the healthy ~50ms baseline). Tunable so
+# operators can re-enable the legacy silence-only behavior by
+# setting this to 0.
+_DISCORD_DEAF_CORROBORATING_LATENCY_SEC: float = float(
+    os.getenv(
+        "KERNOS_DISCORD_DEAF_CORROBORATING_LATENCY_SEC", "5.0",
+    )
 )
 
 # HEARTBEAT-DETECTOR-LIVENESS-CROSSCHECK-V1 (2026-05-20). Pure
@@ -506,17 +525,43 @@ def _is_gateway_heartbeat_unhealthy() -> tuple[bool, str]:
     # DISCORD-GATEWAY-DEAFNESS-DETECT-V1 (2026-05-25): heartbeat
     # latency is fine but the gateway might be deaf to dispatch.
     # If we've received zero socket events of ANY type within the
-    # deaf silence window, the gateway is effectively disconnected
-    # at the message level even though the heartbeat channel works.
-    # Connected guild bots get presence/typing/etc. events
-    # constantly; total silence over this window is a hard fault.
+    # deaf silence window, the gateway might be disconnected at
+    # the message level even though the heartbeat channel works.
+    #
+    # WATCHDOG-FALSE-POSITIVE-GUARD-V1 (2026-05-27): corroborating
+    # signal required. Silence alone produced excessive false-
+    # positives on low-traffic instances (single-user personal bot
+    # routinely had 10-15 min silences during quiet hours, which
+    # triggered watchdog restarts that interrupted in-flight work).
+    # Now: silence-based deafness only fires when latency is ALSO
+    # elevated above the corroborating threshold (default 5s, well
+    # below the hard 60s cap but well above the healthy ~50ms
+    # baseline). Healthy bot during a quiet period stays alive.
     if _DISCORD_DEAF_SILENCE_WINDOW_SEC > 0:
         silence_sec = _time_module.time() - _last_any_socket_event_ts
         if silence_sec > _DISCORD_DEAF_SILENCE_WINDOW_SEC:
+            corroborating_threshold = (
+                _DISCORD_DEAF_CORROBORATING_LATENCY_SEC
+            )
+            if (
+                corroborating_threshold > 0
+                and latency <= corroborating_threshold
+            ):
+                # Silence is real but heartbeat is healthy enough
+                # to suggest a quiet-server scenario rather than
+                # a deaf gateway. Tolerate.
+                return False, (
+                    f"silence={silence_sec:.0f}s OK "
+                    f"(latency={latency:.3f}s <= "
+                    f"corroborating={corroborating_threshold:.1f}s; "
+                    f"quiet-server-likely)"
+                )
             return True, (
                 f"no socket events received for {silence_sec:.0f}s "
-                f"(threshold {_DISCORD_DEAF_SILENCE_WINDOW_SEC}s) — "
-                f"gateway deaf despite latency={latency:.3f}s"
+                f"(threshold {_DISCORD_DEAF_SILENCE_WINDOW_SEC}s) "
+                f"AND latency={latency:.3f}s exceeds corroborating "
+                f"threshold {corroborating_threshold:.1f}s — "
+                f"gateway deaf"
             )
 
     return False, f"latency={latency:.3f}s OK"
