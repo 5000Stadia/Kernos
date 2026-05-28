@@ -78,22 +78,39 @@ already shipped ad-hoc.
 
 ## The four recovery shapes (each behind a flag)
 
-### Shape 1: Test failure recovery (default off → operator opt-in)
+### Shape 1: Test failure recovery (agent-facing decision)
 
 **Flag:** `IMPROVEMENT_RECOVERY_TEST_FAILURE`
   (env: `KERNOS_IMPROVEMENT_RECOVERY_TEST_FAILURE`,
   covenant: `improvement.test_failure_recovery`).
-  Default: `surface_only`. Values: `auto`, `surface_only`, `off`.
+  Default: `surface_to_agent`. Values: `surface_to_agent`,
+  `auto`, `surface_to_operator`, `off`.
 
 **Trigger:** `self_test_result.passed=False` from post-restart hook.
 
 **Action:**
-- `surface_only`: write whisper to operator with the failure
-  summary + a `/recover <attempt_id>` instruction; mark
-  attempt `awaiting_recovery_decision`; pause until operator
-  invokes `/recover` (auto) or `/abandon` (closes attempt).
-- `auto`: directly spawn reviewer agent with failure context;
-  proceed through bounded iterations as above.
+- `surface_to_agent` (DEFAULT): substrate raises the failure
+  into the agent's conversation as a structured observation
+  (the agent already owns the loop's narrative thread —
+  per [[agent-facing-natural-simplicity]] the recovery
+  decision belongs there, not in an operator slash command).
+  Two agent-callable tools appear: `proceed_with_recovery`
+  (spawns reviewer for fix-up cycle) and `abandon_attempt`
+  (closes the attempt with `test_failed_abandoned_by_agent`).
+  The agent surfaces the choice to the operator in prose
+  if the operator's input is needed; otherwise proceeds.
+  Operator can override via `/recover <id>` or
+  `/abandon <id>` at any time.
+- `auto`: substrate directly spawns reviewer agent with
+  failure context; proceed through bounded iterations
+  without surfacing to the agent or operator for the first
+  decision. (Each recovery commit STILL requires operator
+  approval at the commit gate.)
+- `surface_to_operator`: legacy operator-only path — whisper
+  with `/recover <attempt_id>` instruction; pause until
+  operator invokes. Reserved for instances where the agent
+  shouldn't be the recovery decider (e.g., the agent is in
+  bootstrap or the failure is on the agent's own tooling).
 - `off`: skip recovery entirely; mark final_state
   `test_failed_unrecovered`.
 
@@ -340,10 +357,29 @@ Behavior:
 - Calls `IMPROVementLoopOrchestrator.rebase_and_retry(
   attempt_id)`.
 
-### No new agent-callable tools
+### Agent-callable recovery tools (Shape 1 surface_to_agent path)
 
-All four shapes are operator-surface only. The agent never
-gets recovery tools — recovery is operator-gated by design.
+Two new tools, pinned conditionally (only when an attempt is
+in `awaiting_recovery_decision` state for the active agent's
+member):
+
+- **`proceed_with_recovery`** — `attempt_id` (required),
+  `recovery_note` (optional prose explaining the agent's
+  read of the failure). Spawns reviewer for fix-up cycle.
+  Gate classification: `hard_write` (recovery commits still
+  flow through the commit-time approval receipt).
+- **`abandon_attempt`** — `attempt_id` (required),
+  `abandon_reason` (required prose). Closes the attempt with
+  `final_state=test_failed_abandoned_by_agent`. Gate
+  classification: `soft_write` (no source mutation, just
+  closes the ledger row).
+
+Shapes 2, 3, 4, 5, 6 do NOT get agent-callable tools — they
+are substrate-bounded recovery (Shape 2's resume happens at
+bring-up before the agent is even running; Shape 3's rebase
++ Shape 4's retries happen mid-flow without agent decision;
+Shape 5 is purely housekeeping; Shape 6 escalates to architect
+by definition).
 
 ## Architecture
 
@@ -384,13 +420,17 @@ point and routes accordingly.
 
 | AC | Description |
 |---|---|
-| AC1 | When mode=`surface_only` and test fails: whisper sent to operator with `/recover <id>` + `/abandon <id>`; attempt state = `awaiting_recovery_decision`. |
-| AC2 | When mode=`auto` and test fails: reviewer agent spawned with failure context; first iteration written to ledger. |
+| AC1 | When mode=`surface_to_agent` (default) and test fails: substrate raises structured observation into the active member's conversation; `proceed_with_recovery` + `abandon_attempt` tools become pinned for that member; attempt state = `awaiting_recovery_decision`. |
+| AC1a | When agent calls `proceed_with_recovery(attempt_id)`: reviewer spawned (same as auto-mode path); ledger event `recovery_started` with `triggered_by=agent`. |
+| AC1b | When agent calls `abandon_attempt(attempt_id, reason)`: `final_state=test_failed_abandoned_by_agent`; ledger event includes reason. |
+| AC2 | When mode=`auto` and test fails: reviewer agent spawned directly; ledger event `recovery_started` with `triggered_by=substrate`. |
+| AC2a | When mode=`surface_to_operator`: legacy whisper-to-operator path; `/recover` + `/abandon` still available; `triggered_by=operator` on outcome. |
 | AC3 | Reviewer success path: new approval receipt issued; commit + push + restart fire; second post-restart test runs. |
 | AC4 | Recovery iteration cap (2) enforced; on 3rd failure: `final_state=test_failed_unrecovered`. |
-| AC5 | Reviewer "can't fix" path: `final_state=test_failed_unrecovered`; whisper with explanation. |
-| AC6 | `/recover <id>` invalid state: prose error explaining current state. |
+| AC5 | Reviewer "can't fix" path: `final_state=test_failed_unrecovered`; agent surfaces explanation in conversation (mode=`surface_to_agent`) or operator whisper (other modes). |
+| AC6 | `/recover <id>` and `/abandon <id>` work as operator overrides REGARDLESS of mode (operator can always intervene). |
 | AC7 | Recovery commits go through full approval gate (cannot skip). |
+| AC8 | `proceed_with_recovery` + `abandon_attempt` agent tools only pinned when there is an attempt in `awaiting_recovery_decision` state for the active member; otherwise hidden. |
 
 ### Shape 2: Mid-attempt restart-resume
 
@@ -445,7 +485,7 @@ point and routes accordingly.
 
 | AC | Description |
 |---|---|
-| AC32 | All recovery modes default per spec (Shape 1: `surface_only`, Shape 2: `surface_only`, Shape 3: `off`, Shape 4: `on`). |
+| AC32 | All recovery modes default per spec (Shape 1: `surface_to_agent`, Shape 2: `surface_only`, Shape 3: `off`, Shape 4: `on`). |
 | AC33 | Covenant + env var both surface each flag's value; covenant takes precedence (covenants are operator-set, env vars are fallback). |
 | AC34 | `/improvement_status <id>` shows recovery state for every shape (current state + last 5 recovery events). |
 | AC35 | Each recovery shape's ledger event additions documented in `docs/improvement-attempt-ledger.md` schema section. |
@@ -593,13 +633,21 @@ The orchestrator gains four new entry points and one wrapped-
 call helper (`retry_consult`), but the existing happy-path
 behavior is unchanged when all flags are at default values.
 
-## Open architect questions
+## Open architect questions (architect verdict 2026-05-28: bake into Codex review)
 
-1. **Default for Shape 1.** `surface_only` is conservative
-   but adds friction (operator opts in per attempt). `auto`
-   ships the recovery experience the loop was built for but
-   trusts the reviewer agent more. v1 defaults to
-   `surface_only` — is that right for the soak window?
+Architect call 2026-05-28: "Recovery should surface to agent
+and they should be able to proceed or recover. Bake [these]
+into codex review." Q1 is resolved (Shape 1 default =
+`surface_to_agent`); the remaining four are open for Codex's
+independent read.
+
+1. ~~**Default for Shape 1.**~~ ✅ Resolved: `surface_to_agent`.
+   Recovery becomes an agent-in-the-loop decision, with the
+   operator able to override at any time via `/recover` or
+   `/abandon`. Codex: validate the `proceed_with_recovery` +
+   `abandon_attempt` tool shapes and the pinning rule (only
+   when attempt is `awaiting_recovery_decision` for the active
+   member) are right.
 
 2. **Recovery commit attribution.** A recovery commit lands
    on the same branch as the original attempt. Should the
