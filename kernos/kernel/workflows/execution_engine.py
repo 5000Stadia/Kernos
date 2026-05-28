@@ -2143,27 +2143,28 @@ class ExecutionEngine:
         template = predicate.get("value")
         if not isinstance(template, str):
             return
-        # Build the resolution context from the execution's step
-        # outputs. resolve_references_in_value already understands
-        # the {step.X.value.Y} shape used by gate predicates.
-        ctx: dict = {"step": {}}
-        for idx, action in enumerate(action_by_index.values()):
-            if action.id is None:
-                continue
-            record_row = await self._action_sink.get_by_step(
-                execution.instance_id, execution.execution_id,
-                step_index=idx,
+        # Build ResolutionContext via load_workflow_outputs — the
+        # canonical loader the engine uses elsewhere for predicate
+        # resolution. Mode="predicate" so a missing/unresolved ref
+        # returns the sentinel rather than raising.
+        try:
+            step_outputs, gate_outputs = await load_workflow_outputs(
+                self._db, execution.execution_id,
             )
-            if record_row is None:
-                continue
-            try:
-                import json as _json_eng
-                value_data = _json_eng.loads(
-                    record_row.record.value_json or "{}"
-                )
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                value_data = {}
-            ctx["step"][action.id] = {"value": value_data}
+        except Exception as exc:
+            logger.debug(
+                "WORKFLOW_BRIDGE_SENTINEL_LOAD_OUTPUTS_FAILED "
+                "execution_id=%s error=%s",
+                execution.execution_id, exc,
+            )
+            return
+        ctx = ResolutionContext(
+            execution=execution,
+            trigger_payload={},
+            step_outputs=step_outputs,
+            gate_outputs=gate_outputs,
+            mode="predicate",
+        )
         resolved = resolve_references_in_value(template, ctx)
         request_id = resolved if isinstance(resolved, str) else ""
         if not request_id or "{" in request_id:
