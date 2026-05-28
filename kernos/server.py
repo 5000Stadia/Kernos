@@ -226,9 +226,11 @@ async def _direct_broker_dispatch(
 
 @tree.command(
     name="codex",
+    # Discord requires command descriptions ≤100 chars. Pre-fix this
+    # logged DISCORD_TREE_SYNC_FAILED status=400 code=50035 on every
+    # boot. Trimmed from 117 chars to under 100. Same fix on /cc.
     description=(
-        "Dispatch a prompt directly to Codex via ACPX. "
-        "Bypasses the agent's consult tool — for operator-driven broker testing."
+        "Dispatch a prompt directly to Codex via ACPX (operator broker test)."
     ),
 )
 @app_commands.describe(prompt="The full prompt to send to Codex.")
@@ -243,8 +245,7 @@ async def codex_command(
 @tree.command(
     name="cc",
     description=(
-        "Dispatch a prompt directly to Claude Code via ACPX. "
-        "Bypasses the agent's consult tool — for operator-driven broker testing."
+        "Dispatch a prompt directly to Claude Code via ACPX (operator broker test)."
     ),
 )
 @app_commands.describe(prompt="The full prompt to send to Claude Code.")
