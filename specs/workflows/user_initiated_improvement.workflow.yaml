@@ -97,26 +97,38 @@ action_sequence:
               dependency, a configuration drift in data/,
               etc.)
 
-          When you identify the failure, draft a fix. Your
-          response MUST populate these structured fields
-          (the workflow validates and aborts on missing
-          fields when investigation_outcome=completed):
-            - failure_mode: 1-line classification of WHAT broke
-            - external_cause_evidence: what suggests external
-            - internal_cause_evidence: what suggests internal
-            - evidence_refs: list of log paths, runtime trace
-              refs, commit SHAs you consulted
-            - proposed_fix_summary: 1-3 sentences
-            - proposed_fix_diff: unified-diff format if
-              internal; empty if external_only
-            - touches_paths: list of file paths the fix
-              modifies (the classifier ALSO walks the diff;
-              diff is authoritative on disagreement)
-            - external_action: description for external_only;
-              empty if internal
-            - related_pattern_id: optional friction_pattern_id
-              this fix remediates (empty when no known
-              pattern matches — closure machinery skips)
+          When you identify the failure, draft a fix.
+
+          === Response format (BRIDGE-RESPONSE-SCHEMA-V1) ===
+          Write your investigation in natural-language prose
+          first. THEN at the very end of your response, append
+          a JSON code block with structured fields the workflow
+          will extract:
+
+          ```json
+          {
+            "failure_mode": "1-line classification of WHAT broke",
+            "external_cause_evidence": "what suggests external cause",
+            "internal_cause_evidence": "what suggests internal cause",
+            "evidence_refs": ["log paths, runtime trace refs, commit SHAs you consulted"],
+            "proposed_fix_summary": "1-3 sentences",
+            "proposed_fix_diff": "unified-diff format if internal; empty string if external_only",
+            "touches_paths": ["file paths the fix modifies; empty list if external_only"],
+            "external_action": "description for external_only fixes; empty string if internal",
+            "related_pattern_id": "optional friction_pattern_id this remediates; empty when none"
+          }
+          ```
+
+          The classifier walks both `touches_paths` AND the
+          diff (diff is authoritative on disagreement). Be
+          honest about paths — claiming `touches_paths=[]`
+          while the diff modifies `kernos/foo.py` will be
+          caught and routed substrate_tier anyway.
+
+          If the JSON block is missing or malformed, the
+          workflow falls back to the summary-only path and
+          fail-closes to substrate_tier classification —
+          architect still gates everything.
 
           DO NOT apply substrate-tier changes (anything
           touching kernos/, specs/, pyproject.toml, *.workflow.yaml,
@@ -140,28 +152,26 @@ action_sequence:
     continuation_rules:
       on_failure: abort
 
-  # v1.1.1 BRIDGE-RESPONSE-SCHEMA fold (#160): the
-  # read_coding_session_response_for_workflow tool's value carries
-  # ONLY {success, request_id, summary, execution_state,
-  # investigation_outcome}. Structured fields (failure_mode,
-  # proposed_fix_diff, touches_paths, external_action) don't make
-  # it through the bridge response schema. Pre-fix the workflow
-  # YAML referenced those fields and ref-failed at validate.
-  #
-  # v1.1.1 pragmatic fold: only pass the fields that exist in
-  # the read-step's value. The validator's other params default
-  # to "" so summary-only acceptance fires correctly. The
-  # classifier likewise sees empty paths/diff/external → fail-
-  # closed substrate_tier (correct: any investigation result
-  # without explicit external_action signals should hit
-  # architect gate). Proper structured-field carrier ships in
-  # BRIDGE-RESPONSE-SCHEMA-V1.
+  # v1.2 BRIDGE-RESPONSE-SCHEMA-V1 (2026-05-28): the bridge now
+  # parses CC's trailing ```json {...}``` block and lifts allowed
+  # structured fields to top-level keys in the workflow value.
+  # read_coding_session_response_for_workflow's value now carries
+  # failure_mode, proposed_fix_diff, touches_paths, external_action,
+  # related_pattern_id, etc. — empty string / list when CC didn't
+  # include them. Workflow YAML refs are safe: missing fields
+  # resolve to empty and the validator's summary-only fallback
+  # still fires for prose-only CC responses.
   - id: validate_investigation_response
     action_type: call_tool
     parameters:
       tool_id: validate_investigation_response
       args:
         investigation_outcome: '{step.read_investigation_response.value.investigation_outcome}'
+        failure_mode: '{step.read_investigation_response.value.failure_mode}'
+        proposed_fix_summary: '{step.read_investigation_response.value.proposed_fix_summary}'
+        proposed_fix_diff: '{step.read_investigation_response.value.proposed_fix_diff}'
+        external_action: '{step.read_investigation_response.value.external_action}'
+        touches_paths: '{step.read_investigation_response.value.touches_paths}'
         summary: '{step.read_investigation_response.value.summary}'
     continuation_rules:
       on_failure: abort
@@ -171,7 +181,10 @@ action_sequence:
     parameters:
       tool_id: classify_proposed_fix
       args:
-        proposed_fix_summary: '{step.read_investigation_response.value.summary}'
+        proposed_fix_summary: '{step.read_investigation_response.value.proposed_fix_summary}'
+        proposed_fix_diff: '{step.read_investigation_response.value.proposed_fix_diff}'
+        touches_paths: '{step.read_investigation_response.value.touches_paths}'
+        external_action: '{step.read_investigation_response.value.external_action}'
     continuation_rules:
       on_failure: abort
 

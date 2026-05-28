@@ -171,6 +171,106 @@ def _release_lock(lock_path: Path) -> None:
         logger.warning("BRIDGE_WATCHER_LOCK_RELEASE_FAILED: %s", exc)
 
 
+# BRIDGE-RESPONSE-SCHEMA-V1: which structured fields are accepted
+# from CC's trailing JSON block. Unknown fields are dropped silently
+# (forward-compat: CC may emit extra fields for future workflows
+# without us crashing). Reserved fields (request_id, timestamp,
+# target, investigation_outcome, summary, metadata) cannot be
+# overwritten via the JSON block — the bridge owns those.
+_BRIDGE_STRUCTURED_FIELD_ALLOWLIST: frozenset[str] = frozenset({
+    # USER-INITIATED-IMPROVEMENT-TRIGGER-V1 + future investigation
+    # workflows. All optional — workflows degrade gracefully when
+    # absent.
+    "failure_mode",
+    "external_cause_evidence",
+    "internal_cause_evidence",
+    "evidence_refs",
+    "proposed_fix_summary",
+    "proposed_fix_diff",
+    "touches_paths",
+    "external_action",
+    "related_pattern_id",
+    "related_pattern_active_epoch",
+    # Generic findings/source-refs/caveats (existing read-side
+    # consumers already expect these on the response shape).
+    "findings",
+    "source_references",
+    "caveats",
+})
+
+
+_BRIDGE_RESERVED_FIELDS: frozenset[str] = frozenset({
+    "request_id", "timestamp", "target",
+    "investigation_outcome", "summary", "metadata",
+})
+
+
+# Match any ```json ... ``` (or ``` ... ```) fenced code block
+# whose body is a JSON object. Lazy `{.*?}` matches the shortest
+# `{...}` body. findall enumerates ALL blocks; we pick the LAST
+# one (most-trailing) as the structured-fields carrier — natural
+# convention since CC writes prose first then the structured
+# block at the end.
+import re as _re
+_JSON_FENCE_RE = _re.compile(
+    r"```(?:json)?\s*\n(\{.*?\})\s*\n```",
+    _re.DOTALL,
+)
+
+
+def _extract_trailing_json_block(text: str) -> dict | None:
+    """Extract the TRAILING ```json {...}``` fenced block from a
+    text response. Returns the parsed dict or None if no block /
+    parse fails. Never raises (fail-soft: malformed → None →
+    caller degrades).
+
+    Walks all fenced blocks, takes the last one that parses as a
+    dict. This is robust to CC including ```json examples earlier
+    in its prose (e.g., a "here's what the response should look
+    like" demonstration) — only the trailing real one counts.
+    """
+    if not text:
+        return None
+    bodies = _JSON_FENCE_RE.findall(text)
+    if not bodies:
+        return None
+    import json as _json
+    for body in reversed(bodies):
+        try:
+            parsed = _json.loads(body)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _merge_structured_fields_from_response(
+    response_payload: dict, text: str,
+) -> None:
+    """Parse CC's text response for a trailing JSON block; merge
+    allowed structured fields into ``response_payload`` as
+    top-level keys. Mutates response_payload in place.
+
+    No-op when:
+        - text is empty / no JSON block found
+        - JSON block is malformed
+        - JSON block contains no allowlisted fields
+
+    Reserved bridge fields (request_id, timestamp, etc.) cannot
+    be overwritten — CC trying to inject those is ignored.
+    """
+    extracted = _extract_trailing_json_block(text)
+    if not extracted:
+        return
+    for key, value in extracted.items():
+        if key in _BRIDGE_RESERVED_FIELDS:
+            continue
+        if key not in _BRIDGE_STRUCTURED_FIELD_ALLOWLIST:
+            continue
+        response_payload[key] = value
+
+
 def _write_response_atomic(response_path: Path, payload: dict) -> None:
     """Atomic write via tmp+rename. The CodingSessionBridgeResponseEmitter
     treats the appearance of responses/{id}.json as the trigger event;
@@ -275,6 +375,25 @@ async def _handle_outbound_request(
                     "truncated": result.truncated,
                 },
             }
+            # BRIDGE-RESPONSE-SCHEMA-V1 (2026-05-28): if CC's response
+            # contains a trailing ```json ... ``` code block, parse it
+            # and merge as top-level structured fields. This lets
+            # workflows (e.g., USER-INITIATED-IMPROVEMENT-TRIGGER-V1's
+            # /fix) reference {step.X.value.failure_mode}, .touches_paths,
+            # .proposed_fix_diff, etc. without changing the bridge's
+            # free-form summary contract for other consumers. CC's
+            # natural-language summary stays in `summary` AND gets the
+            # structured fields lifted alongside.
+            #
+            # Failure modes (CC didn't include block / malformed JSON /
+            # unknown fields) are tolerated: response_payload still has
+            # the full summary; downstream consumers see empty
+            # structured fields and degrade per their own logic
+            # (classifier fail-closes to substrate_tier; validator
+            # falls back to summary-only acceptance).
+            _merge_structured_fields_from_response(
+                response_payload, result.response,
+            )
         except ConsultationTimeout as exc:
             response_payload = {
                 "request_id": request_id,

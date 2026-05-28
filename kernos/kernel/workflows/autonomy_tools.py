@@ -722,12 +722,62 @@ async def handle_read_coding_session_response_for_workflow(
             # sentinel through normalization for the canonical
             # fallback ("completed" per the helper's contract).
             investigation_outcome = normalize_investigation_outcome(None)
+    # BRIDGE-RESPONSE-SCHEMA-V1 (2026-05-28): pass through structured
+    # fields if CC populated them via the trailing JSON-block protocol
+    # (parsed by bridge_watcher._merge_structured_fields_from_response).
+    # Fields default to "" / [] when absent so the workflow YAML can
+    # reference them without ref_failed.
+    _structured: dict = {}
+    if record.execution_state == "completed":
+        try:
+            response_path = (
+                _Path(data_dir) / instance_id / "coding_session_bridge"
+                / "responses" / f"{request_id}.json"
+            )
+            with response_path.open("r", encoding="utf-8") as fp:
+                _resp = _json.load(fp)
+            _structured = {
+                "failure_mode": _resp.get("failure_mode", "") or "",
+                "external_cause_evidence": (
+                    _resp.get("external_cause_evidence", "") or ""
+                ),
+                "internal_cause_evidence": (
+                    _resp.get("internal_cause_evidence", "") or ""
+                ),
+                "evidence_refs": _resp.get("evidence_refs", []) or [],
+                "proposed_fix_summary": (
+                    _resp.get("proposed_fix_summary", "") or ""
+                ),
+                "proposed_fix_diff": (
+                    _resp.get("proposed_fix_diff", "") or ""
+                ),
+                "touches_paths": _resp.get("touches_paths", []) or [],
+                "external_action": _resp.get("external_action", "") or "",
+                "related_pattern_id": (
+                    _resp.get("related_pattern_id", "") or ""
+                ),
+                "related_pattern_active_epoch": int(
+                    _resp.get("related_pattern_active_epoch", 0) or 0,
+                ),
+                "findings": _resp.get("findings", "") or "",
+                "source_references": (
+                    _resp.get("source_references", []) or []
+                ),
+                "caveats": _resp.get("caveats", "") or "",
+            }
+        except (FileNotFoundError, _json.JSONDecodeError, OSError,
+                ValueError, TypeError):
+            # Same fallback as the investigation_outcome read above —
+            # if the file is unreadable here, leave structured fields
+            # empty and let downstream consumers degrade.
+            _structured = {}
     return {
         "success": record.execution_state in ("attempted", "completed"),
         "request_id": request_id,
         "summary": summary,
         "execution_state": record.execution_state,
         "investigation_outcome": investigation_outcome,
+        **{k: v for k, v in _structured.items()},
     }
 
 
