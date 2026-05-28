@@ -72,7 +72,14 @@ async def run_probe() -> ProbeResult:
 
         # Stub the discord.Client + os.execv so the cascade is
         # observable without actually restarting the process.
-        with patch.object(_server, "client", _StubClient(latency=0.05)):
+        # WATCHDOG-FALSE-POSITIVE-GUARD-V1 (2026-05-27): silence
+        # alone with healthy latency (50ms) is now correctly
+        # tolerated as quiet-server-likely. To exercise the
+        # silence-based deafness escalation, use ELEVATED latency
+        # (10s) — above the corroborating threshold (5s) but
+        # below the hard latency cap (60s) so the silence path
+        # still fires rather than the latency path.
+        with patch.object(_server, "client", _StubClient(latency=10.0)):
             with patch.object(
                 _server.os, "execv",
                 lambda *a, **kw: execv_calls.append(a),
@@ -145,10 +152,14 @@ async def run_probe() -> ProbeResult:
     #   silence-unhealthy state)
     # - os.execv called exactly once (the escalation reached
     #   the restart call, not just fired strikes)
+    # Post-WATCHDOG-FALSE-POSITIVE-GUARD-V1: the unhealthy reason
+    # now reads "no socket events received for Ns ... AND
+    # latency=X exceeds corroborating threshold ... gateway deaf"
+    # instead of the legacy "gateway deaf despite latency" phrase.
     cond_watchdog = (
         watchdog_unhealthy
         and "no socket events received" in watchdog_reason
-        and "gateway deaf despite latency" in watchdog_reason
+        and "gateway deaf" in watchdog_reason
     )
     cond_observer = (
         observer_signal_emitted
