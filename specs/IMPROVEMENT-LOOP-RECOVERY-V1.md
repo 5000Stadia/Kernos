@@ -1,676 +1,400 @@
 # IMPROVEMENT-LOOP-RECOVERY-V1
 
 **Date:** 2026-05-28
-**Status:** Draft for architect review (sub-spec #8 — recovery —
-  of `KERNOS-AUTONOMOUS-IMPROVEMENT-LOOP-V1`; parked at parent
-  closure 2026-05-22 awaiting operational evidence)
-**Scope:** Four explicit scope cuts deferred from
-  IMPROVEMENT-LOOP-WORKFLOW-V1, with two additional recovery
-  shapes surfaced by USER-INITIATED-IMPROVEMENT-TRIGGER-V1's
-  shape (architectural-bound completion failures, gate-pending
-  bridge sentinel drift). All four shipped behind feature
-  flags so the operator can audit each recovery surface in
-  isolation before promoting to default-on.
-**Estimated size:** ~450 LOC source + ~350 LOC tests.
-
-## Why this spec exists
-
-Per IMPROVEMENT-LOOP-WORKFLOW-V1 closure: v1 explicitly ships
-the happy path + simple terminal failure paths. Four recovery
-shapes were deferred for two reasons:
-
-1. **Evidence-first.** The right shape of each recovery cycle
-   depends on how the loop actually fails in practice — not on
-   pre-spec speculation.
-2. **Trust gradient.** Recovery shapes that auto-spawn coding
-   agents on previously-failed work require operator trust
-   that v1 hasn't yet earned.
-
-The 2026-05-26 → 2026-05-28 operator-soak window produced
-enough live evidence to inform each shape. Five attempts
-through the `/fix` surface (USER-INITIATED-IMPROVEMENT-TRIGGER-
-V1) surfaced:
-
-- 0 mid-attempt crashes that needed resume (the loop completed
-  end-to-end on every well-formed attempt)
-- 2 attempts that aborted at `validate_investigation_response`
-  due to bridge-schema drift — fixed by
-  BRIDGE-RESPONSE-SCHEMA-V1 (commit 8af7f9a's predecessor),
-  not by recovery
-- 1 attempt that stuck at the gate after Kernos crash because
-  the bridge sentinel was claimed pre-crash and the bridge
-  wouldn't re-emit on resume — fixed by execution-engine
-  sentinel-reset (commit 9916fa0)
-- 0 push-time drift events (single-developer instance)
-- 0 transient `consult` failures (Codex was stable across all
-  five attempts)
-
-Surfacing this means v1 of recovery doesn't need to predict
-shapes — it can ship targeted handlers for the four originally-
-deferred items, plus formalize the two operational fixes that
-already shipped ad-hoc.
-
-## v1 happy path (what recovery looks like end-to-end)
-
-**Test failure recovery path (the most-common recovery shape):**
-
-1. Post-restart bring-up hook runs `run_self_test_suite`.
-2. Ledger event `self_test_result` written with `passed=False`,
-   `failure_summary`, `failed_test_ids[]`, `diff_at_failure`.
-3. **Recovery is automatic only if** `improvement_recovery_mode`
-   covenant resolves to `"auto"`; default is `"surface_only"`
-   (operator gets a prose surface + `/recover <attempt_id>` to
-   opt in).
-4. On auto: orchestrator spawns the REVIEWER agent (not the
-   original primary — fresh eyes per [[multi-round-codex-
-   convergence]]) with: `failing_test_ids`, the diff that
-   landed, the spec, the original failure_summary.
-5. Reviewer returns either:
-   - A diff that fixes the test (success path) → mints a new
-     approval gate (`git_recovery_authorization` receipt
-     type); operator approves → commit + push + restart →
-     post-restart test runs again.
-   - "I can't fix this — needs human" (abort path) → final_state
-     set to `test_failed_unrecovered`, attempt closed.
-6. Recovery iterations are capped at `2` (post-fix, post-fix-
-   of-fix). On the second failure: final_state set to
-   `test_failed_unrecovered`; loop closes.
-
-## The four recovery shapes (each behind a flag)
-
-### Shape 1: Test failure recovery (agent-facing decision)
-
-**Flag:** `IMPROVEMENT_RECOVERY_TEST_FAILURE`
-  (env: `KERNOS_IMPROVEMENT_RECOVERY_TEST_FAILURE`,
-  covenant: `improvement.test_failure_recovery`).
-  Default: `surface_to_agent`. Values: `surface_to_agent`,
-  `auto`, `surface_to_operator`, `off`.
-
-**Trigger:** `self_test_result.passed=False` from post-restart hook.
-
-**Action:**
-- `surface_to_agent` (DEFAULT): substrate raises the failure
-  into the agent's conversation as a structured observation
-  (the agent already owns the loop's narrative thread —
-  per [[agent-facing-natural-simplicity]] the recovery
-  decision belongs there, not in an operator slash command).
-  Two agent-callable tools appear: `proceed_with_recovery`
-  (spawns reviewer for fix-up cycle) and `abandon_attempt`
-  (closes the attempt with `test_failed_abandoned_by_agent`).
-  The agent surfaces the choice to the operator in prose
-  if the operator's input is needed; otherwise proceeds.
-  Operator can override via `/recover <id>` or
-  `/abandon <id>` at any time.
-- `auto`: substrate directly spawns reviewer agent with
-  failure context; proceed through bounded iterations
-  without surfacing to the agent or operator for the first
-  decision. (Each recovery commit STILL requires operator
-  approval at the commit gate.)
-- `surface_to_operator`: legacy operator-only path — whisper
-  with `/recover <attempt_id>` instruction; pause until
-  operator invokes. Reserved for instances where the agent
-  shouldn't be the recovery decider (e.g., the agent is in
-  bootstrap or the failure is on the agent's own tooling).
-- `off`: skip recovery entirely; mark final_state
-  `test_failed_unrecovered`.
-
-**Bounds:**
-- Max 2 recovery iterations per attempt.
-- Each recovery commit goes through the full approval gate
-  (operator still gates every source mutation).
-
-**Ledger events added:**
-- `recovery_started` (recovery_reason, recovery_mode)
-- `recovery_iteration` (iteration_num, agent, outcome)
-- `recovery_converged` (final_diff_sha)
-- `recovery_aborted_unconverged` (iteration_cap_hit)
-- `recovery_abandoned_by_operator` (via /abandon)
-
-### Shape 2: Mid-attempt restart-resume (default surface-only)
-
-**Flag:** `IMPROVEMENT_RECOVERY_MID_ATTEMPT_RESUME`
-  (env: `KERNOS_IMPROVEMENT_RESUME_MID_ATTEMPT`).
-  Default: `surface_only`. Values: `auto`, `surface_only`, `off`.
-
-**Trigger:** Bring-up hook scans ledger for attempts with:
-- `final_state IS NULL`
-- Last event's timestamp > 60s before current boot time
-  (i.e., the attempt didn't write a terminal event before the
-  crash)
-
-**Action per detected attempt:**
-- Determine resume point by walking the last 10 events:
-  - `spec_iteration` (no `spec_converged`/`spec_aborted`) →
-    **resume_point=spec_cycle** (re-enter from last iteration's
-    state if saved; otherwise abandon)
-  - `spec_converged` (no `impl_iteration`) →
-    **resume_point=impl_cycle_start**
-  - `impl_iteration` (no `impl_converged`/`impl_aborted`) →
-    **resume_point=impl_cycle** (worktree state may be partial)
-  - `impl_converged` (no `approval_requested`) →
-    **resume_point=approval_gate**
-  - `approval_requested` (no `commit_recorded`) →
-    **resume_point=awaiting_approval** (re-bind orchestrator's
-    continuation; nothing else needed, /approve still works)
-  - `commit_recorded` (no `push_succeeded`) →
-    **resume_point=push** (re-push idempotently)
-  - `push_succeeded` (no restart-related event) →
-    **resume_point=restart_self**
-- On `surface_only`: write whisper listing detected attempts +
-  resume_points + `/resume <attempt_id>` instruction; mark
-  attempts `in_flight_at_crash`; await operator decision.
-- On `auto`: re-enter at the detected resume_point IFF the
-  resume_point is safe (spec_cycle, impl_cycle_start,
-  approval_gate, awaiting_approval, push, restart_self).
-  Unsafe points (mid-impl_cycle: worktree may be inconsistent)
-  always surface for operator decision regardless of mode.
-
-**Safety:**
-- `impl_iteration` mid-flight is treated as unsafe (worktree
-  could have partial changes from the coding agent that
-  weren't committed). v1 ALWAYS surfaces for operator
-  decision on these; auto-resume never fires here.
-- A resumed attempt re-uses the original `attempt_id` and
-  the original worktree (which IMPROVEMENT-WORKSPACE-V1
-  preserves across restarts via the per-attempt-id branch).
-
-**Ledger events added:**
-- `attempt_resumed_post_crash` (resume_point, mode)
-- `attempt_abandoned_post_crash` (resume_point, reason)
-- `attempt_awaiting_resume_decision` (resume_point)
-
-### Shape 3: Auto-rebase on origin/main drift (default off)
-
-**Flag:** `IMPROVEMENT_RECOVERY_AUTO_REBASE`
-  (env: `KERNOS_IMPROVEMENT_AUTO_REBASE`).
-  Default: `off`. Values: `auto`, `surface_only`, `off`.
-
-**Trigger:** `git_push` raises with
-  `improvement.head_drifted_pre_push` (non-fast-forward error
-  surfaced by GIT-OPERATIONS-PRIMITIVES-V1).
-
-**Action:**
-- `off`: surface push failure to operator via prose
-  (`/improvement_status` shows the drift); operator resolves
-  manually; attempt closes with `final_state=push_failed_drift`.
-- `surface_only`: identical to `off` but with explicit
-  `/rebase_and_retry <attempt_id>` instruction in the prose.
-- `auto`:
-  1. `git fetch origin main`
-  2. `git rebase origin/main` on the improvement branch
-  3. If conflict: surface to operator with conflict files
-     list; mark attempt `rebase_conflict`; bail.
-  4. If clean: re-run `run_self_test_suite` in worktree
-     (covenant-driven; suite-required by default for
-     auto-rebase). If green: re-push. If red: surface to
-     operator; mark `rebase_self_test_failed`.
-
-**Bounds:**
-- Max 1 auto-rebase per attempt (no rebase-of-rebase). A
-  second drift event closes the attempt with
-  `push_failed_drift_twice`.
-
-**Ledger events added:**
-- `auto_rebase_started` (origin_main_sha_before)
-- `auto_rebase_succeeded` (origin_main_sha_after)
-- `auto_rebase_conflict` (conflict_files[])
-- `rebase_self_test_failed` (failed_test_ids[])
-
-### Shape 4: Per-step retry budgets (default on, conservative)
-
-**Flag:** `IMPROVEMENT_RECOVERY_TRANSIENT_RETRIES`
-  (env: `KERNOS_IMPROVEMENT_RETRY_TRANSIENT`).
-  Default: `on`. Values: `on`, `off`.
-
-**Trigger:** Any `consult` call inside the loop raises with
-a class of exception classified as **transient** (per
-`AGENT_CALL_TRANSIENT_RETRY_V1`'s existing transient-error
-catalog: connection refused, ECONNRESET, HTTP 502/503/504,
-asyncio.TimeoutError).
-
-**Action:**
-- Retry the same `consult` up to 2 times with exponential
-  backoff: 5s, then 30s.
-- Each retry writes a `consult_retry_attempted` event with
-  the iteration_num, error_class, backoff_sec.
-- If all retries exhausted: classify as terminal; attempt
-  fails with `final_state=aborted_consult_failure` (existing
-  AC19 path, now with `retries_exhausted=True` marker).
-
-**Non-transient errors** (CodingAgentTimeout from a true
-hang, ContextWindowExceeded, AuthFailed, etc.) skip retry
-entirely and go straight to AC19 termination.
-
-**Bounds:**
-- 2 retries × 2 calls per round × ~4 rounds = ~16 retries
-  worst-case per attempt. Hard cap of 10 total retries per
-  attempt across all consult calls; cap exceeded → attempt
-  closes with `final_state=aborted_retry_cap`.
-
-**Ledger events added:**
-- `consult_retry_attempted` (iteration, error_class, backoff_sec)
-- `consult_retry_exhausted` (final_error_class)
-- `consult_retry_cap_hit` (total_retries_consumed)
-
-## Two operational fixes that already shipped ad-hoc (formalize here)
-
-### Shape 5: Bridge sentinel reset for gate-pending attempts
-
-**Already implemented:** commit `9916fa0` —
-`ExecutionEngine._reset_bridge_sentinel_for_gate` walks
-pending-gate executions at `restart_resume` and deletes
-the `*.emitted` sentinel so the bridge re-emits naturally.
-
-**Recovery-spec formalization:**
-- The bring-up hook MUST run this reset before the workflow
-  runtime starts processing events (sequencing: sentinel
-  reset → runtime start → ledger scan for `awaiting_recovery_*`).
-- A regression test pins the ordering against the bring-up
-  registry.
-
-**Ledger events added (for telemetry parity with Shape 2):**
-- `bridge_sentinel_reset_post_crash` (request_id, gate_id)
-
-### Shape 6: Architectural-bound completion failure
-
-**Trigger:** Bridge response carries `investigation_outcome=
-architectural_bound_completion` or
-`investigation_outcome=requires_architect_input` (CC determined
-the asked work needs architect-level decision before
-proceeding).
-
-**Action:**
-- Loop ALWAYS surfaces to operator. No auto-recovery is
-  legal — by definition the work needs architect input.
-- Mark attempt `awaiting_architect_input`; closed in
-  ledger with terminal event `attempt_escalated_to_architect`.
-- The operator-facing prose includes CC's summary of WHY it
-  bounded out (the bridge response's `summary` field) +
-  `/abandon <attempt_id>` instruction.
-
-**Recovery-spec formalization:**
-- This case already routes through the bridge today (CC writes
-  the outcome; bridge surfaces it). v1 of recovery just adds
-  the named final_state + the structured ledger event so
-  telemetry can distinguish "architect-bound" from other
-  abort modes.
-
-**Ledger events added:**
-- `attempt_escalated_to_architect` (cc_summary, related_pattern_id)
-
-## Tool surface
-
-### `/recover <attempt_id>` slash command
-
-Operator opt-in for Shape 1 when mode is `surface_only`.
-
-Parameters:
-- `attempt_id` (positional, required).
-
-Behavior:
-- Validates `attempt_id` exists + is in `awaiting_recovery_
-  decision` state. If not: prose error.
-- Loads the attempt's failure_summary + failed_test_ids from
-  the ledger. Calls `IMPROVementLoopOrchestrator.recover_
-  test_failure(attempt_id)`.
-- Returns prose: "Recovery started for attempt
-  {attempt_id} — reviewer will analyze the failure and
-  propose a fix. I'll ping you for approval when ready."
-
-### `/abandon <attempt_id>` slash command
-
-Operator opt-out for Shape 1 (`awaiting_recovery_decision`),
-Shape 2 (`in_flight_at_crash`), and Shape 6
-(`awaiting_architect_input`).
-
-Parameters:
-- `attempt_id` (positional, required).
-- `reason` (optional free text).
-
-Behavior:
-- Validates `attempt_id` exists + is in an abandonable state.
-- Calls `IMPROVementLoopOrchestrator.abandon(attempt_id,
-  reason)`.
-- Marks final_state appropriately (`abandoned_by_operator_*`).
-
-### `/resume <attempt_id>` slash command
-
-Operator opt-in for Shape 2 (`in_flight_at_crash`).
-
-Parameters:
-- `attempt_id` (positional, required).
-
-Behavior:
-- Validates state. Calls `IMPROVementLoopOrchestrator.
-  resume_post_crash(attempt_id)`.
-- Returns prose with the resume_point + what happens next.
-
-### `/rebase_and_retry <attempt_id>` slash command
-
-Operator opt-in for Shape 3 when mode is `surface_only`.
-
-Parameters:
-- `attempt_id` (positional, required).
-
-Behavior:
-- Validates the attempt is in `push_failed_drift` state.
-- Calls `IMPROVementLoopOrchestrator.rebase_and_retry(
-  attempt_id)`.
-
-### Agent-callable recovery tools (Shape 1 surface_to_agent path)
-
-Two new tools, pinned conditionally (only when an attempt is
-in `awaiting_recovery_decision` state for the active agent's
-member):
-
-- **`proceed_with_recovery`** — `attempt_id` (required),
-  `recovery_note` (optional prose explaining the agent's
-  read of the failure). Spawns reviewer for fix-up cycle.
-  Gate classification: `hard_write` (recovery commits still
-  flow through the commit-time approval receipt).
-- **`abandon_attempt`** — `attempt_id` (required),
-  `abandon_reason` (required prose). Closes the attempt with
-  `final_state=test_failed_abandoned_by_agent`. Gate
-  classification: `soft_write` (no source mutation, just
-  closes the ledger row).
-
-Shapes 2, 3, 4, 5, 6 do NOT get agent-callable tools — they
-are substrate-bounded recovery (Shape 2's resume happens at
-bring-up before the agent is even running; Shape 3's rebase
-+ Shape 4's retries happen mid-flow without agent decision;
-Shape 5 is purely housekeeping; Shape 6 escalates to architect
-by definition).
-
-## Architecture
-
-```
-kernos/kernel/improvement_loop_recovery.py
-  - class ImprovementLoopRecovery:
-      # All methods take (attempt_id, instance_id) and return
-      # async results that the orchestrator awaits.
-
-      async def detect_post_crash_attempts() -> list[CrashedAttempt]
-      async def resume_post_crash(attempt_id, mode) -> None
-      async def abandon(attempt_id, reason) -> None
-
-      async def recover_test_failure(attempt_id) -> None
-      # Called by post-restart bring-up hook when test fails.
-
-      async def rebase_and_retry(attempt_id) -> None
-      # Called by orchestrator's push-step error handler.
-
-      async def retry_consult(call_fn, *args, **kwargs) -> Any
-      # Wrapped around every consult call in the orchestrator.
-      # Returns the consult result or raises after exhaustion.
+**Status:** Buildable POC v1
+**Scope:** Shape 1 only: test-failure recovery with
+`surface_to_agent`.
+**POC goal:** A clean zero-user portfolio demo where an autonomous
+improvement lands, the post-restart self-test fails, Kernos wakes the
+active agent with the failure, the agent chooses recovery or abandon,
+and at most two approval-gated fix-up commits are attempted.
+**Estimated size:** ~250 LOC source + ~180 LOC tests.
+
+## Buildability Check
+
+Verified against shipped code:
+
+- `ImprovementLoopOrchestrator.start_attempt` creates the attempt,
+  worktree, and background task at `kernos/kernel/improvement_loop_workflow.py:124`.
+  `_run_attempt` runs spec, impl, then calls `_request_commit_approval`
+  at `kernos/kernel/improvement_loop_workflow.py:215` and
+  `kernos/kernel/improvement_loop_workflow.py:273`. It does not yet
+  continue after approval.
+- `_restart_fn` is accepted and stored, but not used:
+  `kernos/kernel/improvement_loop_workflow.py:109` and
+  `kernos/kernel/improvement_loop_workflow.py:116`.
+- The real ledger has three tables and no typed current-state column:
+  `improvement_attempts.final_state`, commit rows, and append-only
+  event `kind` strings live at `kernos/kernel/instance_db.py:208`,
+  `kernos/kernel/instance_db.py:232`, and
+  `kernos/kernel/instance_db.py:245`.
+- Ledger mutation is through `update_attempt`,
+  `append_event`, and `record_commit`:
+  `kernos/kernel/improvement_ledger.py:79`,
+  `kernos/kernel/improvement_ledger.py:130`, and
+  `kernos/kernel/improvement_ledger.py:174`.
+- Existing shipped event kinds in the orchestrator are
+  `workspace_created`, `spec_iteration`, `impl_iteration`,
+  `approval_requested`, and `attempt_failed`:
+  `kernos/kernel/improvement_loop_workflow.py:186`,
+  `kernos/kernel/improvement_loop_workflow.py:360`,
+  `kernos/kernel/improvement_loop_workflow.py:432`,
+  `kernos/kernel/improvement_loop_workflow.py:505`, and
+  `kernos/kernel/improvement_loop_workflow.py:297`.
+- The self-test gate exists as `run_self_test_suite`; it validates an
+  improvement worktree, appends `self_test_result`, updates
+  `test_outcome`, and sets `first_pass_green=1` only if it is still
+  NULL on a pass:
+  `kernos/kernel/self_test_gate.py:565`,
+  `kernos/kernel/self_test_gate.py:625`,
+  `kernos/kernel/self_test_gate.py:754`, and
+  `kernos/kernel/self_test_gate.py:760`.
+- Durable approval receipts already support
+  `git_commit_authorization`: requests are created at
+  `kernos/kernel/approval_receipts.py:105`; `/approve ... CONFIRM`
+  has a post-approval callback seam by receipt kind at
+  `kernos/messages/handler.py:5374`.
+- `git_commit` and `git_push` enforce the existing approval gate and
+  receipt binding at `kernos/kernel/git_operations.py:410` and
+  `kernos/kernel/git_operations.py:583`. They do not write the
+  improvement ledger today.
+- Agent-callable kernel tools are registered canonically by schema
+  import in `kernos/kernel/kernel_tool_registry.py:95`, dispatcher
+  inventory and paths in `kernos/kernel/reasoning.py:723`,
+  `kernos/kernel/reasoning.py:738`, and
+  `kernos/kernel/reasoning.py:832`, `execute_tool` at
+  `kernos/kernel/reasoning.py:986`, concrete handler branches near
+  `kernos/kernel/reasoning.py:1565`, and gate classification at
+  `kernos/kernel/gate.py:323`.
+- Tool-surfacing starts from `kernel_tool_schema_map` at
+  `kernos/messages/phases/assemble.py:503`, always-pins tools at
+  `kernos/messages/phases/assemble.py:555`, and catalog-scans the
+  remaining tools at `kernos/messages/phases/assemble.py:648`.
+- Synthetic agent wake turns already exist for consult completion via
+  `NormalizedMessage` injection at `kernos/messages/handler.py:4711`;
+  the recovery surface should use that pattern.
+
+Buildability conclusion: the post-restart self-test failure path and
+`awaiting_recovery_decision` state do not exist yet. V1 must add the
+minimal approval/restart/test continuation plus Shape 1 recovery.
+
+## In Scope
+
+- Default and only recovery mode: `surface_to_agent`.
+- Trigger: a post-restart `run_self_test_suite` result with
+  `test_outcome != "pass"` for an improvement attempt.
+- Two agent-callable tools:
+  `proceed_with_recovery(attempt_id)` and
+  `abandon_attempt(attempt_id, reason)`.
+- Conditional tool surfacing: these two tools are visible only when
+  the active space has an attempt in `awaiting_recovery_decision`.
+- Recovery iteration cap: 2 accepted `proceed_with_recovery` calls per
+  attempt.
+- Recovery commits reuse the existing `git_commit_authorization`
+  receipt gate. No source mutation bypasses approval.
+- Operator override uses the same substrate service functions as the
+  agent tools.
+
+## Out Of Scope
+
+- Security hardening, sandboxing, and defense-in-depth changes.
+- Mode flags (`auto`, `surface_to_operator`, `off`).
+- New workflow engine primitives.
+- Auto-rebase, transient retry budgets, mid-attempt restart-resume,
+  bridge sentinel work, and architect-bound escalation.
+
+## V1 Flow
+
+### 0. Minimal continuation needed for the POC
+
+The shipped loop currently stops after `approval_requested`. V1 adds
+the missing continuation so recovery has a real trigger:
+
+1. Extend the existing `/approve` receipt-kind callback seam for
+   `kind="git_commit_authorization"`.
+2. Parse the receipt binding payload for `attempt_id`,
+   `workspace_dir`, `expected_parent_sha`, and `expected_diff_hash`.
+3. Run the existing `git_commit` and `git_push` handlers with the
+   approved receipt.
+4. Write a commit row with `record_commit`; for recovery commits set
+   `recovery_trigger="post_restart_self_test_failed"`.
+5. Append `commit_recorded` and `push_succeeded` events.
+6. Set `final_state="awaiting_post_restart_test"` and invoke the
+   existing restart function.
+7. On bring-up, scan attempts with
+   `final_state="awaiting_post_restart_test"` and run
+   `run_self_test_suite` against the attempt worktree with
+   `include_soak=True`.
+
+The POC uses the existing worktree path because
+`run_self_test_suite` requires a workspace under
+`data/<instance>/improvement_workspace/`.
+
+### 1. Failed post-restart self-test
+
+When the bring-up continuation sees `test_outcome != "pass"`:
+
+1. If this is the first failed post-restart test for the attempt, set
+   `first_pass_green=0` before any recovery pass can later set it to
+   1.
+2. If fewer than 2 recovery iterations have started, set
+   `final_state="awaiting_recovery_decision"`.
+3. Append `recovery_decision_requested` with JSON detail containing
+   `attempt_id`, `failure_summary`, `failed_test_ids` if available,
+   `worktree_path`, and `recovery_iterations_used`.
+4. Inject a synthetic system turn into the origin space using the
+   existing wake-turn pattern. The message tells the agent the test
+   failed and that exactly two tools are available:
+   `proceed_with_recovery` or `abandon_attempt`.
+
+Origin space/member are recorded at attempt start as an
+`attempt_origin` ledger event. This avoids a schema migration while
+keeping the wake target durable across restart.
+
+If two recovery iterations have already started, set
+`final_state="test_failed_unrecovered"`, set `ended_at`, and append
+`recovery_cap_hit`.
+
+### 2. `proceed_with_recovery(attempt_id)`
+
+The tool accepts only attempts whose `final_state` is
+`awaiting_recovery_decision`.
+
+On success:
+
+1. Count prior `recovery_started` events. If the count is already 2,
+   close the attempt as `test_failed_unrecovered`.
+2. Set `final_state="recovery_in_progress"`.
+3. Append `recovery_started` with JSON detail
+   `{ "iteration": N, "trigger": "post_restart_self_test_failed" }`.
+4. Spawn a bounded fix-up cycle against the existing worktree:
+   call the original `primary_coding_agent` with the failure summary,
+   failed tests, spec requirement, worktree path, and instruction to
+   edit the worktree and end with `STATUS: GREEN` or
+   `STATUS: NEEDS_REVISION <reason>`.
+5. Append `recovery_iteration` with `iteration`, `agent`, and
+   `outcome`.
+6. If the recovery consult is not GREEN, set
+   `final_state="test_failed_unrecovered"`, set `ended_at`, and append
+   `recovery_aborted_unconverged`.
+7. If GREEN, issue the same `git_commit_authorization` approval as
+   the original attempt, with binding payload fields
+   `attempt_id`, `workspace_dir`, `expected_parent_sha`,
+   `expected_diff_hash`, and `recovery_iteration=N`.
+8. Append `approval_requested` with `recovery_iteration=N`. The
+   attempt waits for operator approval exactly like the first commit.
+
+After approval, the continuation path commits, pushes, restarts, and
+runs the post-restart self-test again. A pass closes the attempt as
+`completed`; a failure returns to `awaiting_recovery_decision` unless
+the cap is exhausted.
+
+### 3. `abandon_attempt(attempt_id, reason)`
+
+The tool accepts only attempts whose `final_state` is
+`awaiting_recovery_decision`.
+
+On success:
+
+- Set `final_state="test_failed_abandoned_by_agent"`.
+- Set `ended_at`.
+- Append `test_failed_abandoned_by_agent` with the provided reason.
+- Do not spawn a coding agent and do not request approval.
+
+## Agent Tools
+
+Define the schemas next to `IMPROVE_KERNOS_TOOL` in
+`kernos/kernel/improvement_loop_workflow.py`.
+
+`proceed_with_recovery` schema:
+
+```json
+{
+  "name": "proceed_with_recovery",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "attempt_id": { "type": "string" }
+    },
+    "required": ["attempt_id"],
+    "additionalProperties": false
+  }
+}
 ```
 
-Recovery lives in its own module — the orchestrator imports
-it and calls into it at the four trigger sites. Keeps the
-orchestrator focused on happy-path composition; recovery
-shape stays auditable in isolation.
+`abandon_attempt` schema:
 
-The orchestrator's resume entry points (`_run_attempt`,
-`continue_after_approval`, `continue_after_restart`) all gain
-a small dispatcher that consults the ledger for the resume
-point and routes accordingly.
+```json
+{
+  "name": "abandon_attempt",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "attempt_id": { "type": "string" },
+      "reason": { "type": "string" }
+    },
+    "required": ["attempt_id", "reason"],
+    "additionalProperties": false
+  }
+}
+```
 
-## Acceptance criteria
+Registration requirements:
 
-### Shape 1: Test failure recovery
+- Import both schemas in `kernel_tool_registry._import_kernel_schemas`
+  and include them in the schema list.
+- Add both names to `ReasoningService._KERNEL_TOOLS`,
+  `_DISPATCHABLE_KERNEL_TOOLS`, and `_KERNEL_TOOL_PATHS` with
+  `frozenset({"confirmed"})`.
+- Add concrete `execute_tool` branches that call handlers in
+  `improvement_loop_workflow.py`.
+- Classify both as `soft_write` in `DispatchGate.classify_tool_effect`.
+  They mutate the ledger and may spawn a consult, but source mutation
+  still waits for the existing commit approval gate.
+- Do not add either tool to `ALWAYS_PINNED`.
 
-| AC | Description |
-|---|---|
-| AC1 | When mode=`surface_to_agent` (default) and test fails: substrate raises structured observation into the active member's conversation; `proceed_with_recovery` + `abandon_attempt` tools become pinned for that member; attempt state = `awaiting_recovery_decision`. |
-| AC1a | When agent calls `proceed_with_recovery(attempt_id)`: reviewer spawned (same as auto-mode path); ledger event `recovery_started` with `triggered_by=agent`. |
-| AC1b | When agent calls `abandon_attempt(attempt_id, reason)`: `final_state=test_failed_abandoned_by_agent`; ledger event includes reason. |
-| AC2 | When mode=`auto` and test fails: reviewer agent spawned directly; ledger event `recovery_started` with `triggered_by=substrate`. |
-| AC2a | When mode=`surface_to_operator`: legacy whisper-to-operator path; `/recover` + `/abandon` still available; `triggered_by=operator` on outcome. |
-| AC3 | Reviewer success path: new approval receipt issued; commit + push + restart fire; second post-restart test runs. |
-| AC4 | Recovery iteration cap (2) enforced; on 3rd failure: `final_state=test_failed_unrecovered`. |
-| AC5 | Reviewer "can't fix" path: `final_state=test_failed_unrecovered`; agent surfaces explanation in conversation (mode=`surface_to_agent`) or operator whisper (other modes). |
-| AC6 | `/recover <id>` and `/abandon <id>` work as operator overrides REGARDLESS of mode (operator can always intervene). |
-| AC7 | Recovery commits go through full approval gate (cannot skip). |
-| AC8 | `proceed_with_recovery` + `abandon_attempt` agent tools only pinned when there is an attempt in `awaiting_recovery_decision` state for the active member; otherwise hidden. |
+## Conditional Surfacing
 
-### Shape 2: Mid-attempt restart-resume
+The tools are registered globally for dispatch parity but surfaced
+only during recovery decision turns.
 
-| AC | Description |
-|---|---|
-| AC8 | Bring-up scan detects all attempts with `final_state IS NULL` + last event >60s before boot. |
-| AC9 | Resume-point classification correctly maps each terminal-event-state to one of the 7 resume points (test fixture per state). |
-| AC10 | Mode=`surface_only` writes whisper listing each attempt + resume_point + `/resume` + `/abandon` instructions. |
-| AC11 | Mode=`auto` resumes only safe resume_points (5 of 7); always surfaces unsafe (`spec_cycle`, `impl_cycle`). |
-| AC12 | Resumed attempt re-uses original `attempt_id` + original worktree branch. |
-| AC13 | `awaiting_approval` resume: orchestrator re-binds continuation; existing `/approve` still works. |
-| AC14 | `push` resume: idempotent re-push (skip if local + remote SHAs already match). |
-| AC15 | Worktree-corruption detection: if `impl_cycle` resume_point + worktree shows uncommitted changes, ALWAYS surfaces (never auto-resumes) regardless of mode. |
+Implement a small surfacing helper used by assemble:
 
-### Shape 3: Auto-rebase
+1. Before pinned/active selection, check whether the current
+   `instance_id` and active space have an attempt whose
+   `final_state="awaiting_recovery_decision"` and whose
+   `attempt_origin` event targets that space.
+2. If no such attempt exists, remove `proceed_with_recovery` and
+   `abandon_attempt` from the local `_kernel_tool_map` so neither
+   pinned nor catalog scan can surface them.
+3. If such an attempt exists, force-add both schemas to the active
+   tool list for this turn.
 
-| AC | Description |
-|---|---|
-| AC16 | Push raises with `head_drifted_pre_push` → mode dispatch fires (off / surface_only / auto). |
-| AC17 | Mode=`auto`: fetch + rebase happen in worktree (not main checkout). |
-| AC18 | Mode=`auto`: rebase conflict → `final_state=rebase_conflict`; whisper with conflict files. |
-| AC19 | Mode=`auto`: rebase clean + self-test green → re-push fires. |
-| AC20 | Mode=`auto`: rebase clean + self-test red → `final_state=rebase_self_test_failed`. |
-| AC21 | Second drift after auto-rebase → `final_state=push_failed_drift_twice` (no rebase-of-rebase). |
+This keeps dispatch registered while ensuring the agent only sees
+the decision tools when there is an actual recovery decision to make.
 
-### Shape 4: Transient retries
+## Ledger Contract
 
-| AC | Description |
-|---|---|
-| AC22 | Transient error class triggers retry; non-transient does not. |
-| AC23 | Backoff sequence is 5s then 30s (test with mocked sleep). |
-| AC24 | Total retries cap (10/attempt) enforced; cap-hit → `final_state=aborted_retry_cap`. |
-| AC25 | Ledger event `consult_retry_attempted` per retry with correct iteration + error_class. |
-| AC26 | When flag=`off`: first error terminates (no retry attempt). |
+No new tables. No new columns.
 
-### Shape 5: Bridge sentinel reset (regression-pin only)
+Use the existing APIs:
 
-| AC | Description |
-|---|---|
-| AC27 | Bring-up registry test pins ordering: `_reset_bridge_sentinel_for_gate` runs before workflow runtime starts. |
-| AC28 | Sentinel reset emits `bridge_sentinel_reset_post_crash` event per pending-gate execution detected. |
+- `update_attempt(... final_state=...)`
+- `append_event(... kind=..., detail=...)`
+- `record_commit(... recovery_trigger=...)`
 
-### Shape 6: Architect-bound
+Existing states/events remain unchanged.
 
-| AC | Description |
-|---|---|
-| AC29 | Bridge response with `investigation_outcome=architectural_bound_completion` → `final_state=awaiting_architect_input`; whisper sent. |
-| AC30 | `/abandon` works for `awaiting_architect_input` state. |
-| AC31 | `attempt_escalated_to_architect` ledger event includes the CC summary + related_pattern_id (when present). |
+New `final_state` values:
 
-### Cross-shape
+- `awaiting_post_restart_test` - nonterminal; commit pushed and
+  restart requested.
+- `awaiting_recovery_decision` - nonterminal; tools may surface.
+- `recovery_in_progress` - nonterminal; fix-up consult is running.
+- `completed` - terminal; final post-restart self-test passed.
+- `test_failed_unrecovered` - terminal; failure remained after cap or
+  fix-up could not converge.
+- `test_failed_abandoned_by_agent` - terminal; agent chose abandon.
 
-| AC | Description |
-|---|---|
-| AC32 | All recovery modes default per spec (Shape 1: `surface_to_agent`, Shape 2: `surface_only`, Shape 3: `off`, Shape 4: `on`). |
-| AC33 | Covenant + env var both surface each flag's value; covenant takes precedence (covenants are operator-set, env vars are fallback). |
-| AC34 | `/improvement_status <id>` shows recovery state for every shape (current state + last 5 recovery events). |
-| AC35 | Each recovery shape's ledger event additions documented in `docs/improvement-attempt-ledger.md` schema section. |
+New event kinds:
 
-## Soak gate
+- `attempt_origin`
+- `commit_recorded`
+- `push_succeeded`
+- `recovery_decision_requested`
+- `recovery_started`
+- `recovery_iteration`
+- `recovery_aborted_unconverged`
+- `recovery_cap_hit`
+- `test_failed_abandoned_by_agent`
+- `operator_recovery_override`
 
-1. **Automated**: ACs above via test fixtures. Recovery path
-   tests stub `consult` to return scripted reviewer-fix diffs
-   or "can't fix" prose; push-drift tests use a temp git repo
-   with a second clone forcing the drift; retry tests use
-   monkeypatch on the consult function.
-2. **Operator soak per shape (separate sessions, each behind
-   its flag)**:
-   - **Shape 1**: trigger a known-bad commit (e.g., add a
-     test that asserts `False`); approve through the loop;
-     post-restart test fails; opt into `/recover`; observe
-     reviewer fix; approve recovery commit; observe second
-     post-restart test pass.
-   - **Shape 2**: kill Kernos mid-attempt (during spec cycle,
-     during impl cycle, during awaiting_approval, during
-     push). On restart: verify each crashed attempt detected;
-     verify resume_point classified correctly; verify
-     `surface_only` whisper shape; opt into `/resume` for
-     each safe point; verify `/abandon` works for unsafe.
-   - **Shape 3**: trigger drift by manually pushing a commit
-     to origin/main from another clone during an attempt;
-     observe `surface_only` whisper; opt into
-     `/rebase_and_retry`; verify rebase + re-push.
-   - **Shape 4**: monkeypatch consult to raise transient
-     errors twice then succeed; observe retries in ledger;
-     verify final attempt succeeds.
-3. **Failure soak**: each shape's failure-mode AC verified
-   by inducing the specific failure during operator soak.
-
-## Cognition-path migration soak gate
-
-Per [[cognition-migration-soak-gate]]: no production-default
-flip on cognition-path migrations until automated tests pin
-seams AND operator soak verifies lived cognition through
-substrate inspection.
-
-This spec ships every shape behind a flag with conservative
-default (off or surface_only). Promotion to default-on is
-per-shape, requires:
-1. Automated soak passes consistently.
-2. At least 3 operator-soak runs in `auto`/`on` mode
-   verifying the substrate state matches the user-visible
-   prose.
-3. Ledger inspection during soak confirms the expected
-   event sequence.
-
-Default-on promotions land as separate one-line spec patches
-post-evidence-gathering, not as part of this initial spec.
-
-## Out of scope (deferred to v2 if evidence supports)
-
-- **Parallel attempts.** v1 assumes one active attempt at a
-  time. Concurrent `/fix` triggers serialize; second attempt
-  waits in queue. Parallel safe-execution is a v2 question
-  (worktree isolation already supports it; the question is
-  receipt + ledger contention).
-- **Recovery reviewer rotation.** v1 always uses the original
-  reviewer agent for recovery. If the reviewer is the source
-  of the bad call, recovery loops on the same blind spot.
-  v2 question: round-robin or fresh-coding-agent for recovery.
-- **Cross-attempt learning.** When a recovery succeeds, the
-  fix-pattern is recorded in the ledger but not surfaced as a
-  workflow pattern. v2 could mine the ledger for recovery-
-  pattern frequency and propose patterns when a class of fix
-  recurs.
-- **Approval re-issue on TTL expiry.** Per IMPROVEMENT-LOOP-
-  WORKFLOW-V1 Risk #3: if the operator takes >24h to approve,
-  the receipt expires and the attempt is stuck. v2 adds an
-  operator-callable `/reissue_approval <attempt_id>`.
-
-## Risks
-
-- **Risk:** Shape 1's recovery iteration cap (2) is too low.
-  A 3rd attempt might succeed with a different angle; cutting
-  off at 2 may abandon recoverable failures.
-  - **Mitigation:** Cap is operator-configurable via
-    `KERNOS_IMPROVEMENT_RECOVERY_ITERATION_CAP`. v1 ships
-    default 2 because each iteration consumes operator
-    approval bandwidth; bumping requires operator decision.
-
-- **Risk:** Shape 2's resume_point classification is
-  heuristic-based on the last ledger event. If the orchestrator
-  crashes BETWEEN appending two ledger events (e.g., after
-  `impl_converged` is appended but before `approval_requested`),
-  the resume_point will be `impl_cycle_start` instead of
-  `approval_gate`. Re-running the spec cycle wastes work.
-  - **Mitigation:** Acceptable v1 trade-off — wasted work is
-    cheaper than auto-resuming into an inconsistent state.
-    The orchestrator can detect spec.md already exists in
-    the worktree and skip spec_cycle when resuming.
-    Documented in the Shape 2 README.
-
-- **Risk:** Shape 3's auto-rebase + self-test gate can mask
-  test failures introduced by main's drift (e.g., a new
-  test in main that the rebased branch now fails).
-  - **Mitigation:** The gate IS the self-test; if it fails,
-    `rebase_self_test_failed` surfaces. Operator can decide
-    whether the test failure is a true regression or pre-
-    existing flake.
-
-- **Risk:** Shape 4's transient catalog (502/503/504/etc.)
-  may misclassify a real failure as transient and retry into
-  noise. Codex's 600s timeout, for example, looks like a
-  hang — is it transient?
-  - **Mitigation:** Lean conservative on the catalog (already
-    decided in AGENT_CALL_TRANSIENT_RETRY_V1). Hard cap of
-    10 retries/attempt prevents pathological loops.
-
-- **Risk:** Shape 6's `attempt_escalated_to_architect` final
-  state could become a dumping ground for "CC is confused."
-  If recovery fires for too many "architect-bound" cases that
-  weren't truly architectural, the operator loses signal.
-  - **Mitigation:** The bridge's investigation_outcome is set
-    by CC explicitly via the structured-fields protocol; CC
-    has to actively choose this outcome. Audit the rate
-    monthly; if escalation becomes >25% of attempts, revisit
-    the prompt guidance.
+Recovery iteration count is the count of `recovery_started` events for
+the attempt.
 
 ## Dependencies
 
-All shipped:
-- IMPROVEMENT-WORKSPACE-V1 — worktree persists across crash
-- IMPROVEMENT-ATTEMPT-LEDGER-V1 — recovery's durability surface
-- IMPROVEMENT-LOOP-WORKFLOW-V1 — happy-path orchestrator
-- GIT-OPERATIONS-PRIMITIVES-V1 — drift detection at push
-- DURABLE-APPROVAL-RECEIPTS-V1 — recovery commit gates
-- USER-INITIATED-IMPROVEMENT-TRIGGER-V1 — `/fix` surface
-- BRIDGE-RESPONSE-SCHEMA-V1 — structured `investigation_outcome` extraction
-- AGENT-CALL-TRANSIENT-RETRY-V1 — transient error catalog (Shape 4 reference)
-- WORKFLOW-DESCRIPTOR-VERSIONING-V1 — recovery YAML lifts (if any) survive upgrades
+- Orchestrator and tool handlers:
+  `kernos/kernel/improvement_loop_workflow.py:92`,
+  `kernos/kernel/improvement_loop_workflow.py:451`,
+  `kernos/kernel/improvement_loop_workflow.py:559`.
+- Ledger schema and helpers:
+  `kernos/kernel/instance_db.py:208`,
+  `kernos/kernel/improvement_ledger.py:79`,
+  `kernos/kernel/improvement_ledger.py:130`,
+  `kernos/kernel/improvement_ledger.py:174`.
+- Worktree path and branch ownership:
+  `kernos/kernel/improvement_workspace.py:94`,
+  `kernos/kernel/improvement_workspace.py:100`,
+  `kernos/kernel/improvement_workspace.py:107`.
+- Self-test gate:
+  `kernos/kernel/self_test_gate.py:420`,
+  `kernos/kernel/self_test_gate.py:565`,
+  `kernos/kernel/self_test_gate.py:754`.
+- Durable approval receipts and approval callback seam:
+  `kernos/kernel/approval_receipts.py:105`,
+  `kernos/messages/handler.py:5296`,
+  `kernos/messages/handler.py:5374`.
+- Git commit/push approval gate:
+  `kernos/kernel/git_operations.py:410`,
+  `kernos/kernel/git_operations.py:583`.
+- Tool registration, dispatch, classification, and parity:
+  `kernos/kernel/kernel_tool_registry.py:95`,
+  `kernos/kernel/reasoning.py:723`,
+  `kernos/kernel/reasoning.py:738`,
+  `kernos/kernel/reasoning.py:832`,
+  `kernos/kernel/reasoning.py:986`,
+  `kernos/kernel/reasoning.py:1565`,
+  `kernos/kernel/gate.py:323`,
+  `kernos/kernel/gate.py:577`,
+  `tests/test_kernel_tool_registry_parity.py:57`,
+  `tests/test_kernel_tool_dispatch_paths.py:181`.
+- Conditional surfacing and synthetic wake:
+  `kernos/messages/phases/assemble.py:503`,
+  `kernos/messages/phases/assemble.py:648`,
+  `kernos/messages/handler.py:4711`.
 
-## Migration
+## Acceptance Criteria
 
-Additive. New module + new ledger event types + new slash
-commands + new bring-up hook. No schema change to existing
-ledger columns (event_type is already TEXT). Bring-up hook
-ordering update is documented in the bring-up registry test.
+| AC | Description |
+|---|---|
+| AC1 | Approving a `git_commit_authorization` for an improvement attempt commits, pushes, records `commit_recorded`/`push_succeeded`, records a commit row, sets `final_state="awaiting_post_restart_test"`, and calls the restart function. |
+| AC2 | Bring-up scans `awaiting_post_restart_test`, runs `run_self_test_suite`, and on failure sets `first_pass_green=0`, sets `final_state="awaiting_recovery_decision"`, appends `recovery_decision_requested`, and injects a synthetic agent wake. |
+| AC3 | `proceed_with_recovery` and `abandon_attempt` are registered through the canonical registry, dispatch, path, and gate-classification surfaces; existing parity tests fail if any registration surface is missed. |
+| AC4 | The two recovery tools are absent from normal turns and force-surfaced only when the active space owns an `awaiting_recovery_decision` attempt. |
+| AC5 | `proceed_with_recovery` rejects unknown attempts, wrong-state attempts, and cap-exhausted attempts with prose; on a valid attempt it appends `recovery_started` and runs one fix-up cycle. |
+| AC6 | A GREEN recovery cycle issues a new `git_commit_authorization`; no recovery commit or push occurs until the operator approves that receipt. |
+| AC7 | A recovery commit records `recovery_trigger="post_restart_self_test_failed"` and then reuses the same restart plus post-restart self-test path. |
+| AC8 | After two started recovery iterations, another post-restart test failure closes the attempt with `final_state="test_failed_unrecovered"` and appends `recovery_cap_hit`. |
+| AC9 | `abandon_attempt(attempt_id, reason)` closes an awaiting attempt with `final_state="test_failed_abandoned_by_agent"` and appends the reason; it does not spawn consult or request approval. |
+| AC10 | Operator override calls the same proceed/abandon service functions and appends `operator_recovery_override` before the shared action event. |
 
-The orchestrator gains four new entry points and one wrapped-
-call helper (`retry_consult`), but the existing happy-path
-behavior is unchanged when all flags are at default values.
+## Test Plan
 
-## Open architect questions (architect verdict 2026-05-28: bake into Codex review)
+- Extend `tests/test_improvement_loop_workflow.py` with:
+  approval continuation, post-restart test pass, post-restart test
+  failure, recovery proceed, recovery abandon, and cap exhaustion.
+- Extend ledger tests to pin new event names, `final_state` values, and
+  recovery iteration counting from `recovery_started`.
+- Extend tool registry/dispatch parity tests only as required by the
+  new tool names; existing tests should catch missed surfaces.
+- Add a surfacing unit test that assembles a normal turn and an
+  `awaiting_recovery_decision` turn, asserting the tools are absent in
+  the former and present in the latter.
+- Add a handler test for the `git_commit_authorization` approval
+  callback path that stubs `git_commit`, `git_push`, and `restart_fn`.
+- Add a synthetic wake test modeled on `inject_consult_completion_wake`
+  that verifies the recovery message queues a turn in the origin
+  space.
+- Add a demo-style integration test using stubbed consult and
+  self-test outcomes: fail initial test, agent proceeds, recovery
+  commit is approval-gated, second self-test passes, final state is
+  `completed`.
 
-Architect call 2026-05-28: "Recovery should surface to agent
-and they should be able to proceed or recover. Bake [these]
-into codex review." Q1 is resolved (Shape 1 default =
-`surface_to_agent`); the remaining four are open for Codex's
-independent read.
+## Deferred To V2
 
-1. ~~**Default for Shape 1.**~~ ✅ Resolved: `surface_to_agent`.
-   Recovery becomes an agent-in-the-loop decision, with the
-   operator able to override at any time via `/recover` or
-   `/abandon`. Codex: validate the `proceed_with_recovery` +
-   `abandon_attempt` tool shapes and the pinning rule (only
-   when attempt is `awaiting_recovery_decision` for the active
-   member) are right.
-
-2. **Recovery commit attribution.** A recovery commit lands
-   on the same branch as the original attempt. Should the
-   commit author/message reflect that it's a recovery
-   (e.g., commit message prefix `[RECOVERY]`)? Currently no
-   — recovery commits look like normal commits.
-
-3. **Multiple in-flight attempts on resume.** If Kernos
-   crashes with 3 attempts in flight, Shape 2 detects all 3.
-   Does the operator get 3 separate whispers or one
-   consolidated? v1 leans separate (per-attempt prose); could
-   consolidate if that's noisy.
-
-4. **Retry-cap interaction with iteration-cap.** Shape 4's
-   retry cap (10/attempt) is across ALL consult calls in the
-   attempt — but each iteration of spec/impl cycle has its
-   own internal review-protocol retries. The interaction can
-   surprise: an attempt could fail with `retry_cap` even
-   though no individual iteration hit its convergence cap.
-   Worth surfacing in `/improvement_status` more prominently?
-
-5. **Shape 6 boundary clarity.** "Architectural-bound" is a
-   judgement call CC makes. v1 trusts CC's classification
-   absolutely. Is there a hard rule the substrate should
-   enforce (e.g., "if CC asked for /architect, route here
-   regardless of investigation_outcome")?
+- Shape 2: mid-attempt restart-resume.
+- Shape 3: auto-rebase on origin drift.
+- Shape 4: transient consult retries.
+- Shape 5: bridge sentinel reset formalization.
+- Shape 6: architect-bound escalation.
