@@ -38,7 +38,22 @@ _POLL_INTERVAL_SEC = int(
     os.getenv("KERNOS_GATEWAY_HEALTH_POLL_SEC", "60"),
 )
 _GATEWAY_DEAF_WINDOW_SEC = int(
-    os.getenv("KERNOS_GATEWAY_DEAF_WINDOW_SEC", "600"),  # 10 min
+    # Bumped 600s → 1800s (2026-05-28, GATEWAY-OBSERVER-FALSE-
+    # POSITIVE-GUARD): low-traffic personal bot saw 483
+    # DISCORD_GATEWAY_DEAF friction reports in 2 days at the
+    # 600s threshold — quiet hours regularly cross that without
+    # the gateway being actually deaf. Same rationale as the
+    # WATCHDOG-FALSE-POSITIVE-GUARD-V1 (commit b610abd) bumping
+    # the parallel watchdog threshold to 1800s.
+    os.getenv("KERNOS_GATEWAY_DEAF_WINDOW_SEC", "1800"),  # 30 min
+)
+# Corroborating-latency guard for the observer's pattern B
+# detection. Mirrors the watchdog's _DISCORD_DEAF_CORROBORATING_
+# LATENCY_SEC pattern: silence alone with healthy heartbeat is a
+# quiet-server-likely signal, not deafness. Setting to 0 restores
+# the legacy silence-only behavior.
+_GATEWAY_DEAF_CORROBORATING_LATENCY_SEC = float(
+    os.getenv("KERNOS_GATEWAY_DEAF_CORROBORATING_LATENCY_SEC", "5.0"),
 )
 _HEARTBEAT_THRESHOLD_SEC = float(
     os.getenv("KERNOS_DISCORD_WATCHDOG_LATENCY_THRESHOLD_SEC", "60"),
@@ -679,6 +694,23 @@ class GatewayHealthObserver:
             if last_any > 0:
                 silence_sec = now - last_any
                 if silence_sec > _GATEWAY_DEAF_WINDOW_SEC:
+                    # GATEWAY-OBSERVER-FALSE-POSITIVE-GUARD
+                    # (2026-05-28): a quiet personal-bot guild can
+                    # cross the 30-min silence threshold during low-
+                    # traffic hours without the gateway actually
+                    # being deaf. Require a corroborating signal —
+                    # elevated heartbeat latency — before emitting.
+                    # Mirrors the watchdog's
+                    # _DISCORD_DEAF_CORROBORATING_LATENCY_SEC guard.
+                    # Setting the env var to 0 restores legacy
+                    # silence-only behavior.
+                    if _GATEWAY_DEAF_CORROBORATING_LATENCY_SEC > 0:
+                        latency_now = self._latency_provider()
+                        if (
+                            latency_now is None
+                            or latency_now <= _GATEWAY_DEAF_CORROBORATING_LATENCY_SEC
+                        ):
+                            return None
                     return FrictionSignal(
                         signal_type="DISCORD_GATEWAY_DEAF",
                         description=(
@@ -687,12 +719,14 @@ class GatewayHealthObserver:
                             f"(threshold {_GATEWAY_DEAF_WINDOW_SEC}s). "
                             f"Connected guild bots receive presence/"
                             f"typing events constantly; total silence "
-                            f"this long indicates the gateway is "
-                            f"dispatch-dead despite a healthy heartbeat."
+                            f"this long combined with elevated heartbeat "
+                            f"latency indicates the gateway is dispatch-"
+                            f"dead despite a healthy heartbeat."
                         ),
                         evidence=[
                             f"any_socket_silence_sec={silence_sec:.0f}",
                             f"window_sec={_GATEWAY_DEAF_WINDOW_SEC}",
+                            f"corroborating_latency_threshold_sec={_GATEWAY_DEAF_CORROBORATING_LATENCY_SEC}",
                             "pattern=total_socket_silence",
                         ],
                         context={

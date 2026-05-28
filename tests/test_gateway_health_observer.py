@@ -650,12 +650,19 @@ class TestDetectGatewayDeaf:
     # evidence.
 
     def test_pattern_b_total_socket_silence_emits_signal(self, tmp_path):
-        """Bug repro: ZERO socket events in deaf window. Pre-spec
-        this returned None silently; now it must surface DEAF."""
+        """Bug repro: ZERO socket events in deaf window AND elevated
+        heartbeat latency. Pre-spec this returned None silently; now
+        it surfaces DEAF.
+
+        Latency=10.0 here exercises the GATEWAY-OBSERVER-FALSE-
+        POSITIVE-GUARD (2026-05-28): silence alone with healthy
+        heartbeat is treated as quiet-server, not deafness.
+        """
         now = time.time()
         obs = _make_observer(
             mc_counter=None,
-            any_socket_event_ts=now - 1200,  # 20 min silence vs 600s window
+            any_socket_event_ts=now - 2400,  # 40 min silence vs 1800s window
+            latency=10.0,                    # > 5.0s corroborating threshold
             tmp_path=tmp_path,
         )
         signal = obs._detect_gateway_deaf(now)
@@ -674,6 +681,62 @@ class TestDetectGatewayDeaf:
             tmp_path=tmp_path,
         )
         assert obs._detect_gateway_deaf(now) is None
+
+    def test_pattern_b_silence_with_healthy_latency_suppressed(
+        self, tmp_path,
+    ):
+        """GATEWAY-OBSERVER-FALSE-POSITIVE-GUARD (2026-05-28): long
+        silence + healthy heartbeat latency = quiet server, NOT
+        deafness. The corroborating-latency guard suppresses the
+        signal. Direct fix for the observed 483 friction signals in
+        2 days on a low-traffic personal-bot guild."""
+        now = time.time()
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=now - 2400,  # 40 min silence
+            latency=0.05,                    # healthy heartbeat
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_gateway_deaf(now) is None
+
+    def test_pattern_b_silence_with_none_latency_suppressed(
+        self, tmp_path,
+    ):
+        """If latency_provider can't tell us anything (None), don't
+        false-positive. Mirrors the watchdog's same defensive
+        choice — unknown corroboration cannot promote silence to
+        deafness."""
+        now = time.time()
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=now - 2400,
+            latency=None,
+            tmp_path=tmp_path,
+        )
+        assert obs._detect_gateway_deaf(now) is None
+
+    def test_pattern_b_corroborating_threshold_zero_restores_legacy(
+        self, tmp_path, monkeypatch,
+    ):
+        """Setting KERNOS_GATEWAY_DEAF_CORROBORATING_LATENCY_SEC=0
+        restores the legacy silence-only emission behavior — for
+        operators who want the old aggressive detection back."""
+        from kernos.kernel import gateway_health
+
+        monkeypatch.setattr(
+            gateway_health, "_GATEWAY_DEAF_CORROBORATING_LATENCY_SEC", 0.0,
+        )
+        now = time.time()
+        obs = _make_observer(
+            mc_counter=None,
+            any_socket_event_ts=now - 2400,  # long silence
+            latency=0.05,                    # healthy heartbeat
+            tmp_path=tmp_path,
+        )
+        signal = obs._detect_gateway_deaf(now)
+        assert signal is not None
+        assert signal.signal_type == "DISCORD_GATEWAY_DEAF"
+        assert "pattern=total_socket_silence" in signal.evidence
 
     def test_pattern_b_zero_timestamp_skipped(self, tmp_path):
         """If any_socket_event_ts == 0 (bot just started, no events
@@ -708,7 +771,11 @@ class TestDetectGatewayDeaf:
         """Sequencing: pattern B (total silence) is the more severe
         diagnostic so it surfaces first. If somehow both conditions
         held (total silence AND stale on_message AND mc_count > 0
-        from earlier), pattern B's evidence wins."""
+        from earlier), pattern B's evidence wins.
+
+        Latency=10.0 satisfies the corroborating-latency guard
+        added 2026-05-28.
+        """
         now = time.time()
         counter = _MessageCreateCounter(window_sec=600)
         # Old MESSAGE_CREATE outside window won't count anyway.
@@ -719,7 +786,8 @@ class TestDetectGatewayDeaf:
         obs = _make_observer(
             mc_counter=counter,
             last_inbound=now - 3600,  # pattern A would fire on this
-            any_socket_event_ts=now - 1200,  # pattern B fires on this
+            any_socket_event_ts=now - 2400,  # pattern B fires on this
+            latency=10.0,  # corroborating-latency guard satisfied
             tmp_path=tmp_path,
         )
         signal = obs._detect_gateway_deaf(now)
