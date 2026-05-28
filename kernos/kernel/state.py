@@ -71,6 +71,31 @@ class InstanceProfile:
     developer_mode: bool = False
 
 
+@dataclass
+class ProjectState:
+    """Durable binding for a long-horizon project.
+
+    A project is not a separate substrate: it binds an existing
+    ContextSpace, canvas, knowledge tags, and one scheduler trigger.
+    """
+
+    project_id: str
+    instance_id: str
+    space_id: str
+    canvas_id: str
+    name: str
+    owner_member_id: str = ""
+    lifecycle_state: str = "active"
+    created_at: str = ""
+    updated_at: str = ""
+    last_activity_at: str = ""
+    checkin_trigger_id: str = ""
+    next_checkin_at: str = ""
+    completed_at: str = ""
+    completion_summary: str = ""
+    data: dict[str, Any] = field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Domain 2: User Knowledge
 # ---------------------------------------------------------------------------
@@ -673,6 +698,51 @@ class StateStore(ABC):
     async def update_context_space(
         self, instance_id: str, space_id: str, updates: dict
     ) -> None: ...
+
+    # Long-horizon projects (LONG-HORIZON-PROJECT-V1). Default
+    # implementations keep legacy stores constructible; SqliteStateStore is
+    # the production implementation.
+    async def insert_project_state(self, project: ProjectState) -> None:
+        raise NotImplementedError
+
+    async def create_project_state(self, project: ProjectState) -> None:
+        await self.insert_project_state(project)
+
+    async def get_project_state(
+        self, instance_id: str, project_id: str
+    ) -> ProjectState | None:
+        raise NotImplementedError
+
+    async def get_project_state_by_space(
+        self, instance_id: str, space_id: str,
+        lifecycle_state: str | None = None,
+    ) -> ProjectState | None:
+        raise NotImplementedError
+
+    async def list_active_projects(
+        self, instance_id: str, owner_member_id: str = "",
+    ) -> list[ProjectState]:
+        raise NotImplementedError
+
+    async def mark_project_completed(
+        self,
+        instance_id: str,
+        project_id: str,
+        completion_summary: str = "",
+        completed_at: str = "",
+    ) -> ProjectState | None:
+        raise NotImplementedError
+
+    async def update_project_activity(
+        self,
+        instance_id: str,
+        project_id: str,
+        *,
+        last_activity_at: str = "",
+        checkin_trigger_id: str | None = None,
+        next_checkin_at: str | None = None,
+    ) -> ProjectState | None:
+        raise NotImplementedError
 
     async def list_child_spaces(self, instance_id: str, parent_id: str) -> list[ContextSpace]:
         """Return all spaces with parent_id matching the given space."""

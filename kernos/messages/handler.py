@@ -4331,6 +4331,13 @@ class MessageHandler:
                         response = self._handle_help()
                     elif _cmd_lower.startswith("/spaces"):
                         response = await self._handle_spaces(primary_ctx, _cmd)
+                    elif (
+                        _cmd_lower == "/project"
+                        or _cmd_lower.startswith("/project ")
+                    ):
+                        response = await self._handle_project_command(
+                            primary_ctx, _cmd,
+                        )
                     elif _cmd_lower.startswith("/wipe"):
                         response = await self._handle_wipe(primary_ctx, _cmd)
                     elif _cmd_lower.startswith("/fix"):
@@ -5265,6 +5272,11 @@ class MessageHandler:
             "**/spaces** — List all context spaces with status.\n"
             '**/spaces create "Name" "Description"** — Manually create a '
             "new context space for testing multi-space routing.\n\n"
+            '**/project start "Name"** — Start a long-horizon project space, '
+            "canvas, and weekly check-in.\n"
+            "**/project status [name-or-project-id]** — Show project status.\n"
+            "**/project list** — List active projects.\n"
+            "**/project complete [name-or-project-id]** — Mark a project complete.\n\n"
             "These commands bypass the reasoning engine and are not stored "
             "in conversation history.\n\n"
             "**/wipe me** — Delete your member profile, conversations, knowledge, "
@@ -6801,6 +6813,266 @@ class MessageHandler:
                                 )
                             except Exception:
                                 pass
+
+    async def _resolve_project_for_command(
+        self, ctx: TurnContext, target: str,
+    ):
+        """Resolve a project command target by id, then active project name."""
+        target = (target or "").strip()
+        if not target:
+            try:
+                project = await self.state.get_project_state_by_space(
+                    ctx.instance_id,
+                    ctx.active_space_id,
+                    lifecycle_state="active",
+                )
+                if project:
+                    return project
+            except Exception:
+                pass
+            try:
+                projects = await self.state.list_active_projects(
+                    ctx.instance_id,
+                    owner_member_id=ctx.member_id,
+                )
+            except Exception:
+                return None
+            if not isinstance(projects, list):
+                return None
+            active = [p for p in projects if getattr(p, "lifecycle_state", "") == "active"]
+            if not active:
+                return None
+            return max(
+                active,
+                key=lambda p: (
+                    getattr(p, "last_activity_at", "")
+                    or getattr(p, "updated_at", "")
+                    or getattr(p, "created_at", ""),
+                    getattr(p, "updated_at", ""),
+                    getattr(p, "created_at", ""),
+                ),
+            )
+        try:
+            by_id = await self.state.get_project_state(ctx.instance_id, target)
+            if by_id:
+                return by_id
+        except Exception:
+            pass
+        try:
+            projects = await self.state.list_active_projects(
+                ctx.instance_id,
+                owner_member_id=ctx.member_id,
+            )
+        except Exception:
+            return None
+        if not isinstance(projects, list):
+            return None
+        target_l = target.lower()
+        for project in projects:
+            if getattr(project, "name", "").lower() == target_l:
+                return project
+        return None
+
+    @staticmethod
+    def _render_project_start(result: dict) -> str:
+        if not result.get("ok"):
+            return f"Couldn't start project: {result.get('error', 'unknown error')}"
+        if result.get("reminder_created", bool(result.get("checkin_trigger_id"))):
+            reminder_line = (
+                f"Reminder: `{result.get('checkin_trigger_id')}` next "
+                f"{result.get('next_checkin_at') or 'unknown'}"
+            )
+        else:
+            reason = result.get("reminder_reason") or "unknown reason"
+            reminder_line = f"Reminder: not created ({reason})"
+        return (
+            f"Started **{result.get('name', 'Project')}**.\n"
+            f"Project: `{result.get('project_id', '')}`\n"
+            f"Space: `{result.get('space_id', '')}`\n"
+            f"Canvas: `{result.get('canvas_id', '')}`\n"
+            f"{reminder_line}"
+        )
+
+    @staticmethod
+    def _render_project_status(result: dict) -> str:
+        if not result.get("ok"):
+            return f"Project not found: {result.get('error', 'no project found')}"
+        lines = [
+            f"**{result.get('name', 'Project')}** — {result.get('lifecycle_state', 'unknown')}",
+            f"Canvas: `{result.get('canvas_id', '')}`",
+        ]
+        decisions = result.get("recent_decisions") or []
+        if decisions:
+            lines.append("Recent decisions:")
+            for entry in decisions[:3]:
+                subject = entry.get("subject") or "Decision"
+                content = entry.get("content") or ""
+                lines.append(f"- {subject}: {content}")
+        for label, key in (
+            ("Timeline", "timeline"),
+            ("Open loops", "open_loops"),
+            ("Next steps", "next_steps"),
+        ):
+            values = result.get(key) or []
+            if values:
+                lines.append(f"{label}:")
+                lines.extend(f"- {v}" for v in values[:4])
+        reminder = result.get("checkin_trigger_id") or "none"
+        next_at = result.get("next_checkin_at") or "unknown"
+        lines.append(f"Reminder: `{reminder}` next {next_at}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_project_list(projects: list) -> str:
+        if not projects:
+            return "No active projects."
+        lines = ["**Active Projects**"]
+        for project in projects:
+            updated = getattr(project, "updated_at", "")[:10] or "unknown"
+            lines.append(
+                f"- **{getattr(project, 'name', 'Project')}** "
+                f"(`{getattr(project, 'project_id', '')}`) — updated {updated}"
+            )
+        return "\n".join(lines)
+
+    async def _handle_project_command(self, ctx: TurnContext, raw_cmd: str) -> str:
+        """Handle /project start|status|list|complete."""
+        import shlex
+
+        parts = raw_cmd.strip().split(None, 2)
+        if len(parts) < 2:
+            return (
+                'Usage: /project start "Name" | /project status '
+                "[name-or-project-id] | /project list | /project complete "
+                "[name-or-project-id]"
+            )
+        action = parts[1].lower()
+        rest = parts[2].strip() if len(parts) > 2 else ""
+
+        if action == "start":
+            if not rest:
+                return 'Usage: /project start "Name"'
+            try:
+                tokens = shlex.split(rest)
+            except ValueError:
+                tokens = [rest]
+            name = " ".join(tokens).strip()
+            canvas = self._get_canvas_service()
+            if canvas is None:
+                return "Project canvas service is not available."
+            from kernos.kernel.projects import start_project
+            result = await start_project(
+                state=self.state,
+                canvas=canvas,
+                trigger_store=getattr(self, "_trigger_store", None),
+                reasoning_service=self.reasoning,
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                active_space_id=ctx.active_space_id,
+                conversation_id=ctx.conversation_id,
+                name=name,
+                initial_note="",
+                checkin_cadence="weekly",
+                user_timezone=(ctx.soul.timezone if ctx.soul else ""),
+            )
+            if result.get("ok") and result.get("space_id"):
+                ctx.active_space_id = result["space_id"]
+                try:
+                    ctx.active_space = await self.state.get_context_space(
+                        ctx.instance_id,
+                        result["space_id"],
+                    )
+                except Exception:
+                    ctx.active_space = None
+            return self._render_project_start(result)
+
+        if action == "list":
+            try:
+                projects = await self.state.list_active_projects(
+                    ctx.instance_id,
+                    owner_member_id=ctx.member_id,
+                )
+            except Exception:
+                return "Project state is not available."
+            return self._render_project_list(projects if isinstance(projects, list) else [])
+
+        if action == "status":
+            target = ""
+            if rest:
+                try:
+                    target = " ".join(shlex.split(rest)).strip()
+                except ValueError:
+                    target = rest.strip()
+            project_id = ""
+            if target:
+                project = await self._resolve_project_for_command(ctx, target)
+                if not project:
+                    return f"Project not found: {target}"
+                project_id = project.project_id
+            canvas = self._get_canvas_service()
+            from kernos.kernel.projects import surface_project_status
+            result = await surface_project_status(
+                state=self.state,
+                canvas=canvas,
+                instance_id=ctx.instance_id,
+                member_id=ctx.member_id,
+                active_space_id=ctx.active_space_id,
+                project_id=project_id,
+            )
+            return self._render_project_status(result)
+
+        if action == "complete":
+            try:
+                tokens = shlex.split(rest) if rest else []
+            except ValueError:
+                tokens = rest.split()
+            project = None
+            summary = ""
+            if tokens:
+                full_target = " ".join(tokens).strip()
+                candidate = await self._resolve_project_for_command(ctx, full_target)
+                if candidate:
+                    project = candidate
+                    summary = ""
+                else:
+                    candidate = await self._resolve_project_for_command(ctx, tokens[0])
+                    if candidate:
+                        project = candidate
+                        summary = " ".join(tokens[1:]).strip()
+                    else:
+                        project = await self._resolve_project_for_command(ctx, "")
+                        summary = " ".join(tokens).strip()
+            else:
+                project = await self._resolve_project_for_command(ctx, "")
+            if not project:
+                return "No active project found to complete."
+            completed = await self.state.mark_project_completed(
+                ctx.instance_id,
+                project.project_id,
+                completion_summary=summary,
+            )
+            remove_note = ""
+            if getattr(project, "checkin_trigger_id", ""):
+                try:
+                    from kernos.kernel.scheduler import handle_manage_schedule
+                    remove_note = await handle_manage_schedule(
+                        getattr(self, "_trigger_store", None),
+                        ctx.instance_id,
+                        ctx.member_id,
+                        project.space_id,
+                        action="remove",
+                        trigger_id=project.checkin_trigger_id,
+                    )
+                except Exception as exc:
+                    logger.debug("PROJECT_CHECKIN_REMOVE_FAILED: %s", exc)
+            if not completed:
+                return "Project not found."
+            suffix = f"\n{remove_note}" if remove_note else ""
+            return f"Completed **{completed.name}**.{suffix}"
+
+        return (
+            "Unknown /project action. Use start, status, list, or complete."
+        )
 
     async def _handle_spaces(self, ctx: TurnContext, raw_cmd: str) -> str:
         """List spaces or create a new one manually."""

@@ -33,7 +33,7 @@ from kernos.messages.models import NormalizedMessage
 
 SLASH_COMMANDS_TO_PIN = (
     "/status", "/help", "/spaces", "/wipe me", "/wipe all",
-    "/disconnect", "/dump", "/model", "/model lightweight",
+    "/disconnect", "/dump", "/project list", "/model", "/model lightweight",
     "/model anthropic/claude-haiku-4.5", "/model reset",
 )
 
@@ -158,6 +158,14 @@ class TestSlashHandlersReturnStrings:
         finally:
             await idb.close()
 
+    async def test_project_returns_string(self, tmp_path):
+        handler, idb, ctx = await self._make_handler_with_chains(tmp_path)
+        try:
+            out = await handler._handle_project_command(ctx, "/project list")
+            assert isinstance(out, str)
+        finally:
+            await idb.close()
+
     async def test_wipe_returns_string(self, tmp_path):
         handler, idb, ctx = await self._make_handler_with_chains(tmp_path)
         try:
@@ -204,7 +212,7 @@ class TestSlashInterceptBlockStructure:
         # ordering or exhaustiveness.
         for cmd in (
             "/status", "/help", "/spaces", "/wipe", "/disconnect",
-            "/dump", "/model",
+            "/dump", "/project", "/model",
         ):
             assert cmd in src, (
                 f"slash command {cmd!r} not present in handler source — "

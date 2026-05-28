@@ -23,6 +23,7 @@ from kernos.kernel.state import (
     KnowledgeEntry,
     PendingAction,
     Preference,
+    ProjectState,
     Soul,
     StateStore,
     InstanceProfile,
@@ -146,6 +147,30 @@ CREATE TABLE IF NOT EXISTS context_spaces (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_spaces_tenant ON context_spaces(instance_id);
+
+CREATE TABLE IF NOT EXISTS project_state (
+    project_id           TEXT PRIMARY KEY,
+    instance_id          TEXT NOT NULL,
+    owner_member_id      TEXT NOT NULL DEFAULT '',
+    space_id             TEXT NOT NULL,
+    canvas_id            TEXT NOT NULL,
+    name                 TEXT NOT NULL,
+    lifecycle_state      TEXT NOT NULL DEFAULT 'active',
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    last_activity_at     TEXT NOT NULL,
+    checkin_trigger_id   TEXT NOT NULL DEFAULT '',
+    next_checkin_at      TEXT NOT NULL DEFAULT '',
+    completed_at         TEXT NOT NULL DEFAULT '',
+    completion_summary   TEXT NOT NULL DEFAULT '',
+    data                 TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (space_id) REFERENCES context_spaces(id),
+    CHECK (lifecycle_state IN ('active', 'completed'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_state_instance_space
+    ON project_state(instance_id, space_id);
+CREATE INDEX IF NOT EXISTS idx_project_state_owner_lifecycle
+    ON project_state(instance_id, owner_member_id, lifecycle_state, updated_at);
 
 CREATE TABLE IF NOT EXISTS preferences (
     id TEXT PRIMARY KEY,
@@ -490,11 +515,20 @@ class SqliteStateStore(StateStore):
         if member_id:
             clauses.append("(member_id=? OR member_id='' OR member_id IS NULL)")
             params.append(member_id)
-        sql = f"SELECT * FROM knowledge WHERE {' AND '.join(clauses)} LIMIT ?"
-        params.append(limit)
+        sql = f"SELECT * FROM knowledge WHERE {' AND '.join(clauses)}"
+        if not tags:
+            sql += " LIMIT ?"
+            params.append(limit)
         async with db.execute(sql, params) as cur:
             rows = await cur.fetchall()
-        return [self._row_to_ke(r) for r in rows]
+        entries = [self._row_to_ke(r) for r in rows]
+        if tags:
+            wanted = set(tags)
+            entries = [
+                entry for entry in entries
+                if wanted.intersection(set(getattr(entry, "tags", []) or []))
+            ]
+        return entries[:limit]
 
     async def update_knowledge(self, instance_id: str, entry_id: str, updates: dict) -> None:
         db = await self._db(instance_id)
@@ -857,6 +891,197 @@ class SqliteStateStore(StateStore):
              space_id, instance_id),
         )
         await db.commit()
+
+    # ===================================================================
+    # Long-horizon Projects
+    # ===================================================================
+
+    _PROJECT_STATE_COLS = {
+        "project_id", "instance_id", "owner_member_id", "space_id",
+        "canvas_id", "name", "lifecycle_state", "created_at", "updated_at",
+        "last_activity_at", "checkin_trigger_id", "next_checkin_at",
+        "completed_at", "completion_summary", "data",
+    }
+
+    def _project_to_row(self, project: ProjectState) -> tuple:
+        d = asdict(project)
+        data = d.get("data") or {}
+        return (
+            d["project_id"], d["instance_id"], d.get("owner_member_id", ""),
+            d["space_id"], d["canvas_id"], d["name"],
+            d.get("lifecycle_state", "active") or "active",
+            d.get("created_at", ""), d.get("updated_at", ""),
+            d.get("last_activity_at", ""),
+            d.get("checkin_trigger_id", ""),
+            d.get("next_checkin_at", ""),
+            d.get("completed_at", ""),
+            d.get("completion_summary", ""),
+            json.dumps(data, ensure_ascii=False),
+        )
+
+    def _row_to_project(self, row: aiosqlite.Row) -> ProjectState:
+        d = dict(row)
+        d["data"] = _from_json(d.get("data", "{}"), {})
+        return _build_dataclass(ProjectState, d)
+
+    async def insert_project_state(self, project: ProjectState) -> None:
+        """Insert a project_state row after validating its ContextSpace."""
+        if project.lifecycle_state not in ("active", "completed"):
+            raise ValueError("project lifecycle_state must be 'active' or 'completed'")
+        if not await self.get_context_space(project.instance_id, project.space_id):
+            raise ValueError(
+                f"project_state space_id {project.space_id!r} does not exist"
+            )
+
+        now = utc_now()
+        if not project.created_at:
+            project.created_at = now
+        if not project.updated_at:
+            project.updated_at = now
+        if not project.last_activity_at:
+            project.last_activity_at = project.updated_at
+
+        db = await self._db(project.instance_id)
+        await db.execute(
+            "INSERT INTO project_state "
+            "(project_id, instance_id, owner_member_id, space_id, canvas_id, "
+            "name, lifecycle_state, created_at, updated_at, last_activity_at, "
+            "checkin_trigger_id, next_checkin_at, completed_at, "
+            "completion_summary, data) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            self._project_to_row(project),
+        )
+        await db.commit()
+
+    async def create_project_state(self, project: ProjectState) -> None:
+        await self.insert_project_state(project)
+
+    async def get_project_state(
+        self, instance_id: str, project_id: str,
+    ) -> ProjectState | None:
+        db = await self._db(instance_id)
+        async with db.execute(
+            "SELECT * FROM project_state WHERE instance_id=? AND project_id=?",
+            (instance_id, project_id),
+        ) as cur:
+            row = await cur.fetchone()
+        return self._row_to_project(row) if row else None
+
+    async def get_project_state_by_space(
+        self,
+        instance_id: str,
+        space_id: str,
+        lifecycle_state: str | None = None,
+    ) -> ProjectState | None:
+        db = await self._db(instance_id)
+        clauses = ["instance_id=?", "space_id=?"]
+        params: list = [instance_id, space_id]
+        if lifecycle_state:
+            clauses.append("lifecycle_state=?")
+            params.append(lifecycle_state)
+        sql = (
+            "SELECT * FROM project_state WHERE "
+            f"{' AND '.join(clauses)} ORDER BY updated_at DESC LIMIT 1"
+        )
+        async with db.execute(sql, params) as cur:
+            row = await cur.fetchone()
+        return self._row_to_project(row) if row else None
+
+    async def get_project_state_by_space_id(
+        self,
+        instance_id: str,
+        space_id: str,
+        lifecycle_state: str | None = None,
+    ) -> ProjectState | None:
+        return await self.get_project_state_by_space(
+            instance_id, space_id, lifecycle_state=lifecycle_state,
+        )
+
+    async def list_active_projects(
+        self, instance_id: str, owner_member_id: str = "",
+    ) -> list[ProjectState]:
+        db = await self._db(instance_id)
+        clauses = ["instance_id=?", "lifecycle_state='active'"]
+        params: list = [instance_id]
+        if owner_member_id:
+            clauses.append("(owner_member_id=? OR owner_member_id='' OR owner_member_id IS NULL)")
+            params.append(owner_member_id)
+        sql = (
+            "SELECT * FROM project_state WHERE "
+            f"{' AND '.join(clauses)} ORDER BY updated_at DESC"
+        )
+        async with db.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return [self._row_to_project(r) for r in rows]
+
+    async def mark_project_completed(
+        self,
+        instance_id: str,
+        project_id: str,
+        completion_summary: str = "",
+        completed_at: str = "",
+    ) -> ProjectState | None:
+        project = await self.get_project_state(instance_id, project_id)
+        if not project:
+            return None
+        now = completed_at or utc_now()
+        db = await self._db(instance_id)
+        await db.execute(
+            "UPDATE project_state SET lifecycle_state='completed', "
+            "completed_at=?, completion_summary=?, updated_at=?, "
+            "last_activity_at=? WHERE instance_id=? AND project_id=?",
+            (now, completion_summary or project.completion_summary, now, now,
+             instance_id, project_id),
+        )
+        await db.commit()
+        return await self.get_project_state(instance_id, project_id)
+
+    async def update_project_activity(
+        self,
+        instance_id: str,
+        project_id: str,
+        *,
+        last_activity_at: str = "",
+        checkin_trigger_id: str | None = None,
+        next_checkin_at: str | None = None,
+    ) -> ProjectState | None:
+        project = await self.get_project_state(instance_id, project_id)
+        if not project:
+            return None
+        now = utc_now()
+        new_last = last_activity_at or now
+        updates = ["updated_at=?", "last_activity_at=?"]
+        params: list = [now, new_last]
+        if checkin_trigger_id is not None:
+            updates.append("checkin_trigger_id=?")
+            params.append(checkin_trigger_id)
+        if next_checkin_at is not None:
+            updates.append("next_checkin_at=?")
+            params.append(next_checkin_at)
+        params.extend([instance_id, project_id])
+        db = await self._db(instance_id)
+        await db.execute(
+            f"UPDATE project_state SET {', '.join(updates)} "
+            "WHERE instance_id=? AND project_id=?",
+            params,
+        )
+        await db.commit()
+        return await self.get_project_state(instance_id, project_id)
+
+    async def update_project_checkin(
+        self,
+        instance_id: str,
+        project_id: str,
+        *,
+        checkin_trigger_id: str = "",
+        next_checkin_at: str = "",
+    ) -> ProjectState | None:
+        return await self.update_project_activity(
+            instance_id,
+            project_id,
+            checkin_trigger_id=checkin_trigger_id,
+            next_checkin_at=next_checkin_at,
+        )
 
     # ===================================================================
     # Space Notices

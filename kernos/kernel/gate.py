@@ -395,6 +395,9 @@ class DispatchGate:
             # raises on bad shape (no state mutation).
             "classify_proposed_fix",
             "validate_investigation_response",
+            # LONG-HORIZON-PROJECT-V1: status reads project_state,
+            # knowledge, and canvas pages.
+            "surface_project_status",
             # NOTE: manage_channels was here pre-INTEGRATION-CAPABILITY-FIRST-V1
             # Batch 2 follow-up. It has action-dependent semantics
             # (list=read, enable/disable=soft_write); the kernel-reads
@@ -481,6 +484,12 @@ class DispatchGate:
             "record_fix_authorization",
             "maybe_run_closure_for_fix",
             "surface_to_user",
+            # LONG-HORIZON-PROJECT-V1: start creates a space, canvas,
+            # project_state row, and reminder; record writes canvas +
+            # knowledge. Both are bounded and reversible enough for
+            # soft-write handling in the POC.
+            "start_project",
+            "record_project_decision",
         }
 
         if tool_name in _KERNEL_READS:

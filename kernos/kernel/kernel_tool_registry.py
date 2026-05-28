@@ -206,6 +206,11 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.retrieval import REMEMBER_TOOL
     from kernos.kernel.runtime_trace import READ_RUNTIME_TRACE_TOOL
     from kernos.kernel.scheduler import MANAGE_SCHEDULE_TOOL
+    from kernos.kernel.projects import (
+        RECORD_PROJECT_DECISION_TOOL,
+        START_PROJECT_TOOL,
+        SURFACE_PROJECT_STATUS_TOOL,
+    )
     from kernos.kernel.reference.tools import REFERENCE_TOOL_SCHEMAS
     from kernos.kernel.workspace import MANAGE_WORKSPACE_TOOL, REGISTER_TOOL_TOOL
 
@@ -252,6 +257,9 @@ def _import_kernel_schemas() -> list[dict]:
         MANAGE_CHANNELS_TOOL,
         SEND_TO_CHANNEL_TOOL,
         MANAGE_SCHEDULE_TOOL,
+        START_PROJECT_TOOL,
+        RECORD_PROJECT_DECISION_TOOL,
+        SURFACE_PROJECT_STATUS_TOOL,
         # Workshop / execution
         EXECUTE_CODE_TOOL,
         MANAGE_WORKSPACE_TOOL,

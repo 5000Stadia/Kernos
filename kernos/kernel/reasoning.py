@@ -720,7 +720,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants", "record_fix_authorization", "classify_proposed_fix", "validate_investigation_response", "maybe_run_closure_for_fix", "surface_to_user"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "start_project", "record_project_decision", "surface_project_status", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants", "record_fix_authorization", "classify_proposed_fix", "validate_investigation_response", "maybe_run_closure_for_fix", "surface_to_user"}
 
     # SELF-IMPROVEMENT-CLOSURE-V1 (AC17): explicit dispatchability
     # registry. Every name in this set MUST have a concrete branch
@@ -745,6 +745,8 @@ class ReasoningService:
         # Covenants / capabilities / channels
         "manage_covenants", "manage_capabilities",
         "manage_channels", "send_to_channel", "manage_schedule",
+        "start_project", "record_project_decision",
+        "surface_project_status",
         # Planning + diagnostics
         "request_tool", "execute_code", "manage_workspace",
         "register_tool", "manage_plan", "read_runtime_trace",
@@ -856,6 +858,9 @@ class ReasoningService:
         "manage_channels":             frozenset({"confirmed"}),
         "send_to_channel":             frozenset({"confirmed"}),
         "manage_schedule":             frozenset({"confirmed"}),
+        "start_project":               frozenset({"confirmed"}),
+        "record_project_decision":      frozenset({"confirmed"}),
+        "surface_project_status":       frozenset({"confirmed"}),
         "request_tool":                frozenset({"confirmed"}),
         # Previously loop-only — read-only or chain-management; never
         # produced confirmable PendingActions on the legacy path.
@@ -1429,6 +1434,57 @@ class ReasoningService:
                         user_timezone=request.user_timezone,
                     )
                 return "Scheduler is not available."
+            elif tool_name in (
+                "start_project",
+                "record_project_decision",
+                "surface_project_status",
+            ):
+                from kernos.kernel.projects import (
+                    record_project_decision,
+                    start_project,
+                    surface_project_status,
+                )
+                canvas = self._canvas
+                if canvas is None and self._handler and hasattr(self._handler, "_get_canvas_service"):
+                    canvas = self._handler._get_canvas_service()
+                    if canvas is not None:
+                        self._canvas = canvas
+                if self._state is None:
+                    return {"ok": False, "error": "State store is not available."}
+                if tool_name == "start_project":
+                    return await start_project(
+                        state=self._state,
+                        canvas=canvas,
+                        trigger_store=self._trigger_store,
+                        reasoning_service=self,
+                        instance_id=request.instance_id,
+                        member_id=getattr(request, "member_id", "") or "",
+                        active_space_id=request.active_space_id,
+                        conversation_id=request.conversation_id,
+                        name=tool_input.get("name", ""),
+                        initial_note=tool_input.get("initial_note", ""),
+                        checkin_cadence=tool_input.get("checkin_cadence", "weekly"),
+                        user_timezone=request.user_timezone,
+                    )
+                if tool_name == "record_project_decision":
+                    return await record_project_decision(
+                        state=self._state,
+                        canvas=canvas,
+                        instance_id=request.instance_id,
+                        member_id=getattr(request, "member_id", "") or "",
+                        active_space_id=request.active_space_id,
+                        project_id=tool_input.get("project_id", ""),
+                        decision=tool_input.get("decision", ""),
+                        subject=tool_input.get("subject", ""),
+                    )
+                return await surface_project_status(
+                    state=self._state,
+                    canvas=canvas,
+                    instance_id=request.instance_id,
+                    member_id=getattr(request, "member_id", "") or "",
+                    active_space_id=request.active_space_id,
+                    project_id=tool_input.get("project_id", ""),
+                )
             elif tool_name == "request_tool":
                 return await self._handle_request_tool(
                     request.instance_id,
