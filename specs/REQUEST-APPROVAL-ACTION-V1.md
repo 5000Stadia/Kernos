@@ -1,9 +1,9 @@
 # REQUEST-APPROVAL-ACTION-V1
 
-**Date:** 2026-05-28 (v4 — Codex r3 fold)
-**Status:** Draft for round-4 Codex review (expect GREEN —
-  remaining items were implementation-seam mechanics, now
-  pinned to the exact shipped engine contract)
+**Date:** 2026-05-28 (v5 — Codex r4 fold)
+**Status:** Draft for round-5 Codex review (expect GREEN —
+  final implementation-hygiene folds, all pinned to verified
+  shipped field names + ref namespaces)
 **Origin:** DEFERRED #94 from DURABLE-APPROVAL-RECEIPTS-V1 batch
 **Scope:** Workflow-engine action verb that wraps the existing
   `approval_receipts.request_approval()` surface and folds onto
@@ -14,7 +14,60 @@
   a durable storage contract for downstream refs.
 **Estimated size:** ~250 LOC source + ~300 LOC tests.
 
-## What v4 changes from v3 (Codex r3 fold)
+## What v5 changes from v4 (Codex r4 fold)
+
+Codex r4 verdict YELLOW — narrowly. Three implementation-
+hygiene BLOCKING + three SHOULDs, all pinned to verified
+shipped field names + ref namespaces:
+
+1. **Short-circuit must pop `_gate_release_payloads`.** During
+   the `find_terminal_by_binding` await, an
+   `approval.decision_recorded` event can flush and
+   `_on_post_flush_for_gates` sets
+   `_gate_release_payloads[execution_id] = dict(payload)` +
+   sets the waiter (verified `execution_engine.py:1725`). The
+   existing `finally` cleans waiter maps but does NOT pop
+   `_gate_release_payloads` (that's popped only on the normal
+   wait path / timeout). v5 short-circuit pops it and PREFERS
+   the matched event payload over the synthesized one (the
+   matched one came through the real predicate path):
+   ```python
+   matched_payload = self._gate_release_payloads.pop(
+       execution.execution_id, None,
+   )
+   return True, (matched_payload or synthesized_payload)
+   ```
+
+2. **Field is `state_reason`, not `rejection_reason`.**
+   Verified the table column at `approval_receipts.py:53`:
+   `state_reason TEXT NOT NULL DEFAULT ''`. The event
+   emission also maps `reason` from `state_reason`
+   (`approval_receipts.py:671`). v5
+   `find_terminal_by_binding` reads `row["state_reason"]`.
+   The public `approval_outcome.rejection_reason` field is
+   built from the payload's `reason`.
+
+3. **Descriptor `{context.*}` is not a ref namespace.**
+   Verified the resolver supports only `workflow`,
+   `idea_payload`, `step`, `gate` (`refs.py:195-201`). v5
+   descriptor example uses `{idea_payload.operator_actor_id}`
+   and states the trigger payload must carry it (since v1
+   keeps `operator_actor_id` explicit).
+
+SHOULD folded:
+- Missing requesting step-output row aborts the workflow with
+  a distinct reason `gate_release_missing_step_output:<step_id>`
+  + telemetry — NOT a bare `False` (which the callers read as
+  stale-nonce divergence and would restart-loop into the same
+  corruption).
+- `consume_approval` AC shows the real call shape with
+  `data_dir=self._data_dir`.
+- `workflow.gate_receipt_multi_terminal` is emitted by
+  `_await_gate()` (the helper stays side-effect-light and
+  returns enough metadata; the engine emits the workflow
+  telemetry).
+
+## What v4 changed from v3 (Codex r3 fold)
 
 Codex r3 verdict YELLOW — the architecture is right; remaining
 issues were contract-level mechanics at the implementation
@@ -439,6 +492,27 @@ async def _await_gate(self, execution, gate) -> tuple[bool, dict | None]:
                      "decision": receipt["decision"],
                      "source": "receipt_short_circuit_after_install"},
                 )
+                if receipt.get("multi_terminal"):
+                    # Helper flagged >1 terminal row for the binding.
+                    # The engine (not the side-effect-light helper)
+                    # emits the workflow telemetry.
+                    await event_stream.emit(
+                        execution.instance_id,
+                        "workflow.gate_receipt_multi_terminal",
+                        {"execution_id": execution.execution_id,
+                         "gate_nonce": execution.gate_nonce,
+                         "approval_id": receipt["approval_id"]},
+                    )
+                # Codex r4 BLOCKING #1: if an approval event flushed
+                # during the lookup await, the post-flush handler
+                # already buffered the matched payload. Pop it and
+                # PREFER it (it came through the real predicate path);
+                # otherwise use the synthesized payload. This also
+                # prevents a stale _gate_release_payloads entry leaking
+                # into a later gate for the same execution.
+                matched_payload = self._gate_release_payloads.pop(
+                    execution.execution_id, None,
+                )
                 # Emit the SAME resumed telemetry the wait path emits,
                 # then return the payload. Cursor advance happens in
                 # the CALLER via _clear_gate_and_advance — NOT here.
@@ -447,7 +521,7 @@ async def _await_gate(self, execution, gate) -> tuple[bool, dict | None]:
                     {"execution_id": execution.execution_id,
                      "gate_name": gate.gate_name},
                 )
-                return True, synthesized_payload
+                return True, (matched_payload or synthesized_payload)
 
         # 4) No terminal receipt — wait on the installed waiter
         #    (EXISTING path, including timeout handling).
@@ -516,7 +590,10 @@ async def find_terminal_by_binding(
     Returns a normalized dict that maps receipt STATE to the
     event-shaped ``decision`` vocabulary (Codex r3 BLOCKING #2
     — keeps the synthesized payload's decision in the real
-    three values approved/rejected/expired):
+    three values approved/rejected/expired). The ``reason``
+    field reads the table's ``state_reason`` column (Codex r4
+    BLOCKING #2 — there is no ``rejection_reason`` column;
+    verified ``approval_receipts.py:53``):
 
         {
             "approval_id": row["approval_id"],
@@ -527,13 +604,14 @@ async def find_terminal_by_binding(
             "kind": row["kind"],
             "operator_actor_id": row["operator_actor_id"],
             "decided_at": row["decided_at"],
-            "reason": row["rejection_reason"] or "",
+            "reason": row["state_reason"] or "",
+            # Set True when the SELECT matched >1 terminal row
+            # (count before LIMIT). The engine — not this
+            # side-effect-light helper — emits the
+            # workflow.gate_receipt_multi_terminal telemetry
+            # (Codex r4 SHOULD #6).
+            "multi_terminal": <count_of_matches> > 1,
         }
-
-    Emits `workflow.gate_receipt_multi_terminal` telemetry
-    when more than one terminal row matches the binding
-    (should never happen — gate_nonce is freshly minted per
-    gated step; emit so we hear it if the invariant breaks).
     """
 ```
 
@@ -600,13 +678,19 @@ into the REQUESTING step's envelope, the contract must:
    `output_name == step_id`, set its `approval_outcome` field,
    write it back — alongside the existing gate-event capture +
    nonce clear + cursor advance. All in one transaction.
-3. **Missing step-output row is a hard invariant failure.**
-   If the requesting step's envelope doesn't exist at gate-
-   release time, the helper returns `False` (gate-release
-   aborts) rather than advancing without the `approval_outcome`
-   that downstream refs require. The action ALWAYS persists
-   its success envelope before the gate is awaited (existing
-   flow: execute → append success + persist gate_nonce →
+3. **Missing step-output row is a hard invariant failure
+   (Codex r4 SHOULD #4).** If the requesting step's envelope
+   doesn't exist at gate-release time, the caller aborts the
+   workflow with a DISTINCT reason
+   `gate_release_missing_step_output:<step_id>` (+ telemetry)
+   rather than returning a bare `False`. The callers read
+   `_clear_gate_and_advance(...) == False` as stale-nonce
+   divergence (expecting restart/reload to pick up real DB
+   state); a missing step-output row would hit the same
+   corruption on restart and loop. The distinct abort reason
+   breaks that loop. The action ALWAYS persists its success
+   envelope before the gate is awaited (existing flow:
+   execute → append success + persist gate_nonce →
    `_await_gate`), so a missing row signals corruption, not a
    normal path.
 
@@ -678,7 +762,7 @@ action_sequence:
     action_type: request_approval
     parameters:
       kind: git_commit_authorization
-      operator_actor_id: "{context.operator_actor_id}"
+      operator_actor_id: "{idea_payload.operator_actor_id}"
       request_summary: "Commit ready: {step.draft_spec.value.spec_summary}"
       binding_payload:
         expected_parent_sha: "{step.snapshot.value.head_sha}"
@@ -714,6 +798,12 @@ Notes:
   branches that need the three-state distinction
   (`approved` vs `rejected` vs `expired`) reference
   `approval_outcome.decision` and compare strings.
+- `operator_actor_id` uses `{idea_payload.operator_actor_id}`
+  (Codex r4 BLOCKING #3 — `{context.*}` is NOT a supported
+  resolver namespace; only `workflow`, `idea_payload`,
+  `step`, `gate` per `refs.py:195-201`). Since v1 keeps
+  `operator_actor_id` explicit, the workflow's trigger
+  (idea) payload MUST carry `operator_actor_id`.
 - The engine resolves `{workflow.execution_id}` +
   `{workflow.gate_nonce}` at action-execute time. The action
   reads them from `parameters["_workflow_execution_id"]` and
@@ -800,13 +890,14 @@ error.
 | AC9 | `{workflow.execution_id}` + `{workflow.gate_nonce}` refs resolve to the current execution row's id + minted nonce (existing surface — validate the action verb actually receives them). |
 | AC10 | Engine emits `workflow.execution_paused_at_gate` on the gated step (existing behavior). |
 | AC11 | **Race-proof resume rule (Codex r3 BLOCKING #1 fold — real `_await_gate()` contract)**: `_await_gate()` emits `paused_at_gate` + installs waiter/maps (existing flow), THEN — for an approval-event gate — queries `find_terminal_by_binding(...)`. If terminal: emit `workflow.execution_resumed` (same as wait path) and `return (True, synthesized_payload)`. The existing `finally` block cleans waiter maps on the short-circuit return. The CALLER advances the cursor via `_clear_gate_and_advance`; `_await_gate()` does NOT advance. If no terminal: wait on the installed waiter as today. Install-first closes the lost-decision window. |
-| AC11a | New helper `approval_receipts.find_terminal_by_binding(*, data_dir, instance_id, workflow_execution_id, gate_nonce)` queries `state IN ('approved','rejected','expired','consumed')` (the table's column is `state`, not `decision` — Codex r3 BLOCKING #2) scoped by `instance_id` (Codex r3 SHOULD #6), `ORDER BY decided_at DESC LIMIT 1`. Returns a normalized dict whose `decision` maps `consumed → "approved"` and passes `rejected`/`expired`/`approved` through. Multi-match emits `workflow.gate_receipt_multi_terminal`. Returns None when only `pending`. |
+| AC11a | New helper `approval_receipts.find_terminal_by_binding(*, data_dir, instance_id, workflow_execution_id, gate_nonce)` queries `state IN ('approved','rejected','expired','consumed')` (column is `state`, not `decision` — Codex r3 BLOCKING #2) scoped by `instance_id`, `ORDER BY decided_at DESC LIMIT 1`. Returns a normalized dict whose `decision` maps `consumed → "approved"`, passes `rejected`/`expired`/`approved` through, and reads `reason` from the `state_reason` column (Codex r4 BLOCKING #2 — there is no `rejection_reason` column). Sets `multi_terminal=True` when >1 terminal row matched. The helper stays side-effect-light; `_await_gate()` emits `workflow.gate_receipt_multi_terminal` when the flag is set (Codex r4 SHOULD #6). Returns None when only `pending`. |
 | AC11b | Receipt-short-circuit emits engine telemetry event `workflow.gate_receipt_short_circuited` with `{execution_id, approval_id, decision, source}` so soak can verify the path fires when expected. |
 | AC11c | Synthesized gate payload mirrors the real `approval.decision_recorded` event payload shape: `{execution_id, gate_nonce, approval_id, decision, kind, operator_actor_id, decided_at, reason}`. `decision` is in `{approved, rejected, expired}` (consumed already normalized to approved by the helper). Verified against `approval_receipts.py:384`. |
 | AC11d | `find_terminal_by_binding` lookup failure (DB error, etc.) emits `workflow.gate_receipt_lookup_failed` telemetry; gate falls through to the wait path on the installed waiter — does NOT abort the gate. |
+| AC11e | (Codex r4 BLOCKING #1) On the short-circuit branch, `_await_gate()` pops `_gate_release_payloads[execution_id]` and returns `matched_payload or synthesized_payload` (prefers the real predicate-matched event payload if one flushed during the lookup await). This prevents a stale buffered payload leaking into a later gate for the same execution. Test: event flushes after waiter install while the terminal lookup is in flight → no stale entry remains, advance uses the matched payload. |
 | AC12 | On `approval.decision_recorded` event matching the persisted `gate_nonce`: engine populates `approval_outcome` per the storage contract (atomic with clear-nonce + advance-cursor) and resumes. |
 | AC13 | `approval_outcome.decision` carries one of `approved` / `rejected` / `expired` (consumed normalized to approved). `approved` is a boolean convenience. |
-| AC14 | (Codex r3 BLOCKING #4) Engine calls `consume_approval(approval_id, instance_id=...)` ONLY when the resolved `decision == "approved"`, AFTER the nonce-clear + advance + outcome-merge transaction commits. `rejected`/`expired` do NOT consume (matches expiry soak; `consume_approval` CAS only matches `state='approved'` anyway). Receipt-side CAS enforces `single_use=1` + non-expiry. |
+| AC14 | (Codex r3 BLOCKING #4 + r4 SHOULD #5) Engine calls `consume_approval(data_dir=self._data_dir, approval_id=approval_id, instance_id=execution.instance_id)` ONLY when the resolved `decision == "approved"`, AFTER the nonce-clear + advance + outcome-merge transaction commits. `rejected`/`expired` do NOT consume (matches expiry soak; CAS only matches `state='approved'` anyway). Receipt-side CAS enforces `single_use=1` + non-expiry. |
 | AC14a | `consume_approval` failure (already-consumed, DB error) does NOT block anything — cursor already advanced. Telemetry event `workflow.gate_approval_consume_skipped` records the no-op (dotted naming per Codex r2 SHOULD #9). |
 | AC14b | Orphan-approved receipts (cursor advanced, consume failed) are picked up by a background sweep — separate concern, not in v1 scope. v1 logs the receipt-id at WARNING for operator visibility. |
 | AC15 | Existing gate timeout behaviors (`abort_workflow`, `auto_proceed_with_default`) apply unchanged. |
@@ -816,7 +907,7 @@ error.
 | AC | Description |
 |---|---|
 | AC16 | The `output_kind='step'` JSON envelope gains an optional `approval_outcome` field (default absent → `None`). No new physical column. Existing rows/tests unaffected. |
-| AC17 | (Codex r3 BLOCKING #3) The engine wrapper + `_clear_gate_nonce_and_advance` helper signature extends to pass the requesting `step_id` (`output_name`). A step-output merge writes `approval_outcome` into the EXISTING `output_kind='step'` envelope for that `output_name` in the SAME transaction as the gate-event capture + nonce-clear + cursor-advance. A missing step-output row is a HARD invariant failure (helper returns `False`, gate-release aborts) — never advance without the outcome downstream refs require. |
+| AC17 | (Codex r3 BLOCKING #3 + r4 SHOULD #4) The engine wrapper + `_clear_gate_nonce_and_advance` helper signature extends to pass the requesting `step_id` (`output_name`). A step-output merge writes `approval_outcome` into the EXISTING `output_kind='step'` envelope for that `output_name` in the SAME transaction as the gate-event capture + nonce-clear + cursor-advance. A missing step-output row is a HARD invariant failure: the caller aborts the workflow with reason `gate_release_missing_step_output:<step_id>` (NOT a bare `False`, which callers read as stale-nonce divergence and would restart-loop into the same corruption). |
 | AC18 | `refs._STEP_SCOPES` (at `refs.py:67`) gains `approval_outcome` mapped to `envelope.get("approval_outcome")` (Codex r3 SHOULD #5). Ref `{step.<id>.approval_outcome.decision}` in **parameter** context resolves to the decision string; if envelope `approval_outcome` is None, raises `RefResolutionError`. |
 | AC18a | Same ref in **predicate** context: resolves on match; if envelope `approval_outcome` is None, returns no-match (per existing resolver behavior). |
 | AC19 | After Kernos restart, a workflow that previously resumed through a request_approval step still resolves `${step.<id>.approval_outcome.*}` refs on subsequent steps — the envelope round-trips through the loader. |
