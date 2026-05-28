@@ -2085,6 +2085,120 @@ class ExecutionEngine:
             return False
         return existing.record.execution_state == "completed"
 
+    async def _reset_bridge_sentinel_for_gate(
+        self,
+        execution: WorkflowExecution,
+        wf: Workflow,
+        *,
+        gate_step_index: int,
+    ) -> None:
+        """WORKFLOW-RESTART-RESUME-SENTINEL-RESET-V1 (2026-05-27):
+        delete the coding-session bridge's once-per-response sentinel
+        for the response this gate is waiting on, so the bridge's
+        next poll re-emits the event after restart.
+
+        Background: the bridge enforces exactly-once event emission
+        via ``responses/<request_id>.emitted`` sentinel claimed atomically
+        before emit. If the bot crashed AFTER the bridge claimed the
+        sentinel + emitted the event but BEFORE the workflow engine
+        committed the gate-advance, the workflow is stuck — the
+        bridge will not re-emit and the gate matcher has no event
+        to consume.
+
+        This method extracts the request_id from the gate predicate
+        (only applicable when the predicate is a request_id-bound
+        coding_consult.response_received predicate) and deletes the
+        corresponding sentinel. The bridge's next poll re-claims +
+        re-emits naturally.
+
+        No-op for gates that aren't coding-session-bridge-bound (the
+        only path with the sentinel issue today).
+        """
+        import os as _os_eng
+        from pathlib import Path as _Path_eng
+
+        action_by_index = self._build_action_by_index(wf)
+        if gate_step_index not in action_by_index:
+            return
+        gate_action = action_by_index[gate_step_index]
+        if gate_action.gate_ref is None:
+            return
+        gate_by_name = {g.gate_name: g for g in wf.approval_gates}
+        gate = gate_by_name.get(gate_action.gate_ref)
+        if gate is None:
+            return
+        # Only the coding-session bridge's exactly-once sentinel
+        # creates the recovery gap; other approval events are
+        # re-emittable through their own paths.
+        if gate.approval_event_type != "coding_consult.response_received":
+            return
+        # Extract the bound request_id by resolving the predicate's
+        # value template against the execution's recorded step
+        # outputs. The predicate value is typically of the form
+        # ``{step.ask_cc.value.request_id}`` — resolution returns
+        # the concrete request_id committed at the ask step.
+        if self._action_sink is None:
+            return
+        predicate = gate.approval_event_predicate or {}
+        template = predicate.get("value")
+        if not isinstance(template, str):
+            return
+        # Build the resolution context from the execution's step
+        # outputs. resolve_references_in_value already understands
+        # the {step.X.value.Y} shape used by gate predicates.
+        ctx: dict = {"step": {}}
+        for idx, action in enumerate(action_by_index.values()):
+            if action.id is None:
+                continue
+            record_row = await self._action_sink.get_by_step(
+                execution.instance_id, execution.execution_id,
+                step_index=idx,
+            )
+            if record_row is None:
+                continue
+            try:
+                import json as _json_eng
+                value_data = _json_eng.loads(
+                    record_row.record.value_json or "{}"
+                )
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                value_data = {}
+            ctx["step"][action.id] = {"value": value_data}
+        resolved = resolve_references_in_value(template, ctx)
+        request_id = resolved if isinstance(resolved, str) else ""
+        if not request_id or "{" in request_id:
+            # Template still unresolved → step output missing or
+            # malformed. Skip; nothing to reset.
+            return
+        # Sentinel lives at
+        # data/<instance>/coding_session_bridge/responses/<request_id>.emitted
+        data_dir = _os_eng.environ.get("KERNOS_DATA_DIR", "./data")
+        # instance_id may be "discord:<id>" or just "<id>" — strip prefix.
+        iid = execution.instance_id
+        iid_dir = iid.split(":", 1)[-1] if ":" in iid else iid
+        sentinel = (
+            _Path_eng(data_dir)
+            / f"discord_{iid_dir}"
+            / "coding_session_bridge"
+            / "responses"
+            / f"{request_id}.emitted"
+        )
+        if sentinel.exists():
+            try:
+                sentinel.unlink()
+                logger.info(
+                    "WORKFLOW_BRIDGE_SENTINEL_RESET execution_id=%s "
+                    "request_id=%s path=%s — bridge will re-emit on "
+                    "next poll",
+                    execution.execution_id, request_id, str(sentinel),
+                )
+            except OSError as exc:
+                logger.warning(
+                    "WORKFLOW_BRIDGE_SENTINEL_UNLINK_FAILED "
+                    "execution_id=%s request_id=%s error=%s",
+                    execution.execution_id, request_id, exc,
+                )
+
     async def _restart_resume_pass(self) -> None:
         """Spec 4 post-impl Blocker 1: honor durable branch decisions
         via execution.next_step_index. Resolve via the global
@@ -2113,6 +2227,29 @@ class ExecutionEngine:
                     if execution.next_step_index >= 0
                     else execution.action_index_completed + 1
                 )
+                # WORKFLOW-RESTART-RESUME-SENTINEL-RESET-V1
+                # (2026-05-27): if the gate the execution is waiting
+                # on is bound to a coding-session bridge response,
+                # the bridge's once-per-response sentinel may have
+                # been claimed BEFORE the crash, meaning the bridge
+                # will not re-emit the event on restart. Clean up
+                # the sentinel so the bridge's next poll tick re-
+                # claims and re-emits. Best-effort: any failure
+                # here is logged and the restart-resume continues
+                # (workflow may still time out at the gate, which
+                # is no worse than the pre-fix state).
+                try:
+                    await self._reset_bridge_sentinel_for_gate(
+                        execution, wf, gate_step_index=next_idx,
+                    )
+                except Exception as _exc_sr:
+                    logger.warning(
+                        "WORKFLOW_BRIDGE_SENTINEL_RESET_FAILED "
+                        "execution_id=%s error=%s — workflow may "
+                        "still resume cleanly if the event re-fires "
+                        "via another path",
+                        execution.execution_id, _exc_sr,
+                    )
                 await event_stream.emit(
                     execution.instance_id, "workflow.execution_resumed",
                     {"execution_id": execution.execution_id,
