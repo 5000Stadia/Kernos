@@ -21,6 +21,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import aiofiles
+
 logger = logging.getLogger(__name__)
 
 # Pattern matching the start of a log entry: [timestamp] [speaker] [channel]
@@ -99,6 +101,14 @@ class ConversationLogger:
         return self._logs_dir(instance_id, space_id, member_id) / "meta.json"
 
     def _load_meta(self, instance_id: str, space_id: str, member_id: str = "") -> dict:
+        return self._load_meta_sync(instance_id, space_id, member_id)
+
+    async def _load_meta_async(self, instance_id: str, space_id: str, member_id: str = "") -> dict:
+        return await asyncio.get_running_loop().run_in_executor(
+            None, self._load_meta_sync, instance_id, space_id, member_id,
+        )
+
+    def _load_meta_sync(self, instance_id: str, space_id: str, member_id: str = "") -> dict:
         path = self._meta_path(instance_id, space_id, member_id)
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
@@ -116,6 +126,14 @@ class ConversationLogger:
         }
 
     def _save_meta(self, instance_id: str, space_id: str, meta: dict, member_id: str = "") -> None:
+        self._save_meta_sync(instance_id, space_id, meta, member_id)
+
+    async def _save_meta_async(self, instance_id: str, space_id: str, meta: dict, member_id: str = "") -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            None, self._save_meta_sync, instance_id, space_id, meta, member_id,
+        )
+
+    def _save_meta_sync(self, instance_id: str, space_id: str, meta: dict, member_id: str = "") -> None:
         """Atomic write: tempfile + os.replace (POSIX atomic). Always writes to member-scoped path."""
         path = self._meta_path(instance_id, space_id, member_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,8 +149,8 @@ class ConversationLogger:
                 pass
             raise
 
-    def _current_log_path(self, instance_id: str, space_id: str, member_id: str = "") -> Path:
-        meta = self._load_meta(instance_id, space_id, member_id)
+    async def _current_log_path(self, instance_id: str, space_id: str, member_id: str = "") -> Path:
+        meta = await self._load_meta_async(instance_id, space_id, member_id)
         num = meta["current_log"]
         member_dir = self._logs_dir(instance_id, space_id, member_id)
         member_path = member_dir / f"log_{num:03d}.txt"
@@ -171,15 +189,15 @@ class ConversationLogger:
                 ts = timestamp or datetime.now(timezone.utc).isoformat()
                 line = f"[{ts}] [{speaker}] [{channel}] {content}\n"
 
-                meta = self._load_meta(instance_id, space_id, member_id)
+                meta = await self._load_meta_async(instance_id, space_id, member_id)
                 num = meta["current_log"]
                 log_path = logs_dir / f"log_{num:03d}.txt"
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(line)
+                async with aiofiles.open(log_path, "a", encoding="utf-8") as f:
+                    await f.write(line)
 
                 # Update estimated token count (rough: 1 token ≈ 4 chars)
                 meta["current_log_tokens_est"] += len(line) // 4
-                self._save_meta(instance_id, space_id, meta, member_id)
+                await self._save_meta_async(instance_id, space_id, meta, member_id)
 
                 logger.info(
                     "CONV_LOG: space=%s member=%s log=%03d speaker=%s channel=%s len=%d",
@@ -210,11 +228,12 @@ class ConversationLogger:
         if not space_id:
             return []
 
-        log_path = self._current_log_path(instance_id, space_id, member_id)
+        log_path = await self._current_log_path(instance_id, space_id, member_id)
         if not log_path.exists():
             return []
 
-        text = log_path.read_text(encoding="utf-8")
+        async with aiofiles.open(log_path, "r", encoding="utf-8") as f:
+            text = await f.read()
         all_entries = _parse_entries(text)
 
         result: list[dict] = []
@@ -241,7 +260,7 @@ class ConversationLogger:
 
         Returns: {"log_number": N, "tokens_est": N, "path": Path, "exists": bool}
         """
-        meta = self._load_meta(instance_id, space_id, member_id)
+        meta = await self._load_meta_async(instance_id, space_id, member_id)
         log_path = self._logs_dir(instance_id, space_id, member_id) / f"log_{meta['current_log']:03d}.txt"
         if not log_path.exists() and member_id:
             # Check legacy path
@@ -264,7 +283,7 @@ class ConversationLogger:
         Returns: (log_text, log_number)
         Raises FileNotFoundError if no log exists.
         """
-        meta = self._load_meta(instance_id, space_id, member_id)
+        meta = await self._load_meta_async(instance_id, space_id, member_id)
         log_num = meta["current_log"]
         log_path = self._logs_dir(instance_id, space_id, member_id) / f"log_{log_num:03d}.txt"
         if not log_path.exists() and member_id:
@@ -274,7 +293,8 @@ class ConversationLogger:
                 log_path = legacy
         if not log_path.exists():
             raise FileNotFoundError(f"No log file at {log_path}")
-        text = log_path.read_text(encoding="utf-8")
+        async with aiofiles.open(log_path, "r", encoding="utf-8") as f:
+            text = await f.read()
         return text, log_num
 
     async def roll_log(
@@ -285,7 +305,7 @@ class ConversationLogger:
         Returns: (old_log_number, new_log_number)
         """
         async with self._get_lock(instance_id, space_id, member_id):
-            meta = self._load_meta(instance_id, space_id, member_id)
+            meta = await self._load_meta_async(instance_id, space_id, member_id)
             old_num = meta["current_log"]
             new_num = old_num + 1
 
@@ -293,7 +313,7 @@ class ConversationLogger:
             meta["current_log_tokens_est"] = 0
             meta["seeded_tokens_est"] = 0
             meta["created_at"] = datetime.now(timezone.utc).isoformat()
-            self._save_meta(instance_id, space_id, meta, member_id)
+            await self._save_meta_async(instance_id, space_id, meta, member_id)
 
             logger.info(
                 "LOG_ROLL: space=%s member=%s closed=log_%03d starting=log_%03d",
@@ -333,7 +353,8 @@ class ConversationLogger:
         if not prev_path.exists():
             return 0
 
-        text = prev_path.read_text(encoding="utf-8")
+        async with aiofiles.open(prev_path, "r", encoding="utf-8") as f:
+            text = await f.read()
         all_entries = _parse_entries(text)
         if not all_entries:
             return 0
@@ -343,7 +364,7 @@ class ConversationLogger:
         # Always write to member-scoped path
         current_path_dir = self._logs_dir(instance_id, space_id, member_id)
         current_path_dir.mkdir(parents=True, exist_ok=True)
-        meta = self._load_meta(instance_id, space_id, member_id)
+        meta = await self._load_meta_async(instance_id, space_id, member_id)
         current_path = current_path_dir / f"log_{meta['current_log']:03d}.txt"
 
         seed_text = ""
@@ -352,14 +373,14 @@ class ConversationLogger:
             line = f"[{entry['timestamp']}] [{speaker}] [{entry['channel']}] {entry['content']}\n"
             seed_text += line
 
-        with open(current_path, "a", encoding="utf-8") as f:
-            f.write(seed_text)
+        async with aiofiles.open(current_path, "a", encoding="utf-8") as f:
+            await f.write(seed_text)
 
         # Update token estimate — track seeded tokens separately
         seed_tokens = len(seed_text) // 4
         meta["current_log_tokens_est"] += seed_tokens
         meta["seeded_tokens_est"] = meta.get("seeded_tokens_est", 0) + seed_tokens
-        self._save_meta(instance_id, space_id, meta, member_id)
+        await self._save_meta_async(instance_id, space_id, meta, member_id)
 
         logger.info(
             "LOG_SEED: space=%s member=%s from=log_%03d entries=%d tokens_est=%d",
@@ -384,4 +405,5 @@ class ConversationLogger:
                 log_path = legacy
         if not log_path.exists():
             return None
-        return log_path.read_text(encoding="utf-8")
+        async with aiofiles.open(log_path, "r", encoding="utf-8") as f:
+            return await f.read()

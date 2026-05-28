@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import aiofiles
+
 from kernos.capability.client import MCPClientManager
 from kernos.capability.registry import CapabilityRegistry
 from kernos.kernel.credentials import resolve_anthropic_credential
@@ -3953,7 +3955,8 @@ class MessageHandler:
         )
         if not briefing_path.exists():
             return None
-        return briefing_path.read_text(encoding="utf-8")
+        async with aiofiles.open(briefing_path, "r", encoding="utf-8") as f:
+            return await f.read()
 
     # --- Downward search (CS-5) ---
 
@@ -7350,7 +7353,7 @@ class MessageHandler:
                 avgs[phase] = sum(values) // len(values)
         return avgs
 
-    def _load_workspace_tool_schema(self, instance_id: str, tool_name: str) -> dict | None:
+    async def _load_workspace_tool_schema(self, instance_id: str, tool_name: str) -> dict | None:
         """Load a workspace tool's schema from its .tool.json descriptor."""
         catalog_entry = self._tool_catalog.get(tool_name)
         if not catalog_entry or catalog_entry.source != "workspace":
@@ -7367,7 +7370,8 @@ class MessageHandler:
                 / _safe_name(instance_id) / "spaces" / home_space / "files" / desc_file
             )
             if desc_path.exists():
-                descriptor = json.loads(desc_path.read_text(encoding="utf-8"))
+                async with aiofiles.open(desc_path, "r", encoding="utf-8") as f:
+                    descriptor = json.loads(await f.read())
                 return {
                     "name": descriptor.get("name", tool_name),
                     "description": descriptor.get("description", ""),

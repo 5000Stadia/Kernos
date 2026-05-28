@@ -1,8 +1,10 @@
 """Tests for runtime trace — Improvement Loop Tier 2 Pass 1."""
+import asyncio
 import json
 import pytest
 from pathlib import Path
 
+from kernos.kernel import runtime_trace as runtime_trace_module
 from kernos.kernel.runtime_trace import (
     TraceEvent,
     TurnEventCollector,
@@ -120,6 +122,79 @@ class TestRuntimeTrace:
         assert "turn_0" not in turn_ids
         # Newest should be present
         assert f"turn_{MAX_TURNS + 19}" in turn_ids
+
+    async def test_concurrent_rotation_keeps_both_appended_turns(self, trace, monkeypatch):
+        instance_id = "t1"
+        for i in range(MAX_TURNS):
+            events = [TraceEvent(f"seed_{i}", f"ts_{i:06d}", "info", "p", "E", "seed")]
+            await trace.append_turn(instance_id, events)
+
+        path = trace._trace_path(instance_id)
+        original_run_sync_io = runtime_trace_module._run_sync_io
+        a_read = asyncio.Event()
+        b_appended = asyncio.Event()
+        a_rotated = asyncio.Event()
+
+        def trace_lock_held() -> bool:
+            return any(lock.locked() for lock in getattr(trace, "_trace_locks", {}).values())
+
+        async def controlled_run_sync_io(fn, *args, **kwargs):
+            task = asyncio.current_task()
+            task_name = task.get_name() if task else ""
+            fn_name = getattr(fn, "__name__", "")
+            is_append = fn is runtime_trace_module._append_events_sync
+            is_read = fn_name == "read_text"
+            is_rotate = fn_name == "_rotate"
+
+            if task_name == "trace-writer-b" and is_append:
+                await a_read.wait()
+            if task_name == "trace-writer-b" and is_read:
+                await a_rotated.wait()
+            if task_name == "trace-writer-a" and is_rotate and not trace_lock_held():
+                await asyncio.wait_for(b_appended.wait(), timeout=5)
+
+            result = await original_run_sync_io(fn, *args, **kwargs)
+
+            if task_name == "trace-writer-a" and is_read:
+                a_read.set()
+            if task_name == "trace-writer-b" and is_append:
+                b_appended.set()
+            if task_name == "trace-writer-a" and is_rotate:
+                a_rotated.set()
+
+            return result
+
+        monkeypatch.setattr(runtime_trace_module, "_run_sync_io", controlled_run_sync_io)
+
+        async def append_marker(turn_id: str, marker: str) -> None:
+            await trace.append_turn(
+                instance_id,
+                [TraceEvent(turn_id, f"ts_{turn_id}", "info", "p", "E", marker)],
+            )
+
+        task_a = asyncio.create_task(
+            append_marker("turn_concurrent_a", "marker-A"),
+            name="trace-writer-a",
+        )
+        await a_read.wait()
+        task_b = asyncio.create_task(
+            append_marker("turn_concurrent_b", "marker-B"),
+            name="trace-writer-b",
+        )
+        await asyncio.wait_for(asyncio.gather(task_a, task_b), timeout=5)
+
+        records = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        markers_by_turn = {record["turn_id"]: record["detail"] for record in records}
+        turn_ids = set(markers_by_turn)
+
+        assert len(records) == MAX_TURNS
+        assert len(turn_ids) == MAX_TURNS
+        assert markers_by_turn["turn_concurrent_a"] == "marker-A"
+        assert markers_by_turn["turn_concurrent_b"] == "marker-B"
 
     async def test_filter_provider(self, trace):
         events = [

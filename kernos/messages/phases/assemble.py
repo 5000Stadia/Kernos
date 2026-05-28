@@ -593,9 +593,12 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     for name, meta in _affordance.items():
         if name in _added:
             continue
-        schema = (_kernel_tool_map.get(name)
-                  or handler.registry.get_tool_schema(name)
-                  or handler._load_workspace_tool_schema(instance_id, name))
+        schema = (
+            _kernel_tool_map.get(name)
+            or handler.registry.get_tool_schema(name)
+        )
+        if not schema:
+            schema = await handler._load_workspace_tool_schema(instance_id, name)
         if schema and _add_tool(schema):
             tokens = _schema_tokens(schema)
             turns_unused = max(1, _turn - meta.get("last_turn", 0))
@@ -722,7 +725,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                         # Try kernel → MCP → workspace descriptor
                         schema = _kernel_tool_map.get(tool_name) or handler.registry.get_tool_schema(tool_name)
                         if not schema:
-                            schema = handler._load_workspace_tool_schema(instance_id, tool_name)
+                            schema = await handler._load_workspace_tool_schema(instance_id, tool_name)
                         if schema and _add_tool(schema):
                             tokens = _schema_tokens(schema)
                             candidates.append((schema, 0))  # scan-selected = highest priority

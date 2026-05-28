@@ -109,7 +109,7 @@ async def run_probe() -> ProbeResult:
     # Construct a fresh observer with the new any_socket_event_ts
     # provider backdated to trigger pattern B (total socket silence).
     now = time.time()
-    socket_silence_ts = now - 1200  # 20 min ago, > 600s window
+    socket_silence_ts = now - 2400  # 40 min ago, > 1800s window (bumped 8af7f9a)
 
     # Minimal stub store that records emissions.
     class _CaptureStore:
@@ -126,7 +126,15 @@ async def run_probe() -> ProbeResult:
         instance_id="probe6_test",
         data_dir="/tmp/probe6_test_data",
         pattern_store=_CaptureStore(),
-        latency_provider=lambda: 0.05,
+        # GATEWAY-OBSERVER-FALSE-POSITIVE-GUARD (8af7f9a): the
+        # observer's pattern-B (total-socket-silence) emission now
+        # requires a corroborating elevated latency, same as the
+        # watchdog stub above (line ~82). Healthy 50ms latency is
+        # correctly suppressed by the guard; feed elevated latency
+        # (10s > 5s corroborating threshold, < 60s hard cap) so the
+        # silence path still emits the DISCORD_GATEWAY_DEAF signal
+        # this probe asserts on.
+        latency_provider=lambda: 10.0,
         inbound_event_ts_provider=lambda: 0.0,
         message_create_counter=None,
         any_socket_event_ts_provider=lambda: socket_silence_ts,

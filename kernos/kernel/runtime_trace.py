@@ -6,11 +6,13 @@ reads this via the read_runtime_trace kernel tool.
 
 Improvement Loop Tier 2, Pass 1.
 """
+import asyncio
 import json
 import logging
 import os
 import uuid
 from dataclasses import dataclass, field, asdict
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,12 @@ from kernos.utils import utc_now, _safe_name
 logger = logging.getLogger(__name__)
 
 MAX_TURNS = 200  # Ring buffer capacity
+
+
+async def _run_sync_io(fn, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(
+        None, partial(fn, *args, **kwargs),
+    )
 
 
 @dataclass
@@ -36,6 +44,12 @@ class TraceEvent:
 
 def generate_turn_id() -> str:
     return f"turn_{uuid.uuid4().hex[:8]}"
+
+
+def _append_events_sync(path: Path, events: list["TraceEvent"]) -> None:
+    with open(path, "a", encoding="utf-8") as f:
+        for evt in events:
+            f.write(json.dumps(asdict(evt), ensure_ascii=False) + "\n")
 
 
 class TurnEventCollector:
@@ -71,6 +85,14 @@ class RuntimeTrace:
 
     def __init__(self, data_dir: str) -> None:
         self._data_dir = data_dir
+        self._trace_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, path: Path) -> asyncio.Lock:
+        """Per-trace-path lock for serializing append/read/rotate writes."""
+        key = os.fspath(path)
+        if key not in self._trace_locks:
+            self._trace_locks[key] = asyncio.Lock()
+        return self._trace_locks[key]
 
     def _trace_path(self, instance_id: str) -> Path:
         return (
@@ -86,29 +108,31 @@ class RuntimeTrace:
             return
 
         path = self._trace_path(instance_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Append events as JSONL
-        with open(path, "a", encoding="utf-8") as f:
-            for evt in events:
-                f.write(json.dumps(asdict(evt), ensure_ascii=False) + "\n")
+        async with self._get_lock(path):
+            await _run_sync_io(path.parent.mkdir, parents=True, exist_ok=True)
+            await _run_sync_io(_append_events_sync, path, events)
 
-        # Check rotation
-        try:
-            lines = path.read_text(encoding="utf-8").strip().split("\n")
-            turn_ids = set()
-            for line in lines:
-                try:
-                    d = json.loads(line)
-                    turn_ids.add(d.get("turn_id", ""))
-                except json.JSONDecodeError:
-                    continue
-            if len(turn_ids) > MAX_TURNS:
-                self._rotate(path, lines, turn_ids)
-        except Exception as exc:
-            logger.debug("TRACE_ROTATE: check failed: %s", exc)
+            # Check rotation
+            try:
+                text = await _run_sync_io(path.read_text, encoding="utf-8")
+                lines = text.strip().split("\n")
+                turn_ids = set()
+                for line in lines:
+                    try:
+                        d = json.loads(line)
+                        turn_ids.add(d.get("turn_id", ""))
+                    except json.JSONDecodeError:
+                        continue
+                if len(turn_ids) > MAX_TURNS:
+                    await self._rotate_async(path, lines, turn_ids)
+            except Exception as exc:
+                logger.debug("TRACE_ROTATE: check failed: %s", exc)
 
         logger.info("TRACE_APPEND: turn=%s events=%d", events[0].turn_id, len(events))
+
+    async def _rotate_async(self, path: Path, lines: list[str], turn_ids: set[str]) -> None:
+        await _run_sync_io(self._rotate, path, lines, turn_ids)
 
     def _rotate(self, path: Path, lines: list[str], turn_ids: set[str]) -> None:
         """Remove oldest turns to stay within MAX_TURNS."""
