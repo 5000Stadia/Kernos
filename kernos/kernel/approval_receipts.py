@@ -307,6 +307,59 @@ async def find_recent_terminal_by_binding_field(
     return dict(row) if row else None
 
 
+async def find_terminal_by_binding(
+    *,
+    data_dir: str | Path,
+    instance_id: str,
+    workflow_execution_id: str,
+    gate_nonce: str,
+) -> dict | None:
+    """Return the most recent terminal receipt for a workflow gate.
+
+    ``consumed`` is a receipt state, not an event decision; normalize
+    it back to ``approved`` so recovered gate payloads use the same
+    decision vocabulary as ``approval.decision_recorded`` events.
+    """
+    async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
+        db.row_factory = aiosqlite.Row
+        params = (instance_id, workflow_execution_id, gate_nonce)
+        async with db.execute(
+            "SELECT COUNT(*) FROM approval_receipts "
+            "WHERE instance_id = ? "
+            "AND workflow_execution_id = ? "
+            "AND gate_nonce = ? "
+            "AND state IN ('approved','rejected','expired','consumed')",
+            params,
+        ) as cur:
+            count_row = await cur.fetchone()
+        terminal_count = int(count_row[0] if count_row is not None else 0)
+        if terminal_count == 0:
+            return None
+        async with db.execute(
+            "SELECT * FROM approval_receipts "
+            "WHERE instance_id = ? "
+            "AND workflow_execution_id = ? "
+            "AND gate_nonce = ? "
+            "AND state IN ('approved','rejected','expired','consumed') "
+            "ORDER BY decided_at DESC LIMIT 1",
+            params,
+        ) as cur:
+            row = await cur.fetchone()
+    if row is None:
+        return None
+    state = row["state"]
+    return {
+        "approval_id": row["approval_id"],
+        "state": state,
+        "decision": "approved" if state == "consumed" else state,
+        "kind": row["kind"],
+        "operator_actor_id": row["operator_actor_id"],
+        "decided_at": row["decided_at"],
+        "reason": row["state_reason"] or "",
+        "multi_terminal": terminal_count > 1,
+    }
+
+
 async def _verify_event_in_db(
     *, data_dir: str | Path, event_id: str, instance_id: str,
 ) -> bool:
@@ -689,6 +742,7 @@ __all__ = [
     "ensure_schema",
     "request_approval",
     "get_receipt",
+    "find_terminal_by_binding",
     "approve",
     "reject",
     "consume_approval",

@@ -23,6 +23,7 @@ WORLD_EFFECT_VERBS = frozenset({
     "route_to_agent",
     "call_tool",
     "post_to_service",
+    "request_approval",
 })
 
 DIRECT_EFFECT_VERBS = frozenset({
@@ -61,6 +62,8 @@ def is_irreversible(action_type: str, parameters: dict | None = None) -> bool:
         # individual tools declare reversibility metadata.
         return True
     if action_type == "post_to_service":
+        return True
+    if action_type == "request_approval":
         return True
     if action_type == "mark_state":
         return False

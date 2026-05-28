@@ -71,7 +71,7 @@ from typing import Any, Awaitable, Callable
 
 import aiosqlite
 
-from kernos.kernel import event_stream
+from kernos.kernel import approval_receipts, event_stream
 from kernos.kernel.cohorts.descriptor import (
     CohortContext,
     ContextSpaceRef,
@@ -84,6 +84,7 @@ from kernos.kernel.workflows.action_library import (
 from kernos.kernel.integration.briefing import ActionStateRecord
 from kernos.kernel.workflows.action_sink import (
     EventStreamEmitter,
+    GateReleaseMissingStepOutput,
     ToolOperationClassLookup,
     WorkflowActionSink,
     WorkflowExecutionActionSink,
@@ -447,6 +448,27 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _approval_outcome_from_gate_payload(
+    payload: dict | None,
+) -> dict | None:
+    """Map an approval.decision_recorded payload to step output shape."""
+    if not isinstance(payload, dict):
+        return None
+    decision = payload.get("decision")
+    approval_id = payload.get("approval_id")
+    if decision not in {"approved", "rejected", "expired"} or not approval_id:
+        return None
+    reason = payload.get("reason") or None
+    return {
+        "approved": decision == "approved",
+        "decision": decision,
+        "approval_id": approval_id,
+        "decided_at": payload.get("decided_at"),
+        "decided_by_actor": payload.get("operator_actor_id"),
+        "rejection_reason": reason,
+    }
+
+
 # WLP-GATE-SCOPING C1: action-payload template interpolation. The
 # engine substitutes a small set of named placeholders inside string
 # values within an action's parameters dict so descriptors can refer
@@ -584,6 +606,7 @@ class ExecutionEngine:
         self._space_resolver: ActiveSpaceResolver | None = None
         self._db: aiosqlite.Connection | None = None
         self._db_path: Path | None = None
+        self._data_dir: str = ""
         self._queue: asyncio.Queue[WorkflowExecution] = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
@@ -600,6 +623,10 @@ class ExecutionEngine:
         # to equal the paused execution's id, in addition to the
         # descriptor predicate.
         self._gate_nonces: dict[str, str] = {}
+        # Authoritative instance for each active gate wait. Approval
+        # receipt verification must bind to the execution's instance,
+        # not the instance carried by a caller-supplied event.
+        self._gate_instance_ids: dict[str, str] = {}
         # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 6 / Codex
         # round-1 High 5: per-execution gate-release payload buffer.
         # The post-flush match logic writes the satisfying event's
@@ -663,6 +690,7 @@ class ExecutionEngine:
         self._action_library = action_library
         self._ledger = ledger
         self._space_resolver = space_resolver
+        self._data_dir = data_dir
         self._db_path = Path(data_dir) / "instance.db"
         self._db = await aiosqlite.connect(
             str(self._db_path), isolation_level=None,
@@ -918,6 +946,8 @@ class ExecutionEngine:
                 execution, gate_step_index,
                 gate_name=gate_action.gate_ref,
                 gate_output_payload=gate_payload,
+                step_id=gate_action.id,
+                approval_event_type=gate.approval_event_type,
             )
             if not updated:
                 # Spec 4 post-impl Medium 8: stale-nonce divergence
@@ -971,6 +1001,11 @@ class ExecutionEngine:
                 resolved_params = resolve_references_in_value(
                     action.parameters, resolve_ctx,
                 )
+                if action.action_type == "request_approval":
+                    resolved_params["_workflow_execution_id"] = (
+                        execution.execution_id
+                    )
+                    resolved_params["_gate_nonce"] = pending_gate_nonce
             except RefResolutionError as exc:
                 # Decision 3 v2: dynamic resolution failure in
                 # parameter context aborts the workflow via the
@@ -1117,6 +1152,8 @@ class ExecutionEngine:
                     execution, current_step_index,
                     gate_name=action.gate_ref,
                     gate_output_payload=gate_payload,
+                    step_id=action.id,
+                    approval_event_type=gate.approval_event_type,
                 )
                 if not updated:
                     # Spec 4 post-impl Medium 8: stale-nonce divergence.
@@ -1603,14 +1640,112 @@ class ExecutionEngine:
         # post-flush match logic can verify both, not just the
         # descriptor predicate.
         self._gate_nonces[execution.execution_id] = execution.gate_nonce
+        self._gate_instance_ids[execution.execution_id] = execution.instance_id
         nonce_for_cache = execution.gate_nonce
+        matched_payload: dict | None = None
         try:
+            if gate.approval_event_type == "approval.decision_recorded":
+                try:
+                    receipt = await approval_receipts.find_terminal_by_binding(
+                        data_dir=self._data_dir,
+                        instance_id=execution.instance_id,
+                        workflow_execution_id=execution.execution_id,
+                        gate_nonce=execution.gate_nonce,
+                    )
+                except Exception as exc:
+                    await event_stream.emit(
+                        execution.instance_id,
+                        "workflow.gate_receipt_lookup_failed",
+                        {"execution_id": execution.execution_id,
+                         "gate_nonce": execution.gate_nonce,
+                         "error": str(exc)},
+                        correlation_id=execution.correlation_id,
+                    )
+                    receipt = None
+                if receipt is not None:
+                    synthesized_payload = {
+                        "execution_id": execution.execution_id,
+                        "gate_nonce": execution.gate_nonce,
+                        "approval_id": receipt["approval_id"],
+                        "decision": receipt["decision"],
+                        "kind": receipt["kind"],
+                        "operator_actor_id": receipt["operator_actor_id"],
+                        "decided_at": receipt["decided_at"],
+                        "reason": receipt.get("reason") or "",
+                    }
+                    resolved_predicate = await self._resolve_predicate_for_gate(
+                        execution.execution_id,
+                        execution.gate_nonce,
+                        gate.approval_event_predicate,
+                    )
+                    synthetic_event = Event(
+                        event_id=f"receipt-short-circuit:{receipt['approval_id']}",
+                        instance_id=execution.instance_id,
+                        timestamp=receipt["decided_at"]
+                        or datetime.now(timezone.utc).isoformat(),
+                        event_type="approval.decision_recorded",
+                        payload=synthesized_payload,
+                    )
+                    try:
+                        receipt_matches_gate = (
+                            resolved_predicate is not None
+                            and evaluate_predicate(
+                                resolved_predicate, synthetic_event,
+                            )
+                        )
+                    except Exception:
+                        receipt_matches_gate = False
+                    if receipt_matches_gate:
+                        await event_stream.emit(
+                            execution.instance_id,
+                            "workflow.gate_receipt_short_circuited",
+                            {"execution_id": execution.execution_id,
+                             "approval_id": receipt["approval_id"],
+                             "decision": receipt["decision"],
+                             "source": "receipt_short_circuit_after_install"},
+                            correlation_id=execution.correlation_id,
+                        )
+                        if receipt.get("multi_terminal"):
+                            await event_stream.emit(
+                                execution.instance_id,
+                                "workflow.gate_receipt_multi_terminal",
+                                {"execution_id": execution.execution_id,
+                                 "gate_nonce": execution.gate_nonce,
+                                 "approval_id": receipt["approval_id"]},
+                                correlation_id=execution.correlation_id,
+                            )
+                        matched_payload = self._gate_release_payloads.pop(
+                            execution.execution_id, None,
+                        )
+                        self._gate_waiters.pop(execution.execution_id, None)
+                        self._gate_predicates.pop(execution.execution_id, None)
+                        self._gate_event_types.pop(execution.execution_id, None)
+                        self._gate_nonces.pop(execution.execution_id, None)
+                        self._gate_instance_ids.pop(execution.execution_id, None)
+                        self._predicate_resolution_cache.pop(
+                            (execution.execution_id, nonce_for_cache), None,
+                        )
+                        final_payload = self._gate_release_payloads.pop(
+                            execution.execution_id, None,
+                        ) or matched_payload or synthesized_payload
+                        await event_stream.emit(
+                            execution.instance_id,
+                            "workflow.execution_resumed",
+                            {"execution_id": execution.execution_id,
+                             "gate_name": gate.gate_name},
+                            correlation_id=execution.correlation_id,
+                        )
+                        return True, final_payload
             await asyncio.wait_for(ev.wait(), timeout=gate.timeout_seconds)
+            matched_payload = self._gate_release_payloads.pop(
+                execution.execution_id, None,
+            )
         except asyncio.TimeoutError:
             self._gate_waiters.pop(execution.execution_id, None)
             self._gate_predicates.pop(execution.execution_id, None)
             self._gate_event_types.pop(execution.execution_id, None)
             self._gate_nonces.pop(execution.execution_id, None)
+            self._gate_instance_ids.pop(execution.execution_id, None)
             self._gate_release_payloads.pop(execution.execution_id, None)
             self._predicate_resolution_cache.pop(
                 (execution.execution_id, nonce_for_cache), None,
@@ -1632,15 +1767,15 @@ class ExecutionEngine:
             self._gate_predicates.pop(execution.execution_id, None)
             self._gate_event_types.pop(execution.execution_id, None)
             self._gate_nonces.pop(execution.execution_id, None)
+            self._gate_instance_ids.pop(execution.execution_id, None)
+            stale_payload = self._gate_release_payloads.pop(
+                execution.execution_id, None,
+            )
+            if matched_payload is None:
+                matched_payload = stale_payload
             self._predicate_resolution_cache.pop(
                 (execution.execution_id, nonce_for_cache), None,
             )
-        # Read + pop the matched event payload that the post-flush
-        # match logic wrote before signalling the waiter (Decision 6 /
-        # Codex round-1 High 5).
-        matched_payload = self._gate_release_payloads.pop(
-            execution.execution_id, None,
-        )
         await event_stream.emit(
             execution.instance_id, "workflow.execution_resumed",
             {"execution_id": execution.execution_id,
@@ -1684,6 +1819,11 @@ class ExecutionEngine:
         descriptor predicate (e.g. ``actor_eq owner``) would
         otherwise let any approval from that actor wake any paused
         execution waiting on the same event_type.
+
+        For ``approval.decision_recorded``, the event is also checked
+        against the durable terminal receipt before the waiter is
+        signalled. A matching payload without a terminal receipt is
+        treated as no match.
         """
         if not self._gate_waiters:
             return
@@ -1691,6 +1831,7 @@ class ExecutionEngine:
             event_type = self._gate_event_types.get(execution_id)
             predicate = self._gate_predicates.get(execution_id)
             expected_nonce = self._gate_nonces.get(execution_id)
+            gate_instance_id = self._gate_instance_ids.get(execution_id)
             if event_type is None or predicate is None or not expected_nonce:
                 continue
             # WORKFLOW-ORCHESTRATION-PRIMITIVES-V1 Decision 8: resolve
@@ -1714,6 +1855,19 @@ class ExecutionEngine:
                     continue
                 if payload.get("gate_nonce") != expected_nonce:
                     continue
+                if event_type == "approval.decision_recorded":
+                    if event.instance_id != gate_instance_id:
+                        continue
+                    receipt_matches = (
+                        await self._approval_decision_event_has_terminal_receipt(
+                            instance_id=gate_instance_id or "",
+                            workflow_execution_id=execution_id,
+                            gate_nonce=expected_nonce,
+                            payload=payload,
+                        )
+                    )
+                    if not receipt_matches:
+                        continue
                 # Descriptor predicate (author-controlled).
                 try:
                     if evaluate_predicate(resolved_predicate, event):
@@ -1727,6 +1881,81 @@ class ExecutionEngine:
                         break
                 except Exception:
                     pass
+
+    async def _approval_decision_event_has_terminal_receipt(
+        self,
+        *,
+        instance_id: str,
+        workflow_execution_id: str,
+        gate_nonce: str,
+        payload: dict,
+    ) -> bool:
+        """Fail-closed receipt proof for approval.decision_recorded gates.
+
+        Caller-supplied events are not authority by themselves. The
+        receipt table is the durable source of truth that an operator
+        actually approved/rejected/expired the request bound to this
+        execution+nonce.
+        """
+        approval_id = payload.get("approval_id")
+        decision = payload.get("decision")
+        if (
+            not instance_id
+            or not isinstance(approval_id, str)
+            or not approval_id
+            or decision not in {"approved", "rejected", "expired"}
+        ):
+            return False
+        try:
+            receipt = await approval_receipts.find_terminal_by_binding(
+                data_dir=self._data_dir,
+                instance_id=instance_id,
+                workflow_execution_id=workflow_execution_id,
+                gate_nonce=gate_nonce,
+            )
+        except Exception as exc:
+            try:
+                await event_stream.emit(
+                    instance_id,
+                    "workflow.gate_receipt_lookup_failed",
+                    {"execution_id": workflow_execution_id,
+                     "gate_nonce": gate_nonce,
+                     "error": str(exc),
+                     "source": "approval_decision_event_match"},
+                )
+            except Exception:
+                pass
+            return False
+        if receipt is None:
+            return False
+        if (
+            receipt.get("approval_id") == approval_id
+            and receipt.get("decision") == decision
+        ):
+            return True
+        # In abnormal multi-terminal recovery cases the newest terminal
+        # receipt for the binding may not be the one whose event was
+        # re-emitted. Allow only if the exact event approval_id is also
+        # terminal for the same binding.
+        try:
+            exact_receipt = await approval_receipts.get_receipt(
+                data_dir=self._data_dir,
+                approval_id=approval_id,
+            )
+        except Exception:
+            return False
+        if exact_receipt is None:
+            return False
+        state = exact_receipt.get("state")
+        exact_decision = "approved" if state == "consumed" else state
+        return (
+            exact_receipt.get("instance_id") == instance_id
+            and exact_receipt.get("workflow_execution_id")
+            == workflow_execution_id
+            and exact_receipt.get("gate_nonce") == gate_nonce
+            and exact_decision == decision
+            and state in {"approved", "rejected", "expired", "consumed"}
+        )
 
     async def _resolve_predicate_for_gate(
         self,
@@ -2352,6 +2581,8 @@ class ExecutionEngine:
         *,
         gate_name: str = "",
         gate_output_payload: dict | None = None,
+        step_id: str = "",
+        approval_event_type: str = "",
     ) -> bool:
         """Codex round-2-impl Blocker 2: atomic gate release. Clear
         gate_nonce AND advance action_index_completed in one BEGIN
@@ -2378,19 +2609,72 @@ class ExecutionEngine:
         + the gate release land in the same transaction.
         """
         expected_nonce = execution.gate_nonce
-        updated = await self._run_workflow_txn(
-            lambda db: _clear_gate_nonce_and_advance(
-                db, execution.execution_id,
-                step_index=idx, expected_nonce=expected_nonce,
-                gate_name=gate_name,
-                gate_output_payload=gate_output_payload,
-                instance_id=execution.instance_id,
-            ),
+        is_approval_gate = approval_event_type == "approval.decision_recorded"
+        approval_outcome = (
+            _approval_outcome_from_gate_payload(gate_output_payload)
+            if is_approval_gate else None
         )
+        if (
+            is_approval_gate
+            and gate_output_payload is not None
+            and not gate_output_payload.get("timed_out")
+        ):
+            if approval_outcome is None:
+                logger.warning(
+                    "WORKFLOW_GATE_APPROVAL_RECEIPT_MISMATCH execution_id=%s "
+                    "gate_nonce=%s error=invalid_approval_payload",
+                    execution.execution_id, expected_nonce,
+                )
+                return False
+            receipt_matches = await self._approval_decision_event_has_terminal_receipt(
+                instance_id=execution.instance_id,
+                workflow_execution_id=execution.execution_id,
+                gate_nonce=expected_nonce,
+                payload=gate_output_payload,
+            )
+            if not receipt_matches:
+                logger.warning(
+                    "WORKFLOW_GATE_APPROVAL_RECEIPT_MISMATCH execution_id=%s "
+                    "gate_nonce=%s approval_id=%s decision=%s",
+                    execution.execution_id,
+                    expected_nonce,
+                    gate_output_payload.get("approval_id"),
+                    gate_output_payload.get("decision"),
+                )
+                return False
+        try:
+            updated = await self._run_workflow_txn(
+                lambda db: _clear_gate_nonce_and_advance(
+                    db, execution.execution_id,
+                    step_index=idx, expected_nonce=expected_nonce,
+                    gate_name=gate_name,
+                    gate_output_payload=gate_output_payload,
+                    instance_id=execution.instance_id,
+                    step_id=step_id,
+                    approval_outcome=approval_outcome,
+                ),
+            )
+        except GateReleaseMissingStepOutput as exc:
+            reason = f"gate_release_missing_step_output:{exc.step_id}"
+            logger.warning(
+                "WORKFLOW_GATE_RELEASE_MISSING_STEP_OUTPUT execution_id=%s "
+                "step_id=%s",
+                execution.execution_id, exc.step_id,
+            )
+            await self._abort(execution, reason)
+            return False
         if updated:
             execution.gate_nonce = ""
             execution.action_index_completed = idx
             execution.next_step_index = -1
+            if (
+                approval_outcome is not None
+                and approval_outcome.get("decision") == "approved"
+            ):
+                await self._consume_gate_approval_best_effort(
+                    execution,
+                    approval_id=str(approval_outcome.get("approval_id") or ""),
+                )
         else:
             # Stale-nonce divergence (Spec 4 post-impl Medium 8):
             # the row's gate_nonce no longer matches what we expected;
@@ -2402,6 +2686,54 @@ class ExecutionEngine:
                 execution.execution_id, idx, expected_nonce,
             )
         return bool(updated)
+
+    async def _consume_gate_approval_best_effort(
+        self, execution: WorkflowExecution, *, approval_id: str,
+    ) -> None:
+        if not approval_id:
+            return
+        try:
+            consumed = await approval_receipts.consume_approval(
+                data_dir=self._data_dir,
+                approval_id=approval_id,
+                instance_id=execution.instance_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "WORKFLOW_GATE_APPROVAL_CONSUME_SKIPPED "
+                "execution_id=%s approval_id=%s error=%s",
+                execution.execution_id, approval_id, exc,
+            )
+            try:
+                await event_stream.emit(
+                    execution.instance_id,
+                    "workflow.gate_approval_consume_skipped",
+                    {"execution_id": execution.execution_id,
+                     "approval_id": approval_id,
+                     "error": str(exc)},
+                    correlation_id=execution.correlation_id,
+                )
+            except Exception:
+                pass
+            return
+        if consumed:
+            return
+        logger.warning(
+            "WORKFLOW_GATE_APPROVAL_CONSUME_SKIPPED execution_id=%s "
+            "approval_id=%s error=consume_returned_false",
+            execution.execution_id, approval_id,
+        )
+        try:
+            await event_stream.emit(
+                execution.instance_id,
+                "workflow.gate_approval_consume_skipped",
+                {"execution_id": execution.execution_id,
+                 "approval_id": approval_id,
+                 "error": "consume_returned_false"},
+                correlation_id=execution.correlation_id,
+            )
+        except Exception:
+            pass
 
     async def _clear_gate_nonce(
         self, execution: WorkflowExecution,

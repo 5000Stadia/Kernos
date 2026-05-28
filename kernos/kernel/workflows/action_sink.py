@@ -81,6 +81,7 @@ ACTION_OPERATION_CLASS_BY_VERB: dict[str, str] = {
     "write_canvas": "mutate",
     "route_to_agent": "register",
     "post_to_service": "send",
+    "request_approval": "register",
     # Spec 4 post-impl Medium 6: branch verb explicitly classified
     # as mutate (control-flow mutation of next_step_index).
     "branch": "mutate",
@@ -119,6 +120,14 @@ _CALL_TOOL_DEFAULT_RISK_LEVEL = "medium"
 # parallel; v1 of this spec ships without depending on a concrete
 # registry shape.
 ToolOperationClassLookup = Callable[[str], str | None]
+
+
+class GateReleaseMissingStepOutput(RuntimeError):
+    """Raised when a gate release cannot find its requesting step row."""
+
+    def __init__(self, step_id: str) -> None:
+        super().__init__(f"gate_release_missing_step_output:{step_id}")
+        self.step_id = step_id
 
 
 def _operation_class_for_action_type(
@@ -1007,6 +1016,8 @@ async def _clear_gate_nonce_and_advance(
     gate_name: str = "",
     gate_output_payload: dict | None = None,
     instance_id: str = "",
+    step_id: str = "",
+    approval_outcome: dict | None = None,
 ) -> bool:
     """Codex round-2-impl Blocker 2: clear gate_nonce AND advance the
     cursor in one transaction. After gate approval the engine needs
@@ -1058,7 +1069,56 @@ async def _clear_gate_nonce_and_advance(
             gate_name=gate_name,
             event_payload=gate_output_payload,
         )
+    if updated and approval_outcome is not None and instance_id and step_id:
+        await _merge_approval_outcome_into_step_output(
+            db,
+            instance_id=instance_id,
+            execution_id=execution_id,
+            step_id=step_id,
+            approval_outcome=approval_outcome,
+        )
     return updated
+
+
+async def _merge_approval_outcome_into_step_output(
+    db: aiosqlite.Connection,
+    *,
+    instance_id: str,
+    execution_id: str,
+    step_id: str,
+    approval_outcome: dict,
+) -> None:
+    """Merge approval_outcome into the existing step envelope."""
+    async with db.execute(
+        "SELECT output_json FROM workflow_step_outputs "
+        "WHERE instance_id = ? AND workflow_execution_id = ? "
+        "AND output_kind = 'step' AND output_name = ? LIMIT 1",
+        (instance_id, execution_id, step_id),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        raise GateReleaseMissingStepOutput(step_id)
+    try:
+        raw_output = row["output_json"]
+    except (KeyError, TypeError, IndexError):
+        raw_output = row[0]
+    try:
+        envelope = json.loads(raw_output)
+    except (json.JSONDecodeError, TypeError):
+        envelope = {}
+    envelope["approval_outcome"] = approval_outcome
+    from kernos.kernel.workflows.step_outputs import serialize_envelope
+    payload, truncated, _ = serialize_envelope(envelope)
+    await db.execute(
+        "UPDATE workflow_step_outputs "
+        "SET output_json = ?, truncated = ?, recorded_at = ? "
+        "WHERE instance_id = ? AND workflow_execution_id = ? "
+        "AND output_kind = 'step' AND output_name = ?",
+        (
+            payload, 1 if truncated else 0, _now(),
+            instance_id, execution_id, step_id,
+        ),
+    )
 
 
 async def _advance_cursor_only(
@@ -1157,6 +1217,7 @@ async def _append_and_abort(
 
 __all__ = [
     "ACTION_OPERATION_CLASS_BY_VERB",
+    "GateReleaseMissingStepOutput",
     "RISK_LEVEL_BY_OPERATION_CLASS",
     "ToolOperationClassLookup",
     "EventStreamEmitter",

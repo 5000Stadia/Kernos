@@ -30,6 +30,7 @@ Capture envelope shape (per Decision 2):
         "value":   dict | scalar | None,
         "error":   str | None,
         "receipt": dict,
+        "approval_outcome": dict | None,  # optional, only gate approvals
     }
 
 Discipline:
@@ -181,6 +182,10 @@ def serialize_envelope(envelope: dict) -> tuple[str, bool, bool]:
                 "_partial": receipt_str,
             },
         }
+        if "approval_outcome" in envelope:
+            truncated_envelope["approval_outcome"] = envelope.get(
+                "approval_outcome"
+            )
         payload = json.dumps(truncated_envelope)
         truncated = True
 

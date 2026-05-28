@@ -64,7 +64,14 @@ _WORKFLOW_KEYS = frozenset({
 
 # Recognised scopes for ``{step.<id>.<scope>.<path>}``. Maps to
 # fields in the captured envelope from step_outputs.py.
-_STEP_SCOPES = frozenset({"output", "receipt", "error", "success", "value"})
+_STEP_SCOPES = frozenset({
+    "approval_outcome",
+    "output",
+    "receipt",
+    "error",
+    "success",
+    "value",
+})
 
 
 class RefResolutionError(ValueError):
@@ -239,6 +246,8 @@ def _resolve_step(rest: list[str], ctx: ResolutionContext) -> Any:
         base = envelope.get("success")
     elif scope == "value":
         base = envelope.get("value")
+    elif scope == "approval_outcome":
+        base = envelope.get("approval_outcome")
     else:
         return _NOT_FOUND
     if len(rest) == 2:

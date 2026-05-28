@@ -5,10 +5,10 @@ Pins:
 * `bring_up_substrate` constructs every load-bearing component
   the joint stale-elements audit identified as missing from
   production: WorkflowRegistry, ExecutionEngine, ActionLibrary
-  (with all 7 verbs registered), TriggerRegistry (without the
+  (with all shipped verbs registered), TriggerRegistry (without the
   legacy post-flush hook attached), TriggerEvaluationRuntime,
   InternalEventAdapter, SubstrateTools (with runtime).
-* All 7 Action verbs are registered in the ActionLibrary.
+* All shipped Action verbs are registered in the ActionLibrary.
 * The legacy TriggerRegistry post-flush hook is NOT attached
   when started via the substrate path (production posture).
 * SubstrateTools.register_workflow can persist + register triggers
@@ -128,7 +128,7 @@ async def test_bring_up_constructs_every_component(
         await tear_down_substrate(sub)
 
 
-async def test_all_seven_action_verbs_registered(
+async def test_all_shipped_action_verbs_registered(
     tmp_path, event_stream_started, agent_registry,
 ):
     handler = _StubHandler()
@@ -144,9 +144,10 @@ async def test_all_seven_action_verbs_registered(
         assert "route_to_agent" in verbs
         assert "call_tool" in verbs
         assert "post_to_service" in verbs
+        assert "request_approval" in verbs
         assert "mark_state" in verbs
         assert "append_to_ledger" in verbs
-        assert len(verbs) == 7
+        assert len(verbs) == 8
     finally:
         await tear_down_substrate(sub)
 

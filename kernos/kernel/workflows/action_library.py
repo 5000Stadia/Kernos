@@ -17,6 +17,7 @@ short-circuit to ``ActionResult(success=False)``.
   * ``call_tool`` — wraps the existing tool dispatch primitive;
     verifier is the wrapped tool's own declared verifier
   * ``post_to_service`` — wraps the workshop service registry
+  * ``request_approval`` — creates a durable operator approval receipt
 
 **Direct-effect verbs (structural assertions, NOT action-loop
 instances).** These mutate internal state only and have a structural
@@ -41,6 +42,7 @@ auditable.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -656,19 +658,111 @@ class AppendToLedgerAction:
         return all(last.get(k) == v for k, v in params["entry"].items())
 
 
-# DURABLE-APPROVAL-RECEIPTS-V1: a `RequestApprovalAction` workflow
-# verb is DEFERRED to a follow-up sub-spec. Codex code review found
-# two real blockers in the v1 attempt:
-#   1. The engine's CohortContext doesn't carry execution_id +
-#      gate_nonce today, so the receipt wouldn't bind to the gate.
-#   2. Workflow ref-resolver maps `{step.X.output.K}` to
-#      result.value, not result.receipt, so the documented predicate
-#      path wouldn't resolve to the new approval_id.
-# Both require engine surface changes that are bigger than this
-# sub-spec's scope. The receipts substrate is generic-callable
-# from any non-workflow code path (slash commands, future tools);
-# the workflow action verb lands in a follow-up that fixes the
-# engine surface alongside.
+class RequestApprovalAction:
+    """Create an approval receipt bound to the current workflow gate.
+
+    The action does not pause the workflow by itself. The surrounding
+    action descriptor's ``gate_ref`` drives the existing engine gate
+    flow; this verb only creates the durable receipt carrying the
+    execution/gate binding.
+    """
+
+    action_type = "request_approval"
+
+    def __init__(
+        self,
+        request_approval_fn: Callable[..., Awaitable[str]],
+        *,
+        covenant_gate: CovenantGate | None = None,
+    ) -> None:
+        self._request_approval = request_approval_fn
+        self._covenant_gate = covenant_gate
+
+    async def execute(self, context: Any, params: dict) -> ActionResult:
+        if not await _resolve_covenant(
+            self._covenant_gate, context, self.action_type, params,
+        ):
+            return ActionResult(success=False, error="covenant_denied")
+
+        binding_payload = params.get("binding_payload")
+        if binding_payload is None:
+            binding_payload = {}
+        if not isinstance(binding_payload, dict):
+            return ActionResult(
+                success=False,
+                error="invalid_binding_payload:not_a_mapping",
+            )
+        try:
+            json.dumps(binding_payload)
+        except (TypeError, ValueError) as exc:
+            return ActionResult(
+                success=False,
+                error=f"invalid_binding_payload:{exc}",
+            )
+
+        try:
+            kind = params["kind"]
+            operator_actor_id = params["operator_actor_id"]
+            request_summary = params["request_summary"]
+        except KeyError as exc:
+            return ActionResult(
+                success=False, error=f"missing_param:{exc.args[0]}",
+            )
+        for field_name, value in (
+            ("kind", kind),
+            ("operator_actor_id", operator_actor_id),
+            ("request_summary", request_summary),
+        ):
+            if not isinstance(value, str) or not value:
+                return ActionResult(
+                    success=False, error=f"invalid_param:{field_name}",
+                )
+
+        workflow_execution_id = params.get("_workflow_execution_id")
+        gate_nonce = params.get("_gate_nonce")
+        if not (workflow_execution_id and gate_nonce):
+            return ActionResult(
+                success=False, error="missing_workflow_binding",
+            )
+
+        try:
+            approval_id = await self._request_approval(
+                instance_id=getattr(context, "instance_id", ""),
+                kind=kind,
+                requested_for_actor=params.get(
+                    "requested_for_actor",
+                    getattr(context, "member_id", ""),
+                ),
+                operator_actor_id=operator_actor_id,
+                request_summary=request_summary,
+                binding_payload=binding_payload,
+                workflow_execution_id=workflow_execution_id,
+                gate_nonce=gate_nonce,
+                ttl_seconds=params.get("ttl_seconds", 86400),
+                single_use=params.get("single_use", True),
+            )
+        except Exception as exc:
+            return ActionResult(
+                success=False, error=f"approval_request_failed:{exc}",
+            )
+        return ActionResult(
+            success=True,
+            value={"approval_id": approval_id},
+            receipt={
+                "approval_id": approval_id,
+                "kind": kind,
+                "requested_at": _now(),
+            },
+        )
+
+    async def verify(
+        self, context: Any, params: dict, result: ActionResult,
+    ) -> bool:
+        return bool(
+            result.success
+            and result.value
+            and result.value.get("approval_id")
+        )
 
 # ---------------------------------------------------------------------------
 # Control-flow verbs (WORKFLOW-ORCHESTRATION-PRIMITIVES-V1)
@@ -778,6 +872,7 @@ __all__ = [
     "MarkStateAction",
     "NotifyUserAction",
     "PostToServiceAction",
+    "RequestApprovalAction",
     "RouteToAgentAction",
     "WriteCanvasAction",
 ]

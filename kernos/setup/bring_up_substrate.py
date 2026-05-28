@@ -12,7 +12,7 @@ across all six load-bearing classes:
 
 * ``WorkflowRegistry``  — never instantiated in production
 * ``ExecutionEngine``   — never instantiated in production
-* ``ActionLibrary``     — never instantiated in production (all 7
+* ``ActionLibrary``     — never instantiated in production (all shipped
                           Action classes were defined but never
                           registered)
 * ``SubstrateTools``    — never instantiated in production
@@ -27,7 +27,7 @@ heartbeat (Phase 2b shipped in C5c-1 but dormant until now).
 
 Per the design review direction:
 
-* All 7 Action verbs MUST be registered. Where the handler-supplied
+* All shipped Action verbs MUST be registered. Where the handler-supplied
   callable is obvious (notify_user → send_outbound, etc.), the
   adapter wraps it. Where production infrastructure is not yet
   available (e.g., PostToServiceAction's workshop service
@@ -60,6 +60,7 @@ should not block bot startup.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 from dataclasses import dataclass
@@ -197,7 +198,7 @@ async def bring_up_substrate(
     from kernos.kernel.workflows.ledger import WorkflowLedger
     workflow_ledger = WorkflowLedger(data_dir)
 
-    # --- ActionLibrary + register all 7 verbs -------------------------
+    # --- ActionLibrary + register shipped verbs -----------------------
     from kernos.kernel.workflows.action_library import ActionLibrary
     action_library = ActionLibrary()
     _register_all_actions(
@@ -1368,7 +1369,7 @@ async def tear_down_substrate(substrate: Substrate) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Action library verb registration — all 7
+# Action library verb registration
 # ---------------------------------------------------------------------------
 
 
@@ -1398,9 +1399,11 @@ def _register_all_actions(
         MarkStateAction,
         NotifyUserAction,
         PostToServiceAction,
+        RequestApprovalAction,
         RouteToAgentAction,
         WriteCanvasAction,
     )
+    from kernos.kernel import approval_receipts, event_stream
 
     library.register(NotifyUserAction(
         deliver_fn=_notify_deliver_adapter(handler),
@@ -1422,6 +1425,13 @@ def _register_all_actions(
     ))
     library.register(PostToServiceAction(
         service_post_fn=_unwired_stub("post_to_service"),
+    ))
+    library.register(RequestApprovalAction(
+        request_approval_fn=functools.partial(
+            approval_receipts.request_approval,
+            data_dir=data_dir,
+            event_stream=event_stream,
+        ),
     ))
     library.register(MarkStateAction(
         state_store_set=_state_set_adapter(handler),
