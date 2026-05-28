@@ -1469,6 +1469,85 @@ class TestThirteenthAmendmentIdempotentRegister:
         assert row["descriptor_digest"] == first_digest
         assert row["name"] == "first version"
 
+    async def test_architect_upgrade_path_overwrites_existing(
+        self, stack, architect_env,
+    ):
+        """WORKFLOW-DESCRIPTOR-VERSIONING-V1 (2026-05-27): when
+        BOTH the existing row was architect-authored AND the new
+        register call comes from an architect actor, in-place
+        descriptor upgrade succeeds instead of rejecting.
+
+        Unblocks the canonical YAML-edit + bring-up-re-register
+        pattern that pre-fix locked every workflow at first
+        registration.
+        """
+        descriptor_a = _descriptor(
+            workflow_id="wf-upgrade", name="first version",
+        )
+        result1 = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor_a,
+            TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        first_digest = result1.extra["descriptor_digest"]
+
+        descriptor_b = _descriptor(
+            workflow_id="wf-upgrade", name="SECOND VERSION",
+        )
+        result2 = await register_workflow(
+            stack["engine"], _architect_ctx(), descriptor_b,
+            TIER_COMPOSITION,
+        )
+        assert result2.success is True, (
+            f"architect upgrade should succeed; got errors={result2.errors}"
+        )
+        assert result2.extra.get("descriptor_upgraded") is True
+        assert result2.extra["descriptor_digest"] != first_digest
+
+        # Substrate state pin: the row now reflects the new
+        # descriptor + name, and activation_state is registered
+        # (caller must explicitly activate).
+        async with stack["engine"]._db.execute(
+            "SELECT descriptor_digest, name, activation_state "
+            "FROM registered_workflows "
+            "INNER JOIN workflows USING (workflow_id) "
+            "WHERE workflow_id = ?",
+            ("wf-upgrade",),
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row["descriptor_digest"] == result2.extra["descriptor_digest"]
+        assert row["name"] == "SECOND VERSION"
+        assert row["activation_state"] == "registered_not_activated"
+
+    async def test_non_architect_upgrade_path_still_rejects(
+        self, stack, architect_env,
+    ):
+        """Strict-reject preserved for non-architect callers. The
+        upgrade path is architect-only — operator/kernos callers
+        hitting the same workflow_id with different content still
+        get the original CAT_DESCRIPTOR_SHAPE_INVALID error."""
+        from kernos.kernel.workflows.authoring import (
+            CAT_DESCRIPTOR_SHAPE_INVALID,
+        )
+        descriptor_a = _descriptor(
+            workflow_id="wf-no-kernos-upgrade", name="first",
+        )
+        result1 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_a,
+            TIER_COMPOSITION,
+        )
+        assert result1.success is True
+        descriptor_b = _descriptor(
+            workflow_id="wf-no-kernos-upgrade", name="DIFFERENT",
+        )
+        result2 = await register_workflow(
+            stack["engine"], _kernos_ctx(), descriptor_b,
+            TIER_COMPOSITION,
+        )
+        assert result2.success is False
+        assert result2.errors[0].category == CAT_DESCRIPTOR_SHAPE_INVALID
+
     async def test_select_after_catch_runs_post_rollback(
         self, stack, architect_env,
     ):

@@ -723,6 +723,10 @@ async def register_workflow(
             effective_tier=effective_tier,
             computed_tier=computed_tier,
             integrity_error=exc,
+            wf=wf,
+            canonical_json=canonical_json,
+            ctx=ctx,
+            is_architect=is_architect,
         )
     except Exception as exc:
         return AuthoringResult(
@@ -752,6 +756,10 @@ async def _handle_register_pk_collision(
     effective_tier: str,
     computed_tier: str,
     integrity_error: BaseException,
+    wf: "Workflow" = None,
+    canonical_json: str = "",
+    ctx: "AuthoringContext" = None,
+    is_architect: bool = False,
 ) -> AuthoringResult:
     """Disambiguate a post-rollback IntegrityError on register.
 
@@ -811,10 +819,40 @@ async def _handle_register_pk_collision(
                 "idempotent_replay": True,
             },
         )
+    # WORKFLOW-DESCRIPTOR-VERSIONING-V1 (2026-05-27): architect-
+    # authored upgrade path. When BOTH the existing row was
+    # architect-authored AND the new register is from an architect
+    # actor, allow in-place descriptor upgrade rather than rejecting.
+    # This unblocks the canonical pattern: spec author edits a
+    # workflow YAML; bring-up re-registers with the new descriptor.
+    # Pre-fix this rejected every YAML edit until operator wiped the
+    # registry. Non-architect callers still hit the strict reject
+    # (content-addressed-id discipline preserved).
+    if (
+        is_architect
+        and existing.architect_authored
+        and wf is not None
+        and canonical_json
+    ):
+        upgrade_result = await _attempt_architect_descriptor_upgrade(
+            engine=engine,
+            wf=wf,
+            canonical_json=canonical_json,
+            descriptor_digest=new_digest,
+            effective_tier=effective_tier,
+            computed_tier=computed_tier,
+        )
+        if upgrade_result is not None:
+            return upgrade_result
+        # Upgrade attempted but didn't apply (e.g., update_rowcount
+        # mismatch on race). Fall through to the strict reject.
+
     # Either the digest differs or it's empty (pre-amendment row
     # the caller is trying to re-register with new content). Either
     # way, this is a distinct-collision: same workflow_id, different
-    # content. Caller should derive a content-addressed workflow_id.
+    # content. Caller should derive a content-addressed workflow_id
+    # (or deactivate + re-author with a new id; or — for architect-
+    # authored workflows — use the upgrade path above).
     return AuthoringResult(
         success=False,
         errors=[ValidationError(
@@ -827,6 +865,83 @@ async def _handle_register_pk_collision(
                 f"workflow_id or deactivate + re-author with a new id"
             ),
         )],
+    )
+
+
+async def _attempt_architect_descriptor_upgrade(
+    *,
+    engine: "ExecutionEngine",
+    wf: "Workflow",
+    canonical_json: str,
+    descriptor_digest: str,
+    effective_tier: str,
+    computed_tier: str,
+) -> AuthoringResult | None:
+    """Try to upgrade an existing architect-authored workflow's
+    descriptor in place. Returns the AuthoringResult on success,
+    None if the update didn't apply (caller falls back to strict
+    reject).
+
+    Touches both tables: ``workflows`` (raw descriptor blob, used by
+    the engine for action execution) AND ``registered_workflows``
+    (governance metadata + activation state). The registered row
+    goes back to ``registered_not_activated`` so the caller's
+    subsequent ``activate_workflow`` call lights it up cleanly.
+    """
+    from kernos.kernel.workflows.registered_workflows import (
+        upgrade_descriptor_in_place,
+    )
+    from kernos.kernel.workflows.workflow_registry import (
+        _workflow_descriptor_blob,
+    )
+
+    async def _body(db: aiosqlite.Connection):
+        # Update workflows table (Spec 4 raw blob).
+        blob = _workflow_descriptor_blob(wf)
+        await db.execute(
+            "UPDATE workflows SET descriptor_json = ?, name = ?, "
+            "description = ?, owner = ?, version = ? "
+            "WHERE workflow_id = ?",
+            (
+                blob, wf.name, wf.description, wf.owner,
+                wf.version, wf.workflow_id,
+            ),
+        )
+        # Update registered_workflows (governance + activation).
+        return await upgrade_descriptor_in_place(
+            db,
+            workflow_id=wf.workflow_id,
+            descriptor_json_canonical=canonical_json,
+            descriptor_digest=descriptor_digest,
+            governance_tier=effective_tier,
+            computed_tier=computed_tier,
+        )
+
+    try:
+        updated, current_state = await engine._run_workflow_txn(_body)
+    except Exception as exc:
+        logger.warning(
+            "WORKFLOW_DESCRIPTOR_UPGRADE_FAILED workflow_id=%s "
+            "error=%s — falling back to strict reject",
+            wf.workflow_id, exc,
+        )
+        return None
+    if not updated:
+        return None
+    logger.info(
+        "WORKFLOW_DESCRIPTOR_UPGRADED workflow_id=%s new_digest=%s "
+        "state=%s — architect-authored in-place descriptor upgrade",
+        wf.workflow_id, descriptor_digest, current_state,
+    )
+    return AuthoringResult(
+        success=True,
+        workflow_id=wf.workflow_id,
+        extra={
+            "governance_tier": effective_tier,
+            "computed_tier": computed_tier,
+            "descriptor_digest": descriptor_digest,
+            "descriptor_upgraded": True,
+        },
     )
 
 

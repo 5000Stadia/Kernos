@@ -281,6 +281,56 @@ async def transition_to_active(
     return False, current
 
 
+async def upgrade_descriptor_in_place(
+    db: aiosqlite.Connection,
+    *,
+    workflow_id: str,
+    descriptor_json_canonical: str,
+    descriptor_digest: str,
+    governance_tier: str,
+    computed_tier: str,
+) -> tuple[bool, str]:
+    """WORKFLOW-DESCRIPTOR-VERSIONING-V1 (2026-05-27): in-place
+    descriptor upgrade for architect-authored workflows.
+
+    Use case: spec author edits a workflow YAML; bring-up re-
+    registers with the new descriptor. Pre-spec the registry
+    rejected the re-register as a workflow_id collision (per
+    Kit's content-addressed-id philosophy). Pragmatically this
+    blocks every workflow YAML edit from reaching live until the
+    operator either renames the workflow_id or manually wipes
+    the registry. The new upgrade path bridges that gap for
+    architect-authored workflows specifically — same workflow_id,
+    updated descriptor, registered_not_activated state so the
+    caller still has to explicitly activate.
+
+    Sets activation_state back to registered_not_activated so
+    callers that follow the canonical register-then-activate
+    sequence pick up cleanly.
+
+    Returns ``(updated, current_state)``. ``updated`` is True iff
+    the in-place update succeeded.
+    """
+    now = _now()
+    cursor = await db.execute(
+        "UPDATE registered_workflows "
+        "SET descriptor_json_canonical = ?, descriptor_digest = ?, "
+        "    governance_tier = ?, computed_tier = ?, "
+        "    activation_state = ?, last_transition_at = ?, "
+        "    deactivation_reason = '' "
+        "WHERE workflow_id = ?",
+        (
+            descriptor_json_canonical, descriptor_digest,
+            governance_tier, computed_tier,
+            STATE_REGISTERED, now, workflow_id,
+        ),
+    )
+    if cursor.rowcount == 1:
+        return True, STATE_REGISTERED
+    current = await get_activation_state(db, workflow_id=workflow_id)
+    return False, current
+
+
 async def transition_to_deactivated(
     db: aiosqlite.Connection,
     *,
