@@ -1,9 +1,10 @@
 # REQUEST-APPROVAL-ACTION-V1
 
-**Date:** 2026-05-28 (v5 — Codex r4 fold)
-**Status:** Draft for round-5 Codex review (expect GREEN —
-  final implementation-hygiene folds, all pinned to verified
-  shipped field names + ref namespaces)
+**Date:** 2026-05-28 (v5 — Codex r4 fold; r5 GREEN + polish)
+**Status:** ✅ GREEN (Codex r5, 2026-05-28) — implementation-
+  ready. Five-round convergence (r1-r4 YELLOW, BLOCKING counts
+  6→4→4→3→0). The polish notes below are pinned for the
+  implementer; none are spec blockers.
 **Origin:** DEFERRED #94 from DURABLE-APPROVAL-RECEIPTS-V1 batch
 **Scope:** Workflow-engine action verb that wraps the existing
   `approval_receipts.request_approval()` surface and folds onto
@@ -13,6 +14,35 @@
   `approval.decision_recorded` event; decision surfaces through
   a durable storage contract for downstream refs.
 **Estimated size:** ~250 LOC source + ~300 LOC tests.
+
+## Implementation notes (Codex r5 GREEN — non-blocking polish)
+
+Pinned for the implementer. None block; all are cheap and
+verified against the shipped surface:
+
+1. **Defensive `_gate_release_payloads` pop.** The v5 short-
+   circuit pop is sufficient (a duplicate same-binding event
+   can't occur in the same live process — receipt transitions
+   are CAS-gated; boot-reconcile duplicates land after restart
+   where the in-memory buffer is already gone). For airtight-
+   ness, ALSO add `_gate_release_payloads.pop(execution_id,
+   None)` to the `finally` block — but preserve the already-
+   captured `matched_payload` local so the return still
+   prefers the real predicate-matched payload.
+2. **Keep `approval_outcome.rejection_reason` as the public
+   field name.** The rename chain
+   `approval_receipts.state_reason → event payload reason →
+   approval_outcome.rejection_reason` is consistent and
+   `rejection_reason` is clearer for downstream refs. Do NOT
+   rename the outcome field to `reason`.
+3. **Use the existing `_abort(execution, reason)` for the
+   missing-step-output path.** No new abort entry point
+   needed; call `_abort(execution,
+   "gate_release_missing_step_output:<step_id>")` and emit
+   the named telemetry as part of that path.
+4. **`idea_payload.operator_actor_id` is the confirmed v1
+   contract.** Trigger payload must carry `operator_actor_id`;
+   no new engine surface.
 
 ## What v5 changes from v4 (Codex r4 fold)
 
@@ -867,7 +897,7 @@ error.
 
 ## Acceptance criteria
 
-### Action verb (v4 ACs)
+### Action verb (v5 ACs)
 
 | AC | Description |
 |---|---|
@@ -882,14 +912,14 @@ error.
 | AC7b | `binding_payload` containing non-JSON-serializable values → `error="invalid_binding_payload:<typeerror>"`. |
 | AC7c | Missing `_workflow_execution_id` or `_gate_nonce` in resolved params → `error="missing_workflow_binding"`. |
 
-### Engine integration (v4 ACs)
+### Engine integration (v5 ACs)
 
 | AC | Description |
 |---|---|
 | AC8 | Engine mints `pending_gate_nonce` before the gated `request_approval` step's action runs (existing flow). |
 | AC9 | `{workflow.execution_id}` + `{workflow.gate_nonce}` refs resolve to the current execution row's id + minted nonce (existing surface — validate the action verb actually receives them). |
 | AC10 | Engine emits `workflow.execution_paused_at_gate` on the gated step (existing behavior). |
-| AC11 | **Race-proof resume rule (Codex r3 BLOCKING #1 fold — real `_await_gate()` contract)**: `_await_gate()` emits `paused_at_gate` + installs waiter/maps (existing flow), THEN — for an approval-event gate — queries `find_terminal_by_binding(...)`. If terminal: emit `workflow.execution_resumed` (same as wait path) and `return (True, synthesized_payload)`. The existing `finally` block cleans waiter maps on the short-circuit return. The CALLER advances the cursor via `_clear_gate_and_advance`; `_await_gate()` does NOT advance. If no terminal: wait on the installed waiter as today. Install-first closes the lost-decision window. |
+| AC11 | **Race-proof resume rule (Codex r3 BLOCKING #1 fold — real `_await_gate()` contract)**: `_await_gate()` emits `paused_at_gate` + installs waiter/maps (existing flow), THEN — for an approval-event gate — queries `find_terminal_by_binding(...)`. If terminal: emit `workflow.execution_resumed` (same as wait path) and `return (True, matched_payload or synthesized_payload)` (prefers the real predicate-matched event payload per AC11e). The existing `finally` block cleans waiter maps on the short-circuit return. The CALLER advances the cursor via `_clear_gate_and_advance`; `_await_gate()` does NOT advance. If no terminal: wait on the installed waiter as today. Install-first closes the lost-decision window. |
 | AC11a | New helper `approval_receipts.find_terminal_by_binding(*, data_dir, instance_id, workflow_execution_id, gate_nonce)` queries `state IN ('approved','rejected','expired','consumed')` (column is `state`, not `decision` — Codex r3 BLOCKING #2) scoped by `instance_id`, `ORDER BY decided_at DESC LIMIT 1`. Returns a normalized dict whose `decision` maps `consumed → "approved"`, passes `rejected`/`expired`/`approved` through, and reads `reason` from the `state_reason` column (Codex r4 BLOCKING #2 — there is no `rejection_reason` column). Sets `multi_terminal=True` when >1 terminal row matched. The helper stays side-effect-light; `_await_gate()` emits `workflow.gate_receipt_multi_terminal` when the flag is set (Codex r4 SHOULD #6). Returns None when only `pending`. |
 | AC11b | Receipt-short-circuit emits engine telemetry event `workflow.gate_receipt_short_circuited` with `{execution_id, approval_id, decision, source}` so soak can verify the path fires when expected. |
 | AC11c | Synthesized gate payload mirrors the real `approval.decision_recorded` event payload shape: `{execution_id, gate_nonce, approval_id, decision, kind, operator_actor_id, decided_at, reason}`. `decision` is in `{approved, rejected, expired}` (consumed already normalized to approved by the helper). Verified against `approval_receipts.py:384`. |
@@ -902,7 +932,7 @@ error.
 | AC14b | Orphan-approved receipts (cursor advanced, consume failed) are picked up by a background sweep — separate concern, not in v1 scope. v1 logs the receipt-id at WARNING for operator visibility. |
 | AC15 | Existing gate timeout behaviors (`abort_workflow`, `auto_proceed_with_default`) apply unchanged. |
 
-### Storage + ref-resolver (v4 ACs)
+### Storage + ref-resolver (v5 ACs)
 
 | AC | Description |
 |---|---|
@@ -912,7 +942,7 @@ error.
 | AC18a | Same ref in **predicate** context: resolves on match; if envelope `approval_outcome` is None, returns no-match (per existing resolver behavior). |
 | AC19 | After Kernos restart, a workflow that previously resumed through a request_approval step still resolves `${step.<id>.approval_outcome.*}` refs on subsequent steps — the envelope round-trips through the loader. |
 
-### Validation + classification (v4 ACs)
+### Validation + classification (v5 ACs)
 
 | AC | Description |
 |---|---|
@@ -922,7 +952,7 @@ error.
 | AC23 | (Codex r2 BLOCKING #4 fold) Registration validates only: known action type (via `KNOWN_ACTION_TYPES`), valid operation-class registry entry, valid irreversibility classification, and valid `approval_gates` descriptor shape. Per-action param validation is deferred (Codex r2 Q4 — acceptable for v1). Missing or invalid `request_approval` params fail at EXECUTE time via `ActionResult(success=False, error="missing_param:..." / "invalid_binding_payload:..." / "missing_workflow_binding")` — see AC3, AC7a/b/c. |
 | AC24 | Production `ActionLibrary` bring-up wires `RequestApprovalAction` with the receipt function bound via `functools.partial(approval_receipts.request_approval, data_dir=..., event_stream=...)` adapter (Codex r2 BLOCKING #3 fold). Without the adapter, the first execution fails with a missing-kwarg error. Bring-up test asserts the registered action's `request_approval_fn` is callable with only the per-call kwargs (no `data_dir`/`event_stream` required). |
 
-### Descriptor (v4 ACs)
+### Descriptor (v5 ACs)
 
 | AC | Description |
 |---|---|
@@ -1084,5 +1114,5 @@ New helper added by this spec (~30 LOC):
    paused_at_gate`, `workflow.execution_resumed`,
    `workflow.gate_auto_proceeded`).
 
-All open questions are now resolved. v4 is implementation-
-ready pending the r4 GREEN.
+All open questions are now resolved. The spec is
+implementation-ready per Codex r5 GREEN (2026-05-28).
