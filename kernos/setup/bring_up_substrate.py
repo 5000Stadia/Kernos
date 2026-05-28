@@ -1692,6 +1692,10 @@ def _call_tool_adapter(
                     )
                 if tool_id == "validate_investigation_response":
                     # Raises on malformed → workflow aborts.
+                    # v1.1: includes summary so the loosened
+                    # acceptance path (summary-alone) fires when
+                    # bridge response only carries the summary
+                    # field per current bridge schema.
                     return _validate_ir(
                         investigation_outcome=args.get(
                             "investigation_outcome", "",
@@ -1711,6 +1715,7 @@ def _call_tool_adapter(
                         touches_paths=args.get(
                             "touches_paths", [],
                         ),
+                        summary=args.get("summary", ""),
                     )
                 if tool_id == "record_fix_authorization":
                     fa_store = getattr(

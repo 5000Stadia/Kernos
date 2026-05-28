@@ -1692,10 +1692,7 @@ class ReasoningService:
             if tool_name == "validate_investigation_response":
                 # Validation; raises InvestigationResponseMalformed
                 # on bad shape — workflow's on_failure: abort
-                # fires when this raises (vs returning an error
-                # string the workflow would treat as success).
-                # Intentionally NOT caught below so the raise
-                # propagates.
+                # fires when this raises.
                 try:
                     result = validate_investigation_response(
                         investigation_outcome=tool_input.get(
@@ -1716,9 +1713,10 @@ class ReasoningService:
                         touches_paths=tool_input.get(
                             "touches_paths", [],
                         ),
+                        summary=tool_input.get("summary", ""),
                     )
                 except InvestigationResponseMalformed:
-                    raise   # re-raise so workflow aborts
+                    raise
                 return _json.dumps(result, sort_keys=True)
 
             if tool_name == "record_fix_authorization":

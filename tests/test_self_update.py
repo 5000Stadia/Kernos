@@ -246,6 +246,42 @@ class TestFetchFailure:
         enforce_or_continue(_execv=execv_mock, _argv=["server.py"])
         execv_mock.assert_not_called()
 
+    def test_fetch_timeout_does_not_crash_bringup(
+        self, fake_repo, data_dir, monkeypatch,
+    ):
+        """2026-05-27 04:48 incident regression pin: a 60s git-fetch
+        timeout uncaught used to propagate through enforce_or_continue
+        and kill bring-up. Now _run_git catches TimeoutExpired and
+        returns a synthetic returncode=124 — _fetch sees failure,
+        logs FETCH_FAILED, returns from enforce_or_continue without
+        raising. Bot continues with existing code."""
+        call_count = {"n": 0}
+
+        def _fake_run(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # status — succeeds.
+                return _completed(stdout="")
+            if call_count["n"] == 2:
+                # fetch — raises TimeoutExpired (the bug scenario).
+                raise subprocess.TimeoutExpired(
+                    cmd=["git", "fetch", "origin", "main", "--quiet"],
+                    timeout=60,
+                )
+            raise AssertionError(
+                f"unexpected subprocess.run call #{call_count['n']}: "
+                f"args={args} kwargs={kwargs}"
+            )
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        execv_mock = MagicMock()
+        # MUST NOT raise — bug was that TimeoutExpired propagated.
+        enforce_or_continue(_execv=execv_mock, _argv=["server.py"])
+        execv_mock.assert_not_called()
+        # Confirm we got past status (call 1) and tried fetch (call 2),
+        # then enforced returned cleanly without calling rev-parse (3).
+        assert call_count["n"] == 2
+
 
 class TestPullFailure:
     def test_pull_failure_skips_execv(self, fake_repo, data_dir, monkeypatch):

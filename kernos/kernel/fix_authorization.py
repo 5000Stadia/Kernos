@@ -417,6 +417,7 @@ def validate_investigation_response(
     proposed_fix_diff: str = "",
     external_action: str = "",
     touches_paths: Any = None,
+    summary: str = "",
 ) -> dict[str, Any]:
     """Validate the structured CC response shape per spec rules.
 
@@ -424,19 +425,33 @@ def validate_investigation_response(
     violation; returns ``{"valid": True}`` on pass. The
     workflow's ``on_failure: abort`` then halts + surfaces.
 
+    v1.1 BRIDGE-RESPONSE-SCHEMA fold (2026-05-27): the coding-
+    session bridge response shape only carries ``summary +
+    metadata`` — the spec's structured top-level fields
+    (``failure_mode``, ``proposed_fix_diff``, ``touches_paths``,
+    etc.) don't come through. Live /fix test 2026-05-27 19:14
+    confirmed: CC's response had `summary` with a detailed
+    markdown investigation, all other structured fields empty,
+    and the strict validator rejected every completed response.
+    Loosened: when ``investigation_outcome="completed"`` AND
+    ``summary`` is non-empty, treat that as sufficient (the
+    classifier's fail-closed semantics route to substrate-tier
+    when paths/diff/external are all empty anyway, so the
+    architect gate still fires on substrate-tier asks).
+    Strict structured-field requirement returns once
+    BRIDGE-RESPONSE-SCHEMA-V1 ships proper field carriers.
+
     Rules:
       1. ``investigation_outcome`` must be in the enum.
       2. ``touches_paths`` must be a list (possibly empty);
-         non-list raises (None / string / int all rejected).
-      3. If outcome == "completed": ALL of failure_mode,
-         proposed_fix_summary, and AT LEAST ONE of
-         (proposed_fix_diff, external_action) must be
-         non-empty.
+         non-list raises.
+      3. If outcome == "completed": EITHER (a) summary is
+         non-empty OR (b) ALL of failure_mode + proposed_fix_summary
+         + (proposed_fix_diff OR external_action) are non-empty.
       4. If outcome == "unable_to_investigate": validation
-         passes (workflow aborts on read of this outcome via
-         its own logic).
-      5. If outcome == "partial": failure_mode required;
-         proposed_fix_* fields optional.
+         passes (workflow's own logic handles).
+      5. If outcome == "partial": EITHER failure_mode OR summary
+         must be non-empty.
     """
     if investigation_outcome not in _VALID_INVESTIGATION_OUTCOMES:
         raise InvestigationResponseMalformed(
@@ -448,18 +463,23 @@ def validate_investigation_response(
             f"touches_paths must be a list; got "
             f"{type(touches_paths).__name__}={touches_paths!r}"
         )
+    summary_present = bool(summary and str(summary).strip())
     if investigation_outcome == "completed":
+        # v1.1 acceptance path: summary alone is sufficient.
+        if summary_present:
+            return {"valid": True}
+        # Strict path (kept for forward-compat with v2 schema).
         if not failure_mode or not str(failure_mode).strip():
             raise InvestigationResponseMalformed(
                 "investigation_outcome=completed requires non-empty "
-                "failure_mode"
+                "summary OR non-empty failure_mode + structured fields"
             )
         if not proposed_fix_summary or not str(
             proposed_fix_summary,
         ).strip():
             raise InvestigationResponseMalformed(
                 "investigation_outcome=completed requires non-empty "
-                "proposed_fix_summary"
+                "summary OR non-empty proposed_fix_summary"
             )
         diff_present = bool(
             proposed_fix_diff and proposed_fix_diff.strip()
@@ -469,15 +489,17 @@ def validate_investigation_response(
         )
         if not (diff_present or ext_present):
             raise InvestigationResponseMalformed(
-                "investigation_outcome=completed requires at least "
-                "one of: non-empty proposed_fix_diff, non-empty "
-                "external_action"
+                "investigation_outcome=completed requires non-empty "
+                "summary OR at least one of (proposed_fix_diff, "
+                "external_action)"
             )
     elif investigation_outcome == "partial":
-        if not failure_mode or not str(failure_mode).strip():
+        if not summary_present and (
+            not failure_mode or not str(failure_mode).strip()
+        ):
             raise InvestigationResponseMalformed(
                 "investigation_outcome=partial requires non-empty "
-                "failure_mode"
+                "summary OR non-empty failure_mode"
             )
     return {"valid": True}
 
@@ -821,14 +843,15 @@ CLASSIFY_PROPOSED_FIX_TOOL: dict = {
 VALIDATE_INVESTIGATION_RESPONSE_TOOL: dict = {
     "name": "validate_investigation_response",
     "description": (
-        "Validate the structured CC investigation response "
-        "shape before the classifier runs. Aborts the "
-        "workflow with InvestigationResponseMalformed on "
-        "missing required fields (failure_mode, "
-        "proposed_fix_summary, at least one of "
-        "(proposed_fix_diff, external_action)) when "
-        "investigation_outcome=completed; rejects non-list "
-        "touches_paths."
+        "Validate the CC investigation response shape before "
+        "the classifier runs. v1.1: accepts non-empty summary "
+        "as sufficient when outcome=completed (the coding-"
+        "session bridge schema only carries summary + metadata; "
+        "BRIDGE-RESPONSE-SCHEMA-V1 follow-up will add structured "
+        "field carriers). Aborts workflow on malformed shape: "
+        "outcome outside enum, non-list touches_paths, or "
+        "completed-outcome with empty summary AND empty "
+        "structured fields."
     ),
     "input_schema": {
         "type": "object",
@@ -842,6 +865,7 @@ VALIDATE_INVESTIGATION_RESPONSE_TOOL: dict = {
                 "type": "array",
                 "items": {"type": "string"},
             },
+            "summary": {"type": "string"},
         },
         "required": ["investigation_outcome"],
         "additionalProperties": False,

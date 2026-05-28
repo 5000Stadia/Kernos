@@ -133,14 +133,42 @@ def _parse_update_time() -> tuple[int, int]:
 def _run_git(
     args: list[str], *, cwd: Path, timeout: int = 60,
 ) -> subprocess.CompletedProcess:
-    """Run a git subprocess with captured output."""
-    return subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    """Run a git subprocess with captured output.
+
+    Fail-soft on timeout: returns a synthetic CompletedProcess with
+    returncode=124 + stderr explaining the timeout instead of
+    propagating subprocess.TimeoutExpired. Callers already
+    branch on returncode != 0 to log + skip the update step, so
+    a network blip during ``git fetch`` (the canonical bot-killer
+    documented in 2026-05-27 04:48 incident) no longer crashes
+    bring-up. The bot continues with existing code; auto-update
+    retries on next scheduled cycle.
+    """
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.warning(
+            "%s_GIT_TIMEOUT args=%s cwd=%s timeout=%ds — "
+            "treating as failed-but-recoverable (bot continues with "
+            "existing code)",
+            _LOG_PREFIX, args, cwd, timeout,
+        )
+        return subprocess.CompletedProcess(
+            args=["git", *args],
+            returncode=124,    # standard timeout exit code
+            stdout=exc.stdout or "" if isinstance(
+                exc.stdout, (str, bytes),
+            ) else "",
+            stderr=(
+                f"git {' '.join(args)} timed out after {timeout}s"
+            ),
+        )
 
 
 def _run_pip_install(cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:

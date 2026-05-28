@@ -484,6 +484,59 @@ def test_ac25_unable_to_investigate_passes_validation():
     assert out == {"valid": True}
 
 
+# v1.1 BRIDGE-RESPONSE-SCHEMA fold — summary-alone acceptance
+
+
+def test_v11_completed_with_summary_alone_passes():
+    """2026-05-27 19:14 live-test regression pin: the coding-
+    session bridge response carries summary + metadata only, with
+    no structured top-level fields (failure_mode, proposed_fix_diff,
+    etc.). The loosened validator MUST accept summary-only when
+    outcome=completed."""
+    out = validate_investigation_response(
+        investigation_outcome="completed",
+        summary="I traced the failure to kernos/server.py:2279...",
+        touches_paths=[],
+    )
+    assert out == {"valid": True}
+
+
+def test_v11_completed_empty_summary_AND_empty_structured_rejects():
+    """Empty summary AND empty failure_mode → reject (no signal)."""
+    with pytest.raises(InvestigationResponseMalformed,
+                       match="failure_mode"):
+        validate_investigation_response(
+            investigation_outcome="completed",
+            summary="",
+            failure_mode="",
+            proposed_fix_summary="",
+            proposed_fix_diff="",
+            external_action="",
+            touches_paths=[],
+        )
+
+
+def test_v11_partial_with_summary_alone_passes():
+    out = validate_investigation_response(
+        investigation_outcome="partial",
+        summary="started but ran out of context",
+        touches_paths=[],
+    )
+    assert out == {"valid": True}
+
+
+def test_v11_summary_whitespace_only_treated_as_empty():
+    """Whitespace-only summary doesn't count as non-empty."""
+    with pytest.raises(InvestigationResponseMalformed):
+        validate_investigation_response(
+            investigation_outcome="completed",
+            summary="   \n  \t  ",
+            failure_mode="",
+            proposed_fix_summary="",
+            touches_paths=[],
+        )
+
+
 # ---------------------------------------------------------------------
 # Lattice constant sanity pins
 # ---------------------------------------------------------------------
