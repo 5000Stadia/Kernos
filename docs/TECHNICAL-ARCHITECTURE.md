@@ -2,7 +2,7 @@
 
 > **What this is:** A map of what exists today — components, data structures, data flows, and interfaces. The agent reaches this via `request_reference` (REFERENCE-PRIMITIVE-V1; the legacy direct-path `read_doc` was retired). If the code and this document disagree, fix this document.
 >
-> **Last updated:** 2026-05-05 (reflects: through Multi-Member V1, EXTERNAL-AGENT-CONSULTATION, CROSS_SPACE_REQUESTS, AUTO-UPDATE, WORKFLOW-TRIGGERS-CONSOLIDATION v1, KERNEL-TOOL-REGISTRY-V1, CRB bring-up, REFERENCE-PRIMITIVE-V1, `read_doc` retirement)
+> **Last updated:** 2026-05-28 (reflects: through Multi-Member V1, EXTERNAL-AGENT-CONSULTATION, CROSS_SPACE_REQUESTS, AUTO-UPDATE, WORKFLOW-TRIGGERS-CONSOLIDATION v1, KERNEL-TOOL-REGISTRY-V1, CRB bring-up, REFERENCE-PRIMITIVE-V1, `read_doc` retirement, REQUEST-APPROVAL-ACTION-V1, ASYNC-IO-CONVERSION-V1 Tier 1, LONG-HORIZON-PROJECT-V1)
 >
 > **For depth on recent substrate:**
 >
@@ -60,6 +60,12 @@ Every inbound message flows through six phases:
 - `_phase_reason()` — ReasoningRequest construction, task engine execution
 - `_phase_consequence()` — Post-turn processing, cross-domain signals
 - `_phase_persist()` — Conversation logging, compaction trigger, domain assessment, child briefings
+
+### Async-Safe Hot-Path File I/O
+
+**Files:** `kernos/kernel/conversation_log.py`, `kernos/kernel/runtime_trace.py`, `kernos/messages/handler.py`
+
+The 14 every-turn file-I/O sites from ASYNC-IO-CONVERSION-V1 Tier 1 are async-safe so synchronous disk reads/writes do not block the asyncio loop that also carries Discord gateway heartbeats. `ConversationLogger` uses `aiofiles` for log append/read/seed paths and `run_in_executor` for meta JSON helpers. `RuntimeTrace.append_turn()` wraps its mkdir/append/rotation read-write sequence in the executor and serializes it with a per-trace-path `asyncio.Lock`. The message handler uses `aiofiles` for parent-briefing reads and workspace tool descriptor reads. Tier 2/3 conversion remains deferred.
 
 ---
 
@@ -271,7 +277,7 @@ Three named chains: **primary** (main reasoning), **simple** (extraction, compac
 
 ### Dispatch Order
 
-1. **Kernel tools** — Intercepted before MCP. Current set: remember, write_file, read_file, list_files, delete_file, execute_code, manage_workspace, register_tool, inspect_state, request_tool, dismiss_whisper, read_source, read_soul, update_soul, manage_covenants, manage_capabilities, manage_channels, send_to_channel, manage_schedule, manage_plan, manage_members, read_runtime_trace, diagnose_issue, propose_fix, submit_spec, request_reference, store_reference, create_reference_collection, move_reference_to_canvas, mark_reference_superseded, quarantine_reference, restore_reference_from_quarantine. (read_doc retired in REFERENCE-PRIMITIVE-V1.)
+1. **Kernel tools** — Intercepted before MCP. Canonical allowlists live in `ReasoningService._KERNEL_TOOLS` / `_DISPATCHABLE_KERNEL_TOOLS`; schemas live in `kernos/kernel/kernel_tool_registry.py`. Notable surfaces include memory/files, workspace, covenants/capabilities/channels, schedule, project tools (`start_project`, `record_project_decision`, `surface_project_status`), plans, members, runtime diagnostics, references, canvas, external-agent consultation, self-improvement, and git/deployment tools. (`read_doc` retired in REFERENCE-PRIMITIVE-V1.)
 2. **MCP tools** — Routed via MCPClientManager.call_tool()
 3. **Workspace tools** — Detected via `catalog.has_workspace_tool()`. Executed via `workspace.execute_workspace_tool()` in the tool's home space.
 
@@ -309,7 +315,7 @@ Action-based tools classified by action param: manage_covenants, manage_capabili
 
 ### Builder Flow (AW-4)
 
-The agent builds tools in-conversation: `execute_code` (write + test) → `register_tool` (register) → `manage_workspace` (track). Two shapes: **Tools** (callable capabilities registered in catalog) and **Projects** (bodies of work — files + structure, not registered).
+The agent builds tools in-conversation: `execute_code` (write + test) → `register_tool` (register) → `manage_workspace` (track). Two workspace artifact shapes: **Tools** (callable capabilities registered in catalog) and **Workspace Projects** (bodies of work: files + structure, not registered). Long-horizon projects are a separate product surface described in section 10b.
 
 Operating principles guide build-fast-iterate: propose concrete, write code, test before presenting, register, offer to refine.
 
@@ -363,6 +369,24 @@ JSON plan with phases, steps, budget ceilings (max_steps, max_tokens, max_time_s
 ### Discovery Surfacing
 
 `notify_user` parameter on `continue_plan` sends progress/discoveries to user's channel. Plan discoveries list tracks findings across steps.
+
+---
+
+## 10b. Long-Horizon Projects
+
+**Files:** `kernos/kernel/projects.py`, `kernos/kernel/state.py` (`ProjectState`), `kernos/kernel/state_sqlite.py` (`project_state`), `kernos/kernel/canvas.py`, `kernos/kernel/scheduler.py`, `kernos/messages/handler.py`
+
+Long-horizon projects are first-class bindings over existing primitives, not a separate memory substrate. A project row binds a `ContextSpace`, a pinned canvas, `project_decision` knowledge entries, and best-effort scheduler check-in fields.
+
+### Project Tools
+
+- `start_project(name, initial_note="", checkin_cadence="weekly")` creates a domain `ContextSpace`, creates a canvas with `CanvasService.create(..., pinned_to_spaces=[space_id])`, seeds `index.md`, `overview.md`, `decisions.md`, `timeline.md`, `open-loops.md`, and `next-steps.md` with `CanvasService.page_write()`, inserts `project_state`, switches the active space, and best-effort creates a plain reminder through `handle_manage_schedule(action="create", ...)`.
+- `record_project_decision(project_id="", decision, subject="")` resolves the explicit project or active-space project, appends a dated entry to `decisions.md`, appends a timeline line when possible, and writes a `KnowledgeEntry(category="project_decision", tags=["project:<id>", "space:<id>", "project_decision"])`. Canvas and knowledge writes are sequential best effort; knowledge failure returns `partial=True`.
+- `surface_project_status(project_id="")` assembles compact status from `project_state`, recent `project_decision` knowledge, canvas summaries for timeline/open loops/next steps, and stored reminder fields.
+
+### Command Surface
+
+`/project start "Name"`, `/project status [name-or-project-id]`, `/project list`, and `/project complete [name-or-project-id]` are handled in `MessageHandler._handle_project_command()`. Completion marks `project_state.lifecycle_state='completed'`, records completion fields, and best-effort removes the stored check-in trigger.
 
 ---
 
@@ -448,11 +472,20 @@ event_stream emit ─→ writer flush ─→ post_flush hook
 - `kernos/kernel/workflows/action_classification.py` — verb reversibility lookup powering safe-deny.
 - `kernos/kernel/workflows/action_library.py` — bounded set of verbs:
     - World-effect (action-loop instances, covenant-gated, with verifiers): `notify_user`, `write_canvas`, `route_to_agent`, `call_tool`, `post_to_service`.
+    - Receipt/gate bridge: `request_approval` (`RequestApprovalAction`) creates a durable approval receipt bound to the current workflow execution and gate nonce.
     - Direct-effect (structural assertions only): `mark_state`, `append_to_ledger`.
 - `kernos/kernel/workflows/agent_inbox.py` — `AgentInbox` Protocol + `InMemoryAgentInbox` (test/dev) + `NotionAgentInbox` (production stub). `route_to_agent` raises `AgentInboxUnavailable` when no provider is bound.
 - `kernos/kernel/workflows/execution_engine.py` — `ExecutionEngine` + `WorkflowExecution`. Single asyncio queue, one worker task, sequential per-instance dispatch. Synthetic CohortContext built from trigger event + active spaces. Approval-gate semantics: action FIRST → pause AFTER → wait → resume; timeout per gate descriptor. Restart-resume reads `running` rows from SQLite, re-enqueues if next action is `resume_safe`, else aborts with `aborted_by_restart`.
+- `kernos/kernel/approval_receipts.py` — durable approval receipts. `find_terminal_by_binding()` returns the latest terminal receipt for `(instance_id, workflow_execution_id, gate_nonce)` and normalizes consumed receipts to approved decisions for recovery.
+- `kernos/kernel/workflows/refs.py` — workflow reference resolver. `_STEP_SCOPES` includes `approval_outcome` so downstream branches can read `{step.<step_id>.approval_outcome.<field>}`.
 - `kernos/kernel/workflows/ledger.py` — `WorkflowLedger`. Append-only markdown file at `data/{instance_id}/workflows/{workflow_id}/ledger.md`. Cross-instance path-isolation pin.
 - `kernos/kernel/webhooks/receiver.py` — FastAPI `register_routes(app, registry)`. POST `/webhooks/{source_id}` with HMAC or bearer auth, optional schema validator, translates validated bodies to `event_stream.emit("external.webhook", ...)`.
+
+### Request Approval Gate Action
+
+Workflow descriptors can declare `action_type: request_approval` with a `gate_ref`. `RequestApprovalAction.execute()` calls `approval_receipts.request_approval()` using the engine-provided `_workflow_execution_id` and `_gate_nonce`; the engine then pauses on the referenced `ApprovalGate`. `_await_gate()` first installs the waiter, checks `find_terminal_by_binding()` for a terminal receipt, and otherwise waits for an `approval.decision_recorded` event matching the gate predicate plus execution id and nonce.
+
+Gate release is fail-closed for approval events. `_clear_gate_and_advance()` maps the event to `approval_outcome` (`approved`, `decision`, `approval_id`, `decided_at`, `decided_by_actor`, `rejection_reason`), verifies the terminal receipt through `_approval_decision_event_has_terminal_receipt()`, and merges the outcome into the requesting step's existing `workflow_step_outputs` envelope in the same transaction that clears the nonce and advances the cursor. Approved single-use receipts are consumed best-effort after the cursor advances.
 
 ### Audit events
 
@@ -460,7 +493,8 @@ Emitted to `event_stream` with shared `correlation_id` per execution:
 
 - `workflow.execution_started`
 - `workflow.execution_step_succeeded` / `workflow.execution_step_failed`
-- `workflow.execution_paused` (gate) / `workflow.execution_resumed`
+- `workflow.execution_paused_at_gate` / `workflow.execution_resumed`
+- `workflow.gate_receipt_short_circuited` / `workflow.gate_receipt_multi_terminal` / `workflow.gate_receipt_lookup_failed`
 - `workflow.gate_auto_proceeded` / `workflow.owner_escalation`
 - `workflow.execution_terminated`
 
@@ -516,6 +550,8 @@ Background task. Evaluates proactive insights ("whispers") on a timer (default 1
 
 `manage_schedule` creates time-based and event-based triggers. Time-based: cron-like or one-shot. Event-based: calendar event monitoring. Event sources: currently calendar only.
 
+Long-horizon projects use the existing scheduler rather than a project-specific reminder loop. `start_project()` creates a plain check-in reminder through `handle_manage_schedule(action="create", ...)` and stores `checkin_trigger_id` / `next_checkin_at` on `project_state` when available. `/project complete` removes the stored trigger best-effort through `handle_manage_schedule(action="remove", ...)`.
+
 ---
 
 ## 13. State Storage
@@ -524,7 +560,9 @@ Background task. Evaluates proactive insights ("whispers") on a timer (default 1
 
 **File:** `kernos/kernel/state_sqlite.py`
 
-`SqliteStateStore` implements the `StateStore` ABC (38 methods) using SQLite + WAL mode. One database per instance (`data/{instance}/kernos.db`). Hybrid storage: frequently queried fields as indexed columns, rest in JSON overflow blob. Selectable via `KERNOS_STORE_BACKEND=sqlite` env var. `JsonStateStore` remains as fallback.
+`SqliteStateStore` implements the `StateStore` ABC using SQLite + WAL mode. One database per instance (`data/{instance}/kernos.db`). Hybrid storage: frequently queried fields as indexed columns, rest in JSON overflow blob. Selectable via `KERNOS_STORE_BACKEND=sqlite` env var. `JsonStateStore` remains as fallback.
+
+`project_state` lives in the per-instance database and stores `project_id`, `owner_member_id`, `space_id`, `canvas_id`, `name`, lifecycle fields, activity timestamps, check-in reminder fields, completion fields, and JSON overflow data. `insert_project_state()` validates that the referenced `ContextSpace` exists. Lookup methods include `get_project_state()`, `get_project_state_by_space()`, `list_active_projects()`, `mark_project_completed()`, and `update_project_activity()`.
 
 ### Instance Database
 
