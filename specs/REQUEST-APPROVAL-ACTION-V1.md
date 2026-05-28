@@ -1,62 +1,114 @@
 # REQUEST-APPROVAL-ACTION-V1
 
-**Date:** 2026-05-28
-**Status:** Draft for architect + Codex spec review
+**Date:** 2026-05-28 (v2 — Codex r1 fold)
+**Status:** Draft for round-2 Codex review
 **Origin:** DEFERRED #94 from DURABLE-APPROVAL-RECEIPTS-V1 batch
 **Scope:** Workflow-engine action verb that wraps the existing
-  `approval_receipts.request_approval()` surface and integrates
-  with the engine's existing approval-gate concept. Workflow
-  YAML can declare `action: request_approval` as a step;
-  workflow execution pauses at the gate; resumes on
-  `approval.approved` event; surfaces the decision into
-  workflow state for downstream steps to reference.
-**Estimated size:** ~200 LOC source + ~250 LOC tests.
+  `approval_receipts.request_approval()` surface and folds onto
+  the engine's existing `gate_ref` + `approval_gates` mechanism.
+  Workflow YAML declares `action_type: request_approval` with a
+  `gate_ref`; engine pauses; resumes on
+  `approval.decision_recorded` event; decision surfaces through
+  a durable storage contract for downstream refs.
+**Estimated size:** ~250 LOC source + ~300 LOC tests.
+
+## What v2 changes from v1 (Codex r1 fold)
+
+v1 of this spec assumed a new action class would create its
+own gate semantics. Codex r1 verdict YELLOW — six blocking
+contract mismatches with the shipped engine. v2 folds onto
+existing primitives:
+
+1. **Event name fix.** `approval.approved` /
+   `approval.rejected` do not exist. Receipts emit
+   `approval.decision_recorded` with
+   `payload.decision in {"approved", "rejected", "expired"}`.
+2. **Race-proof resume rule.** `_on_post_flush_for_gates()`
+   does NOT buffer events before `_await_gate()` installs a
+   waiter. Fix: on `_await_gate()` entry for a receipt-backed
+   gate, query the receipt row by `(workflow_execution_id,
+   gate_nonce)` first. If terminal, synthesize the gate
+   payload and advance. Only if pending, install the waiter.
+3. **Descriptor shape.** Use the existing `gate_ref` +
+   `approval_gates` block. Don't invent a new gate concept.
+   Use current YAML vocabulary: `action_type`, `parameters`,
+   `{...}` refs, `branch_on_true`, `branch_on_false`.
+4. **`gate_nonce` injection.** Don't extend `CohortContext`
+   (frozen + built once before the action loop). The engine
+   already exposes `{workflow.gate_nonce}` as a ref pattern;
+   the action's `parameters` resolves it. No context surgery.
+5. **Storage contract.** Extend the persisted step-output
+   envelope with an optional `approval_outcome` field, written
+   atomically in the same transaction that clears the gate
+   nonce and advances the cursor. Ref-resolver loads after
+   restart.
+6. **Validation surfaces.** Add `request_approval` to
+   `KNOWN_ACTION_TYPES`, `is_irreversible` (world-effect, safe-
+   deny on timeout), `ACTION_OPERATION_CLASS_BY_VERB`, and the
+   production `ActionLibrary` bring-up.
+
+Plus SHOULDs folded:
+- `decision` first-class field in `approval_outcome`.
+- Workflow gate release calls `consume_approval()` on
+  `single_use=True` receipts (lean per Codex).
+- AC18 uses `RefResolutionError` (parameter context) or
+  no-match (predicate context); not a literal sentinel.
+- `binding_payload` must be JSON-serializable mapping.
+- `operator_actor_id` stays explicit.
+- TTL extension deferred.
+- The approval predicate uses `approval_id` for clarity;
+  engine binding still requires `workflow_execution_id` +
+  `gate_nonce`.
 
 ## Why this spec exists
 
-DURABLE-APPROVAL-RECEIPTS-V1 shipped the receipts surface
-(commit `96f4582`): receipts created, expired, approved,
-rejected, consumed. The IMPROVEMENT-LOOP-WORKFLOW-V1
+DURABLE-APPROVAL-RECEIPTS-V1 shipped the receipts substrate
+(commit `96f4582`). The IMPROVEMENT-LOOP-WORKFLOW-V1
 orchestrator uses receipts as a Python primitive (calls
 `request_approval()` directly).
 
-The Action-Library batch (`action_library.py`) shipped six
-world-effect verbs (`notify_user`, `write_canvas`,
-`route_to_agent`, `call_tool`, `post_to_service`,
-`mark_state`) plus internal-state verbs. Receipt requests
-were intentionally deferred — they have a different shape:
-the action doesn't just emit a side-effect, it PAUSES the
-workflow until an external signal (approval/rejection) lands.
+The `action_library.py` ships eight verbs today
+(`notify_user`, `write_canvas`, `route_to_agent`, `call_tool`,
+`post_to_service`, `mark_state`, `append_to_ledger`, `branch`).
+Receipt requests were intentionally deferred because they
+combine action execution with a workflow PAUSE — not just a
+side-effect.
 
-This spec closes that gap: `request_approval` becomes a
-first-class workflow action that workflow YAML can declare,
-and the engine's existing gate mechanism handles the pause/
-resume cycle.
+This spec adds a ninth verb (`request_approval`) that wraps
+the receipt creation AND folds onto the engine's already-
+shipped gate mechanism. No new gate concept; the verb
+co-operates with `gate_ref` + `approval_gates`.
 
-## v1 scope (the minimum that ships)
+## v2 scope (what ships)
 
-- One new action class: `RequestApprovalAction` (follows
-  the `Action` protocol in `action_library.py`).
-- One new gate-class: `approval_receipt_gate` (extends the
-  engine's existing gate concept; replaces the
-  Python-orchestrator's hand-wired receipt creation +
-  continuation hook).
-- Engine surface change: `CohortContext` gains an
-  `approval_outcome` field (set by the gate-resume handler
-  when an approval lands, before the workflow advances).
-- Engine surface change: ref-resolver supports
-  `${step.<step_id>.approval_outcome.*}` patterns to let
-  downstream steps reference the approval decision.
+- One new action class: `RequestApprovalAction` (follows the
+  `Action` protocol).
+- A receipt-backed gate-resume rule added to
+  `_await_gate()`: on entry, query the receipt by
+  `(workflow_execution_id, gate_nonce)` and short-circuit if
+  terminal. Eliminates the lost-event window.
+- Storage contract extension: `workflow_step_outputs`
+  envelope gains an optional `approval_outcome` field,
+  populated atomically with gate clear + cursor advance.
+- Ref-resolver: `{step.<step_id>.approval_outcome.<field>}`
+  reads the new envelope field.
+- Validation: `request_approval` added to
+  `KNOWN_ACTION_TYPES`, `ACTION_OPERATION_CLASS_BY_VERB`, and
+  `is_irreversible` (returns True — world-effect that
+  persists an operator-visible request and triggers downstream
+  authorization).
+- ActionLibrary bring-up registration: wired in production
+  factory at `kernos/setup/bring_up_substrate.py`-class file.
 
 ## Out of scope (deferred)
 
-- Multi-approver receipts (current receipts are
-  single-operator; multi-approver is a v2 question).
-- Auto re-issue on TTL expiry (operator manually re-requests
-  in v1; matches IMPROVEMENT-LOOP-WORKFLOW-V1 Risk #3).
-- Per-action approval policies (e.g., "always require
-  approval for this workflow regardless of operator
-  defaults") — covered by existing covenant gate system.
+- Multi-approver receipts (v2).
+- Auto re-issue on TTL expiry (operator re-requests).
+- Per-action approval policies beyond covenant_gate.
+- TTL extension surface (re-issuance is acceptable for v1).
+- Structured `binding_payload` schemas (free-form for v1;
+  JSON-serializable mapping validation only).
+- Engine-derived `operator_actor_id` default (explicit-only).
 
 ## Architecture
 
@@ -65,13 +117,12 @@ resume cycle.
 ```python
 class RequestApprovalAction:
     """Workflow action verb that creates an approval receipt
-    and produces a gate the engine pauses on. Workflow
-    resumes on approval.approved or approval.rejected event;
-    decision surfaces as ``approval_outcome`` in step state.
+    bound to the current workflow execution's pending gate
+    nonce. The workflow PAUSES via the existing gate_ref
+    mechanism — this verb does NOT itself create a gate.
 
-    Wraps the existing approval_receipts.request_approval()
-    function — does NOT duplicate the receipt schema, TTL,
-    or single-use semantics.
+    Receipt resume happens via the engine's race-proof
+    receipt-backed gate rule (see _await_gate fold below).
     """
 
     action_type = "request_approval"
@@ -95,6 +146,38 @@ class RequestApprovalAction:
             return ActionResult(
                 success=False, error="covenant_denied",
             )
+
+        # binding_payload validation (Codex r1 SHOULD #7):
+        # must be a JSON-serializable mapping. Empty default.
+        binding_payload = params.get("binding_payload") or {}
+        if not isinstance(binding_payload, dict):
+            return ActionResult(
+                success=False,
+                error="invalid_binding_payload:not_a_mapping",
+            )
+        try:
+            json.dumps(binding_payload)
+        except (TypeError, ValueError) as exc:
+            return ActionResult(
+                success=False,
+                error=f"invalid_binding_payload:{exc}",
+            )
+
+        # workflow_execution_id + gate_nonce are NOT on
+        # CohortContext (Codex r1 BLOCKING #4). They come
+        # through resolved params via {workflow.execution_id}
+        # + {workflow.gate_nonce} ref patterns the engine
+        # already exposes (see execution_engine.py:458).
+        workflow_execution_id = params.get(
+            "_workflow_execution_id",
+        )
+        gate_nonce = params.get("_gate_nonce")
+        if not (workflow_execution_id and gate_nonce):
+            return ActionResult(
+                success=False,
+                error="missing_workflow_binding",
+            )
+
         try:
             approval_id = await self._request_approval(
                 instance_id=getattr(context, "instance_id", ""),
@@ -105,9 +188,9 @@ class RequestApprovalAction:
                 ),
                 operator_actor_id=params["operator_actor_id"],
                 request_summary=params["request_summary"],
-                binding_payload=params.get("binding_payload") or {},
-                workflow_execution_id=context.execution_id,
-                gate_nonce=context.gate_nonce,
+                binding_payload=binding_payload,
+                workflow_execution_id=workflow_execution_id,
+                gate_nonce=gate_nonce,
                 ttl_seconds=params.get("ttl_seconds", 86400),
                 single_use=params.get("single_use", True),
             )
@@ -133,248 +216,397 @@ class RequestApprovalAction:
     async def verify(
         self, context: Any, params: dict, result: ActionResult,
     ) -> bool:
-        # Verification at execute-time: receipt was persisted.
-        # The actual approval outcome is verified at gate
-        # resume time (downstream concern).
         return result.success and bool(
             result.value and result.value.get("approval_id"),
         )
 ```
 
-### Engine integration
+### Engine fold
 
-**`request_approval` is a gating action.** When the engine
-processes a step with `action: request_approval`:
+**No new gate concept.** The verb works with the existing
+`gate_ref` + `approval_gates` machinery. The author declares
+both in the descriptor; the engine mints `pending_gate_nonce`
+before the gated step executes (existing flow); the verb
+reads the nonce through the resolved params; the verb
+creates the receipt with that nonce bound; engine emits
+`workflow.execution_paused_at_gate` (existing); engine waits
+for `approval.decision_recorded` (existing event for the
+approval-receipts substrate).
 
-1. Generates `gate_nonce` (UUID) BEFORE calling execute().
-2. Persists `gate_nonce` on the execution row (via existing
-   `_append_and_persist_gate_nonce` helper).
-3. Calls `action.execute(context, params)` — the action's
-   binding_payload is wired to the persisted `gate_nonce` +
-   `execution_id` via context.
-4. On success: emits `workflow.execution_paused_at_gate`
-   (existing event); marks execution `paused_at_gate`;
-   stops processing this execution.
-5. Engine's existing `_on_post_flush_for_gates` handler
-   matches incoming `approval.approved` or
-   `approval.rejected` events against persisted
-   `gate_nonce`. On match:
-   - Clears gate_nonce (via existing
-     `_clear_gate_nonce_and_advance`)
-   - Sets `step_outputs[<step_id>].approval_outcome` to
-     `{"approved": bool, "approval_id": str,
-       "decided_at": iso, "decided_by_actor": str,
-       "rejection_reason": str | None}`
-   - Resumes execution from next step.
+**The race-proof resume rule (BLOCKING #2 fold):** Add a
+receipt-state check at the top of `_await_gate()` for gates
+whose `approval_event_type == "approval.decision_recorded"`:
 
-### CohortContext extension
+```python
+async def _await_gate(self, ...):
+    # NEW (REQUEST-APPROVAL-ACTION-V1): if this gate's event
+    # type is the approval-receipt event, check the receipt
+    # row first. The post-flush hook does NOT buffer events
+    # that arrive between persist-nonce and install-waiter.
+    if approval_gate.approval_event_type == "approval.decision_recorded":
+        receipt = await approval_receipts.find_terminal_by_binding(
+            data_dir=self._data_dir,
+            workflow_execution_id=workflow_execution_id,
+            gate_nonce=gate_nonce,
+        )
+        if receipt is not None:
+            synthesized_payload = {
+                "approval_id": receipt["approval_id"],
+                "decision": receipt["decision"],          # approved | rejected | expired
+                "decided_at": receipt["decided_at"],
+                "decided_by_actor": receipt["decided_by_actor"],
+                "rejection_reason": receipt.get("rejection_reason"),
+                "workflow_execution_id": workflow_execution_id,
+                "gate_nonce": gate_nonce,
+            }
+            await self._resume_with_gate_payload(
+                synthesized_payload, source="receipt_short_circuit",
+            )
+            return
 
-The Action's `execute()` reads `context.execution_id` and
-`context.gate_nonce` (currently not exposed on
-`CohortContext`). Two minimal additions:
+    # Existing path: emit paused_at_gate, install waiter,
+    # wait for future approval.decision_recorded events.
+    # ...
+```
+
+The new `approval_receipts.find_terminal_by_binding(...)`
+helper (added by this spec):
+
+```python
+async def find_terminal_by_binding(
+    *, data_dir, workflow_execution_id, gate_nonce,
+) -> dict | None:
+    """Return the most recent terminal receipt matching
+    (workflow_execution_id, gate_nonce), or None if pending.
+    Terminal = decision in {approved, rejected, expired}.
+    Mirrors find_recent_terminal_by_binding_field() but uses
+    the workflow binding rather than an arbitrary field."""
+```
+
+**Single-use consumption (SHOULD #2 fold):** When the gate
+resumes from a `decision=approved` receipt (either via post-
+flush event or the short-circuit), the engine calls
+`approval_receipts.consume_approval(approval_id)` before
+advancing the cursor. The consume call is idempotent against
+already-consumed receipts (mirrors the existing helpers'
+shapes). This satisfies both the gate-nonce single-step
+guarantee AND the receipt-level single-use contract.
+
+### Storage contract (BLOCKING #5 fold)
+
+`workflow_step_outputs` currently stores envelopes with
+`success`, `value`, `error`, `receipt`. Add an optional
+`approval_outcome` field at the same level, populated by the
+engine on gate resume:
 
 ```python
 @dataclass
-class CohortContext:
-    instance_id: str
-    member_id: str
-    space_id: str
-    # NEW (this spec):
-    execution_id: str = ""   # workflow execution row id
-    gate_nonce: str = ""     # currently-pending gate's nonce
+class StepOutputEnvelope:
+    success: bool
+    value: Any = None
+    error: str | None = None
+    receipt: dict = field(default_factory=dict)
+    approval_outcome: dict | None = None  # NEW
 ```
 
-These are populated by the engine when it constructs the
-CohortContext for an action call inside a workflow execution.
-Both default to `""` so non-workflow callers
-(`ActionLibrary.execute(action_type, ctx, params)` from
-direct caller paths) keep working unchanged.
+`approval_outcome` shape (SHOULD #1 fold — adds `decision`):
 
-### Ref-resolver extension
+```python
+{
+    "approved": bool,
+    "decision": "approved" | "rejected" | "expired",
+    "approval_id": str,
+    "decided_at": str,            # ISO timestamp
+    "decided_by_actor": str,
+    "rejection_reason": str | None,  # populated when approved=False
+}
+```
 
-Workflow YAML supports refs like
-`${step.<step_id>.value.<field>}` today. The approval action's
-decision lives in a sibling field for clarity:
+**Atomic write:** The engine's existing
+`_clear_gate_nonce_and_advance` helper extends to also
+persist the `approval_outcome` into the requesting step's
+envelope. The persist + clear-nonce + advance-cursor happen
+in a single transaction. On restart, the envelope round-trips
+through the existing step-output loader.
+
+### Ref-resolver
+
+`{step.<step_id>.approval_outcome.<field>}` is the public ref
+pattern. Resolves via the existing step-output loader; if the
+envelope's `approval_outcome` field is `None` or the inner
+field is missing:
+- In **parameter context**: raises `RefResolutionError`
+  (matches existing behavior).
+- In **predicate context**: returns no-match (matches existing
+  behavior).
+
+Per Codex r1 SHOULD #3: there is NO literal `<missing_ref>`
+sentinel.
+
+### Descriptor shape (BLOCKING #3 fold)
+
+Example workflow YAML using existing vocabulary:
 
 ```yaml
 steps:
   - id: request_op_approval
-    action: request_approval
-    params:
+    action_type: request_approval
+    parameters:
       kind: git_commit_authorization
-      operator_actor_id: ${context.operator_actor_id}
-      request_summary: "Commit ready for approval: ${step.draft_spec.value.spec_summary}"
+      operator_actor_id: "{context.operator_actor_id}"
+      request_summary: "Commit ready: {step.draft_spec.value.spec_summary}"
       binding_payload:
-        expected_parent_sha: ${step.snapshot.value.head_sha}
+        expected_parent_sha: "{step.snapshot.value.head_sha}"
+      ttl_seconds: 86400
+      single_use: true
+      _workflow_execution_id: "{workflow.execution_id}"
+      _gate_nonce: "{workflow.gate_nonce}"
+    gate_ref: await_op_approval
 
-  - id: gate_on_approval
-    action: branch
-    params:
-      condition: ${step.request_op_approval.approval_outcome.approved}
-      true_branch: do_commit
-      false_branch: surface_rejection
+approval_gates:
+  - gate_name: await_op_approval
+    approval_event_type: approval.decision_recorded
+    approval_event_predicate:
+      op: eq
+      path: payload.approval_id
+      value: "{step.request_op_approval.value.approval_id}"
+    timeout_seconds: 86400
+    bound_behavior_on_timeout: abort_workflow
 ```
 
-`${step.X.approval_outcome.*}` resolves to the gate-resume
-fields populated by the engine, distinct from
-`${step.X.value.*}` which holds the action's execute-time
-return value.
+Downstream branching uses existing `branch_on_true` /
+`branch_on_false`:
+
+```yaml
+  - id: branch_on_approval
+    action_type: branch
+    parameters:
+      predicate:
+        op: eq
+        path: "{step.request_op_approval.approval_outcome.decision}"
+        value: approved
+    branch_on_true: do_commit
+    branch_on_false: surface_rejection
+```
+
+**Engine-level binding sanity (SHOULD #5 fold):** the
+`approval_event_predicate` SHOULD match on `approval_id` for
+clarity. The engine's `_on_post_flush_for_gates()` continues
+to require `workflow_execution_id` + `gate_nonce` for binding
+— the predicate is an additional clarity surface, not the
+binding contract.
+
+### Validation surfaces (BLOCKING #6 fold)
+
+Updates needed (each gets an AC):
+
+1. **`action_classification.KNOWN_ACTION_TYPES`** — add
+   `"request_approval"` to the world-effect verb set.
+2. **`action_classification.is_irreversible`** — returns
+   `True` for `"request_approval"` (per Codex: world-effecting
+   send-ish, irreversible for safe-deny-on-timeout purposes).
+3. **`action_sink.ACTION_OPERATION_CLASS_BY_VERB`** — map
+   `"request_approval"` to the appropriate operation class
+   (likely `world_effect` consistent with `notify_user` /
+   `route_to_agent`).
+4. **Workflow registry validation** — descriptor parsing
+   already routes unknown action types through
+   `KNOWN_ACTION_TYPES` check. Once added, no extra parse
+   logic needed.
+5. **Bring-up registration** — wire
+   `RequestApprovalAction(request_approval_fn=approval_receipts.request_approval, covenant_gate=...)`
+   into the production `ActionLibrary` factory at
+   `bring_up_substrate.py`.
 
 ## Acceptance criteria
 
-### Action verb
+### Action verb (V2)
 
 | AC | Description |
 |---|---|
-| AC1 | `RequestApprovalAction` registered in `ActionLibrary` with `action_type="request_approval"`. |
+| AC1 | `RequestApprovalAction` follows the `Action` protocol with `action_type="request_approval"`. |
 | AC2 | `execute()` returns success + `{"approval_id": str}` value when the wrapped `request_approval_fn` succeeds. |
 | AC3 | `execute()` returns `error="missing_param:<name>"` when required param missing (kind, operator_actor_id, request_summary). |
 | AC4 | `execute()` returns `error="approval_request_failed:<msg>"` when the wrapped function raises. |
 | AC5 | `execute()` returns `error="covenant_denied"` when the covenant gate denies. |
-| AC6 | `verify()` returns True iff `result.success` AND `result.value` contains a non-empty `approval_id`. |
+| AC6 | `verify()` returns True iff `result.success` AND `result.value.approval_id` is non-empty. |
 | AC7 | Defaults: `ttl_seconds=86400`, `single_use=True`, `requested_for_actor=context.member_id`. |
+| AC7a | `binding_payload` must be a `dict` (JSON-serializable mapping); non-dict → `error="invalid_binding_payload:not_a_mapping"`. |
+| AC7b | `binding_payload` containing non-JSON-serializable values → `error="invalid_binding_payload:<typeerror>"`. |
+| AC7c | Missing `_workflow_execution_id` or `_gate_nonce` in resolved params → `error="missing_workflow_binding"`. |
 
-### Engine integration
-
-| AC | Description |
-|---|---|
-| AC8 | When step `action: request_approval` runs: engine generates `gate_nonce` BEFORE `execute()` and persists it on the execution row. |
-| AC9 | Action's `execute()` reads `gate_nonce` + `execution_id` from CohortContext and passes both to `request_approval_fn`. |
-| AC10 | On successful execute: engine emits `workflow.execution_paused_at_gate` with payload `{gate_nonce, approval_id, step_id}`. |
-| AC11 | On `approval.approved` event matching the persisted `gate_nonce`: engine populates `step_outputs[<step_id>].approval_outcome = {approved: True, approval_id, decided_at, decided_by_actor, rejection_reason: None}` and resumes. |
-| AC12 | On `approval.rejected` event matching the persisted `gate_nonce`: engine populates `approval_outcome = {approved: False, ..., rejection_reason: <reason>}` and resumes. |
-| AC13 | On `approval.expired` event matching the persisted `gate_nonce`: engine populates `approval_outcome = {approved: False, ..., rejection_reason: "expired"}` and resumes (workflow can branch on the expired outcome). |
-| AC14 | Existing gate behavior (`abort_workflow`, `auto_proceed_with_default`) applies if the workflow descriptor declares it on the request_approval step. |
-
-### CohortContext + ref-resolver
+### Engine integration (V2)
 
 | AC | Description |
 |---|---|
-| AC15 | `CohortContext` gains `execution_id: str=""` and `gate_nonce: str=""` fields; non-workflow callers see defaults. |
-| AC16 | Engine populates both fields when constructing the context for actions inside a workflow execution. |
-| AC17 | Ref-resolver resolves `${step.<id>.approval_outcome.<field>}` to the gate-resume fields. |
-| AC18 | Ref to non-existent approval_outcome field returns the existing `<missing_ref>` sentinel (per existing resolver behavior). |
+| AC8 | Engine mints `pending_gate_nonce` before the gated `request_approval` step's action runs (existing flow). |
+| AC9 | `{workflow.execution_id}` + `{workflow.gate_nonce}` refs resolve to the current execution row's id + minted nonce (existing surface — validate the action verb actually receives them). |
+| AC10 | Engine emits `workflow.execution_paused_at_gate` on the gated step (existing behavior). |
+| AC11 | **Race-proof resume rule**: `_await_gate()` for an approval-event gate first queries `find_terminal_by_binding(workflow_execution_id, gate_nonce)`. If terminal: synthesize gate payload and short-circuit advance. If pending: install waiter as before. |
+| AC11a | New helper `approval_receipts.find_terminal_by_binding(...)` returns the row dict for terminal (approved/rejected/expired) decisions matching `(workflow_execution_id, gate_nonce)`, else None. |
+| AC11b | Receipt-short-circuit emits engine telemetry event `workflow.gate_receipt_short_circuited` with `{approval_id, decision, source}` so soak can verify the path fires when expected. |
+| AC12 | On `approval.decision_recorded` event matching the persisted `gate_nonce`: engine populates `approval_outcome` per the storage contract (atomic with clear-nonce + advance-cursor) and resumes. |
+| AC13 | `approval_outcome.decision` field carries the receipt's decision verbatim (`approved` / `rejected` / `expired`). `approved` is a boolean convenience. |
+| AC14 | Single-use receipts (`single_use=True`): engine calls `consume_approval(approval_id)` before advancing the cursor on `decision=approved`. Idempotent against already-consumed. |
+| AC14a | `consume_approval` failure (e.g., receipt already consumed by another path) does NOT block gate advance — the gate's single-step guarantee is independent. Telemetry event `approval_consume_skipped` records the no-op. |
+| AC15 | Existing gate timeout behaviors (`abort_workflow`, `auto_proceed_with_default`) apply unchanged. |
 
-### Workflow-level
+### Storage + ref-resolver (V2)
 
 | AC | Description |
 |---|---|
-| AC19 | Workflow YAML descriptor declaring `action: request_approval` validates at registration. |
-| AC20 | Required params (kind, operator_actor_id, request_summary) enforced at registration; missing params fail descriptor validation. |
-| AC21 | Workflow with paused-at-gate execution survives Kernos restart: bring-up bring-up scans pending gates and re-attaches the gate handler. |
+| AC16 | `workflow_step_outputs` envelope schema extends with optional `approval_outcome` (default `None`). Existing tests pass without modification. |
+| AC17 | Engine writes `approval_outcome` into the requesting step's envelope atomically with `_clear_gate_nonce_and_advance`. Atomic = single transaction. |
+| AC18 | Ref `{step.<id>.approval_outcome.decision}` in **parameter** context: resolves to the decision string; if envelope `approval_outcome` is None, raises `RefResolutionError`. |
+| AC18a | Same ref in **predicate** context: resolves on match; if envelope `approval_outcome` is None, returns no-match (per existing resolver behavior). |
+| AC19 | After Kernos restart, a workflow that previously resumed through a request_approval step still resolves `${step.<id>.approval_outcome.*}` refs on subsequent steps — the envelope round-trips through the loader. |
+
+### Validation + classification (V2)
+
+| AC | Description |
+|---|---|
+| AC20 | `action_classification.KNOWN_ACTION_TYPES` contains `"request_approval"`. |
+| AC21 | `action_classification.is_irreversible("request_approval", ...)` returns `True`. |
+| AC22 | `action_sink.ACTION_OPERATION_CLASS_BY_VERB["request_approval"]` is mapped to the appropriate operation class (world-effect tier consistent with `notify_user` / `route_to_agent`). |
+| AC23 | Workflow descriptor with unknown params for `request_approval` fails registration via the existing `KNOWN_ACTION_TYPES`-gated validator (no per-action parameter-required validation in v1 — Codex SHOULD #4 noted, deferred). |
+| AC24 | Production `ActionLibrary` bring-up registers `RequestApprovalAction` with the receipt surface + covenant gate wired. |
+
+### Descriptor (V2)
+
+| AC | Description |
+|---|---|
+| AC25 | Workflow YAML using `action_type: request_approval` + `gate_ref` + an `approval_gates` entry with `approval_event_type: approval.decision_recorded` validates at registration. |
+| AC26 | The recommended descriptor pattern (predicate matches on `approval_id` for clarity) is documented in `docs/workflow-actions.md` (or equivalent) with the example from this spec. |
+
+### Restart-resume
+
+| AC | Description |
+|---|---|
+| AC27 | Bring-up restart-resume re-enters `_await_gate()` for executions with `gate_nonce`. The race-proof rule fires, picking up terminal receipts that landed before restart. |
 
 ### Integration with IMPROVEMENT-LOOP-WORKFLOW-V1
 
 | AC | Description |
 |---|---|
-| AC22 | The orchestrator's Python-orchestrator path (current production) keeps working unchanged. |
-| AC23 | A parallel YAML-orchestrator descriptor variant can be authored using `request_approval` action verb and exercises the same receipt schema. |
+| AC28 | The orchestrator's Python-orchestrator path keeps working unchanged. |
+| AC29 | A parallel YAML-orchestrator descriptor variant can be authored using `request_approval` and exercises the same receipt schema. |
 
 ## Soak gate
 
-1. **Automated**: ACs above via test fixtures. Approval-flow
-   tests use a fake event stream + monkeypatched
-   `request_approval_fn` to assert the gate handshake.
+1. **Automated**: ACs above via test fixtures.
+   - **Receipt short-circuit test**: persist a terminal
+     receipt row with a known `(execution_id, nonce)`; enter
+     `_await_gate()`; assert short-circuit fires + emits
+     `workflow.gate_receipt_short_circuited`.
+   - **Approval-flow test**: approve via existing `/approve`
+     surface; assert `approval.decision_recorded` event;
+     assert envelope `approval_outcome.decision=approved` +
+     `consume_approval` called.
+   - **Rejection-flow test**: reject; assert envelope shape
+     and predicate branches correctly.
+   - **Expiry-flow test**: TTL=60s; wait; assert
+     `decision=expired` + envelope shape; no
+     `consume_approval` call.
 2. **Operator soak**: author a minimal YAML workflow that
-   uses `request_approval` (e.g., "notify operator → request
-   approval → write canvas"). Trigger; observe pause; approve
-   via existing `/approve <id>` surface; observe canvas
-   write fires.
-3. **Failure soak**: trigger the same workflow; reject the
-   approval; observe `approval_outcome.approved=False`;
-   verify the branch step routes to the rejection path.
-4. **Expiry soak**: trigger the workflow with `ttl_seconds=60`;
-   wait for expiry; verify `approval_outcome.rejection_reason
-   ="expired"` and the workflow handles it cleanly.
+   pauses at `request_approval`; approve via `/approve`;
+   verify downstream step fires with the expected refs.
+3. **Race soak**: inject the race window (mock-time the
+   receipt write to land before the engine installs the
+   waiter); verify the short-circuit fires and the workflow
+   does not get stuck.
 
 ## Migration
 
-Additive. No schema change. The engine's gate concept already
-exists (per execution_engine.py lines 26-54); this spec only
-adds a new gate-creating action. The `_on_post_flush_for_gates`
-handler at `execution_engine.py:1688` already does
-gate_nonce-based matching; this spec wires the action into
-that handler's known gate types.
+Additive. No schema migration for receipts (existing rows
+serve fine). `workflow_step_outputs` envelope adds an
+optional column; existing rows have `approval_outcome=NULL`.
+Existing tests pass unchanged.
 
-CohortContext extension is two new fields with `""` defaults —
-backward-compatible per `[[schema-extension-defaults]]`.
+The race-proof rule lands as an additive top-of-`_await_gate()`
+check that only fires for `approval_event_type ==
+"approval.decision_recorded"` gates. Pre-existing gate flows
+(non-approval) are unaffected.
 
-The `improvement_loop_workflow.py` Python orchestrator keeps
-using `request_approval()` directly (no migration). The YAML-
-orchestrator path becomes available; any future workflow that
-needs operator gating can use it.
+`improvement_loop_workflow.py` keeps the Python-orchestrator
+path; new YAML-orchestrator paths can use `request_approval`.
 
 ## Risks
 
-- **Risk:** Gate handshake race — between persisting
-  `gate_nonce` and the action's `execute()` calling
-  `request_approval` with that nonce, an approval event for
-  the matched nonce could (theoretically) land before the
-  receipt row exists.
-  - **Mitigation:** Order matters in the engine. The fix is
-    to (1) persist gate_nonce first, (2) execute the action
-    which writes the receipt with that nonce, (3) ONLY THEN
-    register the gate handler. The handler being late-bound
-    means in-flight approval events for our nonce buffer
-    until the action returns. Codex should verify this
-    sequencing in review.
+- **Risk:** The receipt short-circuit reads from
+  `approval_receipts` mid-`_await_gate()`. If the read fails
+  (DB locked, etc.), behavior must fall through to the
+  existing wait path rather than aborting the gate.
+  - **Mitigation:** Wrap the lookup in try/except; on
+    exception log + fall through. Telemetry event
+    `workflow.gate_receipt_lookup_failed` so the soak can
+    detect lookup health.
 
-- **Risk:** CohortContext extension may collide with other
-  in-flight specs adding their own fields.
-  - **Mitigation:** Check the latest CohortContext shape at
-    impl time (grep for `class CohortContext`). Add the two
-    fields at the end of the dataclass with defaults.
+- **Risk:** Storage extension of `workflow_step_outputs`
+  envelope could collide with concurrent spec work touching
+  the same surface.
+  - **Mitigation:** Check the envelope dataclass at impl
+    time; add the field at the end with default `None`.
+    Codex round-2 review verifies no collision.
 
-- **Risk:** Ref-resolver extension for `approval_outcome`
-  field could overlap with workflows that already use
-  `value.approval_outcome` shape.
-  - **Mitigation:** New field is at the step level, NOT
-    inside value. Resolver's existing `${step.<id>.<field>}`
-    pattern naturally accommodates this.
+- **Risk:** `consume_approval` failure pathway. The engine
+  must advance even if consume returns "already consumed"
+  (idempotency) — otherwise a botched-but-recoverable receipt
+  state could pin the workflow.
+  - **Mitigation:** AC14a covers this. `approval_consume_skipped`
+    telemetry event provides operator-visible signal without
+    blocking advance.
 
-- **Risk:** Existing tests for `_on_post_flush_for_gates`
-  may need updates if the new action type isn't currently
-  exercised by any fixture.
-  - **Mitigation:** Add a fixture-level test for the new
-    gate type; existing fixtures should be unaffected.
+- **Risk:** The descriptor predicate's `{step.X.value.approval_id}`
+  ref must resolve at the time the gate event arrives — which
+  is AFTER the step has succeeded but BEFORE the gate
+  resumes. The resolver loads from durable step outputs;
+  this works iff `_persist_gate_nonce_only` also persists
+  the action's success envelope first.
+  - **Mitigation:** Sequence in the engine's existing flow
+    is: execute action, append success + persist gate_nonce
+    (single transaction), then `_await_gate()`. So
+    `{step.X.value.approval_id}` is already durable when the
+    predicate evaluates. Confirmed in v1 by Codex's
+    architecture summary.
 
 ## Dependencies
 
 All shipped:
-- DURABLE-APPROVAL-RECEIPTS-V1 (`96f4582`) — receipt schema +
-  request_approval() + approve/reject/expire surfaces
+- DURABLE-APPROVAL-RECEIPTS-V1 (`96f4582`) — receipts +
+  `approval.decision_recorded` event
 - WLP-GATE-SCOPING (C1) — gate_nonce persistence + match
-- WORKFLOW-ACTION-LIBRARY (action_library.py) — Action
-  Protocol + ActionResult shape + covenant_gate pattern
-- IMPROVEMENT-LOOP-WORKFLOW-V1 (`ed91b76`-class commit) —
-  Python orchestrator that proves the receipt+gate flow
-  works end-to-end and motivates the YAML-orchestrator
-  migration path
+- WORKFLOW-ACTION-LIBRARY — Action Protocol + ActionResult
+- IMPROVEMENT-LOOP-WORKFLOW-V1 — Python-orchestrator that
+  proves the receipt+gate combo
+- Engine's `gate_ref` + `approval_gates` descriptor surface
+  (existing per descriptor_parser.py:63, 318, 333, etc.)
+- Engine ref-resolver patterns `{workflow.execution_id}` +
+  `{workflow.gate_nonce}` (existing per
+  execution_engine.py:458)
+
+New helper added by this spec (~30 LOC):
+- `approval_receipts.find_terminal_by_binding(...)` — mirrors
+  existing `find_recent_terminal_by_binding_field` shape but
+  binds on `(workflow_execution_id, gate_nonce)`.
 
 ## Open architect questions
 
-1. **Should `request_approval` action expose the binding-
-   payload as a structured object in YAML, or a free-form
-   dict?** Free-form maximizes flexibility but loses
-   validation; structured constrains the use cases the
-   action supports. Spec v1 leans free-form because the
-   binding_payload IS already free-form in receipts.
+(All four Q's from v1 resolved by Codex r1 SHOULD list:)
 
-2. **`approval_outcome.rejection_reason="expired"` as a
-   first-class outcome.** Is treating expiry as a rejection
-   with a special reason the right shape, or should there
-   be a third path (`approval_outcome.timed_out=True`)? v1
-   leans on the reason field because branching on the same
-   `approved=False` keeps YAML logic simpler.
+1. ~~**Binding-payload shape**~~ ✅ Free-form mapping with
+   JSON-serializable validation; structured per-kind schemas
+   are v2.
+2. ~~**Expiry treatment**~~ ✅ Add `decision` first-class
+   field; expiry remains `approved=False` with
+   `decision="expired"`; predicates can branch cleanly.
+3. ~~**TTL extension**~~ ✅ Deferred; re-issuance is
+   operationally acceptable.
+4. ~~**Default `operator_actor_id`**~~ ✅ Explicit-only.
 
-3. **TTL extension.** If an operator says "I'll approve
-   tomorrow" — should the action verb support a way to
-   extend TTL without re-issuing? Current receipt schema
-   doesn't have TTL extension; would need a new receipt
-   primitive.
-
-4. **Default `operator_actor_id` resolution.** Current spec
-   makes the workflow author specify it explicitly. Should
-   the engine derive it from context (e.g., "the instance's
-   owner member") when omitted? Trade-off: explicit-only
-   prevents footguns; engine-derived removes boilerplate.
+New for v2:
+5. **Telemetry naming.** This spec introduces three new
+   engine events: `workflow.gate_receipt_short_circuited`,
+   `workflow.gate_receipt_lookup_failed`,
+   `approval_consume_skipped`. Are these the right shapes
+   + are they consistent with existing engine telemetry
+   verbs? Codex round-2 to validate naming.
