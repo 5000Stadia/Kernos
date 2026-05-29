@@ -119,6 +119,33 @@ class TestAttemptsCRUD:
         row = await ledger.get_attempt(db._conn, "never_seen")
         assert row is None
 
+    async def test_recovery_v1_final_states_are_storable(self, db):
+        await ledger.create_attempt(
+            db._conn, instance_id="t1", attempt_id="att_states",
+            spec_requirement="req",
+        )
+        states = [
+            "awaiting_post_restart_test",
+            "awaiting_commit_approval",
+            "awaiting_recovery_decision",
+            "recovery_in_progress",
+            "awaiting_recovery_commit_approval",
+            "push_unconfirmed",
+            "attempt_failed",
+            "completed",
+            "live_head_mismatch",
+            "attempt_rejected_at_commit",
+            "attempt_expired_at_commit",
+            "test_failed_unrecovered",
+            "test_failed_abandoned_by_agent",
+        ]
+        for state in states:
+            await ledger.update_attempt(
+                db._conn, attempt_id="att_states", final_state=state,
+            )
+            row = await ledger.get_attempt(db._conn, "att_states")
+            assert row["final_state"] == state
+
 
 # ============================================================
 # AC7 — list_recent_attempts
@@ -192,6 +219,71 @@ class TestAppendEvent:
         events = await ledger.get_attempt_events(db._conn, "att_f")
         assert [e["sequence"] for e in events] == [1, 2]
         assert [e["kind"] for e in events] == ["a", "b"]
+
+    async def test_recovery_v1_event_kinds_are_appendable(self, db):
+        await ledger.create_attempt(
+            db._conn, instance_id="t1",
+            attempt_id="att_recovery_events",
+            spec_requirement="x",
+        )
+        new_kinds = [
+            "attempt_origin",
+            "attempt_failed",
+            "commit_recorded",
+            "push_failed",
+            "push_unconfirmed",
+            "push_succeeded",
+            "recovery_decision_requested",
+            "recovery_started",
+            "recovery_failed",
+            "recovery_iteration",
+            "recovery_no_diff",
+            "recovery_aborted_unconverged",
+            "live_head_mismatch",
+            "attempt_rejected_at_commit",
+            "attempt_expired_at_commit",
+            "recovery_commit_approval_rejected",
+            "recovery_commit_approval_expired",
+            "recovery_cap_hit",
+            "test_failed_abandoned_by_agent",
+            "operator_recovery_override",
+        ]
+        for kind in new_kinds:
+            await ledger.append_event(
+                db._conn,
+                attempt_id="att_recovery_events",
+                kind=kind,
+                detail="{}",
+            )
+        events = await ledger.get_attempt_events(
+            db._conn, "att_recovery_events",
+        )
+        assert [e["kind"] for e in events] == new_kinds
+
+    async def test_recovery_iteration_count_from_started_events(self, db):
+        await ledger.create_attempt(
+            db._conn, instance_id="t1",
+            attempt_id="att_recovery_count",
+            spec_requirement="x",
+        )
+        await ledger.append_event(
+            db._conn, attempt_id="att_recovery_count",
+            kind="recovery_started", detail='{"iteration":1}',
+        )
+        await ledger.append_event(
+            db._conn, attempt_id="att_recovery_count",
+            kind="recovery_iteration", detail='{"iteration":1}',
+        )
+        await ledger.append_event(
+            db._conn, attempt_id="att_recovery_count",
+            kind="recovery_started", detail='{"iteration":2}',
+        )
+        events = await ledger.get_attempt_events(
+            db._conn, "att_recovery_count",
+        )
+        assert sum(
+            1 for e in events if e["kind"] == "recovery_started"
+        ) == 2
 
 
 # ============================================================

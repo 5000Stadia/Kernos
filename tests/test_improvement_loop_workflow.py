@@ -343,6 +343,35 @@ async def test_handle_returns_prose_with_attempt_id(loop_env):
 
 
 @pytest.mark.asyncio
+async def test_handle_missing_consult_seam_fails_before_attempt(loop_env):
+    from kernos.kernel.improvement_loop_workflow import (
+        handle_improve_kernos,
+    )
+
+    data_dir, _ = loop_env
+
+    class _UnwiredHandler:
+        events = None
+
+    text = await handle_improve_kernos(
+        handler=_UnwiredHandler(),
+        tool_input={"spec_requirement": "trivial fix"},
+        instance_id="t1",
+        data_dir=data_dir,
+    )
+    assert "consult seam" in text
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        attempts = await _ledger.list_recent_attempts(
+            db._conn, instance_id="t1", limit=5,
+        )
+    finally:
+        await db.close()
+    assert attempts == []
+
+
+@pytest.mark.asyncio
 async def test_handle_rejects_empty_spec_requirement():
     from kernos.kernel.improvement_loop_workflow import (
         handle_improve_kernos,

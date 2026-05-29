@@ -157,7 +157,9 @@ def _import_kernel_schemas() -> list[dict]:
         RUN_SELF_TEST_SUITE_TOOL,
     )
     from kernos.kernel.improvement_loop_workflow import (
+        ABANDON_ATTEMPT_TOOL,
         IMPROVE_KERNOS_TOOL,
+        PROCEED_WITH_RECOVERY_TOOL,
     )
     from kernos.kernel.closure_store import (
         LOOKUP_PATTERN_INVARIANTS_TOOL,
@@ -300,6 +302,12 @@ def _import_kernel_schemas() -> list[dict]:
         # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): the
         # autonomous-improvement orchestrator entry point.
         IMPROVE_KERNOS_TOOL,
+        # IMPROVEMENT-LOOP-RECOVERY-V1 (2026-05-28): recovery
+        # decision tools. Registered globally for dispatch parity;
+        # assemble conditionally surfaces them only in an active
+        # recovery decision turn.
+        PROCEED_WITH_RECOVERY_TOOL,
+        ABANDON_ATTEMPT_TOOL,
         # SELF-IMPROVEMENT-CLOSURE-V1 (2026-05-26): closure-
         # machinery tools used by the self_improvement workflow's
         # closure path. lookup is read; record + run are

@@ -1105,6 +1105,11 @@ async def bring_up_substrate(
     try:
         from kernos.kernel import approval_receipts as _approvals
         from kernos.kernel import event_stream as _event_stream_approvals
+        from kernos.kernel.improvement_loop_workflow import (
+            process_approved_improvement_commit_continuations,
+            reconcile_stale_recovery_in_progress_attempts,
+            process_terminal_improvement_approval_decisions,
+        )
         await _approvals.ensure_schema(data_dir)
         # Boot reconcile: catches downtime expiries + re-emits any
         # terminal-state receipts whose decision_emitted_at is NULL
@@ -1112,6 +1117,24 @@ async def bring_up_substrate(
         # prior crash). Idempotent on clean shutdowns.
         await _approvals.boot_reconcile(
             data_dir=data_dir, event_stream=_event_stream_approvals,
+        )
+        _improvement_approval_instance_id = (
+            os.environ.get("KERNOS_INSTANCE_ID", "")
+            or getattr(handler, "_instance_id", "")
+            or _substrate_instance_id
+        )
+        await reconcile_stale_recovery_in_progress_attempts(
+            data_dir=data_dir,
+            instance_id=_improvement_approval_instance_id,
+        )
+        await process_terminal_improvement_approval_decisions(
+            data_dir=data_dir,
+            instance_id=_improvement_approval_instance_id,
+        )
+        await process_approved_improvement_commit_continuations(
+            data_dir=data_dir,
+            instance_id=_improvement_approval_instance_id,
+            restart_fn=getattr(handler, "_restart_fn_for_loop", None),
         )
 
         # Background expiry pass — default 60s cadence. Failure-
@@ -1122,10 +1145,15 @@ async def bring_up_substrate(
         async def _approval_expiry_loop():
             while True:
                 try:
-                    await _approvals.expire_pass(
+                    _expired = await _approvals.expire_pass(
                         data_dir=data_dir,
                         event_stream=_event_stream_approvals,
                     )
+                    if _expired:
+                        await process_terminal_improvement_approval_decisions(
+                            data_dir=data_dir,
+                            instance_id=_improvement_approval_instance_id,
+                        )
                 except Exception as _exc_pass:
                     logger.warning(
                         "APPROVAL_EXPIRY_PASS_FAILED exc=%s — "
@@ -1147,6 +1175,40 @@ async def bring_up_substrate(
             _exc_ar,
         )
         _approval_expiry_task = None
+
+    # IMPROVEMENT-LOOP-RECOVERY-V1 (2026-05-28): after a restart
+    # requested by an approved improvement commit, continue the POC
+    # flow by running the post-restart self-test for attempts waiting
+    # in the ledger. Failures wake the origin space for an agent
+    # recovery decision.
+    try:
+        from kernos.kernel.improvement_loop_workflow import (
+            run_pending_post_restart_tests,
+        )
+        _improvement_instance_id = (
+            os.environ.get("KERNOS_INSTANCE_ID", "")
+            or getattr(handler, "_instance_id", "")
+            or _substrate_instance_id
+        )
+        _processed = await run_pending_post_restart_tests(
+            data_dir=data_dir,
+            instance_id=_improvement_instance_id,
+            wake_fn=getattr(
+                handler, "inject_improvement_recovery_wake", None,
+            ),
+        )
+        if _processed:
+            logger.info(
+                "IMPROVEMENT_POST_RESTART_TESTS_PROCESSED "
+                "instance=%s count=%d",
+                _improvement_instance_id, _processed,
+            )
+    except Exception as _exc_improve_recovery:
+        logger.warning(
+            "IMPROVEMENT_POST_RESTART_TESTS_FAILED error=%s — "
+            "substrate continues; inspect /improvement_status",
+            _exc_improve_recovery,
+        )
 
     # POSTURE-CONFIGURATION-V1 (2026-05-22): apply persisted
     # gate_mode from instance_posture if present. The gate's

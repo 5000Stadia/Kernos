@@ -582,27 +582,62 @@ async def handle_git_commit(
 
 async def handle_git_push(
     *, tool_input: dict, instance_id: str, data_dir: str,
-) -> str:
+) -> str | dict[str, Any]:
     from kernos.kernel import approval_receipts as _approvals
     from kernos.kernel.self_test_gate import (
         SubstrateUnhealthyError,
         check_substrate_healthy_or_raise,
     )
 
+    workspace_dir = tool_input.get("workspace_dir", "")
+    target_branch = tool_input.get("target_branch", "") or "main"
+    approval_id = tool_input.get("approval_id", "")
+    return_structured = bool(tool_input.get("return_structured", False))
+
+    def _result(
+        *,
+        ok: bool,
+        message: str,
+        reason: str = "",
+        commit_sha: str = "",
+        origin_sha: str = "",
+        origin_confirmed: bool | None = None,
+    ) -> str | dict[str, Any]:
+        if not return_structured:
+            return message
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "message": message,
+            "target_branch": target_branch,
+        }
+        if reason:
+            payload["reason"] = reason
+        if commit_sha:
+            payload["commit_sha"] = commit_sha
+        if origin_sha:
+            payload["origin_sha"] = origin_sha
+        if origin_confirmed is not None:
+            payload["origin_confirmed"] = origin_confirmed
+        return payload
+
     # SUBSTRATE-SELF-TEST-V1 AC9: autonomous-mutation gate.
     try:
         check_substrate_healthy_or_raise(autonomous_path="git_push")
     except SubstrateUnhealthyError as exc:
-        return str(exc)
-
-    workspace_dir = tool_input.get("workspace_dir", "")
-    target_branch = tool_input.get("target_branch", "") or "main"
-    approval_id = tool_input.get("approval_id", "")
+        return _result(
+            ok=False,
+            reason="substrate_unhealthy",
+            message=str(exc),
+        )
 
     if not approval_id:
-        return (
-            "`git_push` requires the same `approval_id` used for "
-            "`git_commit`. Its outcome carries the commit_sha to push."
+        return _result(
+            ok=False,
+            reason="missing_approval_id",
+            message=(
+                "`git_push` requires the same `approval_id` used for "
+                "`git_commit`. Its outcome carries the commit_sha to push."
+            ),
         )
 
     err = _validate_workspace_or_prose_error(
@@ -610,22 +645,34 @@ async def handle_git_push(
         instance_id=instance_id, data_dir=data_dir,
     )
     if err:
-        return err
+        return _result(ok=False, reason="invalid_workspace", message=err)
 
     receipt = await _approvals.get_receipt(
         data_dir=data_dir, approval_id=approval_id,
     )
     if receipt is None:
-        return f"Approval `{approval_id}` not found."
+        return _result(
+            ok=False,
+            reason="approval_not_found",
+            message=f"Approval `{approval_id}` not found.",
+        )
     if receipt.get("kind") != "git_commit_authorization":
-        return (
-            f"Approval `{approval_id}` isn't a commit authorization. "
-            f"Wrong receipt."
+        return _result(
+            ok=False,
+            reason="wrong_receipt_kind",
+            message=(
+                f"Approval `{approval_id}` isn't a commit authorization. "
+                f"Wrong receipt."
+            ),
         )
     if receipt.get("state") != "approved":
-        return (
-            f"Approval `{approval_id}` is `{receipt.get('state')}`, "
-            f"not approved. Can't push without an approved commit."
+        return _result(
+            ok=False,
+            reason="approval_not_approved",
+            message=(
+                f"Approval `{approval_id}` is `{receipt.get('state')}`, "
+                f"not approved. Can't push without an approved commit."
+            ),
         )
 
     binding = json.loads(receipt.get("binding_payload_json") or "{}")
@@ -634,9 +681,13 @@ async def handle_git_push(
     receipt_commit_sha = outcome.get("commit_sha", "")
 
     if not receipt_commit_sha:
-        return (
-            "Receipt has no `commit_sha` outcome — `git_commit` "
-            "wasn't run yet (or it failed). Run commit first."
+        return _result(
+            ok=False,
+            reason="missing_commit_sha",
+            message=(
+                "Receipt has no `commit_sha` outcome — `git_commit` "
+                "wasn't run yet (or it failed). Run commit first."
+            ),
         )
 
     # Verify worktree HEAD matches the receipt's commit_sha.
@@ -645,30 +696,74 @@ async def handle_git_push(
     )
     head_sha = head_sha.strip()
     if rc != 0 or head_sha != receipt_commit_sha:
-        return (
-            f"Worktree HEAD (`{head_sha[:12]}`) doesn't match the "
-            f"receipt's commit (`{receipt_commit_sha[:12]}`). "
-            f"Did someone else commit?"
+        return _result(
+            ok=False,
+            reason="head_commit_mismatch",
+            commit_sha=receipt_commit_sha,
+            message=(
+                f"Worktree HEAD (`{head_sha[:12]}`) doesn't match the "
+                f"receipt's commit (`{receipt_commit_sha[:12]}`). "
+                f"Did someone else commit?"
+            ),
         )
 
-    # Verify origin hasn't drifted since approval.
-    await _run_git(["fetch", "origin"], cwd=workspace_dir)
+    # Verify origin hasn't drifted since approval. A stale local
+    # remote-tracking ref is not proof of remote state, so the fetch
+    # must succeed before any origin/<branch> equality can confirm.
+    fetch_rc, fetch_out, fetch_stderr = await _run_git(
+        ["fetch", "origin"], cwd=workspace_dir,
+    )
+    if fetch_rc != 0:
+        return _result(
+            ok=False,
+            reason="origin_fetch_failed",
+            commit_sha=receipt_commit_sha,
+            origin_confirmed=False,
+            message=(
+                f"Couldn't confirm `origin/{target_branch}` because "
+                f"`git fetch origin` failed: "
+                f"{fetch_stderr.strip() or fetch_out.strip() or 'unknown error'}."
+            ),
+        )
     rc, origin_sha, _ = await _run_git(
         ["rev-parse", "--verify", f"origin/{target_branch}"],
         cwd=workspace_dir,
     )
     origin_sha = origin_sha.strip()
     if rc != 0:
-        return (
-            f"Couldn't resolve `origin/{target_branch}`. Operator "
-            f"needs to verify remote state."
+        return _result(
+            ok=False,
+            reason="origin_unresolved",
+            commit_sha=receipt_commit_sha,
+            message=(
+                f"Couldn't resolve `origin/{target_branch}`. Operator "
+                f"needs to verify remote state."
+            ),
+        )
+    if origin_sha == receipt_commit_sha:
+        return _result(
+            ok=True,
+            reason="already_pushed",
+            commit_sha=receipt_commit_sha,
+            origin_sha=origin_sha,
+            origin_confirmed=True,
+            message=(
+                f"`origin/{target_branch}` already points at "
+                f"`{receipt_commit_sha[:12]}`. Treating the approved "
+                "push as complete."
+            ),
         )
     if expected_parent and origin_sha != expected_parent:
-        return (
-            f"`origin/{target_branch}` has drifted since the "
-            f"operator approved (expected `{expected_parent[:12]}`, "
-            f"got `{origin_sha[:12]}`). Operator decides whether to "
-            f"abort or rebase + re-approve."
+        return _result(
+            ok=False,
+            reason="origin_drifted",
+            commit_sha=receipt_commit_sha,
+            message=(
+                f"`origin/{target_branch}` has drifted since the "
+                f"operator approved (expected `{expected_parent[:12]}`, "
+                f"got `{origin_sha[:12]}`). Operator decides whether to "
+                f"abort or rebase + re-approve."
+            ),
         )
 
     # Run the push — no --force, ever.
@@ -677,11 +772,59 @@ async def handle_git_push(
         cwd=workspace_dir,
     )
     if rc != 0:
-        return (
-            f"`git push` failed: {stderr.strip() or out.strip() or 'unknown error'}."
+        return _result(
+            ok=False,
+            reason="git_push_failed",
+            commit_sha=receipt_commit_sha,
+            message=(
+                f"`git push` failed: "
+                f"{stderr.strip() or out.strip() or 'unknown error'}."
+            ),
         )
 
-    return (
-        f"Pushed `{receipt_commit_sha[:12]}` to "
-        f"`origin/{target_branch}`. Cycle complete."
+    fetch_rc, fetch_out, fetch_err = await _run_git(
+        ["fetch", "origin"], cwd=workspace_dir,
+    )
+    if fetch_rc != 0:
+        return _result(
+            ok=False,
+            reason="post_push_fetch_failed",
+            commit_sha=receipt_commit_sha,
+            origin_confirmed=False,
+            message=(
+                "`git push` exited 0, but post-push confirmation failed "
+                f"during fetch: "
+                f"{fetch_err.strip() or fetch_out.strip() or 'unknown error'}."
+            ),
+        )
+    rc, confirmed_origin_sha, _ = await _run_git(
+        ["rev-parse", "--verify", f"origin/{target_branch}"],
+        cwd=workspace_dir,
+    )
+    confirmed_origin_sha = confirmed_origin_sha.strip()
+    if rc != 0 or confirmed_origin_sha != receipt_commit_sha:
+        return _result(
+            ok=False,
+            reason="post_push_unconfirmed",
+            commit_sha=receipt_commit_sha,
+            origin_sha=confirmed_origin_sha,
+            origin_confirmed=False,
+            message=(
+                "`git push` exited 0, but `origin/"
+                f"{target_branch}` did not confirm commit "
+                f"`{receipt_commit_sha[:12]}` "
+                f"(got `{confirmed_origin_sha[:12] or 'unresolved'}`)."
+            ),
+        )
+
+    return _result(
+        ok=True,
+        reason="pushed",
+        commit_sha=receipt_commit_sha,
+        origin_sha=receipt_commit_sha,
+        origin_confirmed=True,
+        message=(
+            f"Pushed `{receipt_commit_sha[:12]}` to "
+            f"`origin/{target_branch}`. Cycle complete."
+        ),
     )

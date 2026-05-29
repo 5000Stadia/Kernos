@@ -891,6 +891,54 @@ class MessageHandler:
         self._wlp_runtime: Any = None
         self._wlp_substrate: Any = None
 
+        async def _consult_fn_for_loop(
+            *,
+            target: str,
+            prompt: str,
+            instance_id: str = "",
+            workspace_dir: str = "",
+        ) -> str:
+            from kernos.kernel.external_agents.tool import (
+                get_service as _ext_get_service,
+            )
+
+            _svc = await _ext_get_service(
+                data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
+            )
+            _consult_result = await _svc.orchestrator.consult(
+                instance_id=instance_id or os.getenv("KERNOS_INSTANCE_ID", ""),
+                member_id="improvement_loop",
+                harness=target,
+                question=prompt,
+                context="",
+                session_id_raw="",
+                workspace_dir=workspace_dir or None,
+                timeout_seconds=None,
+            )
+            return _consult_result.response
+
+        # IMPROVEMENT-LOOP-WORKFLOW-V1: route autonomous spec/impl
+        # consultations through the same external-agent service used by
+        # the public consult tool.
+        self._consult_fn_for_loop = _consult_fn_for_loop
+
+        async def _restart_fn_for_loop() -> None:
+            from kernos.kernel.self_admin_tools import handle_restart_self_tool
+            handle_restart_self_tool(
+                reason=(
+                    "autonomous improvement commit pushed; restart for "
+                    "post-restart self-test"
+                ),
+                confirm=True,
+                instance_id=os.getenv("KERNOS_INSTANCE_ID", ""),
+            )
+
+        # IMPROVEMENT-LOOP-RECOVERY-V1: the commit-approval
+        # continuation needs a production restart seam after push.
+        # Route through the same restart_self entrypoint used by the
+        # agent-facing tool.
+        self._restart_fn_for_loop = _restart_fn_for_loop
+
         from kernos.kernel.compaction import CompactionService
         from kernos.kernel.tokens import EstimateTokenAdapter
         self.compaction = CompactionService(
@@ -4430,6 +4478,20 @@ class MessageHandler:
                         response = await self._handle_improvement_status_command(
                             primary_ctx, _cmd,
                         )
+                    elif (
+                        _cmd_lower == "/recover"
+                        or _cmd_lower.startswith("/recover ")
+                    ):
+                        response = await self._handle_recover_command(
+                            primary_ctx, _cmd,
+                        )
+                    elif (
+                        _cmd_lower == "/abandon"
+                        or _cmd_lower.startswith("/abandon ")
+                    ):
+                        response = await self._handle_abandon_command(
+                            primary_ctx, _cmd,
+                        )
                     elif _cmd_lower.startswith("/approve "):
                         # DURABLE-APPROVAL-RECEIPTS-V1 (2026-05-21):
                         # two-step CONFIRM contract per spec D3.
@@ -4819,6 +4881,90 @@ class MessageHandler:
             logger.warning(
                 "CONSULT_WAKE_INJECT_FAILED request_id=%s error=%s",
                 request_id, exc,
+            )
+
+    async def inject_improvement_recovery_wake(self, payload: dict) -> None:
+        """Wake the origin space when an improvement post-restart
+        self-test needs an agent recovery decision."""
+        from datetime import datetime, timezone
+        from kernos.messages.models import (
+            NormalizedMessage as _Msg, AuthLevel as _Auth,
+        )
+
+        space_id = payload.get("originating_space", "") or ""
+        member_id = payload.get("originating_member_id", "") or ""
+        instance_id = payload.get("instance_id", "") or ""
+        attempt_id = payload.get("attempt_id", "") or ""
+        failure_summary = payload.get("failure_summary", "") or ""
+        failed_test_ids = payload.get("failed_test_ids", []) or []
+        worktree_path = payload.get("worktree_path", "") or ""
+        used = payload.get("recovery_iterations_used", 0)
+
+        if not (space_id and instance_id and attempt_id):
+            logger.warning(
+                "IMPROVEMENT_RECOVERY_WAKE_SKIPPED_MISSING_FIELDS "
+                "instance_id=%r space_id=%r attempt_id=%r",
+                instance_id, space_id, attempt_id,
+            )
+            return
+
+        failed = (
+            ", ".join(str(x) for x in failed_test_ids)
+            if failed_test_ids else "(see failure summary)"
+        )
+        wake_body = (
+            "[system: autonomous improvement post-restart self-test failed]\n"
+            f"attempt_id: {attempt_id}\n"
+            f"worktree: {worktree_path}\n"
+            f"recovery_iterations_used: {used} of 2\n"
+            f"failed_tests: {failed}\n\n"
+            f"{failure_summary}\n\n"
+            "Choose exactly one recovery decision tool this turn: "
+            "`proceed_with_recovery` or `abandon_attempt`."
+        )
+
+        synthetic = _Msg(
+            content=wake_body,
+            sender="kernos-system",
+            sender_auth_level=_Auth.owner_verified,
+            platform="system",
+            platform_capabilities=[],
+            conversation_id=space_id,
+            timestamp=datetime.now(timezone.utc),
+            instance_id=instance_id,
+            member_id=member_id,
+            context={
+                "execution_envelope": {
+                    "source": "improvement_recovery_decision_wake",
+                    "attempt_id": attempt_id,
+                    "originating_space": space_id,
+                    "recovery_iterations_used": used,
+                },
+            },
+        )
+
+        async def _run_wake_turn():
+            try:
+                await self.process(synthetic)
+            except Exception as exc:
+                logger.exception(
+                    "IMPROVEMENT_RECOVERY_WAKE_TURN_CRASHED "
+                    "attempt_id=%s space=%s exc=%s",
+                    attempt_id, space_id, exc,
+                )
+
+        try:
+            asyncio.create_task(_run_wake_turn())
+            logger.info(
+                "IMPROVEMENT_RECOVERY_WAKE_INJECTED instance=%s "
+                "space=%s attempt=%s",
+                instance_id, space_id, attempt_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "IMPROVEMENT_RECOVERY_WAKE_INJECT_FAILED "
+                "attempt_id=%s error=%s",
+                attempt_id, exc,
             )
 
     # -----------------------------------------------------------------------
@@ -5369,6 +5515,30 @@ class MessageHandler:
             event_stream=_event_stream,
         )
         if not ok:
+            if (
+                receipt.get("kind") == "git_commit_authorization"
+                and receipt.get("state") == "approved"
+            ):
+                try:
+                    from kernos.kernel.improvement_loop_workflow import (
+                        continue_approved_improvement_commit,
+                    )
+                    continuation_msg = await continue_approved_improvement_commit(
+                        data_dir=data_dir,
+                        instance_id=instance_id,
+                        approval_id=approval_id,
+                        restart_fn=getattr(self, "_restart_fn_for_loop", None),
+                    )
+                    if "skipped" not in continuation_msg:
+                        return (
+                            f"Approval `{approval_id}` was already approved."
+                            "\n\n" + continuation_msg
+                        )
+                except Exception as _exc:
+                    logger.warning(
+                        "IMPROVEMENT_COMMIT_MANUAL_RECONCILE_FAILED "
+                        "approval_id=%s exc=%s", approval_id, _exc,
+                    )
             return message
 
         # TOOL-REGISTRATION-AUTHORIZATION-V1 (2026-05-22): dispatch
@@ -5414,6 +5584,30 @@ class MessageHandler:
                     f"re-register the tool to retry."
                 )
 
+        if kind == "git_commit_authorization":
+            try:
+                from kernos.kernel.improvement_loop_workflow import (
+                    continue_approved_improvement_commit,
+                )
+                continuation_msg = await continue_approved_improvement_commit(
+                    data_dir=data_dir,
+                    instance_id=instance_id,
+                    approval_id=approval_id,
+                    restart_fn=getattr(self, "_restart_fn_for_loop", None),
+                )
+                if "no improvement continuation ran" not in continuation_msg:
+                    return message + "\n\n" + continuation_msg
+            except Exception as _exc:
+                logger.warning(
+                    "IMPROVEMENT_COMMIT_CONTINUATION_FAILED "
+                    "approval_id=%s exc=%s", approval_id, _exc,
+                )
+                return message + (
+                    f"\n\nNote: improvement continuation raised "
+                    f"({_exc}). Receipt stays approved; retry manually "
+                    f"after inspecting /improvement_status."
+                )
+
         return message
 
     async def _handle_reject_command(self, ctx: TurnContext, cmd: str) -> str:
@@ -5451,6 +5645,30 @@ class MessageHandler:
             reason=reason,
             event_stream=_event_stream,
         )
+        if ok:
+            try:
+                from kernos.kernel.improvement_loop_workflow import (
+                    handle_improvement_commit_approval_terminal_decision,
+                )
+
+                continuation_msg = (
+                    await handle_improvement_commit_approval_terminal_decision(
+                        data_dir=data_dir,
+                        approval_id=approval_id,
+                    )
+                )
+                if continuation_msg:
+                    return message + "\n\n" + continuation_msg
+            except Exception as _exc:
+                logger.warning(
+                    "IMPROVEMENT_COMMIT_REJECTION_CONTINUATION_FAILED "
+                    "approval_id=%s exc=%s",
+                    approval_id, _exc,
+                )
+                return message + (
+                    f"\n\nNote: improvement rejection continuation raised "
+                    f"({_exc}). Inspect /improvement_status before retrying."
+                )
         return message
 
     async def _handle_posture_command(
@@ -5795,6 +6013,53 @@ class MessageHandler:
         commits = await _ledger.get_attempt_commits(conn, attempt_id)
         events = await _ledger.get_attempt_events(conn, attempt_id)
         return _ledger.render_attempt_detail(attempt, commits, events)
+
+    async def _handle_recover_command(
+        self, ctx: TurnContext, cmd: str,
+    ) -> str:
+        if not self._instance_db or not ctx.member_id:
+            return "Improvement recovery override isn't available."
+        _member = await self._instance_db.get_member(ctx.member_id)
+        if not _member or _member.get("role") != "owner":
+            return "Recovery override is owner-only."
+        parts = cmd.strip().split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            return "Usage: `/recover <attempt_id>`"
+        from kernos.kernel.improvement_loop_workflow import (
+            proceed_with_recovery_service,
+        )
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+        return await proceed_with_recovery_service(
+            data_dir=data_dir,
+            instance_id=ctx.instance_id,
+            attempt_id=parts[1].strip(),
+            consult_fn=getattr(self, "_consult_fn_for_loop", None),
+            receipts_event_stream=getattr(self, "events", None),
+            operator_override=True,
+        )
+
+    async def _handle_abandon_command(
+        self, ctx: TurnContext, cmd: str,
+    ) -> str:
+        if not self._instance_db or not ctx.member_id:
+            return "Improvement recovery override isn't available."
+        _member = await self._instance_db.get_member(ctx.member_id)
+        if not _member or _member.get("role") != "owner":
+            return "Recovery override is owner-only."
+        parts = cmd.strip().split(maxsplit=2)
+        if len(parts) < 3 or not parts[1].strip() or not parts[2].strip():
+            return "Usage: `/abandon <attempt_id> <reason>`"
+        from kernos.kernel.improvement_loop_workflow import (
+            abandon_attempt_service,
+        )
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+        return await abandon_attempt_service(
+            data_dir=data_dir,
+            instance_id=ctx.instance_id,
+            attempt_id=parts[1].strip(),
+            reason=parts[2].strip(),
+            operator_override=True,
+        )
 
     async def _handle_disconnect(self, ctx: TurnContext) -> str:
         """Disconnect the current platform channel from the member's account."""

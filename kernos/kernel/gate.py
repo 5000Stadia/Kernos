@@ -484,6 +484,11 @@ class DispatchGate:
             "record_fix_authorization",
             "maybe_run_closure_for_fix",
             "surface_to_user",
+            # IMPROVEMENT-LOOP-RECOVERY-V1: ledger mutation and
+            # bounded consult; source mutation remains gated by
+            # git_commit_authorization.
+            "proceed_with_recovery",
+            "abandon_attempt",
             # LONG-HORIZON-PROJECT-V1: start creates a space, canvas,
             # project_state row, and reminder; record writes canvas +
             # knowledge. Both are bounded and reversible enough for

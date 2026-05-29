@@ -511,6 +511,31 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         # remember was historically excluded from this map (the kernel
         # dispatch path still works but the surfacer skipped it).
         _kernel_tool_map.pop("remember", None)
+    from kernos.kernel.improvement_loop_workflow import (
+        RECOVERY_TOOL_NAMES,
+        recovery_tools_visible_for_space,
+    )
+    try:
+        _recovery_tools_visible = await recovery_tools_visible_for_space(
+            data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
+            instance_id=instance_id,
+            active_space_id=active_space_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "RECOVERY_TOOL_SURFACING_CHECK_FAILED: %s", exc,
+        )
+        _recovery_tools_visible = False
+    _forced_recovery_schemas: list[dict] = []
+    if _recovery_tools_visible:
+        _forced_recovery_schemas = [
+            _kernel_tool_map[name]
+            for name in sorted(RECOVERY_TOOL_NAMES)
+            if name in _kernel_tool_map
+        ]
+    else:
+        for name in RECOVERY_TOOL_NAMES:
+            _kernel_tool_map.pop(name, None)
     _all_kernel = list(_kernel_tool_map.values())
 
     # === BUDGETED TOOL WINDOW (SPEC-TOOL-WINDOW) ===
@@ -544,6 +569,8 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             "continuing without filter",
             exc_info=True,
         )
+    if not _recovery_tools_visible:
+        _added.update(RECOVERY_TOOL_NAMES)
 
     def _add_tool(schema: dict) -> bool:
         name = schema.get("name", "")
@@ -576,6 +603,11 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     handler._turn_counter = _turn + 1
 
     candidates: list[tuple[dict, int]] = []  # (schema, eviction_priority)
+    forced_active_tools: list[dict] = []
+
+    for schema in _forced_recovery_schemas:
+        if _add_tool(schema):
+            forced_active_tools.append(schema)
 
     # Session-loaded tools get priority (recently used this session)
     loaded_names = handler.reasoning.get_loaded_tools(active_space_id)
@@ -738,8 +770,8 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     candidates.sort(key=lambda x: x[1])
 
     # Fill active zone within budget
-    active_tools: list[dict] = []
-    _active_tokens = 0
+    active_tools: list[dict] = list(forced_active_tools)
+    _active_tokens = sum(_schema_tokens(t) for t in active_tools)
     _evicted: list[str] = []
     for schema, priority in candidates:
         tokens = _schema_tokens(schema)

@@ -328,6 +328,211 @@ async def test_ac15_git_commit_success_writes_back_sha(env):
 
 
 @pytest.mark.asyncio
+async def test_git_push_structured_success_requires_origin_confirmation(
+    tmp_path, monkeypatch,
+):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    await _approvals.ensure_schema(str(data_dir))
+    workspace = data_dir / "t1" / "improvement_workspace" / "att_push"
+    workspace.mkdir(parents=True)
+    approval_id = await _approvals.request_approval(
+        data_dir=str(data_dir),
+        instance_id="t1",
+        kind="git_commit_authorization",
+        requested_for_actor="agent",
+        operator_actor_id="owner",
+        request_summary="push change",
+        binding_payload={
+            "kind": "git_commit_authorization",
+            "workspace_dir": str(workspace),
+            "expected_parent_sha": "parent_sha",
+            "expected_diff_hash": "sha256:test",
+            "target_branch": "main",
+        },
+    )
+    await _approvals.approve(
+        data_dir=str(data_dir),
+        approval_id=approval_id,
+        instance_id="t1",
+        invoking_member_id="owner",
+        event_stream=None,
+    )
+    await _approvals.set_outcome_field(
+        data_dir=str(data_dir),
+        approval_id=approval_id,
+        field="commit_sha",
+        value="commit_sha",
+    )
+    origin_reads = 0
+
+    async def fake_run_git(args, *, cwd):
+        nonlocal origin_reads
+        if args == ["rev-parse", "HEAD"]:
+            return 0, "commit_sha\n", ""
+        if args == ["fetch", "origin"]:
+            return 0, "fetched\n", ""
+        if args == ["rev-parse", "--verify", "origin/main"]:
+            origin_reads += 1
+            if origin_reads == 1:
+                return 0, "parent_sha\n", ""
+            return 0, "other_sha\n", ""
+        if args == ["push", "origin", "HEAD:main"]:
+            return 0, "pushed\n", ""
+        raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(gop, "_run_git", fake_run_git)
+
+    result = await gop.handle_git_push(
+        tool_input={
+            "workspace_dir": str(workspace),
+            "target_branch": "main",
+            "approval_id": approval_id,
+            "return_structured": True,
+        },
+        instance_id="t1",
+        data_dir=str(data_dir),
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "post_push_unconfirmed"
+    assert result["origin_confirmed"] is False
+
+
+@pytest.mark.asyncio
+async def test_git_push_already_pushed_commit_is_idempotent_success(
+    tmp_path, monkeypatch,
+):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    await _approvals.ensure_schema(str(data_dir))
+    workspace = data_dir / "t1" / "improvement_workspace" / "att_push"
+    workspace.mkdir(parents=True)
+    approval_id = await _approvals.request_approval(
+        data_dir=str(data_dir),
+        instance_id="t1",
+        kind="git_commit_authorization",
+        requested_for_actor="agent",
+        operator_actor_id="owner",
+        request_summary="push change",
+        binding_payload={
+            "kind": "git_commit_authorization",
+            "workspace_dir": str(workspace),
+            "expected_parent_sha": "parent_sha",
+            "expected_diff_hash": "sha256:test",
+            "target_branch": "main",
+        },
+    )
+    await _approvals.approve(
+        data_dir=str(data_dir),
+        approval_id=approval_id,
+        instance_id="t1",
+        invoking_member_id="owner",
+        event_stream=None,
+    )
+    await _approvals.set_outcome_field(
+        data_dir=str(data_dir),
+        approval_id=approval_id,
+        field="commit_sha",
+        value="commit_sha",
+    )
+
+    async def fake_run_git(args, *, cwd):
+        if args == ["rev-parse", "HEAD"]:
+            return 0, "commit_sha\n", ""
+        if args == ["fetch", "origin"]:
+            return 0, "fetched\n", ""
+        if args == ["rev-parse", "--verify", "origin/main"]:
+            return 0, "commit_sha\n", ""
+        if args == ["push", "origin", "HEAD:main"]:
+            raise AssertionError("already-pushed commit must not push again")
+        raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(gop, "_run_git", fake_run_git)
+
+    result = await gop.handle_git_push(
+        tool_input={
+            "workspace_dir": str(workspace),
+            "target_branch": "main",
+            "approval_id": approval_id,
+            "return_structured": True,
+        },
+        instance_id="t1",
+        data_dir=str(data_dir),
+    )
+    assert result["ok"] is True
+    assert result["reason"] == "already_pushed"
+    assert result["commit_sha"] == "commit_sha"
+    assert result["origin_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_git_push_fetch_failure_does_not_confirm_stale_origin_ref(
+    tmp_path, monkeypatch,
+):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    await _approvals.ensure_schema(str(data_dir))
+    workspace = data_dir / "t1" / "improvement_workspace" / "att_push"
+    workspace.mkdir(parents=True)
+    approval_id = await _approvals.request_approval(
+        data_dir=str(data_dir),
+        instance_id="t1",
+        kind="git_commit_authorization",
+        requested_for_actor="agent",
+        operator_actor_id="owner",
+        request_summary="push change",
+        binding_payload={
+            "kind": "git_commit_authorization",
+            "workspace_dir": str(workspace),
+            "expected_parent_sha": "parent_sha",
+            "expected_diff_hash": "sha256:test",
+            "target_branch": "main",
+        },
+    )
+    await _approvals.approve(
+        data_dir=str(data_dir),
+        approval_id=approval_id,
+        instance_id="t1",
+        invoking_member_id="owner",
+        event_stream=None,
+    )
+    await _approvals.set_outcome_field(
+        data_dir=str(data_dir),
+        approval_id=approval_id,
+        field="commit_sha",
+        value="commit_sha",
+    )
+
+    async def fake_run_git(args, *, cwd):
+        if args == ["rev-parse", "HEAD"]:
+            return 0, "commit_sha\n", ""
+        if args == ["fetch", "origin"]:
+            return 1, "", "network down"
+        if args == ["rev-parse", "--verify", "origin/main"]:
+            raise AssertionError("stale origin ref must not confirm push")
+        if args == ["push", "origin", "HEAD:main"]:
+            raise AssertionError("fetch failure must not push")
+        raise AssertionError(f"unexpected git args: {args}")
+
+    monkeypatch.setattr(gop, "_run_git", fake_run_git)
+
+    result = await gop.handle_git_push(
+        tool_input={
+            "workspace_dir": str(workspace),
+            "target_branch": "main",
+            "approval_id": approval_id,
+            "return_structured": True,
+        },
+        instance_id="t1",
+        data_dir=str(data_dir),
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "origin_fetch_failed"
+    assert result["origin_confirmed"] is False
+    assert result["commit_sha"] == "commit_sha"
+
+
+@pytest.mark.asyncio
 async def test_ac14_git_commit_rejects_paths_outside_worktree(env):
     data_dir, _, wt_path, _ = env
     approval_id, _ = await _stage_and_get_receipt(
