@@ -42,13 +42,16 @@ logger = logging.getLogger(__name__)
 IMPROVE_KERNOS_TOOL: dict = {
     "name": "improve_kernos",
     "description": (
-        "Start an autonomous improvement attempt against "
-        "Kernos's own source. The substrate spawns trusted "
-        "coding agents to draft + implement a spec, then asks "
-        "the operator for approval before committing + "
-        "restarting. Returns an attempt_id you can track via "
-        "/improvement_status. The attempt continues "
-        "asynchronously after this call returns."
+        "Start an autonomous improvement against Kernos's own "
+        "source: trusted coding agents draft + implement the "
+        "change, and it pauses for the user's approval before "
+        "anything is committed or goes live. Returns immediately "
+        "with a tracking handle; the work continues in the "
+        "background. Tell the user about it like a person would "
+        "— 'on it, I'll show you the change before anything goes "
+        "live' — not as a status report; do NOT surface the raw "
+        "attempt id or /improvement_status unless they ask for "
+        "detail or you're in an admin/diagnostic context."
     ),
     "input_schema": {
         "type": "object",
