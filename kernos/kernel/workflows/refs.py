@@ -114,6 +114,21 @@ class ResolutionContext:
 
 _NOT_FOUND = object()
 
+# Namespaces a `{...}` token must start with to be treated as a real
+# reference. A token whose head is NOT one of these is not a reference
+# at all — it is literal braces in the surrounding text (embedded JSON,
+# code samples, or prose inside an action prompt). Such tokens are left
+# verbatim instead of raising, so a workflow action parameter can
+# legitimately contain `{` without crashing ref resolution. Genuine
+# references into a known namespace that fail to resolve still raise
+# (preserving typo detection within real refs).
+_KNOWN_NAMESPACES = frozenset({"workflow", "idea_payload", "step", "gate"})
+
+
+def _head_is_known_namespace(reference: str) -> bool:
+    head = reference.split(".", 1)[0].strip()
+    return head in _KNOWN_NAMESPACES
+
 
 def validate_identifier(value: str, *, ctx: str = "identifier") -> None:
     """Raise IdentifierGrammarError if ``value`` doesn't match the
@@ -168,9 +183,13 @@ def _resolve_string(template: str, ctx: ResolutionContext) -> Any:
                 # Caller (predicate evaluator) reads _NOT_FOUND as
                 # "no match this evaluation"; gate stays paused.
                 return _NOT_FOUND
-            raise RefResolutionError(
-                f"reference {matches[0].group(1)!r} unresolved"
-            )
+            if _head_is_known_namespace(matches[0].group(1)):
+                raise RefResolutionError(
+                    f"reference {matches[0].group(1)!r} unresolved"
+                )
+            # Not a reference — literal braces (e.g. a JSON example in
+            # an action prompt). Leave the template text verbatim.
+            return template
         return resolved
 
     # Mixed: stringify each.
@@ -182,9 +201,15 @@ def _resolve_string(template: str, ctx: ResolutionContext) -> Any:
         if resolved is _NOT_FOUND:
             if ctx.mode == "predicate":
                 return _NOT_FOUND
-            raise RefResolutionError(
-                f"reference {match.group(1)!r} unresolved"
-            )
+            if _head_is_known_namespace(match.group(1)):
+                raise RefResolutionError(
+                    f"reference {match.group(1)!r} unresolved"
+                )
+            # Literal braces (embedded JSON / code / prose) — emit the
+            # original token text unchanged rather than failing.
+            out_parts.append(match.group(0))
+            cursor = match.end()
+            continue
         out_parts.append(str(resolved))
         cursor = match.end()
     out_parts.append(template[cursor:])
