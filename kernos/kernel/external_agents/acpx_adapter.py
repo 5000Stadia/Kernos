@@ -169,7 +169,7 @@ SUPPORTED_TARGETS: frozenset[str] = frozenset(_TARGET_ALIAS_MAP.keys())
 
 
 DEFAULT_TIMEOUT_SECONDS: int = int(
-    os.environ.get("KERNOS_ACPX_TIMEOUT_SEC", "600")
+    os.environ.get("KERNOS_ACPX_TIMEOUT_SEC", "1200")
 )
 MAX_TIMEOUT_SECONDS: int = int(
     os.environ.get("KERNOS_ACPX_MAX_TIMEOUT_SEC", "1800")
