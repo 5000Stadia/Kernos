@@ -29,17 +29,25 @@ logger = logging.getLogger(__name__)
 
 
 def _spec_iteration_max() -> int:
+    # Raised 5->8 (2026-06-01): with the consult-timeout fix letting rounds
+    # actually complete, live attempts on SUBSTANTIVE changes were observed
+    # converging (author closing reviewer findings one by one) but running
+    # out of budget before mutual GREEN. Give the convergence room to land;
+    # trivial changes still finish in 1-3 rounds.
     return int(
         os.environ.get(
-            "KERNOS_IMPROVEMENT_SPEC_ITERATION_MAX", "5",
+            "KERNOS_IMPROVEMENT_SPEC_ITERATION_MAX", "8",
         )
     )
 
 
 def _impl_iteration_max() -> int:
+    # Raised 3->6 (2026-06-01): same rationale as spec — a real multi-file
+    # fix needs more than 3 author/reviewer rounds to converge now that
+    # rounds no longer die at the old 600s consult timeout.
     return int(
         os.environ.get(
-            "KERNOS_IMPROVEMENT_IMPL_ITERATION_MAX", "3",
+            "KERNOS_IMPROVEMENT_IMPL_ITERATION_MAX", "6",
         )
     )
 
