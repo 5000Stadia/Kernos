@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import Any
 
@@ -650,6 +651,80 @@ def _loads_detail(text: str) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+_STALL_THRESHOLD_SEC: int = int(
+    os.environ.get("KERNOS_IMPROVEMENT_STALL_THRESHOLD_SEC", "720")
+)
+
+
+async def find_stalled_improvement_attempts(
+    data_dir: str, *, stall_threshold_sec: int | None = None,
+) -> list[dict[str, Any]]:
+    """In-flight improvement attempts (final_state IS NULL) whose LAST ledger
+    event is older than the stall threshold — i.e. the loop is stuck with no
+    progress (a hung consult). Powers the self-monitoring surface so the user
+    learns about a stall instead of waiting on silence (the gap that let an
+    attempt die 2h unnoticed).
+
+    Each dict: attempt_id, last_kind, last_seq, stalled_sec, origin_space_id,
+    origin_member_id. Best-effort; never raises.
+    """
+    import datetime as _dt
+    import aiosqlite
+    threshold = (
+        _STALL_THRESHOLD_SEC if stall_threshold_sec is None
+        else int(stall_threshold_sec)
+    )
+    db_path = os.path.join(data_dir, "instance.db")
+    out: list[dict[str, Any]] = []
+    try:
+        async with aiosqlite.connect(db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                "SELECT attempt_id FROM improvement_attempts "
+                "WHERE final_state IS NULL"
+            ) as cur:
+                ids = [r["attempt_id"] for r in await cur.fetchall()]
+            now = _dt.datetime.now(_dt.timezone.utc)
+            for aid in ids:
+                async with conn.execute(
+                    "SELECT kind, sequence, timestamp FROM "
+                    "improvement_attempt_events WHERE attempt_id=? "
+                    "ORDER BY sequence DESC LIMIT 1", (aid,),
+                ) as cur:
+                    last = await cur.fetchone()
+                if not last:
+                    continue
+                try:
+                    last_ts = _dt.datetime.fromisoformat(last["timestamp"])
+                except Exception:
+                    continue
+                stalled = (now - last_ts).total_seconds()
+                if stalled < threshold:
+                    continue
+                origin_space = origin_member = ""
+                async with conn.execute(
+                    "SELECT detail FROM improvement_attempt_events WHERE "
+                    "attempt_id=? AND kind='attempt_origin' ORDER BY "
+                    "sequence ASC LIMIT 1", (aid,),
+                ) as cur:
+                    orow = await cur.fetchone()
+                if orow:
+                    od = _loads_detail(orow["detail"] or "")
+                    origin_space = od.get("origin_space_id", "") or ""
+                    origin_member = od.get("origin_member_id", "") or ""
+                out.append({
+                    "attempt_id": aid,
+                    "last_kind": last["kind"],
+                    "last_seq": last["sequence"],
+                    "stalled_sec": int(stalled),
+                    "origin_space_id": origin_space,
+                    "origin_member_id": origin_member,
+                })
+    except Exception as exc:
+        logger.warning("IMPROVEMENT_STALL_CHECK_FAILED: %s", exc)
+    return out
 
 
 async def _call_consult_fn(

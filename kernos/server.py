@@ -1532,6 +1532,79 @@ async def on_ready():
     except Exception as exc:
         logger.warning("DISCORD_GATEWAY_WATCHDOG_LAUNCH_FAILED: %s", exc)
 
+    # SELF-MONITORING-V1: watch in-flight improvement attempts for a stall
+    # (no ledger progress past threshold = a hung consult) and surface a
+    # whisper so the user LEARNS about a hang instead of waiting on silence —
+    # the exact gap that let an attempt die ~2h unnoticed. Read-only +
+    # whisper-only (never aborts the attempt); dedup per (attempt, last_seq)
+    # so a standing stall is surfaced once, not every poll.
+    async def _improvement_stall_monitor_loop() -> None:
+        from datetime import datetime, timezone
+        from kernos.kernel.improvement_loop_workflow import (
+            find_stalled_improvement_attempts,
+        )
+        from kernos.kernel.awareness import Whisper, generate_whisper_id
+        interval = int(os.getenv("KERNOS_IMPROVEMENT_STALL_POLL_SEC", "180"))
+        _surfaced: set[str] = set()
+        _inst = os.getenv("KERNOS_INSTANCE_ID", "")
+        while True:
+            await _au_asyncio.sleep(interval)
+            try:
+                stalled = await find_stalled_improvement_attempts(data_dir)
+                for s in stalled:
+                    aid = s["attempt_id"]
+                    sig = f"improvement_stall:{aid}:{s['last_seq']}"
+                    if sig in _surfaced:
+                        continue
+                    mins = s["stalled_sec"] // 60
+                    w = Whisper(
+                        whisper_id=generate_whisper_id(),
+                        insight_text=(
+                            f"The self-improvement attempt (`{aid}`) has made "
+                            f"NO progress for ~{mins} min — its last step was "
+                            f"`{s['last_kind']}` and it looks HUNG (a coding "
+                            f"consult likely stalled). It hasn't failed yet, "
+                            f"but it's stuck. Tell the user plainly that it's "
+                            f"stalled and for how long, and offer to abort + "
+                            f"retry or look closer."
+                        ),
+                        delivery_class="stage",
+                        source_space_id=s.get("origin_space_id", "") or "",
+                        target_space_id=s.get("origin_space_id", "") or "",
+                        supporting_evidence=(
+                            f"attempt={aid} last={s['last_kind']} "
+                            f"stalled_sec={s['stalled_sec']}"
+                        ),
+                        reasoning_trace=(
+                            "self-monitoring stall detector: in-flight "
+                            "improvement attempt with no ledger progress "
+                            "past the stall threshold"
+                        ),
+                        knowledge_entry_id="",
+                        foresight_signal=sig,
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                        owner_member_id=s.get("origin_member_id", "") or "",
+                    )
+                    try:
+                        await state.save_whisper(_inst, w)
+                        _surfaced.add(sig)
+                        logger.info(
+                            "IMPROVEMENT_STALL_SURFACED attempt=%s "
+                            "stalled_min=%d last=%s",
+                            aid, mins, s["last_kind"],
+                        )
+                    except Exception as _we:
+                        logger.warning(
+                            "IMPROVEMENT_STALL_WHISPER_FAILED %s: %s", aid, _we,
+                        )
+            except Exception as _e:
+                logger.warning("IMPROVEMENT_STALL_MONITOR_RAISED: %s", _e)
+
+    try:
+        _au_asyncio.create_task(_improvement_stall_monitor_loop())
+    except Exception as exc:
+        logger.warning("IMPROVEMENT_STALL_MONITOR_LAUNCH_FAILED: %s", exc)
+
     # ACPX-INTEGRATION-V1 (2026-05-18): probe + launch the bridge
     # watchers. Outbound watcher closes the ask_coding_session
     # operator-relay gap (Kernos's tool surface dispatching out to
