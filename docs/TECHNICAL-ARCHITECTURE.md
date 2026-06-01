@@ -438,6 +438,18 @@ Three tools for the agent to investigate and propose fixes:
 
 Discord slash command: `/debug friction`, `/debug trace`, `/debug specs`. Ephemeral output for developer visibility.
 
+### Operational Safety & Self-Monitoring (2026-06-01)
+
+The autonomous `improve_kernos` loop commits + pushes + redeploys real changes, so it is wrapped in a defense-in-depth + self-observation stack:
+
+- **Deploy:** `improve_kernos` runs each spec/impl review round as an ACPX consult; on author+reviewer convergence it pauses at the **human approval gate** (`awaiting_commit_approval`) — nothing commits/goes live without an explicit yes. Review iteration caps: spec 8, impl 6 (`KERNOS_IMPROVEMENT_{SPEC,IMPL}_ITERATION_MAX`). Improvement consults get an explicit 1800s timeout (the orchestrator default is 600s; the loop overrides via `KERNOS_IMPROVEMENT_CONSULT_TIMEOUT_SEC`).
+- **Auto-update** (`kernos/setup/self_update.py`): interval-poll mode (`KERNOS_AUTO_UPDATE_INTERVAL_SEC`, default 600s) checks origin and, when *safe* (no recent inbound activity, no in-flight attempt), pulls + restarts to apply pushes with no manual `/restart`. interval=0 falls back to the legacy daily window.
+- **Boot-guard auto-rollback** (`kernos/setup/boot_guard.py`): an applied update is marked `.update_pending` on probation; `start.sh` runs `boot_guard pre-launch` and, after `KERNOS_BOOT_GUARD_MAX_ATTEMPTS` failed boots, `git reset --hard`s to `.last_known_good` (promoted only on a clean `on_ready`) and drops a `.rollback_notice` surfaced as a whisper. `start.sh` is **off-limits to autonomous modification** (it can't roll back itself).
+- **Self-monitoring stall surface** (`find_stalled_improvement_attempts` + a server poller): in-flight attempts with no ledger progress past `KERNOS_IMPROVEMENT_STALL_THRESHOLD_SEC` (default 720s) surface a whisper so a hung consult is reported instead of going silent. Read-only; never aborts the attempt.
+- **Terminal notify:** on reaching the approval gate *or* any abort, a whisper tells the user in the agent's own voice (no more silent terminal states).
+- **ACPX step-trace** (`ACPX_STEP` log lines): structural coding-agent events are logged as they stream, so a stalled dispatch's last log line shows where it hung — zero token cost.
+- **ACP orphan reaper** (`reap_orphaned_acp_agents`): `codex-acp`/`claude-acp`/`gemini-acp` leaves that `setsid` out of the dispatch tree + reparent to systemd are swept at boot (age-guarded > `MAX_TIMEOUT_SECONDS`, so live consults are never touched).
+
 ---
 
 ## 11c. Workflow Loop Primitive
