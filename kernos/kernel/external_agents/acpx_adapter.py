@@ -1046,6 +1046,22 @@ async def dispatch(
             chunk = _extract_agent_message_chunk(event)
             if chunk is not None:
                 accumulated_chunks.append(chunk)
+            else:
+                # STEP-TRACE: record structural (non-message) events — tool
+                # calls, status, results — into our own log so a stalled
+                # dispatch's LAST log line reveals exactly where the agent
+                # hung. Zero token cost: these events already stream in over
+                # stdout; we only record them. Skips message-chunk (token-
+                # streaming) events to stay low-volume. The first event for a
+                # dispatch logs the target so the trace is attributable.
+                try:
+                    _preview = str(event)[:160].replace("\n", " ")
+                except Exception:
+                    _preview = "?"
+                logger.info(
+                    "ACPX_STEP target=%s evt#%d kind=%s | %s",
+                    target, event_count, last_event_kind, _preview,
+                )
             err_msg = _extract_error_message(event)
             if err_msg:
                 stdout_errors.append(err_msg)
