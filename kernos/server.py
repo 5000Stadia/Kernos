@@ -1202,6 +1202,25 @@ async def on_ready():
     except Exception as _bg_exc:
         logger.warning("BOOT_GUARD_ONREADY_FAILED: %s", _bg_exc)
 
+    # ACPX orphan reap: ACP agents (codex-acp/claude-acp/gemini-acp) can
+    # setsid out of a dispatch's process tree and reparent to systemd,
+    # escaping the per-dispatch teardown and accumulating across restarts
+    # until they wedge the ACP layer and new consults HANG. Boot is a clean
+    # moment (no live consult); with frequent auto-update restarts this keeps
+    # them from ever piling up. Age-guarded so it can't touch a live consult.
+    try:
+        from kernos.kernel.external_agents.acpx_adapter import (
+            reap_orphaned_acp_agents,
+        )
+        _reaped = reap_orphaned_acp_agents()
+        if _reaped:
+            logger.info(
+                "ACPX_ORPHAN_REAP_AT_BOOT: cleared %d orphaned ACP agent(s)",
+                _reaped,
+            )
+    except Exception as _reap_exc:
+        logger.warning("ACPX_ORPHAN_REAP_AT_BOOT_FAILED: %s", _reap_exc)
+
     # ====================================================================
     # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 — live workshop binding
     # ====================================================================

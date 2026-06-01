@@ -119,6 +119,73 @@ def _kill_tree(root_pid: int) -> int:
     return killed
 
 
+_ACP_AGENT_MARKERS: tuple[str, ...] = (
+    "codex-acp", "claude-acp", "gemini-acp",
+)
+
+
+def reap_orphaned_acp_agents(max_age_sec: int | None = None) -> int:
+    """SIGKILL orphaned ACP agent processes (``codex-acp`` / ``claude-acp`` /
+    ``gemini-acp``) older than ``max_age_sec`` (default
+    :data:`MAX_TIMEOUT_SECONDS`). Returns the number killed.
+
+    Why this exists: the per-dispatch teardown (:func:`_kill_tree`) only walks
+    DOWN from the acpx subprocess. But these agents ``setsid`` out of that
+    subtree (via the ``npm exec`` chain) and, when their intermediate parent
+    dies, reparent UP to ``systemd --user`` — escaping the descendant walk
+    entirely. So a dispatch that times out (or whose leaf detaches) leaves an
+    orphan that survives every server restart and accumulates indefinitely,
+    eventually wedging the ACP layer so new consults hang. Observed live:
+    8 orphans up to ~13 days old, correlated with impl-consult hangs.
+
+    SAFE: the age guard guarantees we never touch a LIVE consult — no consult
+    can exceed ``MAX_TIMEOUT_SECONDS``, so any ACP agent older than that is
+    provably orphaned. Matches the exact agent binary names (not a loose
+    ``-acp`` substring, which would hit ``acpi`` kernel threads). Best-effort,
+    Linux/ps-based, never raises. Intended to run at server boot (frequent now
+    that auto-update restarts on a short interval) so orphans never pile up.
+    """
+    import signal
+    import subprocess
+    cutoff = MAX_TIMEOUT_SECONDS if max_age_sec is None else int(max_age_sec)
+    killed = 0
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "etimes,pid,cmd"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode != 0:
+            return 0
+        for line in out.stdout.splitlines()[1:]:
+            parts = line.split(None, 2)
+            if len(parts) < 3:
+                continue
+            etimes_s, pid_s, cmd = parts
+            if not any(m in cmd for m in _ACP_AGENT_MARKERS):
+                continue
+            try:
+                age = int(etimes_s)
+                pid = int(pid_s)
+            except ValueError:
+                continue
+            if age <= cutoff:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed += 1
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+    except Exception as exc:  # best-effort; never break boot
+        logger.warning("ACPX_ORPHAN_REAP_FAILED: %s", exc)
+        return killed
+    if killed:
+        logger.info(
+            "ACPX_ORPHAN_REAP: killed %d orphaned ACP agent(s) older than %ds",
+            killed, cutoff,
+        )
+    return killed
+
+
 def _acpx_binary() -> str:
     """Return the ACPX binary path.
 
