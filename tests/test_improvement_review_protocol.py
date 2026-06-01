@@ -210,8 +210,8 @@ class TestEnvConfig:
         monkeypatch.delenv(
             "KERNOS_IMPROVEMENT_IMPL_ITERATION_MAX", raising=False,
         )
-        assert ReviewIterationState.for_spec().max_iterations == 5
-        assert ReviewIterationState.for_impl().max_iterations == 3
+        assert ReviewIterationState.for_spec().max_iterations == 8
+        assert ReviewIterationState.for_impl().max_iterations == 6
 
 
 # ============================================================
