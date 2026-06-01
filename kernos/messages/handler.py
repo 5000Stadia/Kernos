@@ -913,7 +913,16 @@ class MessageHandler:
                 context="",
                 session_id_raw="",
                 workspace_dir=workspace_dir or None,
-                timeout_seconds=None,
+                # Improvement-loop consults are slow background coding
+                # agents (spec author / reviewer) with NO user waiting —
+                # they routinely run >600s. The orchestrator's default
+                # (None -> 600s) was killing every attempt at the 10-min
+                # mark. Give this path max headroom (orchestrator clamps
+                # to 1800s); the interactive `consult` tool keeps its 600s
+                # default since a user is waiting on those.
+                timeout_seconds=int(
+                    os.getenv("KERNOS_IMPROVEMENT_CONSULT_TIMEOUT_SEC", "1800")
+                ),
             )
             return _consult_result.response
 
