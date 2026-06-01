@@ -61,6 +61,15 @@ _HEARTBEAT_THRESHOLD_SEC = float(
 _POOL_LEAK_THRESHOLD = int(
     os.getenv("KERNOS_HTTP_POOL_CLOSE_WAIT_THRESHOLD", "30"),
 )
+# Per-signal-type cooldown on friction-report emission. A PERSISTENT
+# condition (e.g. a standing CLOSE_WAIT leak above threshold) is detected
+# every poll cycle; without a cooldown _record_signal writes one markdown
+# report per cycle and spams data/diagnostics/friction/. Emit at most one
+# report per signal_type per window; the catalog already dedups via
+# record_occurrence, so nothing is lost but the file/DB churn.
+_FRICTION_REPORT_COOLDOWN_SEC = float(
+    os.getenv("KERNOS_FRICTION_REPORT_COOLDOWN_SEC", "1800"),
+)
 # V1.5 inline remediation (founder's all-three request, 2026-05-20):
 # when the observer has detected discord-heartbeat-blocked for N
 # consecutive ticks, force-restart via os.execv directly. This is
@@ -238,6 +247,9 @@ class GatewayHealthObserver:
         self._heartbeat_suppression_count: int = 0
         self._last_suppression_kind: str = ""
         self._last_suppression_reason: str = ""
+        # Per-signal-type monotonic timestamp of last emitted friction
+        # report, for _FRICTION_REPORT_COOLDOWN_SEC throttling.
+        self._last_report_at: dict[str, float] = {}
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -867,9 +879,21 @@ class GatewayHealthObserver:
         """Write a markdown report + classify into the catalog —
         mirrors the path FrictionObserver uses, intentionally so
         the catalog records are uniform regardless of source."""
+        import time as _time
         from datetime import datetime, timezone
         import uuid as _uuid
         from pathlib import Path
+
+        # Cooldown: a persistent condition is re-detected every poll
+        # cycle. Without this guard we'd write one friction report per
+        # cycle (the CONNECTION_POOL_LEAK spam: ~1 file/minute). Throttle
+        # per signal_type so a standing condition emits at most one report
+        # per window.
+        _now = _time.monotonic()
+        _last = self._last_report_at.get(signal.signal_type)
+        if _last is not None and (_now - _last) < _FRICTION_REPORT_COOLDOWN_SEC:
+            return
+        self._last_report_at[signal.signal_type] = _now
 
         # Markdown report under data/diagnostics/friction/ matching
         # FrictionObserver's convention. The report is the durable
