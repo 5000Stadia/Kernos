@@ -35,6 +35,7 @@ These are non-negotiable. Violating any of these is a build failure regardless o
 - **Protect user data based on loss cost:** Destructive actions on user data require judgment at the dispatch boundary. Low ambiguity + low loss cost = execute ("delete the 5:00 entry we just made"). High loss cost = confirm first ("delete all my calendar events"). Ambiguity + any loss cost = clarify ("clear my reminders" — which ones?). Internal operational artifacts (expired tokens, whispers, suppression entries) are housekeeping — delete freely. This is not a universal ban on deletes; it's a principle of proportional caution.
 - **Graceful errors:** Every failure mode produces a friendly user-facing response. Never a silent crash, never a raw exception.
 - **MCP for capabilities:** Tools and data are accessed through MCP. No direct API integrations that bypass the capability abstraction layer.
+- **`start.sh` is off-limits to autonomous self-modification:** `start.sh` is the un-protectable bootstrap layer — the boot-guard auto-rollback runs *from* it, so a bad commit to this file cannot be auto-recovered and hard-bricks the bot. `improve_kernos` / auto-update must NEVER modify `start.sh` (or its `boot_guard pre-launch` hook). Changes there are human-only: edit, review, and restart by hand. Route around it.
 
 ## Spec Execution Principles
 

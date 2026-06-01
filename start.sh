@@ -2,6 +2,22 @@
 # KERNOS Discord Bot Launcher
 # Double-click this file (or run from terminal: ./start.sh)
 #
+# ============================================================================
+# ⛔ DO NOT MODIFY THIS FILE VIA AUTONOMOUS SELF-IMPROVEMENT / AUTO-UPDATE. ⛔
+# ----------------------------------------------------------------------------
+# This is the un-protectable bootstrap layer. The boot-guard auto-rollback
+# (the `boot_guard pre-launch` call below) RUNS FROM THIS FILE — so it is the
+# ONE file a failed self-update cannot recover. If a bad commit breaks this
+# script, the rollback that would save the bot is itself broken, and the bot
+# hard-bricks with no automatic recovery (manual SSH + git reset required).
+#
+# Therefore: improve_kernos and any code-update must treat start.sh (and the
+# boot_guard pre-launch hook) as OFF-LIMITS and route around it. Changes here
+# are human-only: edit by hand, review carefully, and restart manually —
+# never through the autonomous loop. Everything else in the repo is covered
+# by the boot-guard backstop; this file is the deliberate exception.
+# ============================================================================
+#
 # Self-restart behavior: if a prior Kernos instance from THIS
 # folder is already running (e.g. an orphaned start.sh adopted
 # by systemd --user after the launching terminal closed), this
