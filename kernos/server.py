@@ -1145,6 +1145,63 @@ async def on_ready():
     handler._instance_db = instance_db  # Wire instance DB for member resolution
     handler.register_mcp_tools_in_catalog()
 
+    # BOOT-GUARD: reaching here means a CLEAN boot — Python up, Discord
+    # connected, handler built. Promote the running head to last-known-good
+    # and clear probation. Then surface any pending rollback notice so the
+    # agent can tell the user a bad update was auto-reverted.
+    try:
+        from kernos.setup import boot_guard
+        boot_guard.mark_boot_ok()
+        _rb = boot_guard.consume_rollback_notice()
+        if _rb:
+            logger.error(
+                "BOOT_GUARD_ROLLBACK_SURFACED: failed_head=%s rolled_back_to=%s "
+                "reason=%s git_ok=%s err=%s",
+                str(_rb.get("failed_head", ""))[:12],
+                str(_rb.get("rolled_back_to", ""))[:12],
+                _rb.get("reason"), _rb.get("git_ok"), _rb.get("git_err", ""),
+            )
+            try:
+                from datetime import datetime, timezone
+                from kernos.kernel.awareness import (
+                    Whisper, generate_whisper_id,
+                )
+                _failed = str(_rb.get("failed_head", ""))[:12]
+                _good = str(_rb.get("rolled_back_to", ""))[:12]
+                _reason = _rb.get("reason", "")
+                _w = Whisper(
+                    whisper_id=generate_whisper_id(),
+                    insight_text=(
+                        f"A code update failed to boot and was AUTO-ROLLED-"
+                        f"BACK. You're live and healthy on the previous "
+                        f"version (`{_good}`). The update that failed "
+                        f"(`{_failed}`, reason: {_reason}) is still the latest "
+                        f"commit on GitHub and needs fixing before it can go "
+                        f"live. Tell the user plainly: the latest push didn't "
+                        f"boot, you reverted to stay up, and the broken commit "
+                        f"needs resolving — offer to investigate it."
+                    ),
+                    delivery_class="stage",
+                    source_space_id="",
+                    target_space_id="",
+                    supporting_evidence=(
+                        f"failed={_failed} good={_good} reason={_reason}"
+                    ),
+                    reasoning_trace=(
+                        "boot_guard auto-rollback after a failed self-update "
+                        "boot; surfacing so the user knows + can resolve it."
+                    ),
+                    knowledge_entry_id="",
+                    foresight_signal=f"boot_rollback:{_rb.get('failed_head', '')}",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    owner_member_id="",
+                )
+                await state.save_whisper(instance_id, _w)
+            except Exception as _w_exc:
+                logger.warning("BOOT_GUARD_ROLLBACK_WHISPER_FAILED: %s", _w_exc)
+    except Exception as _bg_exc:
+        logger.warning("BOOT_GUARD_ONREADY_FAILED: %s", _bg_exc)
+
     # ====================================================================
     # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 — live workshop binding
     # ====================================================================

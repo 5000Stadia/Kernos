@@ -171,6 +171,12 @@ source .venv/bin/activate
 # default. Override to 1 explicitly when soak-testing thin path.
 export KERNOS_USE_DECOUPLED_TURN_RUNNER=${KERNOS_USE_DECOUPLED_TURN_RUNNER:-0}
 
+# BOOT-GUARD pre-launch: if a self-update / improve_kernos commit is on
+# probation and has failed to boot cleanly N times, roll back to the last
+# known-good commit before launching. Fail-safe (|| true): a guard error
+# never blocks startup. No-op unless an update is actually on probation.
+python kernos/setup/boot_guard.py pre-launch || true
+
 # Start the bot
 echo "Starting Kernos..."
 echo "Decoupled turn runner: ${KERNOS_USE_DECOUPLED_TURN_RUNNER:-OFF}"

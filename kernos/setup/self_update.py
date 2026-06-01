@@ -463,6 +463,16 @@ def enforce_or_continue(
         )
         return
 
+    # BOOT-GUARD: the new code is now on disk and we're about to restart
+    # onto it. Mark it on probation so that if it fails to boot/ready,
+    # start.sh's pre-launch check (or the in-process readiness deadline)
+    # rolls back to the last head that actually readied.
+    try:
+        from kernos.setup import boot_guard
+        boot_guard.mark_update_pending(remote)
+    except Exception as _bg_exc:  # never block the update
+        logger.warning("%s_BOOT_GUARD_MARK_FAILED: %s", _LOG_PREFIX, _bg_exc)
+
     logger.info("%s_REINSTALLING: pip install -e .", _LOG_PREFIX)
     ok, reason = _reinstall(source_dir)
     if not ok:
