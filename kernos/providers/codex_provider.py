@@ -226,7 +226,23 @@ class OpenAICodexProvider(Provider):
     async def _ensure_http(self) -> Any:
         if self._http is None:
             import httpx
-            self._http = httpx.AsyncClient(timeout=120.0)
+            # This client is a process-lifetime singleton. Without a bounded
+            # keepalive, idle connections the remote has closed linger in the
+            # pool as CLOSE_WAIT sockets until httpx next touches them — which
+            # the gateway pool-leak detector flags. Bound keepalive expiry so
+            # idle connections are reaped promptly. (Good hygiene; a plausible
+            # contributor to the observed CLOSE_WAIT accumulation, not a
+            # confirmed sole root cause — the leak source isn't pinned.)
+            self._http = httpx.AsyncClient(
+                timeout=120.0,
+                limits=httpx.Limits(
+                    max_keepalive_connections=10,
+                    max_connections=20,
+                    keepalive_expiry=float(
+                        os.getenv("KERNOS_CODEX_KEEPALIVE_EXPIRY_SEC", "30")
+                    ),
+                ),
+            )
         return self._http
 
     async def _ensure_valid_token(self) -> None:
