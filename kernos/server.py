@@ -1391,10 +1391,40 @@ async def on_ready():
     # to the agent's situation context, where the agent's covenants
     # (including a default "tell me about updates" preference) decide
     # whether and how to surface in the agent's own voice.
+    async def _safe_to_auto_restart() -> bool:
+        """Guard for interval-mode auto-update: never reboot mid-flight.
+        Returns False (defer to next tick) if there's been recent inbound
+        activity or any improvement attempt is still running."""
+        import time as _t
+        try:
+            quiet = float(os.getenv("KERNOS_AUTO_UPDATE_QUIET_SEC", "120") or "120")
+        except ValueError:
+            quiet = 120.0
+        if (_t.time() - _last_inbound_event_ts) < quiet:
+            return False
+        # No in-flight improvement attempt (final_state still NULL).
+        try:
+            import aiosqlite
+            db_path = os.path.join(data_dir, "instance.db")
+            async with aiosqlite.connect(db_path) as _conn:
+                async with _conn.execute(
+                    "SELECT COUNT(*) FROM improvement_attempts "
+                    "WHERE final_state IS NULL"
+                ) as _cur:
+                    row = await _cur.fetchone()
+            if row and row[0]:
+                return False
+        except Exception:
+            # Fail-closed: if we can't verify safety, defer the restart.
+            return False
+        return True
+
     try:
         import asyncio as _au_asyncio
         from kernos.setup.self_update import scheduled_update_loop
-        _au_asyncio.create_task(scheduled_update_loop(data_dir=data_dir))
+        _au_asyncio.create_task(scheduled_update_loop(
+            data_dir=data_dir, safe_to_restart=_safe_to_auto_restart,
+        ))
     except Exception as exc:
         logger.warning("AUTO_UPDATE_CRON_LAUNCH_FAILED: %s", exc)
 

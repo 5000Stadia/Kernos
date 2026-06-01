@@ -322,6 +322,7 @@ class TestScheduledUpdateLoop:
         on the second sleep to exit cleanly."""
         monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
         monkeypatch.setenv("KERNOS_AUTO_UPDATE_TIME", "04:00")
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")  # daily mode
 
         pull_calls: list[dict] = []
 
@@ -349,6 +350,7 @@ class TestScheduledUpdateLoop:
         """If _pull raises, the loop logs and continues — doesn't
         crash the task."""
         monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")  # daily mode
 
         pull_calls = [0]
 
@@ -369,6 +371,62 @@ class TestScheduledUpdateLoop:
             )
         # Loop survived two pull failures (3 sleeps means 2 pulls).
         assert pull_calls[0] == 2
+
+    async def test_interval_mode_applies_when_safe(self, monkeypatch):
+        """Interval mode: when safe_to_restart() is truthy, the loop
+        calls the apply (enforce_or_continue) path each tick."""
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "600")
+
+        apply_calls: list[dict] = []
+
+        def _fake_apply(**kwargs):
+            apply_calls.append(kwargs)
+
+        sleep_count = [0]
+
+        async def _fake_sleep(seconds):
+            sleep_count[0] += 1
+            assert seconds == 600
+            if sleep_count[0] >= 2:
+                raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await self_update.scheduled_update_loop(
+                data_dir="/tmp/x", safe_to_restart=lambda: True,
+                _apply=_fake_apply, _sleep=_fake_sleep,
+            )
+        assert len(apply_calls) == 1
+        assert apply_calls[0] == {"data_dir": "/tmp/x"}
+
+    async def test_interval_mode_defers_when_unsafe(self, monkeypatch):
+        """Interval mode: when safe_to_restart() is falsey (busy), the
+        loop does NOT apply — it never reboots mid-flight."""
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "600")
+
+        apply_calls: list[dict] = []
+
+        def _fake_apply(**kwargs):
+            apply_calls.append(kwargs)
+
+        sleep_count = [0]
+
+        async def _fake_sleep(seconds):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 3:
+                raise asyncio.CancelledError()
+
+        async def _never_safe():
+            return False
+
+        with pytest.raises(asyncio.CancelledError):
+            await self_update.scheduled_update_loop(
+                data_dir=None, safe_to_restart=_never_safe,
+                _apply=_fake_apply, _sleep=_fake_sleep,
+            )
+        # Two ticks, both deferred — apply never called.
+        assert apply_calls == []
 
 
 # ---------------------------------------------------------------------------

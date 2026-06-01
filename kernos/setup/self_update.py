@@ -106,6 +106,25 @@ def _verbose_enabled() -> bool:
 _DEFAULT_UPDATE_TIME = (3, 0)
 
 
+def _update_interval_sec() -> int:
+    """Poll interval for the auto-update loop, in seconds.
+
+    >0  → frequent interval polling with SAFE auto-restart: every
+          interval the loop checks origin and, when it's safe (no
+          recent conversation, no improvement attempt running),
+          applies any update and cleanly restarts so the new code goes
+          live without a manual ``/restart``.
+    0   → legacy once-daily ``KERNOS_AUTO_UPDATE_TIME`` pull (lands code
+          on disk, applies on next natural restart).
+
+    Default 600s (10 min). ``KERNOS_AUTO_UPDATE_INTERVAL_SEC``.
+    """
+    try:
+        return max(0, int(os.getenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "600")))
+    except ValueError:
+        return 600
+
+
 def _parse_update_time() -> tuple[int, int]:
     """Parse ``KERNOS_AUTO_UPDATE_TIME`` (``HH:MM`` 24-hour, server
     local clock) into a (hour, minute) tuple. Falls back to
@@ -631,21 +650,31 @@ def _seconds_until_next(hour: int, minute: int) -> float:
 async def scheduled_update_loop(
     *,
     data_dir: str | None = None,
+    safe_to_restart: callable | None = None,
     _pull: callable | None = None,
     _sleep: callable | None = None,
+    _apply: callable | None = None,
 ) -> None:
-    """Daily background pull at ``KERNOS_AUTO_UPDATE_TIME``. Runs as
-    an asyncio task launched at server startup; loops indefinitely
-    until cancelled.
+    """Background auto-update loop launched at server startup; loops
+    indefinitely until cancelled. Disabled when ``KERNOS_AUTO_UPDATE=off``.
 
-    Disabled when ``KERNOS_AUTO_UPDATE=off`` — the loop logs once
-    and returns. Distinct from :func:`enforce_or_continue` (cold
-    start / pre-bind) — this is the long-running daily window.
+    Two modes, selected by ``KERNOS_AUTO_UPDATE_INTERVAL_SEC``:
 
-    Test hooks: ``_pull`` overrides :func:`_pull_only`; ``_sleep``
-    overrides :func:`asyncio.sleep`.
+    * **interval mode** (default, interval >0) — every interval, check
+      origin and, when ``safe_to_restart()`` is truthy, apply any update
+      and cleanly restart (via :func:`enforce_or_continue`'s ``os.execv``)
+      so new code goes live with NO manual ``/restart``. When unsafe
+      (active conversation or improvement attempt) the update is deferred
+      to the next tick — it never reboots mid-flight.
+    * **daily mode** (interval ==0) — legacy once-daily ``_pull_only`` at
+      ``KERNOS_AUTO_UPDATE_TIME``; lands code on disk, applies on next
+      natural restart.
+
+    ``safe_to_restart`` may be sync or async; ``None`` means always-safe.
+    Test hooks: ``_pull`` / ``_apply`` / ``_sleep``.
     """
     import asyncio
+    import inspect
 
     if not _auto_update_enabled():
         logger.info(
@@ -655,15 +684,52 @@ async def scheduled_update_loop(
         )
         return
 
-    pull_fn = _pull or _pull_only
     sleep_fn = _sleep or asyncio.sleep
-    hour, minute = _parse_update_time()
+    interval = _update_interval_sec()
 
+    if interval > 0:
+        apply_fn = _apply or enforce_or_continue
+        logger.info(
+            "%s_POLL_SCHEDULED: checking origin every %ds; auto-restart "
+            "when idle (no active turn / improvement attempt)",
+            _LOG_PREFIX, interval,
+        )
+        while True:
+            try:
+                await sleep_fn(interval)
+            except asyncio.CancelledError:
+                logger.info("%s_POLL_CANCELLED: loop stopped", _LOG_PREFIX)
+                raise
+            try:
+                safe = True
+                if safe_to_restart is not None:
+                    res = safe_to_restart()
+                    if inspect.isawaitable(res):
+                        res = await res
+                    safe = bool(res)
+                if not safe:
+                    logger.debug(
+                        "%s_POLL_DEFERRED: busy — retrying next tick",
+                        _LOG_PREFIX,
+                    )
+                    continue
+                # enforce_or_continue: fetch; if behind, pull + execv
+                # (process replaced, never returns); no-op if current.
+                apply_fn(data_dir=data_dir)
+            except Exception as exc:
+                logger.warning(
+                    "%s_POLL_RAISED: %s — continuing loop",
+                    _LOG_PREFIX, exc,
+                )
+        return
+
+    # Legacy daily mode (interval ==0).
+    pull_fn = _pull or _pull_only
+    hour, minute = _parse_update_time()
     logger.info(
         "%s_CRON_SCHEDULED: daily pull at %02d:%02d (server local)",
         _LOG_PREFIX, hour, minute,
     )
-
     while True:
         seconds = _seconds_until_next(hour, minute)
         try:
