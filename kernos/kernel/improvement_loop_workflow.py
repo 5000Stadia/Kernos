@@ -155,6 +155,7 @@ class ImprovementLoopOrchestrator:
         live_repo_dir: str,
         consult_fn: Any = None,           # async (target, prompt) -> str
         restart_fn: Any = None,           # async () -> None
+        notify_fn: Any = None,            # async (attempt_id, final_state) -> None
         receipts_event_stream: Any = None,
     ) -> None:
         self._instance_id = instance_id
@@ -162,6 +163,7 @@ class ImprovementLoopOrchestrator:
         self._live_repo_dir = live_repo_dir
         self._consult_fn = consult_fn
         self._restart_fn = restart_fn
+        self._notify_fn = notify_fn
         self._receipts_event_stream = receipts_event_stream
         # Track running background tasks so tests + shutdown
         # can wait on them.
@@ -277,8 +279,48 @@ class ImprovementLoopOrchestrator:
         )
         self._running_tasks.add(task)
         task.add_done_callback(self._running_tasks.discard)
+        # SELF-IMPROVEMENT-TERMINAL-NOTIFY: when the loop finishes (the
+        # approval gate OR any abort), tell the user instead of going
+        # silent. The done-callback is sync, so schedule the async
+        # notifier as its own task.
+        task.add_done_callback(
+            lambda _t, aid=attempt_id: self._running_tasks.add(
+                asyncio.create_task(self._notify_on_terminal(aid))
+            )
+        )
 
         return attempt_id
+
+    async def _notify_on_terminal(self, attempt_id: str) -> None:
+        """Read the attempt's terminal state and hand it to ``notify_fn``
+        (wired in the handler to surface a whisper to the originating
+        member). Best-effort: never raises into the event loop."""
+        if self._notify_fn is None:
+            return
+        try:
+            from kernos.kernel.instance_db import InstanceDB
+            from kernos.kernel import improvement_ledger as _ledger
+            db = InstanceDB(self._data_dir)
+            await db.connect()
+            try:
+                attempts = await _ledger.list_recent_attempts(
+                    db._conn, self._instance_id, limit=20,
+                )
+            finally:
+                await db.close()
+            row = next(
+                (a for a in attempts if a.get("attempt_id") == attempt_id),
+                None,
+            )
+            final_state = (row or {}).get("final_state") or ""
+            if not final_state:
+                return
+            await self._notify_fn(attempt_id, final_state)
+        except Exception as exc:
+            logger.warning(
+                "IMPROVE_KERNOS_TERMINAL_NOTIFY_FAILED attempt=%s: %s",
+                attempt_id, exc,
+            )
 
     async def _run_attempt(self, *, attempt_id: str) -> None:
         """Background task: spec cycle → impl cycle → request
@@ -2737,12 +2779,76 @@ async def handle_improve_kernos(
     kernos_pkg_dir = Path(kernos.__file__).resolve().parent
     live_repo_dir = str(kernos_pkg_dir.parent)
 
+    async def _notify_terminal(attempt_id: str, final_state: str) -> None:
+        """When the background attempt finishes (approval gate OR abort),
+        queue a whisper to the originating member so the agent proactively
+        tells the user on their next turn — in its own voice, with the
+        conversation in context — instead of going silent. The whisper is
+        agent-facing FRAMING, not a canned user message."""
+        state = getattr(handler, "state", None)
+        if state is None or not origin_member_id:
+            return
+        _msgs = {
+            "awaiting_commit_approval": (
+                f"The self-improvement the user asked for (`{attempt_id}`) "
+                f"finished drafting + review and is WAITING AT THE APPROVAL "
+                f"GATE — a proposed change is ready to show them before "
+                f"anything commits or goes live. Bring it up and offer to "
+                f"walk them through the diff and get their go/no-go."
+            ),
+            "aborted_unconverged": (
+                f"The self-improvement attempt (`{attempt_id}`) used its "
+                f"full review budget but the author and reviewer couldn't "
+                f"agree on a change confident enough to ship, so it STOPPED "
+                f"WITHOUT committing anything. Tell the user it didn't land "
+                f"+ briefly why, and offer to retry or narrow the scope."
+            ),
+            "aborted_consult_failure": (
+                f"The self-improvement attempt (`{attempt_id}`) hit a "
+                f"tooling failure partway and stopped before making any "
+                f"changes — nothing was committed. Tell the user and offer "
+                f"to retry."
+            ),
+        }
+        _default = (
+            f"The self-improvement attempt (`{attempt_id}`) finished in "
+            f"state `{final_state}` without landing a committed change. "
+            f"Tell the user where it ended up and offer a next step."
+        )
+        try:
+            from datetime import datetime, timezone
+            from kernos.kernel.awareness import Whisper, generate_whisper_id
+            w = Whisper(
+                whisper_id=generate_whisper_id(),
+                insight_text=_msgs.get(final_state, _default),
+                delivery_class="stage",
+                source_space_id=origin_space_id,
+                target_space_id=origin_space_id,
+                supporting_evidence=f"attempt={attempt_id} state={final_state}",
+                reasoning_trace=(
+                    f"improve_kernos attempt {attempt_id} reached terminal "
+                    f"state {final_state}; surfacing so the user isn't left "
+                    f"silent after a background self-improvement run."
+                ),
+                knowledge_entry_id="",
+                foresight_signal=f"improvement_terminal:{attempt_id}",
+                created_at=datetime.now(timezone.utc).isoformat(),
+                owner_member_id=origin_member_id,
+            )
+            await state.save_whisper(instance_id, w)
+        except Exception as exc:
+            logger.warning(
+                "IMPROVE_KERNOS_NOTIFY_WHISPER_FAILED %s: %s",
+                attempt_id, exc,
+            )
+
     orchestrator = ImprovementLoopOrchestrator(
         instance_id=instance_id,
         data_dir=data_dir,
         live_repo_dir=live_repo_dir,
         consult_fn=consult_fn,
         restart_fn=restart_fn,
+        notify_fn=_notify_terminal,
         receipts_event_stream=getattr(handler, "events", None),
     )
     try:
