@@ -233,6 +233,10 @@ async def test_runner_prompt_carries_inputs():
     assert "What did the doc say about Q3?" in body
     assert "decided_action.kind=\"execute_tool\"" in captured["system"]
     assert "allowed_operations includes the tool_id" in captured["system"]
+    # The model must compose required natural-language args from the user's
+    # request rather than leaving them blank and bouncing the call back.
+    assert "Compose the tool's required arguments yourself" in captured["system"]
+    assert "do NOT bounce the call back" in captured["system"]
 
     tool_names = [t["name"] for t in captured["tools"]]
     assert "__finalize_briefing__" in tool_names

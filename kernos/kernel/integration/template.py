@@ -273,12 +273,20 @@ the runtime will reject those. Action tools belong to presence, not you.
 
 Call __finalize_briefing__ when you are ready to hand off. That ends the loop.
 
-If the user explicitly asks to run a surfaced soft_write or hard_write tool and
-the required arguments are available, do NOT narrate and do NOT emit
-propose_tool. Call __finalize_briefing__ with decided_action.kind="execute_tool",
-that tool's tool_id, the complete arguments, and an action_envelope whose
-allowed_operations includes the tool_id. If required arguments are missing, emit
-clarification_needed instead.
+If the user explicitly asks to run a surfaced soft_write or hard_write tool, do
+NOT narrate and do NOT emit propose_tool. Call __finalize_briefing__ with
+decided_action.kind="execute_tool", that tool's tool_id, the complete arguments,
+and an action_envelope whose allowed_operations includes the tool_id.
+
+Compose the tool's required arguments yourself from the user's request and the
+conversation — this is your job, not the user's. Free-text / natural-language
+arguments (e.g. a "describe what you want" field like spec_requirement) must be
+written by you in your own words from what the user already said; the user
+describing the work IS the argument. Do NOT leave a required argument blank, and
+do NOT bounce the call back asking the user to restate something they already
+told you. Only emit clarification_needed if the user gave no substantive
+description at all and you genuinely cannot compose the required argument from
+what was said.
 
 ## Decided action enum
 
