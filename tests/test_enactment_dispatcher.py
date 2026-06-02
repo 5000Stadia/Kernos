@@ -79,11 +79,20 @@ def _step(
     )
 
 
-def _briefing() -> Briefing:
+def _briefing(
+    *,
+    user_message: str = "",
+    recent_messages: tuple[dict, ...] = (),
+    narration_context: str = "",
+) -> Briefing:
     return Briefing(
         relevant_context=(),
         filtered_context=(),
-        decided_action=ExecuteTool(tool_id="email_send", arguments={}),
+        decided_action=ExecuteTool(
+            tool_id="email_send",
+            arguments={},
+            narration_context=narration_context,
+        ),
         presence_directive="execute",
         audit_trace=AuditTrace(),
         turn_id="turn-disp",
@@ -93,6 +102,8 @@ def _briefing() -> Briefing:
             allowed_tool_classes=("email",),
             allowed_operations=("send",),
         ),
+        user_message=user_message,
+        recent_messages=recent_messages,
     )
 
 
@@ -195,6 +206,34 @@ async def test_executor_receives_resolved_operation_name():
         StepDispatchInputs(step=_step(), briefing=_briefing())
     )
     assert executor.calls[0].operation_name == "send"
+
+
+@pytest.mark.asyncio
+async def test_executor_receives_gate_authorization_context_from_briefing():
+    """Hard-write gate evaluation needs the original user request and
+    agent reasoning to see that the action is user-authorized."""
+    lookup = _StubLookup({"email_send": _descriptor()})
+    executor = _StubExecutor(ToolExecutionResult(output={}))
+    dispatcher = StepDispatcher(
+        executor=executor, descriptor_lookup=lookup
+    )
+    briefing = _briefing(
+        user_message="Send the email now.",
+        recent_messages=({"role": "user", "content": "draft it first"},),
+        narration_context="The user explicitly authorized the send.",
+    )
+
+    await dispatcher.dispatch(
+        StepDispatchInputs(step=_step(), briefing=briefing)
+    )
+
+    sent = executor.calls[0]
+    assert sent.user_message == "Send the email now."
+    assert sent.recent_messages == (
+        {"role": "user", "content": "draft it first"},
+    )
+    assert "explicitly authorized" in sent.agent_reasoning
+    assert "Presence directive: execute" in sent.agent_reasoning
 
 
 # ---------------------------------------------------------------------------

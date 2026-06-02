@@ -945,6 +945,7 @@ async def on_ready():
 
     async def _shared_chain_caller(
         system, messages, tools, max_tokens, *, conversation_id="",
+        tool_choice="auto",
     ):
         # ============================================================
         # WIRE-SHAPE PLUMBING SEAM — do NOT drop conversation_id.
@@ -974,6 +975,7 @@ async def on_ready():
             tools=tools,
             max_tokens=max_tokens,
             conversation_id=conversation_id,
+            tool_choice=tool_choice,
         )
 
     # Design Review-lean (a) loud-failure surface for v1: until the

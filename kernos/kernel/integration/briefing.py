@@ -1701,6 +1701,11 @@ class Briefing:
     instance_id: str = ""
     member_id: str = ""
     space_id: str = ""
+    # Dispatch-gate context for full-machinery tool execution. Integration
+    # owns the original turn inputs; enactment needs them when evaluating
+    # whether a hard_write action directly fulfills the user's request.
+    user_message: str = ""
+    recent_messages: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.relevant_context, tuple):
@@ -1758,6 +1763,12 @@ class Briefing:
         if not isinstance(self.integration_run_id, str):
             raise BriefingValidationError(
                 "Briefing.integration_run_id must be a string"
+            )
+        if not isinstance(self.user_message, str):
+            raise BriefingValidationError("Briefing.user_message must be a string")
+        if not isinstance(self.recent_messages, tuple):
+            raise BriefingValidationError(
+                "Briefing.recent_messages must be a tuple"
             )
         if self.action_envelope is not None and not isinstance(
             self.action_envelope, ActionEnvelope

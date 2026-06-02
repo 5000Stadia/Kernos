@@ -395,7 +395,15 @@ def wrap_chain_caller_with_telemetry(
     accumulates into the shared telemetry.
     """
 
-    async def _wrapped(system, messages, tools, max_tokens, *, conversation_id=""):
+    async def _wrapped(
+        system,
+        messages,
+        tools,
+        max_tokens,
+        *,
+        conversation_id="",
+        tool_choice="auto",
+    ):
         # ============================================================
         # WIRE-SHAPE PLUMBING SEAM — forward conversation_id through.
         # ============================================================
@@ -414,6 +422,8 @@ def wrap_chain_caller_with_telemetry(
         chain_kwargs = {}
         if conversation_id:
             chain_kwargs["conversation_id"] = conversation_id
+        if tool_choice != "auto":
+            chain_kwargs["tool_choice"] = tool_choice
         response = await chain_caller(
             system, messages, tools, max_tokens,
             **chain_kwargs,

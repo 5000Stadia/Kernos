@@ -273,6 +273,13 @@ the runtime will reject those. Action tools belong to presence, not you.
 
 Call __finalize_briefing__ when you are ready to hand off. That ends the loop.
 
+If the user explicitly asks to run a surfaced soft_write or hard_write tool and
+the required arguments are available, do NOT narrate and do NOT emit
+propose_tool. Call __finalize_briefing__ with decided_action.kind="execute_tool",
+that tool's tool_id, the complete arguments, and an action_envelope whose
+allowed_operations includes the tool_id. If required arguments are missing, emit
+clarification_needed instead.
+
 ## Decided action enum
 
   - respond_only          — presence generates a conversational reply

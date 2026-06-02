@@ -54,6 +54,7 @@ class Provider(ABC):
         max_tokens: int,
         output_schema: dict | None = None,
         conversation_id: str = "",
+        tool_choice: str = "auto",
     ) -> ProviderResponse:
         """Send a completion request and return a KERNOS-native response.
 
@@ -66,5 +67,10 @@ class Provider(ABC):
         conversation_id, when provided, lets providers correlate calls in the
         same conversation for backend prompt-cache hits and session routing.
         Providers that don't have a use for it can ignore it.
+
+        tool_choice defaults to "auto" to preserve provider behavior. Callers
+        that require a tool response, such as synthetic finalizer loops, pass
+        "required"; providers translate that into their native shape where
+        supported.
         """
         ...

@@ -58,11 +58,13 @@ class _FakeProvider(Provider):
         max_tokens,
         output_schema=None,
         conversation_id="",
+        tool_choice="auto",
     ) -> ProviderResponse:
         self.calls.append({
             "model": model,
             "max_tokens": max_tokens,
             "conversation_id": conversation_id,
+            "tool_choice": tool_choice,
         })
         if self._fail:
             raise ReasoningProviderError(
@@ -119,6 +121,24 @@ async def test_chain_fallback_first_entry_succeeds():
     assert resp is not None
     assert len(entries[0].provider.calls) == 1
     assert len(entries[1].provider.calls) == 0
+    assert entries[0].provider.calls[0]["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_chain_caller_forwards_required_tool_choice():
+    """Synthetic finalizer loops can require a tool block without changing
+    the default auto behavior for ordinary calls."""
+    entries = _entries(("primary", "x", False))
+    caller = build_resilient_chain_caller(
+        chains=_chains_with_primary(entries), request=_FakeRequest(),
+    )
+
+    await caller(
+        system="", messages=[], tools=[{"name": "finalize"}],
+        max_tokens=100, tool_choice="required",
+    )
+
+    assert entries[0].provider.calls[0]["tool_choice"] == "required"
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ from kernos.kernel.integration import (
     BudgetState,
     ChainCaller,
     CohortOutput,
+    ExecuteTool,
     IntegrationConfig,
     IntegrationInputs,
     IntegrationRunner,
@@ -188,6 +189,7 @@ async def test_runner_happy_path_single_iteration():
         captured["system"] = system
         captured["messages"] = messages
         captured["tools"] = tools
+        captured["kwargs"] = _
         return _resp(_finalize_block(_DEFAULT_BRIEFING_PAYLOAD))
 
     runner, audit = _make_runner(chain_caller=chain)
@@ -206,6 +208,7 @@ async def test_runner_happy_path_single_iteration():
     assert len(audit) == 1
     assert audit[0]["audit_category"] == "integration.briefing"
     assert audit[0]["success"] is True
+    assert captured["kwargs"]["tool_choice"] == "required"
 
 
 @pytest.mark.asyncio
@@ -228,11 +231,83 @@ async def test_runner_prompt_carries_inputs():
     assert "drive_read_doc" in body
     assert SURFACING_RATIONALE_CREDENTIAL in body
     assert "What did the doc say about Q3?" in body
+    assert "decided_action.kind=\"execute_tool\"" in captured["system"]
+    assert "allowed_operations includes the tool_id" in captured["system"]
 
     tool_names = [t["name"] for t in captured["tools"]]
     assert "__finalize_briefing__" in tool_names
     assert "drive_read_doc" in tool_names
     assert "search_memory" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_runner_parses_improve_kernos_execute_tool_finalize():
+    payload = {
+        "relevant_context": [],
+        "filtered_context": [],
+        "decided_action": {
+            "kind": "execute_tool",
+            "tool_id": "improve_kernos",
+            "arguments": {
+                "spec_requirement": (
+                    "Fix deterministic no_tool_use on self-improvement turns"
+                ),
+            },
+            "narration_context": (
+                "The user explicitly asked to run self-improvement."
+            ),
+        },
+        "action_envelope": {
+            "intended_outcome": "Start the requested self-improvement run.",
+            "allowed_tool_classes": ["kernel"],
+            "allowed_operations": ["improve_kernos"],
+            "constraints": [
+                "Pause for user approval before anything is committed or live.",
+            ],
+            "confirmation_requirements": [],
+            "forbidden_moves": [],
+        },
+        "presence_directive": (
+            "Tell the user the improvement run has started and that changes "
+            "will wait for approval."
+        ),
+    }
+
+    async def chain(*_a, **_kw):
+        return _resp(_finalize_block(payload))
+
+    inputs = _make_inputs(
+        user_message=(
+            "Run improve_kernos to fix deterministic no_tool_use on "
+            "self-improvement turns."
+        ),
+        surfaced_tools=(
+            SurfacedTool(
+                tool_id="improve_kernos",
+                description="Start an autonomous improvement.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "spec_requirement": {"type": "string"},
+                    },
+                    "required": ["spec_requirement"],
+                },
+                gate_classification="hard_write",
+                surfacing_rationale="always_pinned",
+            ),
+        ),
+    )
+    runner, _ = _make_runner(chain_caller=chain)
+
+    briefing = await runner.run(inputs)
+
+    assert isinstance(briefing.decided_action, ExecuteTool)
+    assert briefing.decided_action.tool_id == "improve_kernos"
+    assert briefing.decided_action.arguments["spec_requirement"].startswith("Fix")
+    assert briefing.action_envelope is not None
+    assert "improve_kernos" in briefing.action_envelope.allowed_operations
+    assert briefing.user_message.startswith("Run improve_kernos")
+    assert briefing.recent_messages == inputs.conversation_thread
 
 
 # ---------------------------------------------------------------------------
@@ -1218,7 +1293,7 @@ async def test_iteration_metrics_recorded_per_attempt():
     """
     captured: list = []
 
-    async def chain(system, messages, tools, max_tokens):
+    async def chain(system, messages, tools, max_tokens, **_kw):
         # First call: emit a tool_use for a real tool. Second call:
         # produce no tool_use so the attempt fails on no_tool_use,
         # but iteration_metrics from iter 1 should be carried in the

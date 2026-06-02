@@ -172,7 +172,7 @@ def build_resilient_chain_caller(
 
     The override is resolved at build time (per-turn). The returned
     closure has the standard chain-caller signature
-    ``(system, messages, tools, max_tokens, *, conversation_id="")``
+    ``(system, messages, tools, max_tokens, *, conversation_id="", tool_choice="auto")``
     and iterates the resolved entries with fallback + pre-flight skip.
 
     Construction parameters mirror legacy semantics:
@@ -245,6 +245,7 @@ def build_resilient_chain_caller(
         max_tokens: int,
         *,
         conversation_id: str = "",
+        tool_choice: str = "auto",
     ) -> Any:
         # Pre-flight payload estimate; same estimator the legacy
         # helper uses.
@@ -312,6 +313,7 @@ def build_resilient_chain_caller(
                     tools=tools,
                     max_tokens=max_tokens,
                     conversation_id=conversation_id,
+                    tool_choice=tool_choice,
                 )
                 if i > 0:
                     # Partial fallback succeeded — silent per the
@@ -680,6 +682,7 @@ def setup_default_thin_path_context(
 
     async def _chain_caller(
         system, messages, tools, max_tokens, *, conversation_id="",
+        tool_choice="auto",
     ):
         if not primary_chain:
             raise RuntimeError(
@@ -693,6 +696,7 @@ def setup_default_thin_path_context(
             tools=tools,
             max_tokens=max_tokens,
             conversation_id=conversation_id,
+            tool_choice=tool_choice,
         )
 
     # Default emitters — bridge to events + audit, no extra logging.

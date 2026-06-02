@@ -543,6 +543,33 @@ class TestCodexWireShape:
                 f"must be exactly None"
             )
 
+    async def test_body_defaults_tool_choice_to_auto(self, monkeypatch):
+        captured: dict = {}
+        provider = self._stub_provider(monkeypatch, captured)
+        await provider.complete(
+            model="gpt-5.5",
+            system="rules",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[{"name": "finalize", "description": "F",
+                    "input_schema": {"type": "object", "properties": {}}}],
+            max_tokens=1024,
+        )
+        assert captured["body"]["tool_choice"] == "auto"
+
+    async def test_body_forwards_required_tool_choice(self, monkeypatch):
+        captured: dict = {}
+        provider = self._stub_provider(monkeypatch, captured)
+        await provider.complete(
+            model="gpt-5.5",
+            system="rules",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[{"name": "finalize", "description": "F",
+                    "input_schema": {"type": "object", "properties": {}}}],
+            max_tokens=1024,
+            tool_choice="required",
+        )
+        assert captured["body"]["tool_choice"] == "required"
+
     async def test_body_uses_schema_format_when_output_schema_provided(self, monkeypatch):
         captured: dict = {}
         provider = self._stub_provider(monkeypatch, captured)

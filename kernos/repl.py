@@ -322,6 +322,7 @@ async def build_dev_handler(
 
     async def _shared_chain_caller(
         system, messages, tools, max_tokens, *, conversation_id="",
+        tool_choice="auto",
     ):
         # ============================================================
         # WIRE-SHAPE PLUMBING SEAM — mirrors server.py's chain caller.
@@ -347,6 +348,7 @@ async def build_dev_handler(
             tools=tools,
             max_tokens=max_tokens,
             conversation_id=conversation_id,
+            tool_choice=tool_choice,
         )
 
     class _UnwiredDescriptorLookup:

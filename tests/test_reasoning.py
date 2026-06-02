@@ -319,6 +319,73 @@ async def test_anthropic_provider_returns_provider_response_on_success():
     assert result.output_tokens == 10
 
 
+async def test_anthropic_provider_required_tool_choice_maps_to_any():
+    captured = {}
+    mock_client = MagicMock()
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "Hello!"
+
+    @asynccontextmanager
+    async def _stream(**kwargs):
+        captured["kwargs"] = kwargs
+        stream = MagicMock()
+        stream.get_final_message = AsyncMock(return_value=MagicMock(
+            content=[text_block],
+            stop_reason="end_turn",
+            usage=MagicMock(input_tokens=5, output_tokens=10),
+        ))
+        yield stream
+
+    mock_client.messages.stream = _stream
+
+    with patch("kernos.providers.anthropic_provider.anthropic.AsyncAnthropic", return_value=mock_client):
+        provider = AnthropicProvider(api_key="test")
+        await provider.complete(
+            "model",
+            "system",
+            [],
+            [{"name": "finalize", "description": "F", "input_schema": {}}],
+            1024,
+            tool_choice="required",
+        )
+
+    assert captured["kwargs"]["tool_choice"] == {"type": "any"}
+
+
+async def test_anthropic_provider_default_tool_choice_omits_native_field():
+    captured = {}
+    mock_client = MagicMock()
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = "Hello!"
+
+    @asynccontextmanager
+    async def _stream(**kwargs):
+        captured["kwargs"] = kwargs
+        stream = MagicMock()
+        stream.get_final_message = AsyncMock(return_value=MagicMock(
+            content=[text_block],
+            stop_reason="end_turn",
+            usage=MagicMock(input_tokens=5, output_tokens=10),
+        ))
+        yield stream
+
+    mock_client.messages.stream = _stream
+
+    with patch("kernos.providers.anthropic_provider.anthropic.AsyncAnthropic", return_value=mock_client):
+        provider = AnthropicProvider(api_key="test")
+        await provider.complete(
+            "model",
+            "system",
+            [],
+            [{"name": "finalize", "description": "F", "input_schema": {}}],
+            1024,
+        )
+
+    assert "tool_choice" not in captured["kwargs"]
+
+
 # ---------------------------------------------------------------------------
 # Hallucination detector (observe-only mode)
 # ---------------------------------------------------------------------------
@@ -585,5 +652,4 @@ def test_unknown_effect_tool_not_concurrent_safe():
 # the gap is observable and bounded. Tests retire with the legacy
 # code rather than port to a transitional measure.
 # ---------------------------------------------------------------------------
-
 

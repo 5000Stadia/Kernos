@@ -70,10 +70,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-ChainCaller = Callable[
-    [str | list[dict], list[dict], list[dict], int],
-    Awaitable[ProviderResponse],
-]
+ChainCaller = Callable[..., Awaitable[ProviderResponse]]
 
 
 # INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece C): tool dispatcher

@@ -126,11 +126,8 @@ class StaticToolCatalog:
 # ---------------------------------------------------------------------------
 
 
-ChainCaller = Callable[
-    [str | list[dict], list[dict], list[dict], int],
-    Awaitable[ProviderResponse],
-]
-"""(system, messages, tools, max_tokens) → ProviderResponse"""
+ChainCaller = Callable[..., Awaitable[ProviderResponse]]
+"""(system, messages, tools, max_tokens, *, tool_choice="auto", ...) → ProviderResponse"""
 
 
 # ---------------------------------------------------------------------------

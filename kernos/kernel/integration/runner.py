@@ -366,11 +366,8 @@ class IntegrationAttemptFailed(Exception):
 
 # Callback protocols. Defined as Callable aliases rather than
 # typing.Protocol so existing async lambdas plug in cleanly under tests.
-ChainCaller = Callable[
-    [str | list[dict], list[dict], list[dict], int],
-    Awaitable[ProviderResponse],
-]
-"""(system, messages, tools, max_tokens) → ProviderResponse"""
+ChainCaller = Callable[..., Awaitable[ProviderResponse]]
+"""(system, messages, tools, max_tokens, *, tool_choice="auto", ...) → ProviderResponse"""
 
 ReadOnlyToolDispatcher = Callable[
     [str, dict[str, Any], IntegrationInputs],
@@ -642,6 +639,7 @@ class IntegrationRunner:
                     chain_messages,
                     integration_tools,
                     self._config.max_integration_tokens,
+                    tool_choice="required",
                 )
                 model_ms = _ms_since(iter_started, self._clock)
                 phase_durations_ms[f"integrate_iter_{iterations}"] = model_ms
@@ -1086,6 +1084,8 @@ class IntegrationRunner:
             instance_id=inputs.instance_id,
             member_id=inputs.member_id,
             space_id=inputs.space_id,
+            user_message=inputs.user_message,
+            recent_messages=tuple(inputs.conversation_thread),
         )
 
     def _drain_action_records(self) -> list:

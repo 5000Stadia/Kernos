@@ -88,10 +88,7 @@ class DivergenceReasonerError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-ChainCaller = Callable[
-    [str | list[dict], list[dict], list[dict], int],
-    Awaitable[ProviderResponse],
-]
+ChainCaller = Callable[..., Awaitable[ProviderResponse]]
 
 
 # ---------------------------------------------------------------------------

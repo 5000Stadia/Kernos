@@ -197,8 +197,10 @@ class OllamaProvider(Provider):
         max_tokens: int,
         output_schema: dict | None = None,
         conversation_id: str = "",
+        tool_choice: str = "auto",
     ) -> ProviderResponse:
         del conversation_id  # Ollama's API has no equivalent session/cache key.
+        del tool_choice  # Ollama does not expose a compatible tool-choice knob.
         http = await self._ensure_http()
 
         ollama_messages = self._build_messages(system, messages)

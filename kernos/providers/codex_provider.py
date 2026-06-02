@@ -121,8 +121,9 @@ class OpenAICodexProvider(Provider):
       tips large payloads into mid-stream timeouts. OpenClaw sets this
       via ``storeMode: "disable"``.
     * ``stream: true`` — REQUIRED. The endpoint is SSE-only.
-    * ``tool_choice: "auto"`` — REQUIRED when tools are present. OpenClaw
-      sends this on every tool-bearing call.
+    * ``tool_choice`` — REQUIRED when tools are present. Defaults to
+      ``"auto"`` for normal calls; finalizer loops may pass ``"required"``.
+      OpenClaw sends this field on every tool-bearing call.
     * ``parallel_tool_calls: true`` — REQUIRED. Allows backend to plan
       multi-tool turns. OpenClaw sends this.
     * ``include: ["reasoning.encrypted_content"]`` — REQUIRED for gpt-5.x
@@ -503,6 +504,7 @@ class OpenAICodexProvider(Provider):
         max_tokens: int,
         output_schema: dict | None = None,
         conversation_id: str = "",
+        tool_choice: str = "auto",
     ) -> ProviderResponse:
         await self._ensure_valid_token()
         http = await self._ensure_http()
@@ -572,8 +574,9 @@ class OpenAICodexProvider(Provider):
             "stream": True,
             # REQUIRED when tools present. OpenClaw sends this on every
             # tool-bearing call. Removing it changes backend tool-routing
-            # behavior unpredictably.
-            "tool_choice": "auto",
+            # behavior unpredictably. Defaults to "auto"; integration
+            # synthesis may force "required" for synthetic finalizers.
+            "tool_choice": tool_choice,
             # REQUIRED. Allows backend to plan multi-tool turns. OpenClaw
             # sends this. Verified present in their stable wire shape.
             "parallel_tool_calls": True,

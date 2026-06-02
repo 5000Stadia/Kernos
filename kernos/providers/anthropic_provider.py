@@ -41,6 +41,7 @@ class AnthropicProvider(Provider):
         max_tokens: int,
         output_schema: dict | None = None,
         conversation_id: str = "",
+        tool_choice: str = "auto",
     ) -> ProviderResponse:
         # conversation_id unused: Anthropic's prompt caching is keyed on the
         # static system-prompt prefix, not a session token.
@@ -80,6 +81,8 @@ class AnthropicProvider(Provider):
         }
         if cached_tools:
             create_kwargs["tools"] = cached_tools
+            if tool_choice == "required":
+                create_kwargs["tool_choice"] = {"type": "any"}
         if output_schema:
             create_kwargs["output_config"] = {
                 "format": {"type": "json_schema", "schema": output_schema}

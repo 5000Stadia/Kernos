@@ -59,6 +59,26 @@ from kernos.kernel.tools.operation_resolver import (
 logger = logging.getLogger(__name__)
 
 
+def _agent_reasoning_for_gate(briefing: Any, step: Any) -> str:
+    """Build concise gate context from the execute_tool briefing."""
+    parts: list[str] = []
+    decided = getattr(briefing, "decided_action", None)
+    narration = getattr(decided, "narration_context", "") or ""
+    if narration:
+        parts.append(f"Decided action context: {narration}")
+    directive = getattr(briefing, "presence_directive", "") or ""
+    if directive:
+        parts.append(f"Presence directive: {directive}")
+    envelope = getattr(briefing, "action_envelope", None)
+    intended = getattr(envelope, "intended_outcome", "") or ""
+    if intended:
+        parts.append(f"Intended outcome: {intended}")
+    expectation = getattr(getattr(step, "expectation", None), "prose", "") or ""
+    if expectation:
+        parts.append(f"Step expectation: {expectation}")
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Tool executor + descriptor lookup Protocols
 # ---------------------------------------------------------------------------
@@ -449,6 +469,11 @@ class StepDispatcher:
             member_id=getattr(briefing, "member_id", ""),
             space_id=getattr(briefing, "space_id", ""),
             turn_id=briefing.turn_id,
+            agent_reasoning=_agent_reasoning_for_gate(briefing, step),
+            user_message=getattr(briefing, "user_message", "") or "",
+            recent_messages=tuple(
+                getattr(briefing, "recent_messages", ()) or ()
+            ),
         )
 
         try:

@@ -210,3 +210,35 @@ async def test_response_delivery_wrapper_default_omits_conversation_id():
     await wrapped("sys", [], [], 100)
 
     assert "conversation_id" not in captured["kwargs"]
+
+
+async def test_response_delivery_wrapper_default_omits_tool_choice():
+    """Default tool_choice is auto and omitted from the compatibility
+    wrapper, matching the existing carve-out for optional kwargs."""
+    captured = {}
+
+    async def inner_chain(system, messages, tools, max_tokens, **kwargs):
+        captured["kwargs"] = kwargs
+        return _resp()
+
+    telemetry = AggregatedTelemetry()
+    wrapped = wrap_chain_caller_with_telemetry(inner_chain, telemetry)
+
+    await wrapped("sys", [], [], 100)
+
+    assert "tool_choice" not in captured["kwargs"]
+
+
+async def test_response_delivery_wrapper_forwards_required_tool_choice():
+    captured = {}
+
+    async def inner_chain(system, messages, tools, max_tokens, **kwargs):
+        captured["kwargs"] = kwargs
+        return _resp()
+
+    telemetry = AggregatedTelemetry()
+    wrapped = wrap_chain_caller_with_telemetry(inner_chain, telemetry)
+
+    await wrapped("sys", [], [], 100, tool_choice="required")
+
+    assert captured["kwargs"].get("tool_choice") == "required"
