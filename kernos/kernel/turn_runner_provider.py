@@ -537,6 +537,10 @@ def _build_live_request_factory() -> Callable[..., Any]:
                 trigger="thin-path-executor",
                 active_space_id=getattr(inputs, "space_id", "") or "",
                 member_id=getattr(inputs, "member_id", "") or "",
+                # Carry the user's message so execute_tool handlers can
+                # compose required NL args (e.g. improve_kernos's
+                # spec_requirement) when an upstream stage dropped them.
+                input_text=getattr(inputs, "user_message", "") or "",
             )
         # Integration-dispatcher path: (tool_id, args, inputs).
         _, _, dispatch_inputs = args
@@ -550,6 +554,7 @@ def _build_live_request_factory() -> Callable[..., Any]:
             trigger="thin-path-integration-dispatcher",
             active_space_id=getattr(dispatch_inputs, "space_id", "") or "",
             member_id=getattr(dispatch_inputs, "member_id", "") or "",
+            input_text=getattr(dispatch_inputs, "user_message", "") or "",
         )
 
     return _live_request_factory

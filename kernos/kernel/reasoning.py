@@ -1604,6 +1604,25 @@ class ReasoningService:
                 from kernos.kernel.improvement_loop_workflow import (
                     handle_improve_kernos,
                 )
+                # Live-path arg robustness (2026-06-02 dispatch RCA):
+                # the full-machinery planner re-emits this tool's call
+                # from scratch and routinely DROPS the natural-language
+                # `spec_requirement` (planner.py builds a fresh plan and
+                # does not carry integration's composed arguments), which
+                # bounces the tool with "spec_requirement is required".
+                # The requirement is almost always already in the user's
+                # message, so compose it from request.input_text when the
+                # planner left it empty. This is the convergence point all
+                # live dispatch paths funnel through, so the guard here is
+                # robust regardless of which upstream stage emitted {}.
+                if not (tool_input.get("spec_requirement") or "").strip():
+                    _fallback = (
+                        getattr(request, "input_text", "") or ""
+                    ).strip()
+                    if _fallback:
+                        tool_input = {
+                            **tool_input, "spec_requirement": _fallback,
+                        }
                 return await handle_improve_kernos(
                     handler=getattr(self, "_handler", None),
                     tool_input=tool_input,

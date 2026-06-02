@@ -653,3 +653,57 @@ def test_unknown_effect_tool_not_concurrent_safe():
 # code rather than port to a transitional measure.
 # ---------------------------------------------------------------------------
 
+
+
+# ---------------------------------------------------------------------------
+# Live-path spec_requirement robustness (dispatch RCA 2026-06-02)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_improve_kernos_composes_spec_requirement_from_input_text(monkeypatch):
+    """When an upstream stage (the full-machinery planner) emits the
+    improve_kernos call with an empty spec_requirement, execute_tool must
+    compose it from request.input_text so the tool doesn't bounce."""
+    service, *_ = _make_service()
+    captured: dict = {}
+
+    async def _fake_handle(**kwargs):
+        captured.update(kwargs.get("tool_input") or {})
+        return "started"
+
+    monkeypatch.setattr(
+        "kernos.kernel.improvement_loop_workflow.handle_improve_kernos",
+        _fake_handle,
+    )
+    req = _make_request(
+        input_text="add a short module docstring to tool_aliases.py",
+    )
+    out = await service.execute_tool("improve_kernos", {}, req)
+    assert out == "started"
+    assert (
+        captured.get("spec_requirement")
+        == "add a short module docstring to tool_aliases.py"
+    )
+
+
+@pytest.mark.asyncio
+async def test_improve_kernos_preserves_explicit_spec_requirement(monkeypatch):
+    """An explicitly-provided spec_requirement is never overwritten by the
+    input_text fallback."""
+    service, *_ = _make_service()
+    captured: dict = {}
+
+    async def _fake_handle(**kwargs):
+        captured.update(kwargs.get("tool_input") or {})
+        return "started"
+
+    monkeypatch.setattr(
+        "kernos.kernel.improvement_loop_workflow.handle_improve_kernos",
+        _fake_handle,
+    )
+    req = _make_request(input_text="the raw user message")
+    await service.execute_tool(
+        "improve_kernos", {"spec_requirement": "explicit requirement"}, req,
+    )
+    assert captured.get("spec_requirement") == "explicit requirement"
