@@ -171,6 +171,7 @@ class ImprovementLoopOrchestrator:
         self._restart_fn = restart_fn
         self._notify_fn = notify_fn
         self._announce_fn = announce_fn
+        self._origin_space_id: str = ""
         self._receipts_event_stream = receipts_event_stream
         # Track running background tasks so tests + shutdown
         # can wait on them.
@@ -373,6 +374,15 @@ class ImprovementLoopOrchestrator:
                         ended_at=utc_now(),
                     )
                     return
+
+                # Progress narration: remember where to push short
+                # status lines so the user gets a play-by-play of each
+                # meaningful step instead of a long silence.
+                self._origin_space_id = (
+                    await self._attempt_origin(
+                        db._conn, attempt_id=attempt_id,
+                    )
+                ).get("origin_space_id", "") or ""
 
                 # Spec cycle.
                 spec_outcome = await self._run_spec_cycle(
@@ -629,6 +639,11 @@ class ImprovementLoopOrchestrator:
         spec_text = ""
         while not state.finished:
             iteration = state.iteration + 1
+            await self._announce(
+                self._origin_space_id,
+                "Drafting the spec…" if iteration == 1
+                else f"Revising the spec (round {iteration})…",
+            )
             # Author round
             author_prompt = render_prompt(
                 "spec_author",
@@ -644,6 +659,7 @@ class ImprovementLoopOrchestrator:
             author_status, author_findings = detect_status(author_text)
             spec_text = author_text  # latest spec is the author's output
 
+            await self._announce(self._origin_space_id, "Reviewing the spec…")
             # Reviewer round
             reviewer_prompt = render_prompt(
                 "spec_reviewer",
@@ -709,6 +725,11 @@ class ImprovementLoopOrchestrator:
         prior_findings = ""
         while not state.finished:
             iteration = state.iteration + 1
+            await self._announce(
+                self._origin_space_id,
+                "Implementing the change…" if iteration == 1
+                else f"Reworking the change (round {iteration})…",
+            )
             author_prompt = render_prompt(
                 "impl_author",
                 iteration=iteration,
@@ -721,6 +742,7 @@ class ImprovementLoopOrchestrator:
             )
             author_status, author_findings = detect_status(author_text)
 
+            await self._announce(self._origin_space_id, "Reviewing the code…")
             reviewer_prompt = render_prompt(
                 "impl_reviewer",
                 iteration=iteration,
