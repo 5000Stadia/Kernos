@@ -667,6 +667,40 @@ class IntegrationRunner:
                     b for b in response.content if b.type == "tool_use"
                 ]
                 if not tool_uses:
+                    # NO_TOOL_USE DIAGNOSTIC (2026-06-02): capture exactly what
+                    # the model returned so this failure is root-caused, not
+                    # guessed — block types, the text it said instead of
+                    # calling a tool, the stop reason, and which tools were
+                    # even offered (an empty list = a synthesis-config bug, not
+                    # model behavior).
+                    try:
+                        _content = response.content or []
+                        _block_types = [getattr(b, "type", "?") for b in _content]
+                        _text_preview = next(
+                            (
+                                (getattr(b, "text", "") or "")[:400]
+                                for b in _content
+                                if getattr(b, "type", "") == "text"
+                            ),
+                            "",
+                        )
+                        _offered = []
+                        for t in (integration_tools or []):
+                            _n = (
+                                t.get("name") if isinstance(t, dict)
+                                else getattr(t, "name", "?")
+                            )
+                            _offered.append(_n)
+                        logger.error(
+                            "NO_TOOL_USE_DIAG: iter=%d n_blocks=%d block_types=%s "
+                            "stop_reason=%s tools_offered=%s text_preview=%r",
+                            iterations, len(_content), _block_types,
+                            getattr(response, "stop_reason", None)
+                            or getattr(response, "finish_reason", None),
+                            _offered, _text_preview,
+                        )
+                    except Exception as _diag_exc:
+                        logger.error("NO_TOOL_USE_DIAG_FAILED: %s", _diag_exc)
                     raise IntegrationAttemptFailed(
                         component="no_tool_use",
                         reason=(
