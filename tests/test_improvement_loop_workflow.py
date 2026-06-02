@@ -327,7 +327,10 @@ async def test_impl_green_auto_proceeds_by_default(loop_env, monkeypatch):
         await db.close()
 
     assert approvals and approvals[0]["approval_id"] == approval_id
-    assert approvals[0]["invoking_member_id"] == "member_1"
+    # Auto-approval must present the receipt's operator identity ("owner"),
+    # not the origin member id, or the real approve() operator check rejects
+    # it and the loop parks instead of deploying.
+    assert approvals[0]["invoking_member_id"] == "owner"
     assert continuations and continuations[0]["approval_id"] == approval_id
     assert any(
         space_id == "space_1" and "deploying" in message

@@ -536,7 +536,12 @@ class ImprovementLoopOrchestrator:
                 data_dir=self._data_dir,
                 approval_id=approval_id,
                 instance_id=self._instance_id,
-                invoking_member_id=(origin_member_id or "owner"),
+                # The receipt's operator is "owner" (set by
+                # _request_commit_approval -> operator_actor_id="owner");
+                # auto-approval must present THAT identity, not the
+                # origin member id, or approve() rejects on the operator
+                # check and the loop falls back to parking.
+                invoking_member_id="owner",
                 event_stream=self._receipts_event_stream,
             )
             if not ok:
