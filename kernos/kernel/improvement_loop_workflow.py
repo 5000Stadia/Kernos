@@ -45,12 +45,13 @@ IMPROVE_KERNOS_TOOL: dict = {
     "description": (
         "Start an autonomous improvement against Kernos's own "
         "source: trusted coding agents draft + implement the "
-        "change, and it pauses for the user's approval before "
-        "anything is committed or goes live. Returns immediately "
+        "change, then commit + deploy automatically after review "
+        "unless the change needs explicit approval. Returns immediately "
         "with a tracking handle; the work continues in the "
         "background. Tell the user about it like a person would "
-        "— 'on it, I'll show you the change before anything goes "
-        "live' — not as a status report; do NOT surface the raw "
+        "— 'on it, I'll handle the review and tell you when it's "
+        "live or if I need approval' — not as a status report; do "
+        "NOT surface the raw "
         "attempt id or /improvement_status unless they ask for "
         "detail or you're in an admin/diagnostic context."
     ),
@@ -132,6 +133,9 @@ RECOVERY_TOOL_NAMES = frozenset({
     "abandon_attempt",
 })
 
+_AUTO_PROCEED_MAX_FILES = 25
+_AUTO_PROCEED_MAX_NET_DELETIONS = 400
+
 
 # ---------------------------------------------------------------------
 # Orchestrator
@@ -157,6 +161,7 @@ class ImprovementLoopOrchestrator:
         consult_fn: Any = None,           # async (target, prompt) -> str
         restart_fn: Any = None,           # async () -> None
         notify_fn: Any = None,            # async (attempt_id, final_state) -> None
+        announce_fn: Any = None,          # async (space_id, message) -> None
         receipts_event_stream: Any = None,
     ) -> None:
         self._instance_id = instance_id
@@ -165,10 +170,12 @@ class ImprovementLoopOrchestrator:
         self._consult_fn = consult_fn
         self._restart_fn = restart_fn
         self._notify_fn = notify_fn
+        self._announce_fn = announce_fn
         self._receipts_event_stream = receipts_event_stream
         # Track running background tasks so tests + shutdown
         # can wait on them.
         self._running_tasks: set[asyncio.Task] = set()
+        self._terminal_notify_sent: set[str] = set()
 
     # --- Public entry points ---
 
@@ -284,11 +291,14 @@ class ImprovementLoopOrchestrator:
         # approval gate OR any abort), tell the user instead of going
         # silent. The done-callback is sync, so schedule the async
         # notifier as its own task.
-        task.add_done_callback(
-            lambda _t, aid=attempt_id: self._running_tasks.add(
-                asyncio.create_task(self._notify_on_terminal(aid))
+        def _schedule_terminal_notify(_t, aid=attempt_id) -> None:
+            notify_task = asyncio.create_task(
+                self._notify_on_terminal(aid)
             )
-        )
+            self._running_tasks.add(notify_task)
+            notify_task.add_done_callback(self._running_tasks.discard)
+
+        task.add_done_callback(_schedule_terminal_notify)
 
         return attempt_id
 
@@ -316,11 +326,26 @@ class ImprovementLoopOrchestrator:
             final_state = (row or {}).get("final_state") or ""
             if not final_state:
                 return
+            if attempt_id in self._terminal_notify_sent:
+                return
+            self._terminal_notify_sent.add(attempt_id)
             await self._notify_fn(attempt_id, final_state)
         except Exception as exc:
             logger.warning(
                 "IMPROVE_KERNOS_TERMINAL_NOTIFY_FAILED attempt=%s: %s",
                 attempt_id, exc,
+            )
+
+    async def _announce(self, space_id: str, message: str) -> None:
+        """Best-effort user-facing proactive announcement seam."""
+        if self._announce_fn is None:
+            return
+        try:
+            await _maybe_await(self._announce_fn(space_id, message))
+        except Exception as exc:
+            logger.warning(
+                "IMPROVE_KERNOS_ANNOUNCE_FAILED space=%s: %s",
+                space_id, exc,
             )
 
     async def _run_attempt(self, *, attempt_id: str) -> None:
@@ -333,6 +358,7 @@ class ImprovementLoopOrchestrator:
         from kernos.utils import utc_now
 
         try:
+            post_db_action: Any = None
             db = InstanceDB(self._data_dir)
             await db.connect()
             try:
@@ -381,18 +407,19 @@ class ImprovementLoopOrchestrator:
                     )
                     return
 
-                # Request operator approval.
-                await self._request_commit_approval(
+                origin = await self._attempt_origin(
+                    db._conn, attempt_id=attempt_id,
+                )
+                post_db_action = await self._finalize_after_impl_green(
                     db=db, attempt_id=attempt_id,
                     worktree_path=worktree_path,
-                )
-                await _ledger.update_attempt(
-                    db._conn,
-                    attempt_id=attempt_id,
-                    final_state="awaiting_commit_approval",
+                    origin_space_id=origin.get("origin_space_id", "") or "",
+                    origin_member_id=origin.get("origin_member_id", "") or "",
                 )
             finally:
                 await db.close()
+            if post_db_action is not None:
+                await post_db_action()
         except Exception as exc:
             logger.exception(
                 "IMPROVE_KERNOS_ATTEMPT_FAILED attempt=%s",
@@ -419,6 +446,170 @@ class ImprovementLoopOrchestrator:
                     await db.close()
             except Exception:
                 pass
+
+    async def _attempt_origin(
+        self, conn: Any, *, attempt_id: str,
+    ) -> dict[str, str]:
+        from kernos.kernel import improvement_ledger as _ledger
+
+        events = await _ledger.get_attempt_events(conn, attempt_id)
+        for event in events:
+            if event.get("kind") != "attempt_origin":
+                continue
+            detail = _loads_detail(event.get("detail") or "")
+            return {
+                "origin_space_id": str(detail.get("origin_space_id") or ""),
+                "origin_member_id": str(detail.get("origin_member_id") or ""),
+            }
+        return {"origin_space_id": "", "origin_member_id": ""}
+
+    async def _finalize_after_impl_green(
+        self, *, db: Any, attempt_id: str, worktree_path: str,
+        origin_space_id: str, origin_member_id: str,
+    ) -> Any:
+        """Prepare the durable approval receipt with the open ledger DB.
+
+        Returns a post-close async action for user notification and, when
+        allowed, approval + commit continuation. The returned action must run
+        after the caller closes ``db`` because the continuation opens its own
+        InstanceDB connection.
+        """
+        from kernos.kernel import improvement_ledger as _ledger
+
+        approval_id = await self._request_commit_approval(
+            db=db, attempt_id=attempt_id, worktree_path=worktree_path,
+        )
+        require_approval = _env_truthy("KERNOS_IMPROVE_REQUIRE_APPROVAL")
+        block_reason = await self._auto_proceed_block_reason(worktree_path)
+        await _ledger.update_attempt(
+            db._conn,
+            attempt_id=attempt_id,
+            final_state="awaiting_commit_approval",
+        )
+
+        if require_approval or block_reason:
+            reasons: list[str] = []
+            if require_approval:
+                reasons.append(
+                    "KERNOS_IMPROVE_REQUIRE_APPROVAL is set"
+                )
+            if block_reason:
+                reasons.append(block_reason)
+            reason_text = "; ".join(reasons)
+
+            async def _pause_for_human() -> None:
+                await self._notify_on_terminal(attempt_id)
+                await self._announce(
+                    origin_space_id,
+                    (
+                        "Implemented the change and it passed author+reviewer "
+                        "review, but I need human approval before committing. "
+                        f"Reason: {reason_text}. "
+                        f"Approval `{approval_id}` is waiting.\n"
+                        f"/approve {approval_id} CONFIRM"
+                    ),
+                )
+
+            return _pause_for_human
+
+        async def _auto_proceed() -> None:
+            await self._announce(
+                origin_space_id,
+                (
+                    "Implemented the change; it passed author+reviewer "
+                    "review. Committing and deploying now - I'll tell you "
+                    f"when it's live or if it rolls back. (attempt {attempt_id})"
+                ),
+            )
+            from kernos.kernel import approval_receipts as _approvals
+            ok, msg = await _approvals.approve(
+                data_dir=self._data_dir,
+                approval_id=approval_id,
+                instance_id=self._instance_id,
+                invoking_member_id=(origin_member_id or "owner"),
+                event_stream=self._receipts_event_stream,
+            )
+            if not ok:
+                await self._set_awaiting_commit_approval(attempt_id)
+                await self._announce(
+                    origin_space_id,
+                    (
+                        "Implemented the change and it passed review, but "
+                        f"auto-approval failed: {msg} "
+                        f"Approval `{approval_id}` is waiting.\n"
+                        f"/approve {approval_id} CONFIRM"
+                    ),
+                )
+                return
+
+            await self._append_auto_approved_event(
+                attempt_id=attempt_id, approval_id=approval_id,
+            )
+            result = await continue_approved_improvement_commit(
+                data_dir=self._data_dir,
+                instance_id=self._instance_id,
+                approval_id=approval_id,
+                restart_fn=self._restart_fn,
+            )
+            await self._announce(origin_space_id, result)
+
+        return _auto_proceed
+
+    async def _append_auto_approved_event(
+        self, *, attempt_id: str, approval_id: str,
+    ) -> None:
+        from kernos.kernel import improvement_ledger as _ledger
+        from kernos.kernel.instance_db import InstanceDB
+
+        db = InstanceDB(self._data_dir)
+        await db.connect()
+        try:
+            await _ledger.append_event(
+                db._conn, attempt_id=attempt_id,
+                kind="auto_approved",
+                detail=f"approval_id={approval_id}",
+            )
+        finally:
+            await db.close()
+
+    async def _set_awaiting_commit_approval(self, attempt_id: str) -> None:
+        from kernos.kernel import improvement_ledger as _ledger
+        from kernos.kernel.instance_db import InstanceDB
+
+        db = InstanceDB(self._data_dir)
+        await db.connect()
+        try:
+            await _ledger.update_attempt(
+                db._conn,
+                attempt_id=attempt_id,
+                final_state="awaiting_commit_approval",
+            )
+        finally:
+            await db.close()
+
+    async def _auto_proceed_block_reason(self, worktree_path: str) -> str:
+        files = await _staged_files(worktree_path)
+        if not files:
+            files = await _changed_files(worktree_path)
+        if any(path == "start.sh" for path in files):
+            return (
+                "change touches protected path start.sh, which is "
+                "human-only and un-rollbackable"
+            )
+        if len(files) > _AUTO_PROCEED_MAX_FILES:
+            return (
+                f"change touches {len(files)} files, over the "
+                f"auto-proceed limit of {_AUTO_PROCEED_MAX_FILES}"
+            )
+
+        net_deletions = await _net_deletions_against_head(worktree_path)
+        if net_deletions > _AUTO_PROCEED_MAX_NET_DELETIONS:
+            return (
+                f"change deletes {net_deletions} more lines than it adds, "
+                "over the auto-proceed limit of "
+                f"{_AUTO_PROCEED_MAX_NET_DELETIONS}"
+            )
+        return ""
 
     async def _run_spec_cycle(
         self, *, db, attempt_id: str, spec_requirement: str,
@@ -571,10 +762,10 @@ class ImprovementLoopOrchestrator:
     async def _request_commit_approval(
         self, *, db, attempt_id: str, worktree_path: str,
         recovery_iteration: int | None = None,
-    ) -> None:
+    ) -> str:
         """Capture pre-commit state + issue a
         git_commit_authorization receipt."""
-        await _request_commit_approval_for_attempt(
+        return await _request_commit_approval_for_attempt(
             db=db,
             data_dir=self._data_dir,
             instance_id=self._instance_id,
@@ -607,12 +798,21 @@ class ImprovementLoopOrchestrator:
     ) -> None:
         """Wait for any in-flight background attempt tasks.
         Used by tests + clean shutdown."""
-        if not self._running_tasks:
-            return
-        await asyncio.wait(
-            self._running_tasks,
-            timeout=timeout,
-        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout if timeout is not None else None
+        while self._running_tasks:
+            wait_timeout = None
+            if deadline is not None:
+                wait_timeout = max(0.0, deadline - loop.time())
+                if wait_timeout <= 0:
+                    return
+            _done, pending = await asyncio.wait(
+                set(self._running_tasks),
+                timeout=wait_timeout,
+            )
+            if pending:
+                return
+            await asyncio.sleep(0)
 
 
 # ---------------------------------------------------------------------
@@ -651,6 +851,11 @@ def _loads_detail(text: str) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _env_truthy(name: str) -> bool:
+    value = (os.environ.get(name) or "").strip().lower()
+    return bool(value) and value not in {"0", "false", "no", "off"}
 
 
 _STALL_THRESHOLD_SEC: int = int(
@@ -872,6 +1077,30 @@ async def _changed_files(workspace_dir: str) -> list[str]:
     if rc != 0:
         return []
     return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+async def _net_deletions_against_head(workspace_dir: str) -> int:
+    rc, out, _ = await _run_git_in(
+        ["diff", "--cached", "--numstat"], cwd=workspace_dir,
+    )
+    if rc != 0 or not out.strip():
+        rc, out, _ = await _run_git_in(
+            ["diff", "--numstat", "HEAD"], cwd=workspace_dir,
+        )
+    if rc != 0:
+        return 0
+    additions = 0
+    deletions = 0
+    for line in out.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) < 2:
+            continue
+        try:
+            additions += int(parts[0])
+            deletions += int(parts[1])
+        except ValueError:
+            continue
+    return max(0, deletions - additions)
 
 
 async def _head_sha(workspace_dir: str) -> str:
@@ -2917,6 +3146,65 @@ async def handle_improve_kernos(
                 attempt_id, exc,
             )
 
+    async def _announce_to_origin(space_id: str, message: str) -> None:
+        """Try immediate outbound delivery; fall back to a stage whisper."""
+        member_id = origin_member_id
+        if not member_id:
+            try:
+                from kernos.kernel.scheduler import resolve_owner_member_id
+                member_id = resolve_owner_member_id(instance_id)
+            except Exception:
+                member_id = "owner"
+
+        send_outbound = getattr(handler, "send_outbound", None)
+        if callable(send_outbound):
+            try:
+                sent = await send_outbound(
+                    instance_id, member_id, None, message,
+                )
+                if sent:
+                    return
+            except Exception as exc:
+                logger.warning(
+                    "IMPROVE_KERNOS_ANNOUNCE_OUTBOUND_FAILED %s: %s",
+                    space_id, exc,
+                )
+
+        state = getattr(handler, "state", None)
+        target_space_id = space_id or origin_space_id
+        if state is None or not member_id or not target_space_id:
+            return
+        try:
+            from datetime import datetime, timezone
+            from kernos.kernel.awareness import Whisper, generate_whisper_id
+            w = Whisper(
+                whisper_id=generate_whisper_id(),
+                insight_text=(
+                    "Background self-improvement update for the user:\n"
+                    f"{message}\n"
+                    "Tell the user this proactively in your own voice."
+                ),
+                delivery_class="stage",
+                source_space_id=target_space_id,
+                target_space_id=target_space_id,
+                supporting_evidence="improve_kernos proactive update",
+                reasoning_trace=(
+                    "improve_kernos could not push directly through an "
+                    "outbound channel, so it staged a whisper in the "
+                    "origin space."
+                ),
+                knowledge_entry_id="",
+                foresight_signal="improvement_announce",
+                created_at=datetime.now(timezone.utc).isoformat(),
+                owner_member_id=member_id,
+            )
+            await state.save_whisper(instance_id, w)
+        except Exception as exc:
+            logger.warning(
+                "IMPROVE_KERNOS_ANNOUNCE_WHISPER_FAILED %s: %s",
+                target_space_id, exc,
+            )
+
     orchestrator = ImprovementLoopOrchestrator(
         instance_id=instance_id,
         data_dir=data_dir,
@@ -2924,8 +3212,13 @@ async def handle_improve_kernos(
         consult_fn=consult_fn,
         restart_fn=restart_fn,
         notify_fn=_notify_terminal,
+        announce_fn=_announce_to_origin,
         receipts_event_stream=getattr(handler, "events", None),
     )
+    try:
+        setattr(handler, "_last_improvement_orchestrator", orchestrator)
+    except Exception:
+        pass
     try:
         attempt_id = await orchestrator.start_attempt(
             spec_requirement=spec_requirement,
@@ -2944,8 +3237,8 @@ async def handle_improve_kernos(
         )
     return (
         f"Improvement attempt started: `{attempt_id}`. I'll work "
-        f"through drafting + review and ping you when ready for "
-        f"commit approval. Track progress via "
+        f"through drafting + review, then tell you when it's live "
+        f"or if it needs approval. Track progress via "
         f"`/improvement_status {attempt_id}`."
     )
 

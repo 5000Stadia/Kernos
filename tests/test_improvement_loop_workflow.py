@@ -28,6 +28,7 @@ from kernos.kernel.improvement_loop_workflow import (
     IMPROVE_KERNOS_TOOL,
     ImprovementLoopOrchestrator,
 )
+from kernos.kernel import improvement_loop_workflow as _workflow
 from kernos.kernel.instance_db import InstanceDB
 
 
@@ -160,6 +161,26 @@ def _make_diverging_consult():
     return _consult
 
 
+def _make_converging_consult_with_edit(edit_fn):
+    edited = {"done": False}
+
+    async def _consult(
+        *, target: str, prompt: str, workspace_dir: str = "",
+    ) -> str:
+        if workspace_dir and not edited["done"]:
+            edit_fn(Path(workspace_dir))
+            edited["done"] = True
+        return "final spec content\n\nSTATUS: GREEN"
+
+    return _consult
+
+
+def _approval_id_from_events(events: list[dict]) -> str:
+    event = next(e for e in events if e["kind"] == "approval_requested")
+    detail = event["detail"]
+    return detail.split("approval_id=", 1)[1].split()[0]
+
+
 @pytest.mark.asyncio
 async def test_ac1_ac2_ac3_start_returns_attempt_id_creates_workspace(
     loop_env,
@@ -257,6 +278,217 @@ async def test_ac6_approval_receipt_issued_with_binding(loop_env):
         await db.close()
 
 
+@pytest.mark.asyncio
+async def test_impl_green_auto_proceeds_by_default(loop_env, monkeypatch):
+    monkeypatch.delenv("KERNOS_IMPROVE_REQUIRE_APPROVAL", raising=False)
+    data_dir, repo_dir = loop_env
+    announcements: list[tuple[str, str]] = []
+    approvals: list[dict] = []
+    continuations: list[dict] = []
+
+    async def _announce(space_id: str, message: str) -> None:
+        announcements.append((space_id, message))
+
+    async def _approve(**kwargs):
+        approvals.append(kwargs)
+        return True, "approved"
+
+    async def _continue(**kwargs):
+        continuations.append(kwargs)
+        return "deployed"
+
+    monkeypatch.setattr(_approvals, "approve", _approve)
+    monkeypatch.setattr(
+        _workflow, "continue_approved_improvement_commit", _continue,
+    )
+
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir,
+        live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult(),
+        restart_fn=lambda: None,
+        announce_fn=_announce,
+    )
+    attempt_id = await orch.start_attempt(
+        spec_requirement="x",
+        origin_space_id="space_1",
+        origin_member_id="member_1",
+    )
+    await orch.wait_for_running_tasks(timeout=10)
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        events = await _ledger.get_attempt_events(db._conn, attempt_id)
+        kinds = [e["kind"] for e in events]
+        assert "auto_approved" in kinds
+        approval_id = _approval_id_from_events(events)
+    finally:
+        await db.close()
+
+    assert approvals and approvals[0]["approval_id"] == approval_id
+    assert approvals[0]["invoking_member_id"] == "member_1"
+    assert continuations and continuations[0]["approval_id"] == approval_id
+    assert any(
+        space_id == "space_1" and "deploying" in message
+        for space_id, message in announcements
+    )
+
+
+@pytest.mark.asyncio
+async def test_impl_green_require_approval_parks(loop_env, monkeypatch):
+    monkeypatch.setenv("KERNOS_IMPROVE_REQUIRE_APPROVAL", "1")
+    data_dir, repo_dir = loop_env
+    announcements: list[tuple[str, str]] = []
+    continuations: list[dict] = []
+    approvals: list[dict] = []
+
+    async def _announce(space_id: str, message: str) -> None:
+        announcements.append((space_id, message))
+
+    async def _approve(**kwargs):
+        approvals.append(kwargs)
+        return True, "approved"
+
+    async def _continue(**kwargs):
+        continuations.append(kwargs)
+        return "deployed"
+
+    monkeypatch.setattr(_approvals, "approve", _approve)
+    monkeypatch.setattr(
+        _workflow, "continue_approved_improvement_commit", _continue,
+    )
+
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir,
+        live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult(),
+        restart_fn=lambda: None,
+        announce_fn=_announce,
+    )
+    attempt_id = await orch.start_attempt(
+        spec_requirement="x",
+        origin_space_id="space_1",
+        origin_member_id="member_1",
+    )
+    await orch.wait_for_running_tasks(timeout=10)
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, attempt_id)
+        events = await _ledger.get_attempt_events(db._conn, attempt_id)
+        approval_id = _approval_id_from_events(events)
+    finally:
+        await db.close()
+
+    assert row["final_state"] == "awaiting_commit_approval"
+    assert approvals == []
+    assert continuations == []
+    assert any(
+        f"/approve {approval_id} CONFIRM" in message
+        for _space_id, message in announcements
+    )
+
+
+@pytest.mark.asyncio
+async def test_impl_green_protected_path_parks(loop_env, monkeypatch):
+    monkeypatch.delenv("KERNOS_IMPROVE_REQUIRE_APPROVAL", raising=False)
+    data_dir, repo_dir = loop_env
+    announcements: list[tuple[str, str]] = []
+    continuations: list[dict] = []
+
+    async def _announce(space_id: str, message: str) -> None:
+        announcements.append((space_id, message))
+
+    async def _continue(**kwargs):
+        continuations.append(kwargs)
+        return "deployed"
+
+    monkeypatch.setattr(
+        _workflow, "continue_approved_improvement_commit", _continue,
+    )
+
+    def _touch_start_sh(workspace: Path) -> None:
+        (workspace / "start.sh").write_text("human-only\n")
+
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir,
+        live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult_with_edit(_touch_start_sh),
+        restart_fn=lambda: None,
+        announce_fn=_announce,
+    )
+    attempt_id = await orch.start_attempt(
+        spec_requirement="x",
+        origin_space_id="space_1",
+        origin_member_id="member_1",
+    )
+    await orch.wait_for_running_tasks(timeout=10)
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, attempt_id)
+    finally:
+        await db.close()
+
+    assert row["final_state"] == "awaiting_commit_approval"
+    assert continuations == []
+    assert any("start.sh" in message for _space_id, message in announcements)
+
+
+@pytest.mark.asyncio
+async def test_impl_green_oversized_diff_parks(loop_env, monkeypatch):
+    monkeypatch.delenv("KERNOS_IMPROVE_REQUIRE_APPROVAL", raising=False)
+    data_dir, repo_dir = loop_env
+    announcements: list[tuple[str, str]] = []
+    continuations: list[dict] = []
+
+    async def _announce(space_id: str, message: str) -> None:
+        announcements.append((space_id, message))
+
+    async def _continue(**kwargs):
+        continuations.append(kwargs)
+        return "deployed"
+
+    monkeypatch.setattr(
+        _workflow, "continue_approved_improvement_commit", _continue,
+    )
+
+    def _write_many_files(workspace: Path) -> None:
+        for index in range(_workflow._AUTO_PROCEED_MAX_FILES + 1):
+            (workspace / f"large_{index}.txt").write_text(f"{index}\n")
+
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir,
+        live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult_with_edit(_write_many_files),
+        restart_fn=lambda: None,
+        announce_fn=_announce,
+    )
+    attempt_id = await orch.start_attempt(
+        spec_requirement="x",
+        origin_space_id="space_1",
+        origin_member_id="member_1",
+    )
+    await orch.wait_for_running_tasks(timeout=10)
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, attempt_id)
+    finally:
+        await db.close()
+
+    assert row["final_state"] == "awaiting_commit_approval"
+    assert continuations == []
+    assert any(
+        "auto-proceed limit" in message
+        for _space_id, message in announcements
+    )
+
+
 # ============================================================
 # Failure paths: ACs 16-17
 # ============================================================
@@ -330,11 +562,15 @@ async def test_handle_returns_prose_with_attempt_id(loop_env):
         events = None
         _consult_fn_for_loop = staticmethod(_make_converging_consult())
 
+    handler = _StubHandler()
     text = await handle_improve_kernos(
-        handler=_StubHandler(),
+        handler=handler,
         tool_input={"spec_requirement": "trivial fix"},
         instance_id="t1",
         data_dir=data_dir,
+    )
+    await handler._last_improvement_orchestrator.wait_for_running_tasks(
+        timeout=10,
     )
     assert "att_" in text
     # Natural prose, no JSON markers
