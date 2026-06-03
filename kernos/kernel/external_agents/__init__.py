@@ -23,6 +23,7 @@ from kernos.kernel.external_agents.consultation_log import (
 )
 from kernos.kernel.external_agents.errors import (
     ConsultationFailed,
+    ConsultationStalled,
     ConsultationTimeout,
     DepthExceeded,
     ExternalAgentError,
@@ -69,6 +70,7 @@ __all__ = [
     "ConsultationOrchestrator",
     "ConsultationRecord",
     "ConsultationStatus",
+    "ConsultationStalled",
     "ConsultationTimeout",
     "DEFAULT_RESPONSE_CAP_BYTES",
     "DepthExceeded",

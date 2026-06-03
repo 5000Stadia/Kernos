@@ -40,6 +40,7 @@ from typing import Any, AsyncIterator
 
 from kernos.kernel.external_agents.errors import (
     ConsultationFailed,
+    ConsultationStalled,
     ConsultationTimeout,
     HarnessUnavailable,
 )
@@ -241,6 +242,8 @@ DEFAULT_TIMEOUT_SECONDS: int = int(
 MAX_TIMEOUT_SECONDS: int = int(
     os.environ.get("KERNOS_ACPX_MAX_TIMEOUT_SEC", "1800")
 )
+DEFAULT_IDLE_ABORT_SECONDS: float = 300.0
+DEFAULT_CONSULT_RETRIES: int = 2
 
 
 # ---------------------------------------------------------------------
@@ -346,6 +349,53 @@ class _ParseFailure(Exception):
     #5."""
 
 
+class _TransientAcpxFailure(ConsultationFailed):
+    """Internal marker: a failed ACPX attempt looks retryable."""
+
+    def __init__(
+        self,
+        *args: object,
+        last_event_kind: str = "",
+        event_count: int = 0,
+        stdout_errors: list[str] | None = None,
+        exit_status: int = 0,
+    ) -> None:
+        super().__init__(*args, exit_status=exit_status)
+        self.last_event_kind = last_event_kind
+        self.event_count = event_count
+        self.stdout_errors = list(stdout_errors or [])
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read a non-critical integer env knob, falling back on bad input."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "ACPX_BAD_ENV_INT: %s=%r using_default=%d",
+            name, raw, default,
+        )
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a non-critical float env knob, falling back on bad input."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "ACPX_BAD_ENV_FLOAT: %s=%r using_default=%s",
+            name, raw, default,
+        )
+        return default
+
+
 async def _read_lines_unbounded(
     reader: asyncio.StreamReader | None,
     chunk_size: int = 65536,
@@ -427,6 +477,32 @@ def _parse_ndjson_event(line: str) -> dict[str, Any] | None:
     return parsed
 
 
+def _extract_event_kind(event: dict[str, Any]) -> str:
+    """Return the most useful operator-facing ACP event kind.
+
+    ACPX/ACP JSON-RPC stream events normally carry their semantic
+    step under ``params.update.sessionUpdate``. Fall back to the
+    JSON-RPC method, then legacy normalized root fields.
+    """
+    params = event.get("params")
+    if isinstance(params, dict):
+        update = params.get("update")
+        if isinstance(update, dict):
+            session_update = update.get("sessionUpdate")
+            if isinstance(session_update, str) and session_update:
+                return session_update
+    method = event.get("method")
+    if isinstance(method, str) and method:
+        return method
+    kind = event.get("type")
+    if isinstance(kind, str) and kind:
+        return kind
+    kind = event.get("kind")
+    if isinstance(kind, str) and kind:
+        return kind
+    return ""
+
+
 def _extract_agent_message_chunk(event: dict[str, Any]) -> str | None:
     """Per Codex's pre-spec review:
     'Accumulate final text from session/update events where
@@ -496,6 +572,56 @@ def _extract_error_message(event: dict[str, Any]) -> str | None:
         if isinstance(ek, str) and ek:
             kind = f" [{ek}]"
     return f"{msg}{kind}"
+
+
+_DETERMINISTIC_STDOUT_ERROR_MARKERS: tuple[str, ...] = (
+    "auth",
+    "authentication",
+    "unauthorized",
+    "invalid api key",
+    "api key",
+    "401",
+    "403",
+    "billing",
+    "billing_error",
+    "credit balance",
+    "payment required",
+)
+
+
+_TRANSIENT_STDOUT_ERROR_MARKERS: tuple[str, ...] = (
+    "api error",
+    "api overloaded",
+    "overloaded",
+    "rate limit",
+    "rate-limit",
+    "rate_limit",
+    "429",
+    "5xx",
+    "500",
+    "502",
+    "503",
+    "504",
+    "network",
+    "connection reset",
+    "connection refused",
+    "temporarily unavailable",
+    "service unavailable",
+    "timeout",
+    "timed out",
+)
+
+
+def _stdout_errors_are_deterministic(stdout_errors: list[str]) -> bool:
+    text = "\n".join(stdout_errors).lower()
+    return any(marker in text for marker in _DETERMINISTIC_STDOUT_ERROR_MARKERS)
+
+
+def _stdout_errors_are_transient(stdout_errors: list[str]) -> bool:
+    if not stdout_errors or _stdout_errors_are_deterministic(stdout_errors):
+        return False
+    text = "\n".join(stdout_errors).lower()
+    return any(marker in text for marker in _TRANSIENT_STDOUT_ERROR_MARKERS)
 
 
 def _extract_stop_reason(event: dict[str, Any]) -> str | None:
@@ -882,6 +1008,113 @@ async def dispatch(
     approve_all: bool = True,
     _stale_session_retry: int = 0,
 ) -> ConsultResult:
+    """Dispatch ``prompt`` to ``target`` via ACPX with idle-stall retry."""
+    if _stale_session_retry:
+        return await _dispatch_once(
+            target=target,
+            prompt=prompt,
+            session_id=session_id,
+            workspace_dir=workspace_dir,
+            timeout_seconds=timeout_seconds,
+            approve_all=approve_all,
+            _stale_session_retry=_stale_session_retry,
+        )
+
+    if target not in _TARGET_ALIAS_MAP:
+        available = ", ".join(sorted(SUPPORTED_TARGETS))
+        raise HarnessUnavailable(
+            f"target {target!r} not supported by ACPX adapter. "
+            f"Available: {available}"
+        )
+    binary = _acpx_binary()
+    if not shutil.which(binary):
+        raise HarnessUnavailable(
+            f"{binary!r} not on PATH. Install with "
+            f"`npm install -g acpx@0.8.0` or set "
+            f"KERNOS_ACPX_AUTO_INSTALL=1 to auto-install at bring-up."
+        )
+    acpx_agent_name = _TARGET_ALIAS_MAP[target]
+    workspace_dir = workspace_dir or os.getcwd()
+
+    retries = max(
+        0,
+        _env_int("KERNOS_ACPX_CONSULT_RETRIES", DEFAULT_CONSULT_RETRIES),
+    )
+    max_attempts = retries + 1
+    failures: list[str] = []
+    last_reason = ""
+    last_kind = ""
+    last_exc: BaseException | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await _dispatch_once(
+                target=target,
+                prompt=prompt,
+                session_id=session_id,
+                workspace_dir=workspace_dir,
+                timeout_seconds=timeout_seconds,
+                approve_all=approve_all,
+                _stale_session_retry=0,
+            )
+        except ConsultationStalled as exc:
+            last_exc = exc
+            last_reason = exc.last_reason or "idle_stall"
+            last_kind = exc.last_event_kind or ""
+            failures.append(str(exc))
+        except _TransientAcpxFailure as exc:
+            last_exc = exc
+            last_reason = "transient_stdout_error"
+            last_kind = exc.last_event_kind or ""
+            failures.append(str(exc))
+        except ConsultationFailed:
+            raise
+
+        if attempt >= max_attempts:
+            break
+
+        logger.warning(
+            "ACPX_RETRY target=%s attempt=%d/%d reason=%s last_kind=%s",
+            target, attempt + 1, max_attempts, last_reason,
+            last_kind or "(none)",
+        )
+        if session_id:
+            await _close_session(
+                binary=binary,
+                workspace_dir=workspace_dir,
+                acpx_agent_name=acpx_agent_name,
+                session_id=session_id,
+            )
+
+    failure_tail = " | ".join(failures[-3:]) or "(none)"
+    message = (
+        f"ACPX dispatch to {target!r} exhausted retries "
+        f"(attempts={max_attempts}, last_reason={last_reason or '(none)'}, "
+        f"last_event_kind={last_kind or '(none)'}). "
+        f"recent_failures: {failure_tail}"
+    )
+    if isinstance(last_exc, ConsultationStalled):
+        raise ConsultationStalled(
+            message,
+            last_event_kind=last_exc.last_event_kind,
+            silence_seconds=last_exc.silence_seconds,
+            event_count=last_exc.event_count,
+            attempts=max_attempts,
+            last_reason=last_reason or "idle_stall",
+        ) from last_exc
+    raise ConsultationFailed(message) from last_exc
+
+
+async def _dispatch_once(
+    *,
+    target: str,
+    prompt: str,
+    session_id: str = "",
+    workspace_dir: str = "",
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    approve_all: bool = True,
+    _stale_session_retry: int = 0,
+) -> ConsultResult:
     """Dispatch ``prompt`` to ``target`` via ACPX and return a
     :class:`ConsultResult`.
 
@@ -1007,6 +1240,10 @@ async def dispatch(
     dispatch_started_at = _time_diag.monotonic()
     last_event_at: float | None = None
     last_event_kind: str = ""
+    idle_abort_seconds = _env_float(
+        "KERNOS_ACPX_IDLE_ABORT_SEC",
+        float(DEFAULT_IDLE_ABORT_SECONDS),
+    )
 
     async def _drain_stdout() -> None:
         nonlocal event_count, last_stop_reason, parse_errors
@@ -1039,10 +1276,7 @@ async def dispatch(
             # ACPX_TIMEOUT_DIAGNOSTICS: stamp last-event time + kind
             # so a stalled dispatch attributes correctly post-hoc.
             last_event_at = _time_diag.monotonic()
-            try:
-                last_event_kind = str(event.get("type", "") or event.get("kind", ""))
-            except AttributeError:
-                last_event_kind = "?"
+            last_event_kind = _extract_event_kind(event) or "?"
             chunk = _extract_agent_message_chunk(event)
             if chunk is not None:
                 accumulated_chunks.append(chunk)
@@ -1101,23 +1335,73 @@ async def dispatch(
                 pass
             await asyncio.sleep(0.5)
 
+    async def _idle_watchdog() -> None:
+        if idle_abort_seconds <= 0:
+            await asyncio.Future()
+        startup_budget = min(idle_abort_seconds, 120.0)
+        while True:
+            now = _time_diag.monotonic()
+            if event_count > 0 and last_event_at is not None:
+                silence_seconds = now - last_event_at
+                budget = idle_abort_seconds
+                kind = last_event_kind
+                reason = "idle_stall"
+            else:
+                silence_seconds = now - dispatch_started_at
+                budget = startup_budget
+                kind = last_event_kind
+                reason = "startup_idle_stall"
+            if silence_seconds > budget:
+                raise ConsultationStalled(
+                    f"ACPX dispatch to {target!r} stalled after "
+                    f"{silence_seconds:.1f}s of silence "
+                    f"(idle_abort_seconds={budget:g}, "
+                    f"events_received={event_count}, "
+                    f"last_event_kind={kind or '(none)'}).",
+                    last_event_kind=kind,
+                    silence_seconds=silence_seconds,
+                    event_count=event_count,
+                    last_reason=reason,
+                )
+            await asyncio.sleep(min(1.0, max(0.01, budget - silence_seconds)))
+
     drain_stdout_task = asyncio.create_task(_drain_stdout())
     drain_stderr_task = asyncio.create_task(_drain_stderr())
     tracker_task = asyncio.create_task(_track_descendants())
+    wait_task = asyncio.create_task(proc.wait())
+    idle_watchdog_task = asyncio.create_task(_idle_watchdog())
     timed_out = False
+    stalled_exc: ConsultationStalled | None = None
     drain_incomplete = False
 
     try:
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        done, _pending = await asyncio.wait(
+            {wait_task, idle_watchdog_task},
+            timeout=timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not done:
             timed_out = True
+        elif idle_watchdog_task in done:
+            exc = idle_watchdog_task.exception()
+            if isinstance(exc, ConsultationStalled):
+                stalled_exc = exc
+            elif exc is not None:
+                raise exc
+        else:
+            wait_exc = wait_task.exception()
+            if wait_exc is not None:
+                raise wait_exc
     finally:
         # Codex review fold #1: guarantee subprocess cleanup on any
         # exit from the wait — including caller-side cancellation
         # (CancelledError will propagate AFTER this finally runs).
         # Without this, a cancelled coroutine leaks the child.
         if proc.returncode is None:
+            try:
+                _kill_tree(proc.pid)
+            except Exception:
+                pass
             try:
                 proc.kill()
             except Exception:
@@ -1164,26 +1448,34 @@ async def dispatch(
         # Codex review fold #3: cancel AND await the drain tasks so
         # exceptions are observed and we don't get "Task was
         # destroyed but it is pending" warnings.
-        for task in (drain_stdout_task, drain_stderr_task, tracker_task):
+        for task in (
+            drain_stdout_task, drain_stderr_task, tracker_task,
+            wait_task, idle_watchdog_task,
+        ):
             if not task.done():
                 task.cancel()
         await asyncio.gather(
             drain_stdout_task, drain_stderr_task, tracker_task,
+            wait_task, idle_watchdog_task,
             return_exceptions=True,
         )
 
-    if timed_out:
+    if timed_out or stalled_exc is not None:
         # ACPX_TIMEOUT_DIAGNOSTICS (2026-05-22): on every timeout,
         # drop a friction report so the next investigation has the
         # evidence the prior incident lacked. Best-effort write —
         # never let the diagnostic raise.
         _report_path: str = ""
+        diag_timeout_seconds = (
+            int(max(1, idle_abort_seconds))
+            if stalled_exc is not None else timeout_seconds
+        )
         try:
             _report_path = _write_acpx_timeout_friction_report(
                 target=target,
                 acpx_agent_name=acpx_agent_name,
                 session_id=session_id or "",
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=diag_timeout_seconds,
                 dispatch_started_at=dispatch_started_at,
                 last_event_at=last_event_at,
                 last_event_kind=last_event_kind,
@@ -1203,6 +1495,14 @@ async def dispatch(
             f" Diagnostic report: {_report_path}"
             if _report_path else ""
         )
+        if stalled_exc is not None:
+            raise ConsultationStalled(
+                f"{stalled_exc.args[0]}{_hint}",
+                last_event_kind=stalled_exc.last_event_kind,
+                silence_seconds=stalled_exc.silence_seconds,
+                event_count=stalled_exc.event_count,
+                last_reason=stalled_exc.last_reason,
+            ) from stalled_exc
         raise ConsultationTimeout(
             f"ACPX dispatch to {target!r} exceeded {timeout_seconds}s "
             f"(events_received={event_count}, "
@@ -1260,7 +1560,7 @@ async def dispatch(
                 acpx_agent_name=acpx_agent_name,
                 session_id=session_id,
             )
-            return await dispatch(
+            return await _dispatch_once(
                 target=target,
                 prompt=prompt,
                 session_id=session_id,
@@ -1286,11 +1586,22 @@ async def dispatch(
                 for msg, count in err_counter.most_common()
             ]
             stdout_err_text = " | ".join(err_parts)[:500]
-        raise ConsultationFailed(
+        failure_message = (
             f"ACPX dispatch to {target!r} exited rc={proc.returncode}. "
             f"Accumulated {len(response_text)} chars before failure. "
             f"stderr: {stderr_text} | "
-            f"stdout_errors: {stdout_err_text or '(none)'}",
+            f"stdout_errors: {stdout_err_text or '(none)'}"
+        )
+        if _stdout_errors_are_transient(stdout_errors):
+            raise _TransientAcpxFailure(
+                failure_message,
+                last_event_kind=last_event_kind,
+                event_count=event_count,
+                stdout_errors=list(stdout_errors),
+                exit_status=proc.returncode,
+            )
+        raise ConsultationFailed(
+            failure_message,
             # 2026-05-20 Codex audit fix: pass real rc through so
             # consult_log's exit_status column reflects reality
             # instead of defaulting to 0.

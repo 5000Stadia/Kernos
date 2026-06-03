@@ -20,6 +20,26 @@ class ConsultationTimeout(ExternalAgentError):
     """Subprocess exceeded ``timeout_seconds``; killed."""
 
 
+class ConsultationStalled(ConsultationTimeout):
+    """Subprocess stopped emitting ACP events before the total timeout."""
+
+    def __init__(
+        self,
+        *args: object,
+        last_event_kind: str = "",
+        silence_seconds: float = 0.0,
+        event_count: int = 0,
+        attempts: int = 1,
+        last_reason: str = "idle_stall",
+    ) -> None:
+        super().__init__(*args)
+        self.last_event_kind = last_event_kind
+        self.silence_seconds = silence_seconds
+        self.event_count = event_count
+        self.attempts = attempts
+        self.last_reason = last_reason
+
+
 class ConsultationFailed(ExternalAgentError):
     """Subprocess exited non-zero; stderr captured in ``args[1]``
     when available. ``exit_status`` carries the subprocess return
@@ -51,6 +71,7 @@ class HarnessRegistrationError(ExternalAgentError):
 
 __all__ = [
     "ConsultationFailed",
+    "ConsultationStalled",
     "ConsultationTimeout",
     "DepthExceeded",
     "ExternalAgentError",
