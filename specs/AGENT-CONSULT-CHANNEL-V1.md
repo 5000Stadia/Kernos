@@ -65,7 +65,7 @@ The CLI cannot delegate a permission request (only auto-modes); the `onPermissio
 Each stage: **done = tests green + the collapsed predecessor deleted + (gated stages) a live run.**
 
 1. **`ConsultResult` structured + propagate up** (§5.1–5.2) — unblocks everything; *no behavior change, pure legibility*. **This stage's diagnostics on a live run answer risk #1 (§8) and gate how much of Tier 2 we build.**
-2. **Surfacing consolidation** — route `_announce`/`_notify_terminal` through `_surface_improvement_message`; delete those wrappers (keep the global primitives).
+2. **Surfacing consolidation** — ✅ *already satisfied* (verified Stage 2, 2026-06-03): `_surface_improvement_message` is the single push+whisper primitive; `_announce_to_origin` + `_notify_terminal` already route through it; nothing bypasses it to call `send_outbound`/`save_whisper` directly. No deletion work invented. Residual minor smell (the cold-path ledger-reread in `_notify_terminal`) is *accepted* — folding it would thread diagnostics through `notify_fn` + test fakes, adding complexity to a correct once-per-attempt path (net-negative on simplicity).
 3. **Sessioned consults + same-session guard + concurrency ids** (§5.6) — prerequisite for any answer/resume.
 4. **`BLOCKED/NEEDS_INPUT` protocol + `DecisionPolicy` v1 + durable `awaiting_consult_input`** (§5.3, §5.5) — parsing + answering ship **together** (answering needs stage 3). KERNOS-answers-from-context first; user escalation is restart-safe.
 5. **Liveness consolidation** — idle-watchdog as sole authority; retire the stall-monitor live-consult watch (§5.7).
