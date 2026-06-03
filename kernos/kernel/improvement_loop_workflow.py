@@ -3349,7 +3349,17 @@ async def handle_improve_kernos(
             "created."
         )
     restart_fn = getattr(handler, "_restart_fn_for_loop", None)
-    primary = tool_input.get("primary_coding_agent") or "claude_code"
+    # AGENT-CONSULT-CHANNEL-V1 (2026-06-03): default to codex for both
+    # roles. Evidence (att_a7c581544fca, att_e5882683794b vs
+    # att_9460b60144d7) + an isolation harness showed claude_code/
+    # claude-agent-acp wedges mid-turn under the live bot's concurrent
+    # load (emits usage_update, never sends end_turn → idle-stall), while
+    # codex converges cleanly. claude-acp is fine in isolation, so this
+    # is a live-contention avoidance, not an agent bug. claude_code stays
+    # explicitly selectable; it's just no longer the default that hangs.
+    # Trade-off accepted: author+reviewer share an engine (less
+    # independent perspective) in exchange for a loop that completes.
+    primary = tool_input.get("primary_coding_agent") or "codex"
     reviewer = tool_input.get("reviewer_coding_agent") or "codex"
 
     # Resolve live_repo_dir from the running process. The Kernos
