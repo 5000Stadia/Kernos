@@ -232,6 +232,7 @@ class ImprovementLoopOrchestrator:
         )
 
         # Create attempt row in ledger.
+        workspace_create_exc: Exception | None = None
         db = InstanceDB(self._data_dir)
         await db.connect()
         try:
@@ -278,9 +279,12 @@ class ImprovementLoopOrchestrator:
                     kind="workspace_create_failed",
                     detail=str(exc)[:200],
                 )
-                raise
+                workspace_create_exc = exc
         finally:
             await db.close()
+        if workspace_create_exc is not None:
+            await self._notify_on_terminal(attempt_id)
+            raise workspace_create_exc
 
         # Kick off the background task.
         task = asyncio.create_task(
@@ -373,6 +377,7 @@ class ImprovementLoopOrchestrator:
                         final_state="workspace_missing",
                         ended_at=utc_now(),
                     )
+                    await self._notify_on_terminal(attempt_id)
                     return
 
                 # Progress narration: remember where to push short
@@ -399,6 +404,7 @@ class ImprovementLoopOrchestrator:
                         final_state="aborted_unconverged",
                         ended_at=utc_now(),
                     )
+                    await self._notify_on_terminal(attempt_id)
                     return
 
                 # Impl cycle.
@@ -415,6 +421,7 @@ class ImprovementLoopOrchestrator:
                         final_state="aborted_unconverged",
                         ended_at=utc_now(),
                     )
+                    await self._notify_on_terminal(attempt_id)
                     return
 
                 origin = await self._attempt_origin(
@@ -456,6 +463,7 @@ class ImprovementLoopOrchestrator:
                     await db.close()
             except Exception:
                 pass
+            await self._notify_on_terminal(attempt_id)
 
     async def _attempt_origin(
         self, conn: Any, *, attempt_id: str,
@@ -546,6 +554,7 @@ class ImprovementLoopOrchestrator:
             )
             if not ok:
                 await self._set_awaiting_commit_approval(attempt_id)
+                await self._notify_on_terminal(attempt_id)
                 await self._announce(
                     origin_space_id,
                     (
@@ -880,6 +889,84 @@ def _loads_detail(text: str) -> dict[str, Any]:
         return {}
 
 
+async def _surface_improvement_message(
+    handler: Any,
+    instance_id: str,
+    origin_space_id: str,
+    origin_member_id: str,
+    message: str,
+    *,
+    whisper_text: str = "",
+    push: bool = True,
+    save_whisper: bool = True,
+    fallback_to_whisper: bool = False,
+    supporting_evidence: str = "improve_kernos proactive update",
+    reasoning_trace: str = (
+        "improve_kernos surfaced a background self-improvement update."
+    ),
+    foresight_signal: str = "improvement_announce",
+) -> None:
+    """Surface a background improvement update through outbound push and/or
+    a durable stage whisper to the originating member."""
+    if handler is None:
+        return
+    member_id = origin_member_id
+    if not member_id:
+        try:
+            from kernos.kernel.scheduler import resolve_owner_member_id
+            member_id = resolve_owner_member_id(instance_id)
+        except Exception:
+            member_id = "owner"
+
+    sent = False
+    if push and member_id:
+        send_outbound = getattr(handler, "send_outbound", None)
+        if callable(send_outbound):
+            try:
+                sent = bool(
+                    await send_outbound(instance_id, member_id, None, message)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "IMPROVE_KERNOS_ANNOUNCE_OUTBOUND_FAILED %s: %s",
+                    origin_space_id, exc,
+                )
+
+    if not save_whisper and not (fallback_to_whisper and not sent):
+        return
+
+    state = getattr(handler, "state", None)
+    target_space_id = origin_space_id
+    if state is None or not member_id:
+        return
+    try:
+        from datetime import datetime, timezone
+        from kernos.kernel.awareness import Whisper, generate_whisper_id
+        w = Whisper(
+            whisper_id=generate_whisper_id(),
+            insight_text=whisper_text or (
+                "Background self-improvement update for the user:\n"
+                f"{message}\n"
+                "Tell the user this proactively in your own voice."
+            ),
+            delivery_class="stage",
+            source_space_id=target_space_id,
+            target_space_id=target_space_id,
+            supporting_evidence=supporting_evidence,
+            reasoning_trace=reasoning_trace,
+            knowledge_entry_id="",
+            foresight_signal=foresight_signal,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            owner_member_id=member_id,
+        )
+        await state.save_whisper(instance_id, w)
+    except Exception as exc:
+        logger.warning(
+            "IMPROVE_KERNOS_ANNOUNCE_WHISPER_FAILED %s: %s",
+            target_space_id, exc,
+        )
+
+
 def _env_truthy(name: str) -> bool:
     value = (os.environ.get(name) or "").strip().lower()
     return bool(value) and value not in {"0", "false", "no", "off"}
@@ -957,6 +1044,162 @@ async def find_stalled_improvement_attempts(
     except Exception as exc:
         logger.warning("IMPROVEMENT_STALL_CHECK_FAILED: %s", exc)
     return out
+
+
+async def reconcile_orphaned_attempts(
+    *,
+    data_dir: str,
+    instance_id: str,
+    recent_within_sec: int = 86400,
+    orphan_idle_sec: int = 120,
+    notify_fn: Any = None,
+    announce_fn: Any = None,
+) -> list[dict[str, Any]]:
+    """Surface improvement attempts that lost their background task.
+
+    On boot there are no live in-process attempt tasks. A recent running row
+    whose latest ledger event is already idle is therefore an interrupted
+    attempt, not a still-active one. Approval-wait rows stay parked, but get a
+    reminder so the user is not left with a silent pending gate.
+    """
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+
+    import aiosqlite
+
+    from kernos.kernel import improvement_ledger as _ledger
+    from kernos.utils import utc_now
+
+    if not instance_id:
+        return []
+    db_path = Path(data_dir) / "instance.db"
+    if not db_path.exists():
+        return []
+
+    def _parse_ts(value: str) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    now = datetime.now(timezone.utc)
+    recent_cutoff = now - timedelta(seconds=max(0, int(recent_within_sec)))
+    idle_cutoff = now - timedelta(seconds=max(0, int(orphan_idle_sec)))
+    actions: list[dict[str, Any]] = []
+    surfaces: list[tuple[str, str, str]] = []
+
+    async with aiosqlite.connect(str(db_path)) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT attempt_id, started_at, final_state "
+            "FROM improvement_attempts "
+            "WHERE instance_id=? "
+            "  AND (final_state IS NULL OR final_state=?) "
+            "ORDER BY started_at ASC",
+            (instance_id, "awaiting_commit_approval"),
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+        for row in rows:
+            attempt_id = str(row.get("attempt_id") or "")
+            if not attempt_id:
+                continue
+            started_at = _parse_ts(str(row.get("started_at") or ""))
+            if started_at is None or started_at < recent_cutoff:
+                continue
+
+            async with conn.execute(
+                "SELECT kind, timestamp FROM improvement_attempt_events "
+                "WHERE attempt_id=? ORDER BY sequence DESC LIMIT 1",
+                (attempt_id,),
+            ) as cur:
+                latest = await cur.fetchone()
+            latest_kind = str(latest["kind"] or "") if latest else ""
+            latest_ts = (
+                _parse_ts(str(latest["timestamp"] or ""))
+                if latest else started_at
+            )
+
+            async with conn.execute(
+                "SELECT detail FROM improvement_attempt_events "
+                "WHERE attempt_id=? AND kind=? "
+                "ORDER BY sequence ASC LIMIT 1",
+                (attempt_id, "attempt_origin"),
+            ) as cur:
+                origin_row = await cur.fetchone()
+            origin = _loads_detail(origin_row["detail"] or "") if origin_row else {}
+            origin_space_id = str(origin.get("origin_space_id") or "")
+            origin_member_id = str(origin.get("origin_member_id") or "")
+
+            final_state = row.get("final_state")
+            if final_state is None:
+                if latest_ts is None or latest_ts > idle_cutoff:
+                    continue
+                await _ledger.update_attempt(
+                    conn,
+                    attempt_id=attempt_id,
+                    final_state="aborted_interrupted_by_restart",
+                    ended_at=utc_now(),
+                )
+                await _ledger.append_event(
+                    conn,
+                    attempt_id=attempt_id,
+                    kind="attempt_interrupted",
+                    detail=_detail({
+                        "reason": "restart_interrupted_background_task",
+                        "last_event_kind": latest_kind,
+                        "last_event_timestamp": (
+                            latest_ts.isoformat() if latest_ts else ""
+                        ),
+                    }),
+                )
+                surfaces.append((
+                    origin_space_id,
+                    origin_member_id,
+                    (
+                        f"A self-improvement attempt ({attempt_id}) was "
+                        "interrupted by a restart before it finished - "
+                        "nothing was committed."
+                    ),
+                ))
+                actions.append({
+                    "attempt_id": attempt_id,
+                    "action": "marked_interrupted",
+                })
+                continue
+
+            if final_state == "awaiting_commit_approval":
+                surfaces.append((
+                    origin_space_id,
+                    origin_member_id,
+                    (
+                        f"A self-improvement attempt ({attempt_id}) is "
+                        "still waiting for your go-ahead."
+                    ),
+                ))
+                actions.append({
+                    "attempt_id": attempt_id,
+                    "action": "reminded_awaiting_commit_approval",
+                })
+
+    for origin_space_id, origin_member_id, message in surfaces:
+        try:
+            if notify_fn is not None:
+                await _maybe_await(
+                    notify_fn(origin_space_id, origin_member_id, message)
+                )
+            if announce_fn is not None:
+                await _maybe_await(announce_fn(origin_space_id, message))
+        except Exception as exc:
+            logger.warning(
+                "IMPROVEMENT_ORPHAN_SURFACE_FAILED space=%s member=%s: %s",
+                origin_space_id, origin_member_id, exc,
+            )
+
+    return actions
 
 
 async def _call_consult_fn(
@@ -3146,91 +3389,41 @@ async def handle_improve_kernos(
             f"state `{final_state}` without landing a committed change. "
             f"Tell the user where it ended up and offer a next step."
         )
-        try:
-            from datetime import datetime, timezone
-            from kernos.kernel.awareness import Whisper, generate_whisper_id
-            w = Whisper(
-                whisper_id=generate_whisper_id(),
-                insight_text=_msgs.get(final_state, _default),
-                delivery_class="stage",
-                source_space_id=origin_space_id,
-                target_space_id=origin_space_id,
-                supporting_evidence=f"attempt={attempt_id} state={final_state}",
-                reasoning_trace=(
-                    f"improve_kernos attempt {attempt_id} reached terminal "
-                    f"state {final_state}; surfacing so the user isn't left "
-                    f"silent after a background self-improvement run."
-                ),
-                knowledge_entry_id="",
-                foresight_signal=f"improvement_terminal:{attempt_id}",
-                created_at=datetime.now(timezone.utc).isoformat(),
-                owner_member_id=origin_member_id,
-            )
-            await state.save_whisper(instance_id, w)
-        except Exception as exc:
-            logger.warning(
-                "IMPROVE_KERNOS_NOTIFY_WHISPER_FAILED %s: %s",
-                attempt_id, exc,
-            )
+        await _surface_improvement_message(
+            handler,
+            instance_id,
+            origin_space_id,
+            origin_member_id,
+            _msgs.get(final_state, _default),
+            whisper_text=_msgs.get(final_state, _default),
+            push=False,
+            save_whisper=True,
+            supporting_evidence=f"attempt={attempt_id} state={final_state}",
+            reasoning_trace=(
+                f"improve_kernos attempt {attempt_id} reached terminal "
+                f"state {final_state}; surfacing so the user isn't left "
+                f"silent after a background self-improvement run."
+            ),
+            foresight_signal=f"improvement_terminal:{attempt_id}",
+        )
 
     async def _announce_to_origin(space_id: str, message: str) -> None:
         """Try immediate outbound delivery; fall back to a stage whisper."""
-        member_id = origin_member_id
-        if not member_id:
-            try:
-                from kernos.kernel.scheduler import resolve_owner_member_id
-                member_id = resolve_owner_member_id(instance_id)
-            except Exception:
-                member_id = "owner"
-
-        send_outbound = getattr(handler, "send_outbound", None)
-        if callable(send_outbound):
-            try:
-                sent = await send_outbound(
-                    instance_id, member_id, None, message,
-                )
-                if sent:
-                    return
-            except Exception as exc:
-                logger.warning(
-                    "IMPROVE_KERNOS_ANNOUNCE_OUTBOUND_FAILED %s: %s",
-                    space_id, exc,
-                )
-
-        state = getattr(handler, "state", None)
-        target_space_id = space_id or origin_space_id
-        if state is None or not member_id or not target_space_id:
-            return
-        try:
-            from datetime import datetime, timezone
-            from kernos.kernel.awareness import Whisper, generate_whisper_id
-            w = Whisper(
-                whisper_id=generate_whisper_id(),
-                insight_text=(
-                    "Background self-improvement update for the user:\n"
-                    f"{message}\n"
-                    "Tell the user this proactively in your own voice."
-                ),
-                delivery_class="stage",
-                source_space_id=target_space_id,
-                target_space_id=target_space_id,
-                supporting_evidence="improve_kernos proactive update",
-                reasoning_trace=(
-                    "improve_kernos could not push directly through an "
-                    "outbound channel, so it staged a whisper in the "
-                    "origin space."
-                ),
-                knowledge_entry_id="",
-                foresight_signal="improvement_announce",
-                created_at=datetime.now(timezone.utc).isoformat(),
-                owner_member_id=member_id,
-            )
-            await state.save_whisper(instance_id, w)
-        except Exception as exc:
-            logger.warning(
-                "IMPROVE_KERNOS_ANNOUNCE_WHISPER_FAILED %s: %s",
-                target_space_id, exc,
-            )
+        await _surface_improvement_message(
+            handler,
+            instance_id,
+            space_id or origin_space_id,
+            origin_member_id,
+            message,
+            push=True,
+            save_whisper=False,
+            fallback_to_whisper=True,
+            reasoning_trace=(
+                "improve_kernos could not push directly through an "
+                "outbound channel, so it staged a whisper in the "
+                "origin space."
+            ),
+        )
 
     orchestrator = ImprovementLoopOrchestrator(
         instance_id=instance_id,

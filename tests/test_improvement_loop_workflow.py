@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,64 @@ def _approval_id_from_events(events: list[dict]) -> str:
     return detail.split("approval_id=", 1)[1].split()[0]
 
 
+async def _create_reconcile_attempt(
+    data_dir: str,
+    *,
+    attempt_id: str,
+    final_state: str | None,
+    started_delta_sec: int,
+    latest_event_delta_sec: int,
+    instance_id: str = "t1",
+    origin_space_id: str = "space_1",
+    origin_member_id: str = "member_1",
+) -> None:
+    now = datetime.now(timezone.utc)
+    started_at = (
+        now - timedelta(seconds=started_delta_sec)
+    ).isoformat()
+    latest_at = (
+        now - timedelta(seconds=latest_event_delta_sec)
+    ).isoformat()
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        await _ledger.create_attempt(
+            db._conn,
+            instance_id=instance_id,
+            attempt_id=attempt_id,
+            spec_requirement="reconcile me",
+            started_at=started_at,
+            primary_coding_agent="claude_code",
+            reviewer_coding_agent="codex",
+        )
+        if final_state is not None:
+            await _ledger.update_attempt(
+                db._conn,
+                attempt_id=attempt_id,
+                final_state=final_state,
+            )
+        await _ledger.append_event(
+            db._conn,
+            attempt_id=attempt_id,
+            kind="attempt_origin",
+            detail=json.dumps({
+                "instance_id": instance_id,
+                "origin_space_id": origin_space_id,
+                "origin_member_id": origin_member_id,
+            }),
+            timestamp=started_at,
+        )
+        await _ledger.append_event(
+            db._conn,
+            attempt_id=attempt_id,
+            kind="spec_iteration",
+            detail="round 1 started",
+            timestamp=latest_at,
+        )
+    finally:
+        await db.close()
+
+
 @pytest.mark.asyncio
 async def test_ac1_ac2_ac3_start_returns_attempt_id_creates_workspace(
     loop_env,
@@ -339,6 +398,56 @@ async def test_impl_green_auto_proceeds_by_default(loop_env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_impl_green_auto_approval_failure_notifies_terminal(
+    loop_env, monkeypatch,
+):
+    monkeypatch.delenv("KERNOS_IMPROVE_REQUIRE_APPROVAL", raising=False)
+    data_dir, repo_dir = loop_env
+    notifications: list[tuple[str, str]] = []
+    continuations: list[dict] = []
+
+    async def _notify(attempt_id: str, final_state: str) -> None:
+        notifications.append((attempt_id, final_state))
+
+    async def _approve(**kwargs):
+        return False, "approval store unavailable"
+
+    async def _continue(**kwargs):
+        continuations.append(kwargs)
+        return "deployed"
+
+    monkeypatch.setattr(_approvals, "approve", _approve)
+    monkeypatch.setattr(
+        _workflow, "continue_approved_improvement_commit", _continue,
+    )
+
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir,
+        live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult(),
+        restart_fn=lambda: None,
+        notify_fn=_notify,
+    )
+    attempt_id = await orch.start_attempt(
+        spec_requirement="x",
+        origin_space_id="space_1",
+        origin_member_id="member_1",
+    )
+    await orch.wait_for_running_tasks(timeout=10)
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, attempt_id)
+    finally:
+        await db.close()
+
+    assert row["final_state"] == "awaiting_commit_approval"
+    assert continuations == []
+    assert notifications == [(attempt_id, "awaiting_commit_approval")]
+
+
+@pytest.mark.asyncio
 async def test_impl_green_require_approval_parks(loop_env, monkeypatch):
     monkeypatch.setenv("KERNOS_IMPROVE_REQUIRE_APPROVAL", "1")
     data_dir, repo_dir = loop_env
@@ -490,6 +599,179 @@ async def test_impl_green_oversized_diff_parks(loop_env, monkeypatch):
         "auto-proceed limit" in message
         for _space_id, message in announcements
     )
+
+
+# ============================================================
+# Boot reconcile for orphaned / parked attempts
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_reconcile_marks_old_null_attempt_interrupted_and_surfaces(
+    loop_env,
+):
+    data_dir, _repo_dir = loop_env
+    await _create_reconcile_attempt(
+        data_dir,
+        attempt_id="att_old_null",
+        final_state=None,
+        started_delta_sec=600,
+        latest_event_delta_sec=300,
+    )
+    surfaces: list[tuple[str, str, str]] = []
+
+    async def _notify(space_id: str, member_id: str, message: str) -> None:
+        surfaces.append((space_id, member_id, message))
+
+    actions = await _workflow.reconcile_orphaned_attempts(
+        data_dir=data_dir,
+        instance_id="t1",
+        orphan_idle_sec=120,
+        notify_fn=_notify,
+    )
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, "att_old_null")
+        events = await _ledger.get_attempt_events(db._conn, "att_old_null")
+    finally:
+        await db.close()
+
+    assert actions == [{
+        "attempt_id": "att_old_null",
+        "action": "marked_interrupted",
+    }]
+    assert row["final_state"] == "aborted_interrupted_by_restart"
+    assert any(e["kind"] == "attempt_interrupted" for e in events)
+    assert surfaces == [(
+        "space_1",
+        "member_1",
+        (
+            "A self-improvement attempt (att_old_null) was interrupted by "
+            "a restart before it finished - nothing was committed."
+        ),
+    )]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_keeps_recent_null_attempt_running(loop_env):
+    data_dir, _repo_dir = loop_env
+    await _create_reconcile_attempt(
+        data_dir,
+        attempt_id="att_recent_null",
+        final_state=None,
+        started_delta_sec=90,
+        latest_event_delta_sec=30,
+    )
+    surfaces: list[tuple[str, str, str]] = []
+
+    async def _notify(space_id: str, member_id: str, message: str) -> None:
+        surfaces.append((space_id, member_id, message))
+
+    actions = await _workflow.reconcile_orphaned_attempts(
+        data_dir=data_dir,
+        instance_id="t1",
+        orphan_idle_sec=120,
+        notify_fn=_notify,
+    )
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, "att_recent_null")
+        events = await _ledger.get_attempt_events(db._conn, "att_recent_null")
+    finally:
+        await db.close()
+
+    assert actions == []
+    assert row["final_state"] is None
+    assert not any(e["kind"] == "attempt_interrupted" for e in events)
+    assert surfaces == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_surfaces_awaiting_commit_without_state_change(
+    loop_env,
+):
+    data_dir, _repo_dir = loop_env
+    await _create_reconcile_attempt(
+        data_dir,
+        attempt_id="att_waiting",
+        final_state="awaiting_commit_approval",
+        started_delta_sec=600,
+        latest_event_delta_sec=300,
+    )
+    surfaces: list[tuple[str, str, str]] = []
+
+    async def _notify(space_id: str, member_id: str, message: str) -> None:
+        surfaces.append((space_id, member_id, message))
+
+    actions = await _workflow.reconcile_orphaned_attempts(
+        data_dir=data_dir,
+        instance_id="t1",
+        notify_fn=_notify,
+    )
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, "att_waiting")
+        events = await _ledger.get_attempt_events(db._conn, "att_waiting")
+    finally:
+        await db.close()
+
+    assert actions == [{
+        "attempt_id": "att_waiting",
+        "action": "reminded_awaiting_commit_approval",
+    }]
+    assert row["final_state"] == "awaiting_commit_approval"
+    assert not any(e["kind"] == "attempt_interrupted" for e in events)
+    assert surfaces == [(
+        "space_1",
+        "member_1",
+        (
+            "A self-improvement attempt (att_waiting) is still waiting "
+            "for your go-ahead."
+        ),
+    )]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ignores_attempts_older_than_recent_window(loop_env):
+    data_dir, _repo_dir = loop_env
+    await _create_reconcile_attempt(
+        data_dir,
+        attempt_id="att_ancient",
+        final_state=None,
+        started_delta_sec=90000,
+        latest_event_delta_sec=300,
+    )
+    surfaces: list[tuple[str, str, str]] = []
+
+    async def _notify(space_id: str, member_id: str, message: str) -> None:
+        surfaces.append((space_id, member_id, message))
+
+    actions = await _workflow.reconcile_orphaned_attempts(
+        data_dir=data_dir,
+        instance_id="t1",
+        recent_within_sec=86400,
+        orphan_idle_sec=120,
+        notify_fn=_notify,
+    )
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        row = await _ledger.get_attempt(db._conn, "att_ancient")
+        events = await _ledger.get_attempt_events(db._conn, "att_ancient")
+    finally:
+        await db.close()
+
+    assert actions == []
+    assert row["final_state"] is None
+    assert not any(e["kind"] == "attempt_interrupted" for e in events)
+    assert surfaces == []
 
 
 # ============================================================

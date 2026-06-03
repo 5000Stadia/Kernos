@@ -1223,6 +1223,60 @@ async def on_ready():
     except Exception as _reap_exc:
         logger.warning("ACPX_ORPHAN_REAP_AT_BOOT_FAILED: %s", _reap_exc)
 
+    # IMPROVEMENT-ORPHAN-RECONCILE: a restart kills any in-process
+    # improve_kernos background task. Recent running ledger rows are
+    # therefore genuine interrupted attempts at boot; parked approval rows
+    # get a reminder so the user does not wait on silence.
+    try:
+        from kernos.kernel.improvement_loop_workflow import (
+            _surface_improvement_message,
+            reconcile_orphaned_attempts,
+        )
+        _improvement_orphan_instance_id = (
+            os.environ.get("KERNOS_INSTANCE_ID", "")
+            or getattr(handler, "_instance_id", "")
+            or instance_id
+        )
+
+        async def _surface_improvement_orphan(
+            origin_space_id: str,
+            origin_member_id: str,
+            message: str,
+        ) -> None:
+            await _surface_improvement_message(
+                handler,
+                _improvement_orphan_instance_id,
+                origin_space_id,
+                origin_member_id,
+                message,
+                push=True,
+                save_whisper=True,
+                supporting_evidence="improve_kernos boot orphan reconcile",
+                reasoning_trace=(
+                    "boot reconcile surfaced an interrupted or parked "
+                    "improve_kernos attempt so the user is not left silent."
+                ),
+                foresight_signal="improvement_orphan_reconcile",
+            )
+
+        if _improvement_orphan_instance_id:
+            _orphan_actions = await reconcile_orphaned_attempts(
+                data_dir=data_dir,
+                instance_id=_improvement_orphan_instance_id,
+                notify_fn=_surface_improvement_orphan,
+            )
+            if _orphan_actions:
+                logger.info(
+                    "IMPROVEMENT_ORPHAN_RECONCILE_AT_BOOT instance=%s actions=%s",
+                    _improvement_orphan_instance_id,
+                    _orphan_actions,
+                )
+    except Exception as _orphan_exc:
+        logger.warning(
+            "IMPROVEMENT_ORPHAN_RECONCILE_AT_BOOT_FAILED: %s",
+            _orphan_exc,
+        )
+
     # ====================================================================
     # INTEGRATION-CAPABILITY-FIRST-V1 Batch 2 — live workshop binding
     # ====================================================================
