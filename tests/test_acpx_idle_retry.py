@@ -92,6 +92,20 @@ class _FakeProc:
             self._feed_eof()
             asyncio.create_task(self._finish_later(1))
             return
+        if self.mode == "soft_complete":
+            # claude-acp quirk: finishes generating (final agent_message +
+            # usage_update) but never sends end_turn, then goes idle.
+            self._feed_stdout([
+                {"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text",
+                                    "text": "done\nSTATUS: GREEN"},
+                    }}},
+                {"jsonrpc": "2.0", "method": "session/update", "params": {
+                    "update": {"sessionUpdate": "usage_update"}}},
+            ])
+            return  # no EOF, no finish -> idle; watchdog soft-completes
         raise AssertionError(f"unknown fake ACPX mode: {self.mode}")
 
     def _feed_eof(self) -> None:
@@ -252,3 +266,53 @@ async def test_stall_retry_exhaustion_reports_context(
     assert caught.value.attempts == 3
     assert caught.value.last_event_kind == "tool_call"
     assert "attempts=3" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_soft_complete_on_usage_update_idle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """claude-acp finished (usage_update + output) but never sent
+    end_turn: the soft-completion protocol harvests it as success rather
+    than killing + failing the finished work."""
+    monkeypatch.setattr(acpx_adapter, "SOFT_COMPLETE_ON_IDLE", True)
+    monkeypatch.setattr(acpx_adapter, "SOFT_COMPLETE_IDLE_SECONDS", 0.05)
+    # Keep the hard stall window high so soft-complete fires first.
+    monkeypatch.setenv("KERNOS_ACPX_IDLE_ABORT_SEC", "30")
+    monkeypatch.setenv("KERNOS_ACPX_CONSULT_RETRIES", "0")
+    procs = _install_fake_acpx(monkeypatch, ["soft_complete"], tmp_path)
+
+    result = await acpx_adapter.dispatch(
+        target="claude_code",
+        prompt="work",
+        workspace_dir=str(tmp_path),
+        timeout_seconds=30,
+    )
+
+    assert "STATUS: GREEN" in result.response
+    assert result.metadata.get("acpx_soft_completed") is True
+    assert result.metadata.get("acpx_stop_reason") == "soft_complete_on_idle"
+    assert procs[0].killed is True
+
+
+@pytest.mark.asyncio
+async def test_mid_tool_call_idle_still_stalls_not_soft_completes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """A mid-tool-call idle (last event = tool_call) is a REAL stall —
+    soft-complete must not fire on it."""
+    monkeypatch.setattr(acpx_adapter, "SOFT_COMPLETE_ON_IDLE", True)
+    monkeypatch.setattr(acpx_adapter, "SOFT_COMPLETE_IDLE_SECONDS", 0.05)
+    monkeypatch.setenv("KERNOS_ACPX_IDLE_ABORT_SEC", "0.1")
+    monkeypatch.setenv("KERNOS_ACPX_CONSULT_RETRIES", "0")
+    _install_fake_acpx(monkeypatch, ["stall"], tmp_path)
+
+    with pytest.raises(ConsultationStalled):
+        await acpx_adapter.dispatch(
+            target="claude_code",
+            prompt="work",
+            workspace_dir=str(tmp_path),
+            timeout_seconds=30,
+        )

@@ -246,6 +246,30 @@ MAX_TIMEOUT_SECONDS: int = int(
 DEFAULT_IDLE_ABORT_SECONDS: float = 300.0
 DEFAULT_CONSULT_RETRIES: int = 2
 
+# AGENT-CONSULT-CHANNEL-V1: soft-completion protocol for claude-agent-acp's
+# observed quirk under live load — it finishes the work + emits its final
+# agent_message + usage_update, then fails to send `end_turn`, leaving the
+# turn hanging until the idle watchdog kills it and throws away finished
+# work. When the LAST event is a completion signal (usage_update) AND we
+# have accumulated response text, a shorter idle window treats the turn as
+# COMPLETE (harvest the response) instead of stalling. A mid-tool-call idle
+# (last event = tool_call) is still a real stall. Env-gated; default on.
+SOFT_COMPLETE_ON_IDLE: bool = (
+    os.environ.get("KERNOS_ACPX_SOFT_COMPLETE_ON_IDLE", "1").strip().lower()
+    not in {"0", "false", "no", "off"}
+)
+SOFT_COMPLETE_IDLE_SECONDS: float = float(
+    os.environ.get("KERNOS_ACPX_SOFT_COMPLETE_IDLE_SEC", "90")
+)
+# Event kinds that signal the model finished generating its turn.
+_COMPLETION_EVENT_KINDS: frozenset[str] = frozenset({"usage_update"})
+
+
+class _SoftTurnComplete(Exception):
+    """Internal signal: an idle turn that is functionally complete
+    (work done + final output produced, only `end_turn` missing).
+    Routed into the success path, not treated as a stall."""
+
 
 # ---------------------------------------------------------------------
 # Availability probe
@@ -1351,8 +1375,25 @@ async def _dispatch_once(
             now = _time_diag.monotonic()
             if event_count > 0 and last_event_at is not None:
                 silence_seconds = now - last_event_at
-                budget = idle_abort_seconds
                 kind = last_event_kind
+                # Soft-completion (the protocol for claude-acp's missing
+                # end_turn): the model finished generating (usage_update)
+                # and produced output, but never closed the turn. Harvest
+                # it after a shorter window rather than waiting out the
+                # full idle and discarding finished work.
+                if (
+                    SOFT_COMPLETE_ON_IDLE
+                    and kind in _COMPLETION_EVENT_KINDS
+                    and accumulated_chunks
+                    and silence_seconds > SOFT_COMPLETE_IDLE_SECONDS
+                ):
+                    raise _SoftTurnComplete(
+                        f"{target}: turn complete on idle after "
+                        f"{silence_seconds:.1f}s (last_event_kind={kind}, "
+                        f"response_chars="
+                        f"{sum(len(c) for c in accumulated_chunks)})"
+                    )
+                budget = idle_abort_seconds
                 reason = "idle_stall"
             else:
                 silence_seconds = now - dispatch_started_at
@@ -1380,6 +1421,7 @@ async def _dispatch_once(
     idle_watchdog_task = asyncio.create_task(_idle_watchdog())
     timed_out = False
     stalled_exc: ConsultationStalled | None = None
+    soft_completed = False
     drain_incomplete = False
 
     try:
@@ -1392,7 +1434,10 @@ async def _dispatch_once(
             timed_out = True
         elif idle_watchdog_task in done:
             exc = idle_watchdog_task.exception()
-            if isinstance(exc, ConsultationStalled):
+            if isinstance(exc, _SoftTurnComplete):
+                soft_completed = True
+                logger.info("ACPX_SOFT_COMPLETE %s", exc)
+            elif isinstance(exc, ConsultationStalled):
                 stalled_exc = exc
             elif exc is not None:
                 raise exc
@@ -1547,6 +1592,11 @@ async def _dispatch_once(
 
     response_text = "".join(accumulated_chunks)
     response_text, truncated = response_truncate(response_text)
+    if soft_completed and not last_stop_reason:
+        # Synthetic terminator for the harvested turn (claude-acp emitted
+        # usage_update + output but no end_turn). Lets the result flow
+        # through the normal success path with a clear marker.
+        last_stop_reason = "soft_complete_on_idle"
     stderr_text = (
         b"".join(stderr_chunks)
         .decode("utf-8", errors="replace")
@@ -1557,7 +1607,10 @@ async def _dispatch_once(
     # clean exit with rc=0 and SOME response text). Treat a non-zero
     # exit with partial text as a failure — without that distinction,
     # a crash mid-response is indistinguishable from a complete answer.
-    if proc.returncode != 0:
+    if proc.returncode != 0 and not soft_completed:
+        # (soft_completed: we intentionally killed a functionally-complete
+        # turn that never sent end_turn, so a non-zero rc here is expected
+        # and is NOT a failure — the harvested response is the result.)
         # Stale-session detection (2026-05-19 founder report): when an
         # ACPX named session's underlying agent died, `sessions ensure`
         # reports the session "exists" and every subsequent dispatch
@@ -1657,6 +1710,7 @@ async def _dispatch_once(
         "acpx_target": acpx_agent_name,
         "acpx_returncode": proc.returncode,
         "acpx_last_event_kind": last_event_kind,
+        "acpx_soft_completed": soft_completed,
         "acpx_stdout_errors": list(stdout_errors),
         "acpx_stderr_tail": _stderr_tail,
     }
