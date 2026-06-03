@@ -69,6 +69,24 @@ class HarnessRegistrationError(ExternalAgentError):
     a programmer error (bad options, name collision)."""
 
 
+def consultation_diagnostics(exc: BaseException) -> dict:
+    """AGENT-CONSULT-CHANNEL-V1 Stage 1b: extract a legible, structured
+    diagnostic dict from any consult exception so the failure can be
+    attributed up the ladder instead of flattened to ``str(exc)[:300]``.
+    Safe on any exception (returns at least exc_type + message)."""
+    diag: dict = {
+        "exc_type": type(exc).__name__,
+        "message": str(exc)[:300],
+    }
+    for field_name in (
+        "last_event_kind", "silence_seconds", "event_count",
+        "attempts", "last_reason", "exit_status",
+    ):
+        if hasattr(exc, field_name):
+            diag[field_name] = getattr(exc, field_name)
+    return diag
+
+
 __all__ = [
     "ConsultationFailed",
     "ConsultationStalled",
@@ -79,4 +97,5 @@ __all__ = [
     "HarnessUnavailable",
     "ReentrancyBlocked",
     "WorkspaceNotAllowed",
+    "consultation_diagnostics",
 ]

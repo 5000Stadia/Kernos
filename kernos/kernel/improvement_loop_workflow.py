@@ -454,10 +454,17 @@ class ImprovementLoopOrchestrator:
                         final_state="aborted_consult_failure",
                         ended_at=utc_now(),
                     )
+                    # AGENT-CONSULT-CHANNEL-V1 Stage 1b: record the
+                    # STRUCTURED failure context (what the agent was last
+                    # doing, how long silent, exit status) so the cause is
+                    # legible one layer up — not flattened to str(exc).
+                    from kernos.kernel.external_agents.errors import (
+                        consultation_diagnostics,
+                    )
                     await _ledger.append_event(
                         db._conn, attempt_id=attempt_id,
                         kind="attempt_failed",
-                        detail=str(exc)[:300],
+                        detail=_detail(consultation_diagnostics(exc)),
                     )
                 finally:
                     await db.close()
@@ -3389,13 +3396,54 @@ async def handle_improve_kernos(
             f"state `{final_state}` without landing a committed change. "
             f"Tell the user where it ended up and offer a next step."
         )
+        _chosen = _msgs.get(final_state, _default)
+        # AGENT-CONSULT-CHANNEL-V1 Stage 1b: weave the legible failure
+        # cause into the abort whisper so the user hears WHAT happened
+        # (last agent activity, how long silent), not just "a tooling
+        # failure". Reads the structured attempt_failed detail recorded
+        # by the orchestrator's except handler.
+        if final_state == "aborted_consult_failure":
+            try:
+                from kernos.kernel.instance_db import InstanceDB
+                _db = InstanceDB(data_dir)
+                await _db.connect()
+                try:
+                    _evs = await _ledger.get_attempt_events(
+                        _db._conn, attempt_id,
+                    )
+                finally:
+                    await _db.close()
+                _fail = next(
+                    (e for e in reversed(_evs)
+                     if e.get("kind") == "attempt_failed"), None,
+                )
+                if _fail:
+                    _d = _loads_detail(_fail.get("detail") or "")
+                    _bits = []
+                    _k = _d.get("last_event_kind") or ""
+                    if _k and _k != "?":
+                        _bits.append(f"last activity was `{_k}`")
+                    if _d.get("silence_seconds"):
+                        _bits.append(
+                            f"silent ~{int(_d['silence_seconds'])}s "
+                            "before giving up"
+                        )
+                    if _d.get("exc_type"):
+                        _bits.append(f"({_d['exc_type']})")
+                    if _bits:
+                        _chosen += (
+                            " For the user, the concrete cause: "
+                            + ", ".join(_bits) + "."
+                        )
+            except Exception:
+                pass
         await _surface_improvement_message(
             handler,
             instance_id,
             origin_space_id,
             origin_member_id,
-            _msgs.get(final_state, _default),
-            whisper_text=_msgs.get(final_state, _default),
+            _chosen,
+            whisper_text=_chosen,
             push=False,
             save_whisper=True,
             supporting_evidence=f"attempt={attempt_id} state={final_state}",
