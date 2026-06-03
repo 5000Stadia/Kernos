@@ -2127,7 +2127,26 @@ async def continue_approved_improvement_commit(
                         f"worktree HEAD is `{current_head[:12]}`."
                     )
             else:
+                # AGENT-CONSULT-CHANNEL-V1 fix #2: the auto-proceed commit
+                # can race a transiently-clean index — observed live
+                # (att_9460b60144d7): a codex run auto-approved, then
+                # _staged_files AND _changed_files both came back empty so
+                # the commit refused with head_unchanged, yet the change
+                # was present + staged moments later. Re-stage defensively
+                # exactly as the approval seam did (git add -u + git add .)
+                # so the commit binds to the same diff the receipt
+                # approved. The expected_diff_hash check in handle_git_commit
+                # still guards correctness — if re-staging picks up anything
+                # other than the approved diff, the commit is refused, not
+                # forced.
+                await _run_git_in(["add", "-u"], cwd=workspace_dir)
+                await _run_git_in(["add", "."], cwd=workspace_dir)
                 files = await _staged_files(workspace_dir)
+                logger.info(
+                    "IMPROVE_KERNOS_COMMIT_STAGING attempt=%s staged=%d "
+                    "files=%s",
+                    attempt_id, len(files), ",".join(files)[:200] or "(none)",
+                )
                 if not files:
                     files = await _changed_files(workspace_dir)
                 if not files:
