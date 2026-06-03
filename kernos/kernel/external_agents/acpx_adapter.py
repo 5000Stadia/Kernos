@@ -1621,12 +1621,23 @@ async def _dispatch_once(
             f"no response and no stopReason. stderr: {stderr_text}"
         )
 
+    # AGENT-CONSULT-CHANNEL-V1 Stage 1: carry the FULL diagnostic
+    # context on every result (success too), not just failures, so it
+    # propagates up the ladder instead of being flattened away. These
+    # are the fields a stalled/failed consult needs to attribute the
+    # cause one layer up (last activity, silence, stderr, soft errors).
+    _stderr_tail = (
+        b"".join(stderr_chunks).decode("utf-8", errors="replace")
+    )[-2000:] if stderr_chunks else ""
     metadata: dict[str, Any] = {
         "acpx_event_count": event_count,
         "acpx_parse_errors": parse_errors,
         "acpx_stop_reason": last_stop_reason,
         "acpx_target": acpx_agent_name,
         "acpx_returncode": proc.returncode,
+        "acpx_last_event_kind": last_event_kind,
+        "acpx_stdout_errors": list(stdout_errors),
+        "acpx_stderr_tail": _stderr_tail,
     }
 
     logger.info(
