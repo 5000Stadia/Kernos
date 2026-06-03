@@ -43,6 +43,7 @@ from kernos.kernel.external_agents.errors import (
     ConsultationStalled,
     ConsultationTimeout,
     HarnessUnavailable,
+    consultation_diagnostics,
 )
 from kernos.kernel.external_agents.harness import ConsultResult
 from kernos.kernel.external_agents.subprocess_substrate import (
@@ -1102,7 +1103,14 @@ async def dispatch(
             attempts=max_attempts,
             last_reason=last_reason or "idle_stall",
         ) from last_exc
-    raise ConsultationFailed(message) from last_exc
+    # Stage 1c: carry the last attempt's structured context forward so
+    # an exhausted-retry failure is as legible as a single stall.
+    raise ConsultationFailed(
+        message,
+        diagnostics=(
+            consultation_diagnostics(last_exc) if last_exc else {}
+        ),
+    ) from last_exc
 
 
 async def _dispatch_once(
@@ -1503,12 +1511,25 @@ async def _dispatch_once(
                 event_count=stalled_exc.event_count,
                 last_reason=stalled_exc.last_reason,
             ) from stalled_exc
-        raise ConsultationTimeout(
+        _timeout_exc = ConsultationTimeout(
             f"ACPX dispatch to {target!r} exceeded {timeout_seconds}s "
             f"(events_received={event_count}, "
             f"last_event_kind={last_event_kind!r}, "
             f"stderr_bytes={sum(len(c) for c in stderr_chunks)}).{_hint}"
         )
+        # Stage 1c: attach structured context so a total-timeout failure
+        # is legible up the ladder, not just the stall path.
+        _timeout_exc.diagnostics = {
+            "event_count": event_count,
+            "last_event_kind": last_event_kind,
+            "stop_reason": last_stop_reason,
+            "stdout_errors": list(stdout_errors),
+            "stderr_tail": (
+                b"".join(stderr_chunks).decode("utf-8", errors="replace")
+            )[-2000:],
+            "parse_errors": parse_errors,
+        }
+        raise _timeout_exc
 
     # Codex review fold #6: if drain task hit an unexpected exception
     # we couldn't observe with the gather above, surface it via the

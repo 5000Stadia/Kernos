@@ -43,11 +43,19 @@ class ConsultationStalled(ConsultationTimeout):
 class ConsultationFailed(ExternalAgentError):
     """Subprocess exited non-zero; stderr captured in ``args[1]``
     when available. ``exit_status`` carries the subprocess return
-    code so audit rows distinguish exit codes (AC16)."""
+    code so audit rows distinguish exit codes (AC16). ``diagnostics``
+    (AGENT-CONSULT-CHANNEL-V1 Stage 1c) carries the structured
+    stream context (event_count, last_event_kind, stop_reason,
+    stderr_tail, …) so EVERY failure — not just stalls — is legible
+    up the ladder."""
 
-    def __init__(self, *args: object, exit_status: int = 0) -> None:
+    def __init__(
+        self, *args: object, exit_status: int = 0,
+        diagnostics: dict | None = None,
+    ) -> None:
         super().__init__(*args)
         self.exit_status = exit_status
+        self.diagnostics = dict(diagnostics or {})
 
 
 class WorkspaceNotAllowed(ExternalAgentError):
@@ -84,6 +92,12 @@ def consultation_diagnostics(exc: BaseException) -> dict:
     ):
         if hasattr(exc, field_name):
             diag[field_name] = getattr(exc, field_name)
+    # Merge any structured diagnostics dict the raise site attached
+    # (covers non-stall failures: timeout, non-zero rc, no-response).
+    extra = getattr(exc, "diagnostics", None)
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            diag.setdefault(k, v)
     return diag
 
 
