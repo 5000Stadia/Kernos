@@ -1005,3 +1005,29 @@ async def test_self_heal_hook_spawns_verified_repair_when_enabled(
         ), "expected a child repair attempt row"
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_loop_scratch_excluded_from_commit(loop_env):
+    """spec.md/impl_notes.md are in-run scratch — they must never be staged
+    for commit, or they pollute main and drift the next run's spec author
+    (regression for att_cdd51065fe2e)."""
+    import subprocess
+    from kernos.kernel.improvement_workspace import ImprovementWorkspace
+    from kernos.kernel.improvement_loop_workflow import (
+        _unstage_loop_scratch, _staged_files,
+    )
+    data_dir, repo_dir = loop_env
+    ws = ImprovementWorkspace(
+        data_dir=data_dir, instance_id="t1", live_repo_dir=repo_dir,
+    )
+    wt = await ws.create("att_scratch")
+    (Path(wt) / "spec.md").write_text("internal relay\n")
+    (Path(wt) / "impl_notes.md").write_text("scratch notes\n")
+    (Path(wt) / "real_change.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "."], cwd=wt, check=True)
+    await _unstage_loop_scratch(wt)
+    staged = await _staged_files(wt)
+    assert "real_change.py" in staged
+    assert "spec.md" not in staged
+    assert "impl_notes.md" not in staged

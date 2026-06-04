@@ -1489,6 +1489,9 @@ async def _request_commit_approval_for_attempt(
     # exactly to the diff the operator sees.
     await _run_git_in(["add", "-u"], cwd=worktree_path)
     await _run_git_in(["add", "."], cwd=worktree_path)
+    # Keep the loop's scratch (spec.md/impl_notes.md) out of the approved diff
+    # + commit so it never pollutes main.
+    await _unstage_loop_scratch(worktree_path)
 
     _rc, head_sha, _ = await _run_git_in(
         ["rev-parse", "HEAD"], cwd=worktree_path,
@@ -1540,6 +1543,24 @@ async def _request_commit_approval_for_attempt(
         detail=detail,
     )
     return approval_id
+
+
+# The loop writes these scratch artifacts into the worktree as an in-run
+# relay (spec.md by the orchestrator from the author's response, impl_notes.md
+# by the impl author). They are NOT part of the deliverable — committing them
+# pollutes main, and the next attempt's worktree (branched from main) then
+# starts with stale scratch that drifts the spec author off the real request.
+# Keep them in the worktree for the run; never commit them.
+_LOOP_SCRATCH_ARTIFACTS = ("spec.md", "impl_notes.md")
+
+
+async def _unstage_loop_scratch(workspace_dir: str) -> None:
+    """Unstage the loop's scratch artifacts so they never land in the commit
+    (and so the approval diff + diff-hash binding cover only the deliverable)."""
+    await _run_git_in(
+        ["reset", "-q", "HEAD", "--", *_LOOP_SCRATCH_ARTIFACTS],
+        cwd=workspace_dir,
+    )
 
 
 async def _staged_files(workspace_dir: str) -> list[str]:
@@ -2381,6 +2402,7 @@ async def continue_approved_improvement_commit(
                 # forced.
                 await _run_git_in(["add", "-u"], cwd=workspace_dir)
                 await _run_git_in(["add", "."], cwd=workspace_dir)
+                await _unstage_loop_scratch(workspace_dir)
                 files = await _staged_files(workspace_dir)
                 logger.info(
                     "IMPROVE_KERNOS_COMMIT_STAGING attempt=%s staged=%d "

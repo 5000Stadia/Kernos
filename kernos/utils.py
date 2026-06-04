@@ -56,11 +56,6 @@ def format_user_datetime(utc_dt: datetime, tz_name: str) -> str:
     return local.strftime("%A, %B %d, %Y — %I:%M %p")
 
 
-def ensure_terminal_newline(text: str) -> str:
-    """Return text with exactly one trailing newline."""
-    return text.rstrip("\n") + "\n"
-
-
 def interpret_local_iso_as_utc(iso_str: str, tz_name: str) -> datetime:
     """Convert a normalized local ISO timestamp to UTC.
 
