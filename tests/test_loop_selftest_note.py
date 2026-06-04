@@ -18,10 +18,12 @@ REQUIRED_RUNTIME_NEUTRAL_CLAIM = (
 )
 ALLOWED_LOOP_SELFTEST_PATHS = {
     "docs/notes/soak-01.md",
+    "docs/notes/soak-02.md",
     "docs/notes/loop-selftest.md",
     "impl_notes.md",
     "spec.md",
     "tests/test_soak_01_note.py",
+    "tests/test_soak_02_note.py",
     "tests/test_loop_selftest_note.py",
 }
 
