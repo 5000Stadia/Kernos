@@ -450,6 +450,16 @@ The autonomous `improve_kernos` loop commits + pushes + redeploys real changes, 
 - **ACPX step-trace** (`ACPX_STEP` log lines): structural coding-agent events are logged as they stream, so a stalled dispatch's last log line shows where it hung — zero token cost.
 - **ACP orphan reaper** (`reap_orphaned_acp_agents`): `codex-acp`/`claude-acp`/`gemini-acp` leaves that `setsid` out of the dispatch tree + reparent to systemd are swept at boot (age-guarded > `MAX_TIMEOUT_SECONDS`, so live consults are never touched).
 
+### Recursive self-heal lane (RECURSIVE-SELF-HEAL-V1 — default-off)
+
+When an attempt aborts on a bug in KERNOS's *own* loop machinery (not a hard task / weak agent output), the supervisor can spawn ONE bounded child repair, verify it deterministically, and surface it. The design **is** the guardrails — "a bounded recovery lane, not a self-rewrite mandate." Inert unless `KERNOS_RECURSIVE_SELF_HEAL` is truthy (default OFF for v1). Module: `kernos/kernel/recursive_self_heal.py`; hook: `ImprovementLoopOrchestrator._maybe_self_heal` on the impl-cycle abort path.
+
+- **Classifier** (`classify_failure`): every machinery signature needs a deterministic POSITIVE symptom **and** a NEGATIVE guard (a task failure can mimic a signature) — default is `task_failure` (never recurse). Signature #5 (worktree dirty-state invariant) requires the worktree be *objectively* dirty via an independent `git status --porcelain` read; a false-GREEN over a pristine worktree is correctly a task failure. A recognized class with no hermetic verifier + canonical fix is **propose-only**, never auto-run (`can_auto_run`). v1 ships #5 only.
+- **Durable runaway bound** (`improvement_attempt_edges` table, `reserve_child_repair`): DB-enforced `UNIQUE(parent, recursive_repair)` (one child per parent) + `UNIQUE(root, signature, fingerprint)` (never repeat a fix per root) + `child_depth ≤ 1` checked **globally against `root_attempt_id`**. The child edge is reserved **transactionally before** any spawn, so a restart cannot launder depth (in-memory counters could).
+- **Constitutional boundary** (`touches_constitutional_path`): a verified child repair that touches any guardrail file (orchestration / approval / dispatch / `external_agents/**` / the lane itself / `start.sh` / boot-guard / guardrail tests) routes to **human review** even when it passes — never auto-applied. The diff is listed via `_changed_files_incl_untracked` (porcelain) so an untracked guardrail file can't slip past.
+- **Hermetic verification** (`verify_worktree_dirty_state`): a fresh temp git fixture with an untracked file, asserting the change detector sees it — a deterministic pass/fail, never a model judgment, no live LLM/gateway.
+- **Honest v1 resume:** a verified repair is not yet committed/deployed, so the parent can't transparently resume on the still-buggy running process — the lane surfaces the verified child repair for the normal approval+commit+deploy path rather than fabricate a silent continuation. The supervisor owns every state transition; the child runs synchronously (no background loop) with `recursion_disabled`.
+
 ---
 
 ## 11c. Workflow Loop Primitive
