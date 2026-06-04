@@ -1545,22 +1545,29 @@ class MessageHandler:
         # before any model call — so this is inert until
         # KERNOS_SELF_MAINTENANCE_REVIEW is set.
         try:
-            if not hasattr(self, "_self_maint_instances"):
-                self._self_maint_instances: set[str] = set()
-            if instance_id not in self._self_maint_instances:
-                self._self_maint_instances.add(instance_id)
-                asyncio.create_task(
+            if not hasattr(self, "_self_maint_tasks"):
+                self._self_maint_tasks: dict[str, "asyncio.Task"] = {}
+            if instance_id not in self._self_maint_tasks:
+                task = asyncio.create_task(
                     self._run_self_maintenance_loop(instance_id),
                     name=f"self_maintenance:{instance_id}",
+                )
+                self._self_maint_tasks[instance_id] = task
+                task.add_done_callback(
+                    lambda t, _i=instance_id: self._self_maint_tasks.pop(_i, None)
                 )
         except Exception as exc:
             logger.warning("Failed to start self-maintenance loop for %s: %s",
                            instance_id, exc)
 
     def _self_maintenance_busy(self) -> bool:
-        """Idle-aware: True if any space has queued/pending turns, so the
-        review never competes with a live conversation."""
+        """Idle-aware: True if any turn is queued OR in flight, so the review
+        never competes with a live conversation. Queue depth alone misses a
+        turn already pulled from the mailbox (Codex wiring-review #3), so we
+        also check the active-turn counter maintained by the space loop."""
         try:
+            if getattr(self, "_active_turn_count", 0) > 0:
+                return True
             return any(
                 r.mailbox.qsize() > 0 for r in self._runners.values()
             )
@@ -1588,43 +1595,33 @@ class MessageHandler:
     async def _surface_self_maintenance(
         self, instance_id: str, text: str, report: dict,
     ) -> None:
-        """Surface the review to the System space (the admin surface) as a
-        reflection for the agent to CONSIDER — never an instruction, never an
-        autonomous action."""
-        from datetime import datetime, timezone
-        from kernos.messages.models import (
-            NormalizedMessage as _Msg, AuthLevel as _Auth,
-        )
+        """Surface the review as PASSIVE substrate data — a file written to the
+        System space (the admin surface) that the agent reads as ambient
+        context to CONSIDER. Deliberately NOT a processed turn: the review text
+        is model-generated, so routing it through process() as an
+        owner-authored message would let it reach the reasoning/tool/slash path
+        (Codex wiring-review #1/#2). Reflection, never autonomous action.
+
+        Raises on failure so the caller (maybe_run_daily) counts it surfaced
+        only when it was durably written — a failed write doesn't bury the
+        concern for the dedup TTL."""
+        files = getattr(self, "_files", None)
+        if files is None:
+            raise RuntimeError("file service unavailable")
         space = await self._get_system_space(instance_id)
         if space is None:
-            logger.info("SELF_MAINTENANCE_SURFACE_SKIPPED no system space "
-                        "instance=%s", instance_id)
-            return
-        body = (
-            "[system: daily self-maintenance review — a reflection to "
-            "consider, no action required]\n\n"
-            f"{text}"
+            raise RuntimeError("no system space to surface into")
+        content = (
+            "# Daily Self-Maintenance Review\n\n"
+            f"_slice: `{report.get('slice', '?')}`"
+            f"{'  ·  constitutional (human-gated)' if report.get('constitutional') else ''}_\n\n"
+            f"{text}\n"
         )
-        synthetic = _Msg(
-            content=body, sender="kernos-system",
-            sender_auth_level=_Auth.owner_verified, platform="system",
-            platform_capabilities=[], conversation_id=space.id,
-            timestamp=datetime.now(timezone.utc), instance_id=instance_id,
-            member_id="",
-            context={"execution_envelope": {
-                "source": "self_maintenance_review",
-                "slice": report.get("slice", ""),
-                "constitutional": bool(report.get("constitutional")),
-            }},
+        await files.write_file(
+            instance_id, space.id, "self-maintenance-review.md", content,
+            "KERNOS's latest daily self-review — a reflection to consider "
+            "(passive; any change still goes through the approval gate)",
         )
-
-        async def _run():
-            try:
-                await self.process(synthetic)
-            except Exception as exc:
-                logger.exception("SELF_MAINTENANCE_SURFACE_TURN_CRASHED "
-                                 "instance=%s exc=%s", instance_id, exc)
-        asyncio.create_task(_run())
 
     async def _run_self_maintenance_loop(self, instance_id: str) -> None:
         """Periodic daily self-stewardship tick. Reuses no new scheduler:
@@ -1632,7 +1629,11 @@ class MessageHandler:
         ~once/24h and short-circuits when the kill switch is off."""
         from kernos.kernel import self_maintenance_review as smr
         from kernos.utils import utc_now
-        interval = int(os.getenv("KERNOS_SELF_MAINTENANCE_INTERVAL_SEC", "3600"))
+        try:
+            interval = max(60, int(os.getenv(
+                "KERNOS_SELF_MAINTENANCE_INTERVAL_SEC", "3600")))
+        except (TypeError, ValueError):
+            interval = 3600
         data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
         while True:
             try:
@@ -4401,6 +4402,12 @@ class MessageHandler:
                 # Block until at least one message arrives
                 msg, ctx, future = await runner.mailbox.get()
                 merged_messages = [(msg, ctx, future)]
+                # Idle-awareness for the self-maintenance review: mark a turn
+                # in flight the moment it leaves the mailbox (qsize drops to 0
+                # mid-turn, so queue depth alone is a false-negative —
+                # Codex wiring-review #3).
+                self._active_turn_count = getattr(
+                    self, "_active_turn_count", 0) + 1
 
                 # Merge window: wait briefly for follow-up messages
                 try:
@@ -4868,6 +4875,10 @@ class MessageHandler:
                     if not f.done():
                         f.set_result("Something went wrong. Try again.")
             finally:
+                # Turn done — clear the in-flight marker (idle-awareness).
+                if merged_messages:
+                    self._active_turn_count = max(
+                        0, getattr(self, "_active_turn_count", 1) - 1)
                 # CROSS_SPACE_REQUESTS_V1 (Q1): release the per-space
                 # mutation lock on every iteration exit (success,
                 # exception, cancellation). Cross-space requests
@@ -4890,6 +4901,17 @@ class MessageHandler:
                 except asyncio.CancelledError:
                     pass
         self._runners.clear()
+        # SELF-MAINTENANCE-REVIEW-V1: cancel the per-instance review loops too
+        # (Codex wiring-review #5 — don't leak the background tasks).
+        for _iid, task in list(getattr(self, "_self_maint_tasks", {}).items()):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        if hasattr(self, "_self_maint_tasks"):
+            self._self_maint_tasks.clear()
 
     # -----------------------------------------------------------------------
     # AUTO-WAKE-V1 (2026-05-19): consult completion → wake turn

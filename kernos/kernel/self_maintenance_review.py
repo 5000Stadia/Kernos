@@ -154,38 +154,62 @@ def load_bounded_source(
     repo_root: str = ".",
     *,
     max_lines_per_file: int = 160,
-    max_total_lines: int = 700,
     max_files_per_dir: int = 4,
+    max_line_chars: int = 400,
+    max_total_chars: int = 24000,
 ) -> str:
     """Read a BOUNDED excerpt of the slice's source for a single, tool-less
-    completion (the live consult has no file-reading tools). Honours the
-    read-budget guardrail: caps lines/file, total lines, and files per
-    directory, so a broad slice like ``workflows/`` can't balloon the prompt."""
-    root = Path(repo_root)
+    completion (the live consult has no file-reading tools). HARD caps on
+    bytes, not just lines (Codex wiring-review #4): per-line char cap + a total
+    char budget, streamed line-by-line so a huge single line or big file can't
+    blow memory or prompt size. Every target is resolved and must stay under
+    ``repo_root`` — traversal / absolute / symlinked-out paths are skipped."""
+    try:
+        root = Path(repo_root).resolve()
+    except Exception:
+        return "(invalid repo root)"
     chunks: list[str] = []
-    total = 0
+    total_chars = 0
+
+    def _contained(p: Path) -> Path | None:
+        try:
+            rp = p.resolve()
+            return rp if rp.is_relative_to(root) else None
+        except Exception:
+            return None
+
     for rel in slice_.paths:
-        if total >= max_total_lines:
+        if total_chars >= max_total_chars:
             break
-        target = root / rel
+        target = _contained(root / rel)
+        if target is None:
+            continue
         files: list[Path] = []
         if rel.endswith("/") or target.is_dir():
-            files = sorted(target.glob("*.py"))[:max_files_per_dir]
+            files = [f for f in sorted(target.glob("*.py"))[:max_files_per_dir]
+                     if _contained(f) is not None]
         elif target.is_file():
             files = [target]
         for f in files:
-            if total >= max_total_lines:
+            if total_chars >= max_total_chars:
                 break
+            header = f"# ── {f.relative_to(root)} ──"
+            picked: list[str] = [header]
+            total_chars += len(header) + 1
+            n = 0
             try:
-                lines = f.read_text(errors="replace").splitlines()
+                with f.open(errors="replace") as fh:
+                    for line in fh:
+                        if n >= max_lines_per_file or total_chars >= max_total_chars:
+                            picked.append("…")
+                            break
+                        snippet = line.rstrip("\n")[:max_line_chars]
+                        picked.append(snippet)
+                        total_chars += len(snippet) + 1
+                        n += 1
             except Exception:
                 continue
-            budget = min(max_lines_per_file, max_total_lines - total)
-            excerpt = lines[:budget]
-            total += len(excerpt)
-            rel_name = f.relative_to(root) if f.is_relative_to(root) else f
-            suffix = "" if len(lines) <= budget else f"\n… ({len(lines) - budget} more lines)"
-            chunks.append(f"# ── {rel_name} ──\n" + "\n".join(excerpt) + suffix)
+            chunks.append("\n".join(picked))
     return "\n\n".join(chunks) if chunks else "(no readable source found)"
 
 

@@ -349,12 +349,30 @@ def test_load_bounded_source_reads_files_and_caps(tmp_path):
     (tmp_path / "kernos").mkdir()
     (tmp_path / "kernos" / "a.py").write_text("\n".join(f"line{i}" for i in range(500)))
     sl = smr.ReviewSlice("t", "intent", ("kernos/a.py",))
-    out = smr.load_bounded_source(sl, str(tmp_path), max_lines_per_file=50,
-                                  max_total_lines=200)
+    out = smr.load_bounded_source(sl, str(tmp_path), max_lines_per_file=50)
     assert "kernos/a.py" in out
     assert "line0" in out and "line49" in out
     assert "line60" not in out          # capped at 50 lines/file
-    assert "more lines" in out          # truncation noted
+    assert "…" in out                   # truncation marker
+
+
+def test_load_bounded_source_hard_char_caps(tmp_path):
+    (tmp_path / "big.py").write_text("X" * 100000)        # one huge line
+    sl = smr.ReviewSlice("t", "i", ("big.py",))
+    out = smr.load_bounded_source(sl, str(tmp_path), max_line_chars=80,
+                                  max_total_chars=2000)
+    assert len(out) < 3000                                # bounded, not 100k
+    assert "XXXX" in out                                  # something was read
+
+
+def test_load_bounded_source_skips_paths_outside_root(tmp_path):
+    root = tmp_path / "repo"; root.mkdir()
+    (root / "inside.py").write_text("safe\n")
+    (tmp_path / "secret.py").write_text("ESCAPED\n")
+    sl = smr.ReviewSlice("t", "i", ("inside.py", "../secret.py"))
+    out = smr.load_bounded_source(sl, str(root))
+    assert "safe" in out
+    assert "ESCAPED" not in out          # traversal path skipped
 
 
 def test_load_bounded_source_handles_directory_and_missing(tmp_path):
