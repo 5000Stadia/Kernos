@@ -268,3 +268,30 @@ def test_reviewers_told_to_green_trivial_first_pass():
                              workspace_dir="/tmp/wt").lower()
     assert "green" in spec_rev and "trivial" in spec_rev
     assert "trivial" in impl_rev
+
+
+def test_impl_reviewer_has_request_fidelity_gate():
+    """The FINAL review must verify the diff fulfils the operator's literal
+    request, not just the (drift-prone) spec. Regression for att_cdd51065fe2e:
+    operator asked for humanize_duration, loop shipped a different helper and
+    self-reported success."""
+    text = render_prompt(
+        "impl_reviewer",
+        spec_requirement="add humanize_duration(seconds) to utils.py",
+        spec_text="spec", workspace_dir="/tmp/wt",
+    )
+    low = text.lower()
+    assert "fidelity" in low
+    assert "substitut" in low or "substituted" in low
+    # the operator's literal ask must be embedded for the reviewer to check
+    assert "humanize_duration" in text
+
+
+def test_spec_reviewer_flags_dropped_operator_deliverable():
+    text = render_prompt(
+        "spec_reviewer",
+        spec_requirement="add humanize_duration(seconds) to utils.py",
+        spec_text="spec",
+    ).lower()
+    assert "fidelity" in text
+    assert "deliverable" in text

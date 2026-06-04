@@ -413,6 +413,7 @@ class ImprovementLoopOrchestrator:
                     primary_agent=attempt["primary_coding_agent"],
                     reviewer_agent=attempt["reviewer_coding_agent"],
                     worktree_path=worktree_path,
+                    spec_requirement=attempt["spec_requirement"],
                 )
                 if impl_outcome != "GREEN":
                     await _ledger.update_attempt(
@@ -619,7 +620,7 @@ class ImprovementLoopOrchestrator:
             await self._run_impl_cycle(
                 db=db, attempt_id=child_attempt_id,
                 primary_agent="codex", reviewer_agent="codex",
-                worktree_path=child_wt,
+                worktree_path=child_wt, spec_requirement=fix_prompt,
             )
         return await _changed_files_incl_untracked(child_wt)
 
@@ -883,10 +884,17 @@ class ImprovementLoopOrchestrator:
     async def _run_impl_cycle(
         self, *, db, attempt_id: str,
         primary_agent: str, reviewer_agent: str,
-        worktree_path: str,
+        worktree_path: str, spec_requirement: str = "",
     ) -> str:
         """Run the impl author/reviewer convergence loop.
-        Returns 'GREEN' or 'ABORTED_UNCONVERGED'."""
+        Returns 'GREEN' or 'ABORTED_UNCONVERGED'.
+
+        ``spec_requirement`` is the operator's ORIGINAL request, threaded to
+        the final reviewer so it can verify the diff actually fulfills what
+        the operator asked for — not merely what the (possibly drifted) spec
+        says. This is the request-fidelity backstop: the spec is an internal
+        relay that can garble the ask, so the last gate checks against the
+        operator's literal words."""
         from kernos.kernel import improvement_ledger as _ledger
         from kernos.kernel.improvement_review_protocol import (
             ReviewIterationState, detect_status,
@@ -964,6 +972,7 @@ class ImprovementLoopOrchestrator:
                 iteration=iteration,
                 prior_findings="",
                 workspace_dir=worktree_path,
+                spec_requirement=spec_requirement,
             )
             reviewer_text = await self._consult(
                 target=reviewer_agent, prompt=reviewer_prompt,
