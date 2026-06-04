@@ -285,6 +285,37 @@ async def _compute_staged_diff_hash_async(workspace_dir: str) -> str:
     return f"sha256:{digest}"
 
 
+# Fallback commit identity for the autonomous improvement loop. A fresh
+# deploy clone that only ever *pulls* (e.g. kernos-main) has no git
+# user.name/user.email, so `git commit` dies with "Author identity unknown"
+# — silently capping every self-improvement run at the final commit step.
+# The loop must be self-sufficient: if the worktree has no identity, commit
+# under a stable Kernos identity (env-overridable) via per-command `-c` flags,
+# which never mutate repo config and never override a real configured author.
+_DEFAULT_GIT_AUTHOR_NAME = os.environ.get("KERNOS_GIT_AUTHOR_NAME", "Kernos")
+_DEFAULT_GIT_AUTHOR_EMAIL = os.environ.get(
+    "KERNOS_GIT_AUTHOR_EMAIL", "kernos@kernos.local",
+)
+
+
+async def _commit_identity_args(workspace_dir: str) -> list[str]:
+    """Return `-c user.name=… -c user.email=…` args ONLY when the worktree
+    has no author identity configured; otherwise `[]` (respect the real
+    author). Makes the autonomous commit robust to a fresh deploy clone."""
+    rc_n, name, _ = await _run_git(
+        ["config", "user.name"], cwd=workspace_dir,
+    )
+    rc_e, email, _ = await _run_git(
+        ["config", "user.email"], cwd=workspace_dir,
+    )
+    if name.strip() and email.strip():
+        return []
+    return [
+        "-c", f"user.name={_DEFAULT_GIT_AUTHOR_NAME}",
+        "-c", f"user.email={_DEFAULT_GIT_AUTHOR_EMAIL}",
+    ]
+
+
 # ---------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------
@@ -560,9 +591,12 @@ async def handle_git_commit(
             f"for the current contents; re-issue."
         )
 
-    # Run the commit.
+    # Run the commit. Inject a fallback author identity when the worktree
+    # has none configured (a fresh deploy clone) so `git commit` can't die
+    # with "Author identity unknown" and silently cap the loop.
+    identity_args = await _commit_identity_args(workspace_dir)
     rc, out, stderr = await _run_git(
-        ["commit", "-m", message], cwd=workspace_dir,
+        identity_args + ["commit", "-m", message], cwd=workspace_dir,
     )
     if rc != 0:
         return (

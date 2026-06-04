@@ -238,6 +238,68 @@ async def _stage_and_get_receipt(
 
 
 @pytest.mark.asyncio
+async def test_git_commit_succeeds_without_configured_identity(
+    env, monkeypatch,
+):
+    """A fresh deploy clone that only ever pulls (e.g. kernos-main) has NO
+    git author identity, so `git commit` dies with 'Author identity unknown'
+    and silently caps every self-improvement run at the final commit step.
+    The loop must commit anyway under a fallback Kernos identity. (Observed
+    live: att_948028d50c69 — spec GREEN, impl GREEN, auto-approved, then
+    commit_refused/head_unchanged purely from the missing identity.)"""
+    data_dir, repo_dir, wt_path, _ = env
+    # Neutralize ambient global/system identity so the test is deterministic.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    env_vars = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    for cfg_dir in (repo_dir, wt_path):
+        for key in ("user.name", "user.email"):
+            subprocess.run(
+                ["git", "config", "--unset", key],
+                cwd=cfg_dir, env=env_vars,
+            )
+    approval_id, _ = await _stage_and_get_receipt(
+        data_dir=data_dir, wt_path=wt_path,
+    )
+    text = await gop.handle_git_commit(
+        tool_input={
+            "workspace_dir": wt_path, "message": "add change.txt",
+            "approval_id": approval_id, "files": ["change.txt"],
+        },
+        instance_id="t1", data_dir=data_dir,
+    )
+    assert "Committed" in text, f"commit should succeed via fallback: {text}"
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an <%ae>"],
+        cwd=wt_path, env=env_vars, capture_output=True, text=True,
+    ).stdout.strip()
+    assert author == "Kernos <kernos@kernos.local>", author
+
+
+@pytest.mark.asyncio
+async def test_git_commit_preserves_configured_identity(env):
+    """When the worktree DOES have an author identity, the fallback must NOT
+    override it."""
+    data_dir, _, wt_path, _ = env  # fixture configures Test <test@example.com>
+    approval_id, _ = await _stage_and_get_receipt(
+        data_dir=data_dir, wt_path=wt_path,
+    )
+    text = await gop.handle_git_commit(
+        tool_input={
+            "workspace_dir": wt_path, "message": "add change.txt",
+            "approval_id": approval_id, "files": ["change.txt"],
+        },
+        instance_id="t1", data_dir=data_dir,
+    )
+    assert "Committed" in text
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an <%ae>"],
+        cwd=wt_path, capture_output=True, text=True,
+    ).stdout.strip()
+    assert author == "Test <test@example.com>", author
+
+
+@pytest.mark.asyncio
 async def test_ac8_git_commit_rejects_missing_approval(env):
     data_dir, _, wt_path, _ = env
     text = await gop.handle_git_commit(
