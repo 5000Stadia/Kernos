@@ -153,7 +153,7 @@ async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
         '"corrective_findings":["real concern"],"evolution_idea":null,'
         '"serves_the_whole":true}\n```'
     )
-    async def _consult(_p): return payload
+    async def _consult(_p, _s=None): return payload
     async def _boom(_t, _r): raise RuntimeError("whisper down")
 
     r1 = await smr.maybe_run_daily(
@@ -180,7 +180,7 @@ async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
 async def test_parse_failure_does_not_advance_cursor(tmp_path, monkeypatch):
     monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
     d = str(tmp_path)
-    async def _consult(_p): return "I have opinions but no json block."
+    async def _consult(_p, _s=None): return "I have opinions but no json block."
     r = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:00:00+00:00", consult_fn=_consult,
     )
@@ -196,7 +196,7 @@ async def test_review_writes_audit_receipt(tmp_path, monkeypatch):
         '```json\n{"overall_health":"healthy","corrective_findings":[],'
         '"evolution_idea":null,"serves_the_whole":true}\n```'
     )
-    async def _consult(_p): return payload
+    async def _consult(_p, _s=None): return payload
     await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:00:00+00:00", consult_fn=_consult,
     )
@@ -211,7 +211,7 @@ async def test_review_writes_audit_receipt(tmp_path, monkeypatch):
 
 
 def _consult_returning(payload: str):
-    async def _c(_prompt):
+    async def _c(_prompt, _slice=None):
         return payload
     return _c
 
@@ -340,3 +340,29 @@ async def test_constitutional_flag_survives_to_report(tmp_path, monkeypatch):
     )
     assert res["report"]["constitutional"] is True
     assert captured and captured[0]["constitutional"] is True
+
+
+# --- live source loader (read budget) --------------------------------------
+
+
+def test_load_bounded_source_reads_files_and_caps(tmp_path):
+    (tmp_path / "kernos").mkdir()
+    (tmp_path / "kernos" / "a.py").write_text("\n".join(f"line{i}" for i in range(500)))
+    sl = smr.ReviewSlice("t", "intent", ("kernos/a.py",))
+    out = smr.load_bounded_source(sl, str(tmp_path), max_lines_per_file=50,
+                                  max_total_lines=200)
+    assert "kernos/a.py" in out
+    assert "line0" in out and "line49" in out
+    assert "line60" not in out          # capped at 50 lines/file
+    assert "more lines" in out          # truncation noted
+
+
+def test_load_bounded_source_handles_directory_and_missing(tmp_path):
+    d = tmp_path / "pkg"; d.mkdir()
+    (d / "one.py").write_text("alpha\nbeta\n")
+    (d / "two.py").write_text("gamma\n")
+    sl = smr.ReviewSlice("t", "i", ("pkg/", "does/not/exist.py"))
+    out = smr.load_bounded_source(sl, str(tmp_path), max_files_per_dir=4)
+    assert "alpha" in out and "gamma" in out   # dir expanded
+    # missing path simply contributes nothing; no crash
+    assert "one.py" in out

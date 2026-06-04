@@ -149,6 +149,46 @@ def slice_for_cursor(cursor: int) -> ReviewSlice:
     return REVIEW_SLICES[cursor % len(REVIEW_SLICES)]
 
 
+def load_bounded_source(
+    slice_: ReviewSlice,
+    repo_root: str = ".",
+    *,
+    max_lines_per_file: int = 160,
+    max_total_lines: int = 700,
+    max_files_per_dir: int = 4,
+) -> str:
+    """Read a BOUNDED excerpt of the slice's source for a single, tool-less
+    completion (the live consult has no file-reading tools). Honours the
+    read-budget guardrail: caps lines/file, total lines, and files per
+    directory, so a broad slice like ``workflows/`` can't balloon the prompt."""
+    root = Path(repo_root)
+    chunks: list[str] = []
+    total = 0
+    for rel in slice_.paths:
+        if total >= max_total_lines:
+            break
+        target = root / rel
+        files: list[Path] = []
+        if rel.endswith("/") or target.is_dir():
+            files = sorted(target.glob("*.py"))[:max_files_per_dir]
+        elif target.is_file():
+            files = [target]
+        for f in files:
+            if total >= max_total_lines:
+                break
+            try:
+                lines = f.read_text(errors="replace").splitlines()
+            except Exception:
+                continue
+            budget = min(max_lines_per_file, max_total_lines - total)
+            excerpt = lines[:budget]
+            total += len(excerpt)
+            rel_name = f.relative_to(root) if f.is_relative_to(root) else f
+            suffix = "" if len(lines) <= budget else f"\n… ({len(lines) - budget} more lines)"
+            chunks.append(f"# ── {rel_name} ──\n" + "\n".join(excerpt) + suffix)
+    return "\n\n".join(chunks) if chunks else "(no readable source found)"
+
+
 # ---------------------------------------------------------------------------
 # Durable cursor + dedup state (a small JSON in data_dir)
 # ---------------------------------------------------------------------------
@@ -443,7 +483,7 @@ async def maybe_run_daily(
     *,
     data_dir: str,
     now_iso: str,
-    consult_fn: Callable[..., Any],   # async (prompt) -> str
+    consult_fn: Callable[..., Any],   # async (prompt, slice) -> str
     whisper_fn: Callable[..., Any] | None = None,  # async (text, report) -> None
     busy: bool = False,
 ) -> dict:
@@ -463,7 +503,9 @@ async def maybe_run_daily(
     cursor = int(state.get("cursor", 0))
     slice_ = slice_for_cursor(cursor)
     try:
-        text = await consult_fn(build_review_prompt(slice_))
+        # consult_fn receives (prompt, slice) — the slice carries the paths a
+        # live, tool-less single completion needs to pre-load source.
+        text = await consult_fn(build_review_prompt(slice_), slice_)
     except Exception as exc:
         append_receipt(data_dir, {
             "ts": now_iso, "slice": slice_.name, "outcome": "error",
@@ -526,6 +568,7 @@ __all__ = [
     "REVIEW_SLICES",
     "ReviewSlice",
     "slice_for_cursor",
+    "load_bounded_source",
     "load_state",
     "save_state",
     "append_receipt",

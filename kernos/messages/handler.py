@@ -1539,6 +1539,122 @@ class MessageHandler:
             self._evaluators[instance_id] = evaluator
         except Exception as exc:
             logger.warning("Failed to start AwarenessEvaluator for %s: %s", instance_id, exc)
+        # SELF-MAINTENANCE-REVIEW-V1: start the daily self-stewardship loop
+        # alongside the evaluator (once per instance). The loop is cheap when
+        # the kill switch is off — maybe_run_daily short-circuits to "disabled"
+        # before any model call — so this is inert until
+        # KERNOS_SELF_MAINTENANCE_REVIEW is set.
+        try:
+            if not hasattr(self, "_self_maint_instances"):
+                self._self_maint_instances: set[str] = set()
+            if instance_id not in self._self_maint_instances:
+                self._self_maint_instances.add(instance_id)
+                asyncio.create_task(
+                    self._run_self_maintenance_loop(instance_id),
+                    name=f"self_maintenance:{instance_id}",
+                )
+        except Exception as exc:
+            logger.warning("Failed to start self-maintenance loop for %s: %s",
+                           instance_id, exc)
+
+    def _self_maintenance_busy(self) -> bool:
+        """Idle-aware: True if any space has queued/pending turns, so the
+        review never competes with a live conversation."""
+        try:
+            return any(
+                r.mailbox.qsize() > 0 for r in self._runners.values()
+            )
+        except Exception:
+            return True  # on doubt, defer
+
+    async def _self_maintenance_consult(self, prompt: str, slice_) -> str:
+        """Single bounded completion: pre-load a capped excerpt of the slice's
+        source (the completion is tool-less) and ask KERNOS to review it."""
+        from kernos.kernel.self_maintenance_review import load_bounded_source
+        source = load_bounded_source(slice_, os.getenv("KERNOS_REPO_DIR", "."))
+        user = (
+            f"{prompt}\n\n"
+            f"--- SOURCE EXCERPT (bounded) ---\n{source}\n--- END SOURCE ---"
+        )
+        return await self.reasoning.complete_simple(
+            system_prompt=(
+                "You are KERNOS reflecting on your own code in a daily "
+                "self-maintenance review. Be honest, concrete, and brief."
+            ),
+            user_content=user,
+            max_tokens=1600,
+        )
+
+    async def _surface_self_maintenance(
+        self, instance_id: str, text: str, report: dict,
+    ) -> None:
+        """Surface the review to the System space (the admin surface) as a
+        reflection for the agent to CONSIDER — never an instruction, never an
+        autonomous action."""
+        from datetime import datetime, timezone
+        from kernos.messages.models import (
+            NormalizedMessage as _Msg, AuthLevel as _Auth,
+        )
+        space = await self._get_system_space(instance_id)
+        if space is None:
+            logger.info("SELF_MAINTENANCE_SURFACE_SKIPPED no system space "
+                        "instance=%s", instance_id)
+            return
+        body = (
+            "[system: daily self-maintenance review — a reflection to "
+            "consider, no action required]\n\n"
+            f"{text}"
+        )
+        synthetic = _Msg(
+            content=body, sender="kernos-system",
+            sender_auth_level=_Auth.owner_verified, platform="system",
+            platform_capabilities=[], conversation_id=space.id,
+            timestamp=datetime.now(timezone.utc), instance_id=instance_id,
+            member_id="",
+            context={"execution_envelope": {
+                "source": "self_maintenance_review",
+                "slice": report.get("slice", ""),
+                "constitutional": bool(report.get("constitutional")),
+            }},
+        )
+
+        async def _run():
+            try:
+                await self.process(synthetic)
+            except Exception as exc:
+                logger.exception("SELF_MAINTENANCE_SURFACE_TURN_CRASHED "
+                                 "instance=%s exc=%s", instance_id, exc)
+        asyncio.create_task(_run())
+
+    async def _run_self_maintenance_loop(self, instance_id: str) -> None:
+        """Periodic daily self-stewardship tick. Reuses no new scheduler:
+        wakes every interval and calls maybe_run_daily, which self-gates to
+        ~once/24h and short-circuits when the kill switch is off."""
+        from kernos.kernel import self_maintenance_review as smr
+        from kernos.utils import utc_now
+        interval = int(os.getenv("KERNOS_SELF_MAINTENANCE_INTERVAL_SEC", "3600"))
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+        while True:
+            try:
+                if smr.is_enabled():
+                    async def _whisper(text, report, _iid=instance_id):
+                        await self._surface_self_maintenance(_iid, text, report)
+                    res = await smr.maybe_run_daily(
+                        data_dir=data_dir, now_iso=utc_now(),
+                        consult_fn=self._self_maintenance_consult,
+                        whisper_fn=_whisper,
+                        busy=self._self_maintenance_busy(),
+                    )
+                    if str(res.get("outcome", "")).startswith("reviewed"):
+                        logger.info(
+                            "SELF_MAINTENANCE_REVIEW instance=%s outcome=%s "
+                            "slice=%s", instance_id, res.get("outcome"),
+                            res.get("slice"),
+                        )
+            except Exception as exc:
+                logger.warning("SELF_MAINTENANCE_LOOP error instance=%s: %s",
+                               instance_id, exc)
+            await asyncio.sleep(interval)
 
     def register_adapter(self, platform: str, adapter: "BaseAdapter") -> None:
         """Register a platform adapter for outbound messaging."""
