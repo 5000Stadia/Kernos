@@ -69,6 +69,7 @@ class ProviderRegistry:
         return self._factories.pop(provider_key, None) is not None
 
     def get(self, provider_key: str) -> AgentInboxFactory | None:
+        """Return the factory bound to ``provider_key``, if any."""
         return self._factories.get(provider_key)
 
     def has(self, provider_key: str) -> bool:

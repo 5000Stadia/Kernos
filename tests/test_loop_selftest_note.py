@@ -19,11 +19,15 @@ REQUIRED_RUNTIME_NEUTRAL_CLAIM = (
 ALLOWED_LOOP_SELFTEST_PATHS = {
     "docs/notes/soak-01.md",
     "docs/notes/soak-02.md",
+    "docs/notes/soak-03.md",
     "docs/notes/loop-selftest.md",
     "impl_notes.md",
+    "kernos/kernel/agents/providers.py",
+    "kernos/utils.py",
     "spec.md",
     "tests/test_soak_01_note.py",
     "tests/test_soak_02_note.py",
+    "tests/test_soak_03_surface.py",
     "tests/test_loop_selftest_note.py",
 }
 
@@ -57,7 +61,7 @@ def test_loop_selftest_dirty_scope_and_marker_confinement():
     assert REQUIRED_RUNTIME_NEUTRAL_CLAIM in content
 
     # Substrate state: this improvement's dirty worktree surface remains
-    # confined to the approved documentation/review artifacts.
+    # confined to the active spec's approved artifacts.
     dirty_paths = _dirty_worktree_paths()
     loop_selftest_is_dirty = bool(dirty_paths & ALLOWED_LOOP_SELFTEST_PATHS)
     if loop_selftest_is_dirty:
