@@ -21,7 +21,7 @@ It produces a short, honest report and surfaces it **to the main KERNOS agent to
 
 ## 3. Shape
 
-1. **Cadence — daily, idle-aware.** Fires at most once per 24h, off-peak, and DEFERS if a turn is in flight or an `improve_kernos` attempt is running. Reuses the existing interval/workflow scheduling; no new scheduler.
+1. **Cadence — daily, idle-aware.** Fires ~once a day (a minimum gap of ~20h between runs, so a slightly-early daily tick still fires), off-peak, and DEFERS if a turn is in flight or an `improve_kernos` attempt is running. Reuses the existing interval/workflow scheduling; no new scheduler.
 2. **Scope — one rotating slice per day, nothing exempt.** Review a single subsystem per run, advancing a cursor pinned in state. Cheap, focused, sustainable; covers the whole system over ~a week. NOT a whole-codebase sweep. **The slice list includes the maintenance methodology itself** — the daily review, the self-healing lane, and the governing intention (operating principles). KERNOS turns the same two lenses on *how it reviews and evolves itself*. Those meta-slices are marked **constitutional**: reviewable + ponderable like anything else, but any evolution there is **human-gated** — surfaced to the founder to weigh, never self-applied (aligns with the recursive-self-heal constitutional set + "start.sh is human-only").
 3. **The review — two lenses.** For the day's slice, read the *intent* (TECHNICAL-ARCHITECTURE, kernel outline, the relevant spec) and the *as-built* code, then assess in ONE bounded reasoning consult (not a multi-agent gauntlet):
    - **Corrective lens:** Does the implementation still serve the documented intention, or has it drifted? Is there a healthier / simpler / more elegant shape? Dead code, redundancy, an unguarded failure mode, a violated principle/covenant?
@@ -36,7 +36,9 @@ It produces a short, honest report and surfaces it **to the main KERNOS agent to
 ## 4. Guardrails (the ark)
 
 - Read-only; no autonomous mutation. Action only via the existing approval gate.
-- Bounded cost: one reasoning consult per day, one slice.
+- Bounded cost: one reasoning consult per day, one slice, ONE single-pass read budget — the prompt instructs "read only what you need; for a directory slice focus on key modules, don't sweep", so a broad slice like `workflows/` can't balloon into an expensive scan.
+- A parse failure (no usable verdict) is NOT counted as a clean review: it doesn't advance the cursor (the slice is re-reviewed next cycle) and is logged as `parse_error`.
+- An audit receipt (JSONL) is appended per attempted review so the founder can see the cadence + what's been noticed.
 - Idle-aware: never competes with a live turn or an in-flight improvement.
 - Covenant-bound: the review respects the governing principles + covenants; it may FLAG a principle violation but never override one.
 - **Evolution discipline:** ≤1 minor, reversible, well-justified evolution idea per review; serves-the-whole or it isn't raised. No sweeping rewrites, no novelty-for-its-own-sake, no compounding churn. Thoughtful evolution, one minor step at a time.

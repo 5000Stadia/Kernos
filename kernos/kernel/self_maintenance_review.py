@@ -176,6 +176,21 @@ def save_state(data_dir: str, state: dict) -> None:
     _state_path(data_dir).write_text(json.dumps(state, separators=(",", ":")))
 
 
+def _receipts_path(data_dir: str) -> Path:
+    return Path(data_dir) / "self_maintenance_receipts.jsonl"
+
+
+def append_receipt(data_dir: str, record: dict) -> None:
+    """Append one JSONL audit receipt per attempted review so the founder can
+    see the cadence + what KERNOS has been noticing over time (spec §3.6)."""
+    try:
+        line = json.dumps(record, separators=(",", ":"))
+        with _receipts_path(data_dir).open("a") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass  # receipts are best-effort; never break the review on logging
+
+
 def _hours_between(a_iso: str, b_iso: str) -> float | None:
     """Hours from a_iso to b_iso, or None if either is unparseable."""
     from datetime import datetime
@@ -235,6 +250,9 @@ def build_review_prompt(slice_: ReviewSlice) -> str:
         "INTENTION OF THE WHOLE KERNOS SYSTEM — is it still pulling its weight, "
         "in the right place, worth its complexity? This is creative, holistic "
         "pondering, not bug-hunting.\n\n"
+        "BUDGET: this is ONE bounded, single-pass review. Read only what you "
+        "need — for a directory slice, focus on the key modules + entry points, "
+        "do NOT exhaustively read every file or expand into a broad sweep.\n\n"
         "DISCIPLINE (binding): thoughtful evolution, NOT out-of-hand mutation. "
         "Propose AT MOST ONE minor, reversible, well-justified evolution idea "
         "— one step, serving the whole. If nothing is genuinely worth "
@@ -266,20 +284,26 @@ def parse_review(text: str, slice_name: str) -> dict:
         "serves_the_whole": None,
         "serves_the_whole_why": "",
         "suggested_direction": "",
+        "parsed": False,
         "raw": text.strip()[-4000:],
     }
     block = _last_json_block(text)
     if block is not None:
+        report["parsed"] = True
         for k in (
             "overall_health", "corrective_findings", "evolution_idea",
             "serves_the_whole", "serves_the_whole_why", "suggested_direction",
         ):
             if k in block:
                 report[k] = block[k]
-    # Enforce the discipline at the parse boundary: at most ONE evolution idea.
+    # Discipline at the parse boundary: at most ONE evolution idea.
     ev = report.get("evolution_idea")
     if isinstance(ev, list):
         report["evolution_idea"] = ev[0] if ev else None
+    # Discipline: an evolution idea is only valid if it serves the whole —
+    # "serves-the-whole or it isn't raised" (Codex code-review #4).
+    if report.get("serves_the_whole") is not True:
+        report["evolution_idea"] = None
     if not isinstance(report.get("corrective_findings"), list):
         report["corrective_findings"] = (
             [str(report["corrective_findings"])]
@@ -312,51 +336,67 @@ def _fingerprint(slice_name: str, finding: str) -> str:
     return hashlib.sha256(f"{slice_name}|{norm}".encode()).hexdigest()[:16]
 
 
-def filter_seen(report: dict, state: dict, now_iso: str) -> dict:
-    """Drop corrective findings + an evolution idea already surfaced within
-    the TTL, so the same observation doesn't nag every rotation. Returns a new
-    report; mutates state['seen'] with freshly-surfaced fingerprints."""
-    seen: dict[str, str] = state.setdefault("seen", {})
-    # Expire stale fingerprints.
-    fresh = {}
-    for fp, iso in seen.items():
+def prune_seen(seen: dict, now_iso: str) -> dict:
+    """Return seen with TTL-expired fingerprints dropped (pure)."""
+    out = {}
+    for fp, iso in (seen or {}).items():
         gap = _hours_between(iso, now_iso)
         if gap is None or gap < DEDUP_TTL_DAYS * 24:
-            fresh[fp] = iso
-    seen.clear()
-    seen.update(fresh)
+            out[fp] = iso
+    return out
 
+
+def filter_seen(report: dict, seen: dict, now_iso: str) -> tuple[dict, dict]:
+    """Return ``(filtered_report, fresh_fingerprints)``. Does NOT mutate
+    ``seen`` — the caller commits ``fresh_fingerprints`` ONLY after a finding
+    is actually surfaced (Codex code-review #2: a failed/absent whisper must
+    not bury the concern for the TTL). Drops findings/idea/role-concern already
+    seen within the TTL so the same observation doesn't nag every rotation."""
     slice_name = report.get("slice", "")
+    fresh: dict[str, str] = {}
+
     kept_findings = []
     for f in report.get("corrective_findings", []):
         fp = _fingerprint(slice_name, f)
-        if fp in seen:
+        if fp in seen or fp in fresh:
             continue
-        seen[fp] = now_iso
+        fresh[fp] = now_iso
         kept_findings.append(f)
 
-    ev = report.get("evolution_idea")
     kept_ev = None
-    if ev:
+    ev = report.get("evolution_idea")
+    if ev:  # parse_review already enforced serves_the_whole is True
         fp = _fingerprint(slice_name, f"evolve:{ev}")
         if fp not in seen:
-            seen[fp] = now_iso
+            fresh[fp] = now_iso
             kept_ev = ev
+
+    # A "doesn't serve the whole" verdict is itself a dedup-able concern, so a
+    # repeat minor_concerns with no FRESH detail can't keep re-whispering
+    # (Codex code-review #3).
+    role_fresh = False
+    if report.get("serves_the_whole") is False:
+        fp = _fingerprint(slice_name, "role:does_not_serve_whole")
+        if fp not in seen:
+            fresh[fp] = now_iso
+            role_fresh = True
 
     out = dict(report)
     out["corrective_findings"] = kept_findings
     out["evolution_idea"] = kept_ev
-    return out
+    out["role_concern_fresh"] = role_fresh
+    return out, fresh
 
 
 def has_anything_to_say(report: dict) -> bool:
-    """Honest-when-healthy: only surface when there's a fresh finding, an
-    evolution idea, or a non-healthy verdict."""
+    """Honest-when-healthy: surface only on FRESH substance — a fresh finding,
+    a fresh (serves-the-whole) evolution idea, or a fresh role concern. The
+    bare health verdict alone is NOT a trigger, so an all-duplicate
+    minor_concerns report stays quiet (Codex code-review #3)."""
     return bool(
         report.get("corrective_findings")
         or report.get("evolution_idea")
-        or report.get("overall_health") not in ("healthy", "unknown", None)
-        or report.get("serves_the_whole") is False
+        or report.get("role_concern_fresh")
     )
 
 
@@ -409,7 +449,7 @@ async def maybe_run_daily(
 ) -> dict:
     """Run today's review iff enabled, not busy, and due. Returns a result
     dict with ``outcome``: disabled | busy | not_due | reviewed_quiet |
-    reviewed_surfaced | error."""
+    reviewed_surfaced | parse_error | error."""
     if not is_enabled():
         return {"outcome": "disabled"}
     if busy:
@@ -420,35 +460,64 @@ async def maybe_run_daily(
     if not due_for_review(state, now_iso):
         return {"outcome": "not_due"}
 
-    slice_ = slice_for_cursor(int(state.get("cursor", 0)))
+    cursor = int(state.get("cursor", 0))
+    slice_ = slice_for_cursor(cursor)
     try:
         text = await consult_fn(build_review_prompt(slice_))
     except Exception as exc:
+        append_receipt(data_dir, {
+            "ts": now_iso, "slice": slice_.name, "outcome": "error",
+            "error": str(exc)[:200],
+        })
         return {"outcome": "error", "slice": slice_.name, "error": str(exc)[:200]}
 
     report = parse_review(text or "", slice_.name)
     report["constitutional"] = slice_.constitutional
-    report = filter_seen(report, state, now_iso)
-    report["constitutional"] = slice_.constitutional  # filter_seen returns a copy
+
+    # Parse failure: the review didn't produce a usable verdict. Do NOT count
+    # it as a clean reviewed slice or advance the cursor (Codex code-review #5)
+    # — rate-limit (stamp the run) and re-review this same slice next cycle.
+    if not report.get("parsed"):
+        state["last_run_iso"] = now_iso
+        save_state(data_dir, state)
+        append_receipt(data_dir, {
+            "ts": now_iso, "slice": slice_.name, "outcome": "parse_error",
+        })
+        return {"outcome": "parse_error", "slice": slice_.name, "report": report}
+
+    pruned = prune_seen(state.get("seen", {}), now_iso)
+    filtered, fresh = filter_seen(report, pruned, now_iso)
+    filtered["constitutional"] = slice_.constitutional
 
     surfaced = False
-    if has_anything_to_say(report) and whisper_fn is not None:
+    if has_anything_to_say(filtered) and whisper_fn is not None:
         try:
-            await whisper_fn(to_whisper_text(report), report)
+            await whisper_fn(to_whisper_text(filtered), filtered)
             surfaced = True
         except Exception:
             surfaced = False
 
-    # Advance the cursor + stamp the run + persist dedup, regardless of whether
-    # we surfaced (a quiet healthy slice still counts as reviewed).
-    state["cursor"] = int(state.get("cursor", 0)) + 1
+    # Commit fresh fingerprints ONLY after a successful surface, so a failed or
+    # absent whisper doesn't bury the concern for the TTL (Codex #2). A quiet
+    # healthy slice (nothing fresh) commits just the pruned set.
+    state["seen"] = {**pruned, **fresh} if surfaced else pruned
+    state["cursor"] = cursor + 1
     state["last_run_iso"] = now_iso
     save_state(data_dir, state)
+
+    append_receipt(data_dir, {
+        "ts": now_iso, "slice": slice_.name,
+        "outcome": "reviewed_surfaced" if surfaced else "reviewed_quiet",
+        "overall_health": filtered.get("overall_health"),
+        "n_findings": len(filtered.get("corrective_findings") or []),
+        "has_evolution_idea": bool(filtered.get("evolution_idea")),
+        "constitutional": slice_.constitutional,
+    })
 
     return {
         "outcome": "reviewed_surfaced" if surfaced else "reviewed_quiet",
         "slice": slice_.name,
-        "report": report,
+        "report": filtered,
     }
 
 
@@ -459,6 +528,8 @@ __all__ = [
     "slice_for_cursor",
     "load_state",
     "save_state",
+    "append_receipt",
+    "prune_seen",
     "due_for_review",
     "build_review_prompt",
     "parse_review",

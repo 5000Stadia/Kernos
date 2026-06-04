@@ -101,26 +101,110 @@ def test_report_with_evolution_idea_has_something_to_say():
 
 
 def test_filter_seen_suppresses_repeats_within_ttl():
-    state = {"cursor": 0, "last_run_iso": "", "seen": {}}
+    seen = {}
     rep = {"slice": "awareness", "corrective_findings": ["dup finding"],
-           "evolution_idea": "evolve x"}
-    first = smr.filter_seen(rep, state, "2026-06-04T00:00:00+00:00")
+           "evolution_idea": "evolve x", "serves_the_whole": True}
+    first, fresh = smr.filter_seen(rep, seen, "2026-06-04T00:00:00+00:00")
     assert first["corrective_findings"] == ["dup finding"]
     assert first["evolution_idea"] == "evolve x"
+    seen.update(fresh)   # caller commits after surfacing
     # same report next day -> both suppressed
-    second = smr.filter_seen(rep, state, "2026-06-05T00:00:00+00:00")
+    second, _ = smr.filter_seen(rep, seen, "2026-06-05T00:00:00+00:00")
     assert second["corrective_findings"] == []
     assert second["evolution_idea"] is None
 
 
 def test_filter_seen_reraises_after_ttl_expiry():
-    state = {"cursor": 0, "last_run_iso": "", "seen": {}}
-    rep = {"slice": "awareness", "corrective_findings": ["aged finding"],
-           "evolution_idea": None}
-    smr.filter_seen(rep, state, "2026-06-04T00:00:00+00:00")
-    # 30 days later (> 14d TTL) -> surfaces again
-    later = smr.filter_seen(rep, state, "2026-07-04T00:00:00+00:00")
+    seen = {}
+    rep = {"slice": "awareness", "corrective_findings": ["aged finding"]}
+    _, fresh = smr.filter_seen(rep, seen, "2026-06-04T00:00:00+00:00")
+    seen.update(fresh)
+    seen = smr.prune_seen(seen, "2026-07-04T00:00:00+00:00")  # >14d -> expired
+    later, _ = smr.filter_seen(rep, seen, "2026-07-04T00:00:00+00:00")
     assert later["corrective_findings"] == ["aged finding"]
+
+
+def test_filter_seen_does_not_mutate_caller_seen():
+    seen = {}
+    rep = {"slice": "x", "corrective_findings": ["f"]}
+    smr.filter_seen(rep, seen, "2026-06-04T00:00:00+00:00")
+    assert seen == {}   # Codex #2: caller commits, filter_seen must not mutate
+
+
+# --- Codex code-review fixes ----------------------------------------------
+
+
+def test_evolution_idea_dropped_unless_serves_the_whole():
+    # serves_the_whole False -> the idea is NOT raised (discipline #4)
+    r = smr.parse_review(
+        '```json\n{"overall_health":"minor_concerns","corrective_findings":[],'
+        '"evolution_idea":"rip it out","serves_the_whole":false}\n```', "gate",
+    )
+    assert r["evolution_idea"] is None
+    assert smr.has_anything_to_say(r) is False  # nothing fresh/serving
+
+
+@pytest.mark.asyncio
+async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
+    d = str(tmp_path)
+    payload = (
+        '```json\n{"overall_health":"minor_concerns",'
+        '"corrective_findings":["real concern"],"evolution_idea":null,'
+        '"serves_the_whole":true}\n```'
+    )
+    async def _consult(_p): return payload
+    async def _boom(_t, _r): raise RuntimeError("whisper down")
+
+    r1 = await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
+        consult_fn=_consult, whisper_fn=_boom,
+    )
+    assert r1["outcome"] == "reviewed_quiet"        # surface failed
+    assert smr.load_state(d)["seen"] == {}          # NOT buried
+    # next cycle, whisper works -> the concern still surfaces
+    seen_whispers = []
+    async def _ok(t, rr): seen_whispers.append(t)
+    # same slice again: force cursor back + clear the daily gate
+    st = smr.load_state(d); st["cursor"] -= 1; st["last_run_iso"] = ""
+    smr.save_state(d, st)
+    r2 = await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-05T00:00:00+00:00",
+        consult_fn=_consult, whisper_fn=_ok,
+    )
+    assert r2["outcome"] == "reviewed_surfaced"
+    assert seen_whispers and "real concern" in seen_whispers[0]
+
+
+@pytest.mark.asyncio
+async def test_parse_failure_does_not_advance_cursor(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
+    d = str(tmp_path)
+    async def _consult(_p): return "I have opinions but no json block."
+    r = await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-04T00:00:00+00:00", consult_fn=_consult,
+    )
+    assert r["outcome"] == "parse_error"
+    assert smr.load_state(d)["cursor"] == 0   # NOT counted as a clean review
+
+
+@pytest.mark.asyncio
+async def test_review_writes_audit_receipt(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
+    d = str(tmp_path)
+    payload = (
+        '```json\n{"overall_health":"healthy","corrective_findings":[],'
+        '"evolution_idea":null,"serves_the_whole":true}\n```'
+    )
+    async def _consult(_p): return payload
+    await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-04T00:00:00+00:00", consult_fn=_consult,
+    )
+    import json as _json
+    receipts = (tmp_path / "self_maintenance_receipts.jsonl").read_text().splitlines()
+    assert len(receipts) == 1
+    rec = _json.loads(receipts[0])
+    assert rec["outcome"] == "reviewed_quiet" and rec["overall_health"] == "healthy"
 
 
 # --- orchestration ---------------------------------------------------------
