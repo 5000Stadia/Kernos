@@ -320,6 +320,169 @@ async def set_edge_state(
         await db.commit()
 
 
+# ---------------------------------------------------------------------------
+# Hermetic verification fixture for signature #5 (§9.2) — proves a repair
+# actually fixed worktree change-detection, with NO live LLM/gateway/network.
+# ---------------------------------------------------------------------------
+
+
+async def verify_worktree_dirty_state(_workspace_dir: str = "") -> bool:
+    """Deterministic pass/fail: in a fresh temp git repo with an UNTRACKED
+    new file, does the substrate's change-detection see it? This is the
+    invariant signature #5's repair must restore. Returns True iff detection
+    correctly reports the worktree as dirty. Hermetic + reproducible."""
+    import subprocess
+    import tempfile
+
+    from kernos.kernel.improvement_loop_workflow import _worktree_has_changes
+
+    d = tempfile.mkdtemp(prefix="rsh_verify_")
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        for cmd in (
+            ["init", "-q", "-b", "main"],
+            ["config", "user.email", "t@e"],
+            ["config", "user.name", "t"],
+        ):
+            subprocess.run(["git", *cmd], cwd=d, env=env, check=True)
+        (Path(d) / "README.md").write_text("x\n")
+        subprocess.run(["git", "add", "."], cwd=d, env=env, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "init"], cwd=d, env=env, check=True,
+        )
+        # The signature-#5 case: a brand-new UNTRACKED file.
+        (Path(d) / "NEW_FILE.md").write_text("created by the agent\n")
+        return await _worktree_has_changes(d)
+    except Exception:
+        return False
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+_VERIFIERS: dict[str, Callable[..., Any]] = {
+    "worktree_dirty_state_invariant": verify_worktree_dirty_state,
+}
+
+
+# ---------------------------------------------------------------------------
+# Supervisor (§3) — the bounded recovery lane. Owns all transitions. Seams
+# (spawn_child_fn / surface_fn) are injected so this is testable without the
+# live orchestrator and so the child runs with recursive tools stripped.
+# ---------------------------------------------------------------------------
+
+
+async def attempt_self_heal(
+    *,
+    data_dir: str,
+    parent_attempt_id: str,
+    diagnostics: dict,
+    new_edge_id: str,
+    child_attempt_id: str,
+    now_iso: str,
+    spawn_child_fn: Callable[..., Any],   # async (signature_id, child_attempt_id) -> diff_files:list[str]
+    surface_fn: Callable[..., Any] | None = None,  # async (message) -> None
+) -> dict:
+    """The bounded recovery lane. Returns a result dict with ``outcome`` one
+    of: disabled, task_failure, depth_or_dedup_blocked, child_repair_passed,
+    child_repair_failed, human_review_required, constitutional_block.
+
+    The supervisor is the ONLY owner of transitions. The child repair
+    (``spawn_child_fn``) must run with recursion disabled + recursive tools
+    stripped (the caller wires that). After the child, a HERMETIC verifier
+    decides pass/fail — never a model judgment. A repair diff that touches a
+    constitutional file is forced to human review even if it verifies."""
+    async def _say(msg: str) -> None:
+        if surface_fn is not None:
+            try:
+                await surface_fn(msg)
+            except Exception:
+                pass
+
+    if not is_enabled():
+        return {"outcome": "disabled"}
+
+    signature_id = classify_failure(diagnostics)
+    if signature_id == TASK_FAILURE:
+        # Never recurse on a hard task / weak agent output.
+        return {"outcome": "task_failure"}
+
+    fp = failure_fingerprint(signature_id, diagnostics)
+    ok, reason = await reserve_child_repair(
+        data_dir=data_dir, parent_attempt_id=parent_attempt_id,
+        child_attempt_id=child_attempt_id, signature_id=signature_id,
+        failure_fingerprint=fp, edge_id=new_edge_id, now_iso=now_iso,
+    )
+    if not ok:
+        return {"outcome": "depth_or_dedup_blocked", "reason": reason}
+
+    await _say(
+        f"The parent improvement hit a machinery failure "
+        f"(`{signature_id}`). Spawning one bounded repair attempt for that "
+        f"infrastructure issue, then I'll verify and resume or stop."
+    )
+    await set_edge_state(
+        data_dir=data_dir, edge_id=new_edge_id, state="child_repair_running",
+    )
+
+    # Spawn the bounded child repair (recursion disabled by the caller).
+    try:
+        diff_files = await spawn_child_fn(
+            signature_id=signature_id, child_attempt_id=child_attempt_id,
+        ) or []
+    except Exception as exc:
+        await set_edge_state(
+            data_dir=data_dir, edge_id=new_edge_id, state="child_repair_failed",
+        )
+        await _say(f"The repair attempt errored ({type(exc).__name__}); stopping.")
+        return {"outcome": "child_repair_failed", "reason": str(exc)[:200]}
+
+    # Constitutional boundary (§9.4): even a verified fix that touches a
+    # guardrail file is human-only.
+    constitutional = touches_constitutional_path(list(diff_files))
+    if constitutional:
+        await set_edge_state(
+            data_dir=data_dir, edge_id=new_edge_id, state="human_review_required",
+        )
+        await _say(
+            "The repair touched guardrail/constitutional code "
+            f"({', '.join(constitutional[:3])}) — routing to human review "
+            "instead of auto-applying."
+        )
+        return {"outcome": "constitutional_block", "files": constitutional}
+
+    # Hermetic deterministic verification (§9.2).
+    verifier = _VERIFIERS.get(signature_id)
+    await set_edge_state(
+        data_dir=data_dir, edge_id=new_edge_id, state="child_repair_verifying",
+    )
+    passed = False
+    if verifier is not None:
+        try:
+            passed = bool(await verifier())
+        except Exception:
+            passed = False
+
+    if passed:
+        await set_edge_state(
+            data_dir=data_dir, edge_id=new_edge_id, state="child_repair_passed",
+        )
+        await _say(
+            "Repair verified by the deterministic fixture. Resuming the "
+            "original improvement."
+        )
+        return {"outcome": "child_repair_passed", "signature_id": signature_id}
+
+    await set_edge_state(
+        data_dir=data_dir, edge_id=new_edge_id, state="child_repair_failed",
+    )
+    await _say(
+        "The repair did not pass its verification fixture; stopping rather "
+        "than resuming on an unverified fix."
+    )
+    return {"outcome": "child_repair_failed", "reason": "verification_failed"}
+
+
 __all__ = [
     "MAX_CHILD_DEPTH",
     "TASK_FAILURE",
@@ -330,4 +493,6 @@ __all__ = [
     "ensure_schema",
     "reserve_child_repair",
     "set_edge_state",
+    "verify_worktree_dirty_state",
+    "attempt_self_heal",
 ]

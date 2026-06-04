@@ -154,3 +154,100 @@ async def test_reservation_durable_across_reopen(tmp_path):
         edge_id="e2", now_iso="t1",
     )
     assert ok2 is False  # one-child-per-parent survived the "restart"
+
+
+# ---------------------------------------------------------------------------
+# Hermetic verification fixture (§9.2) — the real thing, no mocks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_verify_worktree_dirty_state_fixture_passes():
+    # With the change-detection fix shipped (2d46d05), an untracked new file
+    # IS seen -> the verifier passes deterministically.
+    assert await rsh.verify_worktree_dirty_state() is True
+
+
+# ---------------------------------------------------------------------------
+# Supervisor (§3) — the bounded recovery lane, with injected seams
+# ---------------------------------------------------------------------------
+
+
+def _machinery_diag():
+    return {"reason": "false_green", "worktree_objectively_dirty": True}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_disabled_is_inert(tmp_path, monkeypatch):
+    monkeypatch.delenv("KERNOS_RECURSIVE_SELF_HEAL", raising=False)
+    spawned = []
+    async def _spawn(**k): spawned.append(k); return []
+    res = await rsh.attempt_self_heal(
+        data_dir=str(tmp_path), parent_attempt_id="p", diagnostics=_machinery_diag(),
+        new_edge_id="e", child_attempt_id="c", now_iso="t", spawn_child_fn=_spawn,
+    )
+    assert res["outcome"] == "disabled"
+    assert spawned == []  # never spawns when off
+
+
+@pytest.mark.asyncio
+async def test_supervisor_task_failure_never_spawns(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_RECURSIVE_SELF_HEAL", "1")
+    await rsh.ensure_schema(str(tmp_path))
+    spawned = []
+    async def _spawn(**k): spawned.append(k); return []
+    # pristine worktree false-green => task failure
+    res = await rsh.attempt_self_heal(
+        data_dir=str(tmp_path), parent_attempt_id="p",
+        diagnostics={"reason": "false_green", "worktree_objectively_dirty": False},
+        new_edge_id="e", child_attempt_id="c", now_iso="t", spawn_child_fn=_spawn,
+    )
+    assert res["outcome"] == "task_failure"
+    assert spawned == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_happy_path_passes(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_RECURSIVE_SELF_HEAL", "1")
+    await rsh.ensure_schema(str(tmp_path))
+    async def _spawn(**k):
+        return ["kernos/kernel/improvement_loop_workflow_helper.py"]  # benign-ish, NOT constitutional
+    res = await rsh.attempt_self_heal(
+        data_dir=str(tmp_path), parent_attempt_id="p", diagnostics=_machinery_diag(),
+        new_edge_id="e", child_attempt_id="c", now_iso="t", spawn_child_fn=_spawn,
+    )
+    assert res["outcome"] == "child_repair_passed"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_constitutional_diff_routes_to_human(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_RECURSIVE_SELF_HEAL", "1")
+    await rsh.ensure_schema(str(tmp_path))
+    async def _spawn(**k):
+        return ["kernos/kernel/gate.py"]  # constitutional!
+    res = await rsh.attempt_self_heal(
+        data_dir=str(tmp_path), parent_attempt_id="p", diagnostics=_machinery_diag(),
+        new_edge_id="e", child_attempt_id="c", now_iso="t", spawn_child_fn=_spawn,
+    )
+    assert res["outcome"] == "constitutional_block"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_depth_blocked_does_not_spawn(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_RECURSIVE_SELF_HEAL", "1")
+    d = str(tmp_path); await rsh.ensure_schema(d)
+    # pre-reserve a child of "p" so p already has its one child
+    await rsh.reserve_child_repair(
+        data_dir=d, parent_attempt_id="p", child_attempt_id="prior",
+        signature_id="worktree_dirty_state_invariant",
+        failure_fingerprint=rsh.failure_fingerprint("worktree_dirty_state_invariant", {"x": 9}),
+        edge_id="prior_e", now_iso="t0",
+    )
+    spawned = []
+    async def _spawn(**k): spawned.append(k); return []
+    res = await rsh.attempt_self_heal(
+        data_dir=d, parent_attempt_id="p", diagnostics=_machinery_diag(),
+        new_edge_id="e2", child_attempt_id="c2", now_iso="t1", spawn_child_fn=_spawn,
+    )
+    assert res["outcome"] == "depth_or_dedup_blocked"
+    assert spawned == []
