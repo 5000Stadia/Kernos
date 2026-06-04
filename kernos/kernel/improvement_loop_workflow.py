@@ -3145,6 +3145,7 @@ async def run_pending_post_restart_tests(
     data_dir: str,
     instance_id: str,
     wake_fn: Any = None,
+    completed_wake_fn: Any = None,
     self_test_fn: Any = None,
     live_repo_dir: str = "",
     live_head_fn: Any = None,
@@ -3236,6 +3237,37 @@ async def run_pending_post_restart_tests(
                 await _ledger.update_attempt(
                     db._conn, attempt_id=attempt_id, **updates,
                 )
+                # Success is NOT silent: wake the origin space so the agent
+                # proactively tells the user the improvement landed + verified
+                # (the loop deploys via restart, so the in-process terminal
+                # notify never fires for `completed`).
+                if completed_wake_fn is not None:
+                    commits = await _ledger.get_attempt_commits(
+                        db._conn, attempt_id,
+                    )
+                    commit_sha = (
+                        str((commits or [{}])[-1].get("commit_sha") or "")
+                        if commits else ""
+                    )
+                    origin = await _attempt_origin(db._conn, attempt_id)
+                    if origin.get("origin_space_id"):
+                        await _maybe_await(completed_wake_fn({
+                            "instance_id": (
+                                refreshed.get("instance_id") or instance_id
+                            ),
+                            "originating_space": origin.get(
+                                "origin_space_id",
+                            ) or "",
+                            "originating_member_id": origin.get(
+                                "origin_member_id",
+                            ) or "",
+                            "attempt_id": attempt_id,
+                            "commit_sha": commit_sha,
+                            "spec_requirement": (
+                                refreshed.get("spec_requirement") or ""
+                            ),
+                            "self_test_summary": summary or "",
+                        }))
             else:
                 await _surface_recovery_decision(
                     db._conn,
@@ -3630,6 +3662,12 @@ async def handle_improve_kernos(
         if state is None or not origin_member_id:
             return
         _msgs = {
+            "completed": (
+                f"The self-improvement the user asked for (`{attempt_id}`) "
+                f"LANDED end-to-end — committed, pushed to main, redeployed, "
+                f"and the post-restart substrate self-test passed. Tell the "
+                f"user it's live and what changed."
+            ),
             "awaiting_commit_approval": (
                 f"The self-improvement the user asked for (`{attempt_id}`) "
                 f"finished drafting + review and is WAITING AT THE APPROVAL "

@@ -1196,6 +1196,9 @@ async def bring_up_substrate(
             wake_fn=getattr(
                 handler, "inject_improvement_recovery_wake", None,
             ),
+            completed_wake_fn=getattr(
+                handler, "inject_improvement_completed_wake", None,
+            ),
         )
         if _processed:
             logger.info(

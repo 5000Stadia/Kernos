@@ -1506,6 +1506,44 @@ async def test_post_restart_pass_completes_attempt(recovery_env):
     assert row["first_pass_green"] == 1
 
 
+async def test_post_restart_pass_fires_completion_wake(recovery_env):
+    """Success must NOT be silent: on `completed`, the reconciler wakes the
+    origin space so the agent proactively tells the user it landed (the loop
+    deploys via restart, so the in-process terminal-notify never fires for
+    completed). Regression for att_4e9e3f283080 finishing without any ack."""
+    data_dir = recovery_env
+    await _create_attempt(data_dir)
+    await _record_final_commit(data_dir, commit_sha="liveabc123")
+
+    async def fake_self_test(**_kwargs):
+        return {"outcome": "pass", "summary": "107 passed in 3.7s"}
+
+    async def fake_live_head(_repo):
+        return "liveabc123", {"live_repo_dir": "/tmp/live"}
+
+    woke: list[dict] = []
+
+    async def completed_wake_fn(payload):
+        woke.append(payload)
+
+    count = await iwf.run_pending_post_restart_tests(
+        data_dir=data_dir,
+        instance_id="t1",
+        self_test_fn=fake_self_test,
+        live_head_fn=fake_live_head,
+        completed_wake_fn=completed_wake_fn,
+    )
+    row = await _attempt(data_dir)
+    assert count == 1
+    assert row["final_state"] == "completed"
+    assert len(woke) == 1, "completion must wake the origin exactly once"
+    p = woke[0]
+    assert p["originating_space"] == "space_origin"
+    assert p["attempt_id"] == "att_recovery"
+    assert p["commit_sha"] == "liveabc123"
+    assert "107 passed" in p["self_test_summary"]
+
+
 async def test_post_restart_live_head_mismatch_is_not_completed_or_tested(
     recovery_env,
 ):

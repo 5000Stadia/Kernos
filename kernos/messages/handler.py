@@ -4976,6 +4976,89 @@ class MessageHandler:
                 attempt_id, exc,
             )
 
+    async def inject_improvement_completed_wake(self, payload: dict) -> None:
+        """Wake the origin space when an autonomous improvement LANDED
+        end-to-end (committed → pushed → redeployed → post-restart self-test
+        passed). Success deploys via restart, so the in-process terminal
+        notify never fires for `completed` — this is how the agent learns to
+        tell the user it's live. Mirrors inject_improvement_recovery_wake."""
+        from datetime import datetime, timezone
+        from kernos.messages.models import (
+            NormalizedMessage as _Msg, AuthLevel as _Auth,
+        )
+
+        space_id = payload.get("originating_space", "") or ""
+        member_id = payload.get("originating_member_id", "") or ""
+        instance_id = payload.get("instance_id", "") or ""
+        attempt_id = payload.get("attempt_id", "") or ""
+        commit_sha = payload.get("commit_sha", "") or ""
+        spec_requirement = payload.get("spec_requirement", "") or ""
+        self_test_summary = payload.get("self_test_summary", "") or ""
+
+        if not (space_id and instance_id and attempt_id):
+            logger.warning(
+                "IMPROVEMENT_COMPLETED_WAKE_SKIPPED_MISSING_FIELDS "
+                "instance_id=%r space_id=%r attempt_id=%r",
+                instance_id, space_id, attempt_id,
+            )
+            return
+
+        wake_body = (
+            "[system: autonomous improvement landed end-to-end]\n"
+            f"attempt_id: {attempt_id}\n"
+            f"commit: {commit_sha[:12] if commit_sha else '(see ledger)'}\n"
+            f"spec: {spec_requirement}\n"
+            f"post_restart_self_test: passed\n"
+            f"{self_test_summary}\n\n"
+            "The change the user asked for is committed, pushed to main, "
+            "redeployed, and verified live. Proactively tell the user it's "
+            "done + what shipped — don't make them ask."
+        )
+
+        synthetic = _Msg(
+            content=wake_body,
+            sender="kernos-system",
+            sender_auth_level=_Auth.owner_verified,
+            platform="system",
+            platform_capabilities=[],
+            conversation_id=space_id,
+            timestamp=datetime.now(timezone.utc),
+            instance_id=instance_id,
+            member_id=member_id,
+            context={
+                "execution_envelope": {
+                    "source": "improvement_completed_wake",
+                    "attempt_id": attempt_id,
+                    "originating_space": space_id,
+                    "commit_sha": commit_sha,
+                },
+            },
+        )
+
+        async def _run_wake_turn():
+            try:
+                await self.process(synthetic)
+            except Exception as exc:
+                logger.exception(
+                    "IMPROVEMENT_COMPLETED_WAKE_TURN_CRASHED "
+                    "attempt_id=%s space=%s exc=%s",
+                    attempt_id, space_id, exc,
+                )
+
+        try:
+            asyncio.create_task(_run_wake_turn())
+            logger.info(
+                "IMPROVEMENT_COMPLETED_WAKE_INJECTED instance=%s "
+                "space=%s attempt=%s",
+                instance_id, space_id, attempt_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "IMPROVEMENT_COMPLETED_WAKE_INJECT_FAILED "
+                "attempt_id=%s error=%s",
+                attempt_id, exc,
+            )
+
     # -----------------------------------------------------------------------
     # Six-Phase Pipeline (SPEC-HANDLER-DECOMPOSE)
     # -----------------------------------------------------------------------
