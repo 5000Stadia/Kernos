@@ -210,7 +210,11 @@ def load_bounded_source(
             except Exception:
                 continue
             chunks.append("\n".join(picked))
-    return "\n\n".join(chunks) if chunks else "(no readable source found)"
+    out = "\n\n".join(chunks)
+    # Hard ceiling: the streaming early-breaks bound memory, but a header + a
+    # final line can still nudge past the budget — guarantee the RETURNED size
+    # never exceeds max_total_chars (Codex confirmation #4).
+    return out[:max_total_chars] if out else "(no readable source found)"
 
 
 # ---------------------------------------------------------------------------

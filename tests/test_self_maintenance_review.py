@@ -361,8 +361,11 @@ def test_load_bounded_source_hard_char_caps(tmp_path):
     sl = smr.ReviewSlice("t", "i", ("big.py",))
     out = smr.load_bounded_source(sl, str(tmp_path), max_line_chars=80,
                                   max_total_chars=2000)
-    assert len(out) < 3000                                # bounded, not 100k
+    assert len(out) <= 2000                               # HARD ceiling
     assert "XXXX" in out                                  # something was read
+    # even an absurdly tiny budget is a true ceiling
+    tiny = smr.load_bounded_source(sl, str(tmp_path), max_total_chars=10)
+    assert len(tiny) <= 10
 
 
 def test_load_bounded_source_skips_paths_outside_root(tmp_path):
