@@ -365,6 +365,38 @@ _VERIFIERS: dict[str, Callable[..., Any]] = {
 }
 
 
+# Canonical cause→fix spec text per signature (§3: "scoped to the diagnosed
+# signature"). Only signatures with BOTH a fix prompt AND a hermetic verifier
+# can auto-run; the rest are propose-only (§4). v1 ships #5 only.
+SIGNATURE_FIX_PROMPTS: dict[str, str] = {
+    "worktree_dirty_state_invariant": (
+        "MACHINERY REPAIR (recursive self-heal, signature: worktree "
+        "dirty-state invariant). The improvement loop's change-detection "
+        "failed to reflect uncommitted/untracked worktree files, so a real "
+        "diff was treated as empty. Restore the invariant: change-detection "
+        "(`_worktree_has_changes` / the reviewer's diff source in "
+        "`kernos/kernel/git_operations.py` and "
+        "`kernos/kernel/improvement_loop_workflow.py`) MUST report a brand-new "
+        "UNTRACKED file as a real change (e.g. via `git status --porcelain` "
+        "and `git add -N .` before `git diff`). Make the minimal correct fix "
+        "and add a regression test. Do NOT touch orchestration, approval, or "
+        "dispatch guardrail files."
+    ),
+}
+
+
+def fix_prompt_for(signature_id: str) -> str | None:
+    """Canonical scoped repair prompt for a signature, or None if the
+    signature is propose-only (no auto-run)."""
+    return SIGNATURE_FIX_PROMPTS.get(signature_id)
+
+
+def can_auto_run(signature_id: str) -> bool:
+    """A signature may auto-run ONLY if it has both a deterministic verifier
+    and a canonical fix prompt (§4: propose vs auto-run)."""
+    return signature_id in _VERIFIERS and signature_id in SIGNATURE_FIX_PROMPTS
+
+
 # ---------------------------------------------------------------------------
 # Supervisor (§3) — the bounded recovery lane. Owns all transitions. Seams
 # (spawn_child_fn / surface_fn) are injected so this is testable without the
@@ -406,6 +438,16 @@ async def attempt_self_heal(
     if signature_id == TASK_FAILURE:
         # Never recurse on a hard task / weak agent output.
         return {"outcome": "task_failure"}
+
+    if not can_auto_run(signature_id):
+        # Recognized machinery class but no hermetic verifier + canonical fix
+        # yet — propose only, never auto-run (§4).
+        await _say(
+            f"Detected a machinery failure (`{signature_id}`) but it's "
+            "propose-only (no deterministic repair+verification yet) — "
+            "surfacing instead of auto-repairing."
+        )
+        return {"outcome": "propose_only", "signature_id": signature_id}
 
     fp = failure_fingerprint(signature_id, diagnostics)
     ok, reason = await reserve_child_repair(
@@ -468,8 +510,7 @@ async def attempt_self_heal(
             data_dir=data_dir, edge_id=new_edge_id, state="child_repair_passed",
         )
         await _say(
-            "Repair verified by the deterministic fixture. Resuming the "
-            "original improvement."
+            "Repair verified by the deterministic fixture."
         )
         return {"outcome": "child_repair_passed", "signature_id": signature_id}
 
@@ -495,4 +536,7 @@ __all__ = [
     "set_edge_state",
     "verify_worktree_dirty_state",
     "attempt_self_heal",
+    "fix_prompt_for",
+    "can_auto_run",
+    "SIGNATURE_FIX_PROMPTS",
 ]

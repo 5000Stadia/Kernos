@@ -421,6 +421,14 @@ class ImprovementLoopOrchestrator:
                         final_state="aborted_unconverged",
                         ended_at=utc_now(),
                     )
+                    # RECURSIVE-SELF-HEAL-V1: if this abort matches a known
+                    # MACHINERY signature (not a hard task / weak output),
+                    # spawn one bounded, verified repair. Inert by default.
+                    await self._maybe_self_heal(
+                        db=db, attempt_id=attempt_id,
+                        worktree_path=worktree_path,
+                        impl_outcome=impl_outcome,
+                    )
                     await self._notify_on_terminal(attempt_id)
                     return
 
@@ -471,6 +479,149 @@ class ImprovementLoopOrchestrator:
             except Exception:
                 pass
             await self._notify_on_terminal(attempt_id)
+
+    async def _maybe_self_heal(
+        self, *, db: Any, attempt_id: str, worktree_path: str,
+        impl_outcome: str,
+    ) -> None:
+        """RECURSIVE-SELF-HEAL-V1 hook on the impl-cycle abort path.
+
+        Inert unless ``KERNOS_RECURSIVE_SELF_HEAL`` is set (default OFF). When
+        on, classifies the failure against the curated machinery signatures
+        and — for an auto-runnable signature only — spawns ONE bounded,
+        durably-capped child repair, verifies it with a hermetic fixture, and
+        surfaces honestly. The supervisor (recursive_self_heal.attempt_self_heal)
+        owns every transition + guardrail; this method only supplies the live
+        seams (objective dirtiness, child dispatch, narration)."""
+        from kernos.kernel import recursive_self_heal as rsh
+        from kernos.utils import utc_now
+
+        if not rsh.is_enabled():
+            return
+        try:
+            await rsh.ensure_schema(self._data_dir)
+            # Ground-truth dirtiness from an INDEPENDENT raw porcelain read —
+            # the negative guard for signature #5 must NOT route through the
+            # loop's own change detector (`_worktree_has_changes`). If that
+            # detector is the thing that's broken (the induced live-gate
+            # scenario), this independent read still tells the truth, so the
+            # divergence is what surfaces the machinery bug.
+            _rc, _out, _ = await _run_git_in(
+                ["status", "--porcelain"], cwd=worktree_path,
+            )
+            objectively_dirty = _rc == 0 and bool(_out.strip())
+            reason = (
+                "no_diff" if impl_outcome == "ABORTED_NO_DIFF"
+                else str(impl_outcome or "").lower()
+            )
+            diagnostics = {
+                "reason": reason,
+                "worktree_objectively_dirty": objectively_dirty,
+            }
+            child_attempt_id = f"att_{uuid.uuid4().hex[:12]}"
+            edge_id = f"edge_{uuid.uuid4().hex[:12]}"
+
+            async def _spawn(*, signature_id: str, child_attempt_id: str):
+                return await self._dispatch_child_repair(
+                    db=db, parent_attempt_id=attempt_id,
+                    signature_id=signature_id,
+                    child_attempt_id=child_attempt_id,
+                )
+
+            async def _surface(msg: str) -> None:
+                await self._announce(self._origin_space_id, msg)
+
+            result = await rsh.attempt_self_heal(
+                data_dir=self._data_dir, parent_attempt_id=attempt_id,
+                diagnostics=diagnostics, new_edge_id=edge_id,
+                child_attempt_id=child_attempt_id, now_iso=utc_now(),
+                spawn_child_fn=_spawn, surface_fn=_surface,
+            )
+            # Record the lane's verdict on the PARENT attempt for traceability.
+            from kernos.kernel import improvement_ledger as _ledger
+            await _ledger.append_event(
+                db._conn, attempt_id=attempt_id,
+                kind="self_heal",
+                detail=_detail({"edge": edge_id, **result}),
+            )
+            if result.get("outcome") == "child_repair_passed":
+                # v1 resume is HONEST, not fabricated: the verified machinery
+                # fix lives in the child worktree but is NOT yet committed /
+                # deployed, so the parent cannot transparently resume on the
+                # running (still-buggy) process. Surface the verified repair
+                # for the normal approval+commit+deploy path rather than
+                # pretending the original goal silently continued.
+                await self._announce(
+                    self._origin_space_id,
+                    f"The machinery repair (`{result.get('signature_id')}`) "
+                    f"verified in child attempt `{child_attempt_id}`. It needs "
+                    "approval to commit + deploy; once it's live, re-run the "
+                    "original improvement.",
+                )
+        except Exception:
+            # Best-effort lane: a self-heal failure must never compound the
+            # original abort. The parent is already terminal + notified.
+            logger.exception(
+                "RECURSIVE_SELF_HEAL_HOOK_FAILED attempt=%s", attempt_id,
+            )
+
+    async def _dispatch_child_repair(
+        self, *, db: Any, parent_attempt_id: str, signature_id: str,
+        child_attempt_id: str,
+    ) -> list[str]:
+        """Run ONE bounded child repair scoped to ``signature_id``'s canonical
+        cause→fix, in its own worktree, and return ALL changed paths (incl.
+        untracked) for the supervisor's constitutional check. Reuses the
+        normal spec+impl convergence machinery; the child is a real (traceable)
+        ledger attempt but is dispatched synchronously — no background loop,
+        so it cannot itself recurse (the durable depth bound blocks it anyway)."""
+        from kernos.kernel import improvement_ledger as _ledger
+        from kernos.kernel import recursive_self_heal as rsh
+        from kernos.kernel.improvement_workspace import ImprovementWorkspace
+
+        fix_prompt = rsh.fix_prompt_for(signature_id)
+        if not fix_prompt:
+            return []
+        # The child repair is codex-only (claude_code soft-stalls under live
+        # concurrent load; the loop-reliability arc defaulted to codex).
+        await _ledger.create_attempt(
+            db._conn, instance_id=self._instance_id,
+            attempt_id=child_attempt_id, spec_requirement=fix_prompt,
+            primary_coding_agent="codex", reviewer_coding_agent="codex",
+        )
+        await _ledger.append_event(
+            db._conn, attempt_id=child_attempt_id, kind="attempt_origin",
+            detail=json.dumps(
+                {
+                    "instance_id": self._instance_id,
+                    "origin_space_id": self._origin_space_id,
+                    "origin_member_id": "",
+                    "recursive_repair_of": parent_attempt_id,
+                    "recursion_disabled": True,
+                },
+                separators=(",", ":"),
+            ),
+        )
+        ws = ImprovementWorkspace(
+            data_dir=self._data_dir, instance_id=self._instance_id,
+            live_repo_dir=self._live_repo_dir,
+        )
+        child_wt = await ws.create(child_attempt_id)
+        await _ledger.update_attempt(
+            db._conn, attempt_id=child_attempt_id, worktree_path=child_wt,
+        )
+        spec_outcome = await self._run_spec_cycle(
+            db=db, attempt_id=child_attempt_id, spec_requirement=fix_prompt,
+            primary_agent="codex", reviewer_agent="codex",
+            worktree_path=child_wt,
+        )
+        if spec_outcome == "GREEN":
+            await self._run_impl_cycle(
+                db=db, attempt_id=child_attempt_id,
+                primary_agent="codex", reviewer_agent="codex",
+                worktree_path=child_wt,
+            )
+        return await _changed_files_incl_untracked(child_wt)
 
     async def _attempt_origin(
         self, conn: Any, *, attempt_id: str,
@@ -1413,6 +1564,27 @@ async def _changed_files(workspace_dir: str) -> list[str]:
     if rc != 0:
         return []
     return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+async def _changed_files_incl_untracked(workspace_dir: str) -> list[str]:
+    """ALL changed paths — staged, unstaged, AND untracked — via
+    ``git status --porcelain``. ``git diff --name-only`` misses brand-new
+    files, so the recursive-self-heal constitutional check (which must NOT
+    let an untracked guardrail file slip through) uses this instead."""
+    rc, out, _ = await _run_git_in(
+        ["status", "--porcelain"], cwd=workspace_dir,
+    )
+    if rc != 0:
+        return []
+    paths: list[str] = []
+    for line in out.splitlines():
+        # porcelain v1: 2 status chars + space + path (+ "orig -> new" on rename)
+        entry = line[3:].strip() if len(line) > 3 else line.strip()
+        if " -> " in entry:
+            entry = entry.split(" -> ", 1)[1].strip()
+        if entry:
+            paths.append(entry)
+    return paths
 
 
 async def _net_deletions_against_head(workspace_dir: str) -> int:

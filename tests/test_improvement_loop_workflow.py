@@ -916,3 +916,92 @@ async def test_handle_rejects_empty_spec_requirement():
     )
     assert "spec_requirement" in text
     assert "required" in text
+
+
+# ============================================================
+# RECURSIVE-SELF-HEAL-V1 wiring (gated; default-off)
+# ============================================================
+
+
+async def _make_child_worktree(orch, attempt_id):
+    """Create a real worktree for an attempt id (so _maybe_self_heal has a
+    dirty tree to read ground-truth from)."""
+    from kernos.kernel.improvement_workspace import ImprovementWorkspace
+    ws = ImprovementWorkspace(
+        data_dir=orch._data_dir, instance_id=orch._instance_id,
+        live_repo_dir=orch._live_repo_dir,
+    )
+    return await ws.create(attempt_id)
+
+
+@pytest.mark.asyncio
+async def test_self_heal_hook_inert_when_disabled(loop_env, monkeypatch):
+    monkeypatch.delenv("KERNOS_RECURSIVE_SELF_HEAL", raising=False)
+    data_dir, repo_dir = loop_env
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir, live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult(),
+    )
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        await _ledger.create_attempt(
+            db._conn, instance_id="t1", attempt_id="att_parent",
+            spec_requirement="x", primary_coding_agent="codex",
+            reviewer_coding_agent="codex",
+        )
+        wt = await _make_child_worktree(orch, "att_parent")
+        (Path(wt) / "NEW.txt").write_text("agent wrote this\n")  # dirty tree
+        await orch._maybe_self_heal(
+            db=db, attempt_id="att_parent", worktree_path=wt,
+            impl_outcome="ABORTED_NO_DIFF",
+        )
+        events = await _ledger.get_attempt_events(db._conn, "att_parent")
+        # No self_heal event + no child attempt when the kill switch is off.
+        assert not any(e.get("kind") == "self_heal" for e in events)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_self_heal_hook_spawns_verified_repair_when_enabled(
+    loop_env, monkeypatch,
+):
+    monkeypatch.setenv("KERNOS_RECURSIVE_SELF_HEAL", "1")
+    data_dir, repo_dir = loop_env
+    # The child repair runs the scoped spec+impl cycle; a converging consult
+    # writes a benign (NON-constitutional) marker so the worktree-diff
+    # invariant passes and the child produces a real diff.
+    orch = ImprovementLoopOrchestrator(
+        instance_id="t1", data_dir=data_dir, live_repo_dir=repo_dir,
+        consult_fn=_make_converging_consult(),
+    )
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        await _ledger.create_attempt(
+            db._conn, instance_id="t1", attempt_id="att_parent2",
+            spec_requirement="x", primary_coding_agent="codex",
+            reviewer_coding_agent="codex",
+        )
+        wt = await _make_child_worktree(orch, "att_parent2")
+        (Path(wt) / "agent_change.txt").write_text("real change\n")  # dirty
+        await orch._maybe_self_heal(
+            db=db, attempt_id="att_parent2", worktree_path=wt,
+            impl_outcome="ABORTED_NO_DIFF",
+        )
+        events = await _ledger.get_attempt_events(db._conn, "att_parent2")
+        heal = [e for e in events if e.get("kind") == "self_heal"]
+        assert heal, "expected a self_heal verdict event on the parent"
+        detail = json.loads(heal[0]["detail"])
+        # signature #5 verified against the (already-fixed) installed detector
+        assert detail["outcome"] == "child_repair_passed"
+        # a real, traceable child attempt was created
+        attempts = await _ledger.list_recent_attempts(
+            db._conn, instance_id="t1", limit=10,
+        )
+        assert any(
+            a["attempt_id"] != "att_parent2" for a in attempts
+        ), "expected a child repair attempt row"
+    finally:
+        await db.close()
