@@ -58,6 +58,10 @@ class ReviewSlice:
     name: str
     intent: str           # the documented intention, in one line
     paths: tuple[str, ...]  # the as-built code to read
+    constitutional: bool = False  # self-governance/maintenance machinery —
+    #   reviewable + ponderable, but any evolution is HUMAN-GATED (never
+    #   self-applied). Nothing is exempt from review; the methodology audits
+    #   itself, but it cannot quietly rewrite its own rules.
 
 
 REVIEW_SLICES: tuple[ReviewSlice, ...] = (
@@ -108,6 +112,35 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "Background trigger-driven workflows on the event-stream post-flush "
         "hook; compose existing surfaces, no parallel substrate.",
         ("kernos/kernel/workflows/",),
+    ),
+    # --- The methodology reviews itself (constitutional: human-gated) ------
+    ReviewSlice(
+        "self-maintenance-methodology",
+        "HOW KERNOS reviews + evolves itself: the daily two-lens review, the "
+        "request-fidelity + proportionality gates, the evolution discipline "
+        "(thoughtful, one minor step at a time). Is the way I improve myself "
+        "still the healthiest, most effective approach, and does it serve the "
+        "whole? Nothing is exempt — the methodology audits itself.",
+        ("kernos/kernel/self_maintenance_review.py",
+         "kernos/kernel/improvement_review_protocol.py",
+         "specs/SELF-MAINTENANCE-REVIEW-V1.md"),
+        constitutional=True,
+    ),
+    ReviewSlice(
+        "self-healing",
+        "The bounded recovery lane: classify machinery-vs-task failure, the "
+        "durable runaway bound, constitutional guard, hermetic verification. "
+        "Is recovery still bounded, legible, and proportionate?",
+        ("kernos/kernel/recursive_self_heal.py",),
+        constitutional=True,
+    ),
+    ReviewSlice(
+        "governing-intention",
+        "The constitution the rest serves: operating principles, identity, "
+        "hatching guidance, conservative-by-default posture. Does the lived "
+        "system still embody these, and do they still serve the whole?",
+        ("kernos/kernel/template.py",),
+        constitutional=True,
     ),
 )
 
@@ -174,10 +207,22 @@ def build_review_prompt(slice_: ReviewSlice) -> str:
     """The single bounded reasoning consult: read intent + as-built, assess
     through both lenses, honour the evolution discipline."""
     paths = "\n".join(f"  - {p}" for p in slice_.paths)
+    constitutional_note = ""
+    if slice_.constitutional:
+        constitutional_note = (
+            "\nNOTE — this slice IS part of your self-governance / maintenance "
+            "machinery (how you review, heal, and govern yourself). Review and "
+            "ponder it as freely and honestly as any other — nothing is exempt "
+            "— but any evolution here is CONSTITUTIONAL: it is human-gated and "
+            "must NOT be self-applied. Frame any idea as something for the "
+            "founder to weigh, not something to route into an autonomous "
+            "change.\n"
+        )
     return (
         "You are KERNOS performing your DAILY SELF-MAINTENANCE REVIEW of one "
         f"slice of yourself: `{slice_.name}`.\n\n"
-        f"Documented intention of this slice:\n  {slice_.intent}\n\n"
+        f"Documented intention of this slice:\n  {slice_.intent}\n"
+        f"{constitutional_note}\n"
         f"As-built code to read (use your source-reading tools):\n{paths}\n\n"
         "Review through TWO lenses:\n\n"
         "1. CORRECTIVE — does the implementation still serve that intention, "
@@ -334,11 +379,18 @@ def to_whisper_text(report: dict) -> str:
             "Role check: this may not be earning its place in the whole — "
             f"{report.get('serves_the_whole_why', '')}".rstrip()
         )
-    lines.append(
-        "Consider whether any of this is worth raising to the founder or "
-        "proposing as a single minor improvement (through the normal gate). "
-        "Thoughtful evolution, one step at a time — no obligation to act."
-    )
+    if report.get("constitutional"):
+        lines.append(
+            "This slice is governance/maintenance machinery — CONSTITUTIONAL. "
+            "Raise any idea to the founder to weigh; it is human-gated, not "
+            "something to self-apply."
+        )
+    else:
+        lines.append(
+            "Consider whether any of this is worth raising to the founder or "
+            "proposing as a single minor improvement (through the normal gate). "
+            "Thoughtful evolution, one step at a time — no obligation to act."
+        )
     return "\n".join(lines)
 
 
@@ -375,7 +427,9 @@ async def maybe_run_daily(
         return {"outcome": "error", "slice": slice_.name, "error": str(exc)[:200]}
 
     report = parse_review(text or "", slice_.name)
+    report["constitutional"] = slice_.constitutional
     report = filter_seen(report, state, now_iso)
+    report["constitutional"] = slice_.constitutional  # filter_seen returns a copy
 
     surfaced = False
     if has_anything_to_say(report) and whisper_fn is not None:

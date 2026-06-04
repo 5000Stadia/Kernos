@@ -201,3 +201,58 @@ async def test_maybe_run_not_due_second_time_same_day(tmp_path, monkeypatch):
     )
     assert r3["outcome"] == "reviewed_quiet"
     assert smr.load_state(d)["cursor"] == 2
+
+
+# --- the methodology reviews itself (constitutional, human-gated) ----------
+
+
+def test_methodology_reviews_itself():
+    names = {s.name for s in smr.REVIEW_SLICES}
+    # nothing is exempt: the maintenance methodology + self-healing + the
+    # governing intention are all in scope.
+    assert "self-maintenance-methodology" in names
+    assert "self-healing" in names
+    assert "governing-intention" in names
+    meta = next(s for s in smr.REVIEW_SLICES
+                if s.name == "self-maintenance-methodology")
+    assert "kernos/kernel/self_maintenance_review.py" in meta.paths
+    assert meta.constitutional is True
+
+
+def test_constitutional_slices_are_human_gated_in_prompt():
+    meta = next(s for s in smr.REVIEW_SLICES if s.constitutional)
+    p = smr.build_review_prompt(meta).lower()
+    assert "constitutional" in p and "human-gated" in p
+    assert "not be self-applied" in p or "must not be self-applied" in p
+
+
+def test_constitutional_whisper_routes_to_founder_not_self_apply():
+    report = {
+        "slice": "self-maintenance-methodology", "overall_health": "healthy",
+        "corrective_findings": [], "evolution_idea": "tighten the dedup window",
+        "serves_the_whole": True, "constitutional": True,
+    }
+    text = smr.to_whisper_text(report).lower()
+    assert "constitutional" in text
+    assert "founder" in text and "human-gated" in text
+
+
+@pytest.mark.asyncio
+async def test_constitutional_flag_survives_to_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
+    d = str(tmp_path)
+    # advance cursor to the first constitutional slice
+    meta_idx = next(i for i, s in enumerate(smr.REVIEW_SLICES) if s.constitutional)
+    smr.save_state(d, {"cursor": meta_idx, "last_run_iso": "", "seen": {}})
+    payload = (
+        '```json\n{"overall_health":"healthy","corrective_findings":[],'
+        '"evolution_idea":"a minor tweak","serves_the_whole":true}\n```'
+    )
+    captured = []
+    async def _whisper(text, report): captured.append(report)
+    res = await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
+        consult_fn=_consult_returning(payload), whisper_fn=_whisper,
+    )
+    assert res["report"]["constitutional"] is True
+    assert captured and captured[0]["constitutional"] is True
