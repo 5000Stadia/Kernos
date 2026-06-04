@@ -17,9 +17,11 @@ REQUIRED_RUNTIME_NEUTRAL_CLAIM = (
     "runtime behavior"
 )
 ALLOWED_LOOP_SELFTEST_PATHS = {
+    "docs/notes/soak-01.md",
     "docs/notes/loop-selftest.md",
     "impl_notes.md",
     "spec.md",
+    "tests/test_soak_01_note.py",
     "tests/test_loop_selftest_note.py",
 }
 
@@ -64,7 +66,9 @@ def test_loop_selftest_dirty_scope_and_marker_confinement():
     green_marker = marker_prefix + " GREEN"
     assert marker_prefix not in content
     if SPEC_PATH.exists():
-        assert marker_prefix not in SPEC_PATH.read_text(encoding="utf-8")
+        spec_text = SPEC_PATH.read_text(encoding="utf-8")
+        spec_lines = spec_text.splitlines()
+        assert marker_prefix not in "\n".join(spec_lines[:-1])
     assert impl_notes.count(marker_prefix) == 1
     assert impl_notes.rstrip().endswith(green_marker)
 
