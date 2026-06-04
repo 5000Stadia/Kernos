@@ -744,6 +744,7 @@ class ImprovementLoopOrchestrator:
 
         state = ReviewIterationState.for_impl()
         prior_findings = ""
+        false_green = 0  # consecutive "GREEN but no worktree diff" rounds
         while not state.finished:
             iteration = state.iteration + 1
             await self._announce(
@@ -762,6 +763,49 @@ class ImprovementLoopOrchestrator:
                 workspace_dir=worktree_path,
             )
             author_status, author_findings = detect_status(author_text)
+
+            # AGENT-CONSULT-CHANNEL-V1: worktree-diff invariant. Trust
+            # REALITY over the agent's say-so. Observed live
+            # (att_cc209c6e08a5): claude_code reported author=GREEN every
+            # round while the worktree stayed PRISTINE — no files written —
+            # so the reviewer rightly rejected forever and the attempt
+            # burned the full round budget (96 min) chasing a change that
+            # never existed. A GREEN with zero diff is a FALSE GREEN:
+            # downgrade it + tell the author to actually write the files,
+            # and abort fast after two in a row (matches the loop's own
+            # "stopped: no change produced" recommendation).
+            # status --porcelain so a NEW (untracked) file counts as a
+            # real diff — `git diff` alone would miss "create a new file".
+            has_changes = await _worktree_has_changes(worktree_path)
+            if author_status == "GREEN" and not has_changes:
+                false_green += 1
+                logger.warning(
+                    "IMPROVE_KERNOS_FALSE_GREEN attempt=%s round=%d "
+                    "consecutive=%d (author=GREEN, worktree pristine)",
+                    attempt_id, iteration, false_green,
+                )
+                if false_green >= 2:
+                    await _ledger.append_event(
+                        db._conn, attempt_id=attempt_id,
+                        kind="impl_iteration",
+                        detail=(
+                            f"round {iteration}: author=FALSE_GREEN "
+                            f"(reported GREEN but produced NO worktree diff "
+                            f"twice) — aborting"
+                        ),
+                    )
+                    return "ABORTED_NO_DIFF"
+                author_status = "NEEDS_REVISION"
+                author_findings = (
+                    "You reported STATUS: GREEN but the worktree has ZERO "
+                    "changes — no files were created or edited. You MUST "
+                    "actually USE your file-editing tools to write the "
+                    "change to disk in the worktree. Describing it or "
+                    "claiming completion is NOT enough; produce a real "
+                    "diff. " + (author_findings or "")
+                )
+            else:
+                false_green = 0
 
             await self._announce(self._origin_space_id, "Reviewing the code…")
             reviewer_prompt = render_prompt(
@@ -1345,6 +1389,21 @@ async def _staged_files(workspace_dir: str) -> list[str]:
     if rc != 0:
         return []
     return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+async def _worktree_has_changes(workspace_dir: str) -> bool:
+    """True if the worktree has ANY uncommitted change — staged,
+    unstaged, OR untracked (new files). ``git diff`` misses untracked
+    files, so a 'create a new file' task looks like a zero diff to a
+    diff-only check; ``git status --porcelain`` catches all three.
+    Used by the worktree-diff invariant so creating a new file counts
+    as real work."""
+    rc, out, _ = await _run_git_in(
+        ["status", "--porcelain"], cwd=workspace_dir,
+    )
+    if rc != 0:
+        return False
+    return bool(out.strip())
 
 
 async def _changed_files(workspace_dir: str) -> list[str]:

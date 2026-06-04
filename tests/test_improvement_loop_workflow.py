@@ -139,7 +139,9 @@ def _make_converging_consult(*, converge_at_round: int = 1):
     after `converge_at_round` round, NEEDS_REVISION before."""
     call_count = {"n": 0}
 
-    async def _consult(*, target: str, prompt: str) -> str:
+    async def _consult(
+        *, target: str, prompt: str, workspace_dir: str = "",
+    ) -> str:
         call_count["n"] += 1
         # Iterations involve author + reviewer per round.
         # Round 1 = calls 1+2, Round 2 = calls 3+4, etc.
@@ -149,6 +151,16 @@ def _make_converging_consult(*, converge_at_round: int = 1):
                 "draft spec content\n\n"
                 "STATUS: NEEDS_REVISION refine further"
             )
+        # A real GREEN comes with an actual worktree change; write a
+        # marker so the worktree-diff invariant sees a real diff
+        # (a GREEN with a pristine worktree is now a FALSE GREEN).
+        if workspace_dir:
+            try:
+                (Path(workspace_dir) / "impl_marker.txt").write_text(
+                    "implemented\n"
+                )
+            except Exception:
+                pass
         return "final spec content\n\nSTATUS: GREEN"
     return _consult
 
