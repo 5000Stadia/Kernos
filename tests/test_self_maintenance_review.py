@@ -387,3 +387,42 @@ def test_load_bounded_source_handles_directory_and_missing(tmp_path):
     assert "alpha" in out and "gamma" in out   # dir expanded
     # missing path simply contributes nothing; no crash
     assert "one.py" in out
+
+
+# --- on-demand force (operator-initiated /selfreview) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_force_runs_even_when_disabled_and_not_due(tmp_path, monkeypatch):
+    monkeypatch.delenv("KERNOS_SELF_MAINTENANCE_REVIEW", raising=False)  # OFF
+    d = str(tmp_path)
+    healthy = (
+        '```json\n{"overall_health":"healthy","corrective_findings":[],'
+        '"evolution_idea":null,"serves_the_whole":true}\n```'
+    )
+    async def _c(_p, _s=None): return healthy
+    # forced run works despite the kill switch being off + not-due + busy
+    r1 = await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
+        consult_fn=_c, busy=True, force=True,
+    )
+    assert r1["outcome"] == "reviewed_quiet"
+    assert smr.load_state(d)["cursor"] == 1
+    # immediately again (would be not_due) — force still runs, next slice
+    r2 = await smr.maybe_run_daily(
+        data_dir=d, now_iso="2026-06-04T00:05:00+00:00",
+        consult_fn=_c, force=True,
+    )
+    assert r2["outcome"] == "reviewed_quiet"
+    assert smr.load_state(d)["cursor"] == 2
+
+
+@pytest.mark.asyncio
+async def test_no_force_still_gated_by_kill_switch(tmp_path, monkeypatch):
+    monkeypatch.delenv("KERNOS_SELF_MAINTENANCE_REVIEW", raising=False)
+    async def _c(_p, _s=None): return "x"
+    r = await smr.maybe_run_daily(
+        data_dir=str(tmp_path), now_iso="2026-06-04T00:00:00+00:00",
+        consult_fn=_c,
+    )
+    assert r["outcome"] == "disabled"   # autonomous path stays gated

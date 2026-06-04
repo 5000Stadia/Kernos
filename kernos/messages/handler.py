@@ -1574,6 +1574,63 @@ class MessageHandler:
         except Exception:
             return True  # on doubt, defer
 
+    async def _handle_selfreview(self, ctx) -> str:
+        """Owner-only on-demand self-maintenance review. Runs ONE review NOW
+        (force — bypasses the kill switch + daily gate so you can induce + watch
+        it anytime), writes the note to the System space, advances the rotating
+        cursor, and returns a short summary."""
+        _is_owner = False
+        try:
+            if getattr(self, "_instance_db", None) and getattr(ctx, "member_id", ""):
+                _m = await self._instance_db.get_member(ctx.member_id)
+                _is_owner = bool(_m and _m.get("role") == "owner")
+        except Exception:
+            _is_owner = False
+        if not _is_owner:
+            return "Only the owner can run `/selfreview`."
+
+        from kernos.kernel import self_maintenance_review as smr
+        from kernos.utils import utc_now
+        instance_id = (getattr(ctx, "instance_id", "")
+                       or getattr(self, "_current_instance_id", ""))
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+
+        async def _whisper(text, report, _iid=instance_id):
+            await self._surface_self_maintenance(_iid, text, report)
+
+        res = await smr.maybe_run_daily(
+            data_dir=data_dir, now_iso=utc_now(),
+            consult_fn=self._self_maintenance_consult,
+            whisper_fn=_whisper, force=True,
+        )
+        outcome = res.get("outcome", "")
+        if outcome == "error":
+            return (f"Self-review hit an error on `{res.get('slice', '?')}`: "
+                    f"{res.get('error', '')}")
+        if outcome == "parse_error":
+            return (f"Self-review of `{res.get('slice', '?')}` ran but I "
+                    "couldn't parse a clean verdict — try once more.")
+        rep = res.get("report", {}) or {}
+        sl = rep.get("slice", "?")
+        consti = " (constitutional — human-gated)" if rep.get("constitutional") else ""
+        findings = rep.get("corrective_findings") or []
+        idea = rep.get("evolution_idea")
+        lines = [
+            f"🪞 Self-review of `{sl}`{consti} — health: "
+            f"**{rep.get('overall_health', '?')}**."
+        ]
+        if findings:
+            lines.append(f"Corrective ({len(findings)}): "
+                         + "; ".join(str(f) for f in findings[:3]))
+        if idea:
+            lines.append(f"Evolution idea: {idea}")
+        if not findings and not idea:
+            lines.append("Nothing fresh to surface — healthy and on-purpose.")
+        where = ("written to the System space + receipts"
+                 if outcome == "reviewed_surfaced" else "logged to receipts")
+        lines.append(f"_Full note {where}. Run again to review the next slice._")
+        return "\n".join(lines)
+
     async def _self_maintenance_consult(self, prompt: str, slice_) -> str:
         """Single bounded completion: pre-load a capped excerpt of the slice's
         source (the completion is tool-less) and ask KERNOS to review it."""
@@ -4524,6 +4581,11 @@ class MessageHandler:
                         response = await self._handle_fix_command(
                             primary_ctx, primary_msg, _cmd,
                         )
+                    elif (
+                        _cmd_lower == "/selfreview"
+                        or _cmd_lower.startswith("/selfreview ")
+                    ):
+                        response = await self._handle_selfreview(primary_ctx)
                     elif _cmd_lower == "/restart":
                         # Owner-only restart — works on all platforms
                         _is_owner = False

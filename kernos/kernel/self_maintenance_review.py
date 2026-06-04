@@ -514,18 +514,24 @@ async def maybe_run_daily(
     consult_fn: Callable[..., Any],   # async (prompt, slice) -> str
     whisper_fn: Callable[..., Any] | None = None,  # async (text, report) -> None
     busy: bool = False,
+    force: bool = False,
 ) -> dict:
-    """Run today's review iff enabled, not busy, and due. Returns a result
-    dict with ``outcome``: disabled | busy | not_due | reviewed_quiet |
-    reviewed_surfaced | parse_error | error."""
-    if not is_enabled():
-        return {"outcome": "disabled"}
-    if busy:
-        # Idle-aware: never compete with a live turn or an in-flight attempt.
-        return {"outcome": "busy"}
+    """Run today's review. Returns a result dict with ``outcome``: disabled |
+    busy | not_due | reviewed_quiet | reviewed_surfaced | parse_error | error.
+
+    ``force`` is for an OPERATOR-initiated on-demand review (e.g. a slash
+    command): it bypasses the kill switch, the busy check, and the once/24h
+    gate, because the operator is explicitly asking and is present to watch.
+    The autonomous daily loop never sets force, so it stays fully gated."""
+    if not force:
+        if not is_enabled():
+            return {"outcome": "disabled"}
+        if busy:
+            # Idle-aware: never compete with a live turn or in-flight attempt.
+            return {"outcome": "busy"}
 
     state = load_state(data_dir)
-    if not due_for_review(state, now_iso):
+    if not force and not due_for_review(state, now_iso):
         return {"outcome": "not_due"}
 
     cursor = int(state.get("cursor", 0))
