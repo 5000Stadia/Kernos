@@ -1,4 +1,5 @@
 """Tests for SPEC-TIMEZONE-ARCHITECTURE: central time utilities."""
+import inspect
 from datetime import datetime, timezone, timedelta
 
 import pytest
@@ -9,6 +10,7 @@ from kernos.utils import (
     to_user_local,
     format_user_time,
     format_user_datetime,
+    humanize_duration,
     interpret_local_iso_as_utc,
 )
 
@@ -27,6 +29,16 @@ class TestUtcNow:
     def test_utc_now_dt_is_aware(self):
         dt = utc_now_dt()
         assert dt.tzinfo == timezone.utc
+
+
+class TestHumanizeDuration:
+    def test_formats_90_seconds_and_exposes_public_contract(self):
+        assert humanize_duration(90) == "1m 30s"
+        signature = inspect.signature(humanize_duration)
+        assert list(signature.parameters) == ["seconds"]
+        assert signature.parameters["seconds"].annotation is int
+        assert signature.return_annotation is str
+        assert humanize_duration.__doc__
 
 
 class TestToUserLocal:

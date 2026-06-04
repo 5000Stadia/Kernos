@@ -563,6 +563,7 @@ def _validate_page_slug(slug: str) -> bool:
 
 
 def canvas_dir(data_dir: str, instance_id: str, canvas_id: str) -> Path:
+    """Return the filesystem directory for a canvas under instance data."""
     return (
         Path(data_dir)
         / _safe_name(instance_id)

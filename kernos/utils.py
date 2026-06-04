@@ -12,6 +12,16 @@ def utc_now_dt() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def humanize_duration(seconds: int) -> str:
+    """Format a duration in seconds for human-readable display."""
+    minutes, remaining_seconds = divmod(seconds, 60)
+    if minutes and remaining_seconds:
+        return f"{minutes}m {remaining_seconds}s"
+    if minutes:
+        return f"{minutes}m"
+    return f"{remaining_seconds}s"
+
+
 def to_user_local(utc_dt: datetime, tz_name: str) -> datetime:
     """Convert UTC datetime to user's local timezone.
 
