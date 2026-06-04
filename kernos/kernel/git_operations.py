@@ -385,13 +385,32 @@ async def handle_git_diff_for_review(
         ["diff", f"{base}..{head}"],
         cwd=workspace_dir,
     )
-    if rc != 0:
-        return (
-            f"`git diff {base}..{head}` failed: "
-            f"{stderr.strip() or 'unknown error'}."
-        )
-    if not out.strip():
-        return f"No diff between `{base}` and `{head}`."
+    if rc != 0 or not out.strip():
+        # IMPROVEMENT-LOOP root-cause fix (2026-06-03): the improvement
+        # agents work UNCOMMITTED in the worktree, so a commit-range diff
+        # (base..head, default origin/main..HEAD) is empty — or errors if
+        # base is absent — and the reviewer saw "nothing implemented" EVERY
+        # round, so the loop never converged (att_cc209c6e08a5: 96min;
+        # claude DID write docs/LOOP-TEST.md but it was invisible here).
+        # Fall back to the uncommitted worktree diff vs HEAD, including NEW
+        # files. `git diff` ignores untracked, so intent-to-add them first
+        # (`git add -N`, non-destructive — the commit phase re-stages
+        # fully anyway).
+        await _run_git(["add", "-N", "."], cwd=workspace_dir)
+        rc2, wt_out, _ = await _run_git(["diff", "HEAD"], cwd=workspace_dir)
+        if rc2 == 0 and wt_out.strip():
+            out = (
+                f"# No committed diff for {base}..{head}; showing "
+                f"UNCOMMITTED worktree changes (vs HEAD) — this is the "
+                f"work to review:\n\n{wt_out}"
+            )
+        elif rc != 0:
+            return (
+                f"`git diff {base}..{head}` failed: "
+                f"{stderr.strip() or 'unknown error'}."
+            )
+        else:
+            return f"No diff between `{base}` and `{head}`."
     out_bytes = out.encode("utf-8")
     if len(out_bytes) > _DIFF_OUTPUT_CAP_BYTES:
         truncated = out_bytes[:_DIFF_OUTPUT_CAP_BYTES].decode(
