@@ -460,6 +460,14 @@ When an attempt aborts on a bug in KERNOS's *own* loop machinery (not a hard tas
 - **Hermetic verification** (`verify_worktree_dirty_state`): a fresh temp git fixture with an untracked file, asserting the change detector sees it — a deterministic pass/fail, never a model judgment, no live LLM/gateway.
 - **Honest v1 resume:** a verified repair is not yet committed/deployed, so the parent can't transparently resume on the still-buggy running process — the lane surfaces the verified child repair for the normal approval+commit+deploy path rather than fabricate a silent continuation. The supervisor owns every state transition; the child runs synchronously (no background loop) with `recursion_disabled`.
 
+### Daily self-maintenance review (SELF-MAINTENANCE-REVIEW-V1 — default-off)
+
+A daily self-stewardship pass: once a day KERNOS reviews ONE rotating slice of its own code through two lenses and surfaces a reflection to itself **to consider** — reflection, not autonomy. Inert unless `KERNOS_SELF_MAINTENANCE_REVIEW` is truthy (default OFF). Module: `kernos/kernel/self_maintenance_review.py`; wired via `MessageHandler._run_self_maintenance_loop` (started per-instance alongside the AwarenessEvaluator, cheap when off).
+
+- **Two lenses** (`build_review_prompt`): **corrective** (drift/decay/unguarded edge vs the documented intention) and **generative** (a more efficient/effective way, AND does this function's validity + role still hold up against the overarching intention of the whole system?). **Evolution discipline** is binding: ≤1 minor, reversible, serves-the-whole idea per review, enforced again at the parse boundary; honest-when-healthy and honest-when-nothing-to-evolve.
+- **Rotating slice, nothing exempt:** 11 slices, one per day, cursor in state; covers the system in ~a week. The set **includes the maintenance machinery itself** — `self-maintenance-methodology`, `self-healing`, and `governing-intention` are reviewed like anything else, but flagged **constitutional**: ponderable, but any evolution is human-gated (surfaced to the founder, never self-applied).
+- **Surface = the System space** (admin surface) as a reflection to consider; every real change still flows through approval-gated `improve_kernos`. **Dedup** (14-day TTL) committed only after a successful surface, so a failed whisper never buries a concern. A **parse failure** isn't counted as a clean review (no cursor advance). Per-review **JSONL audit receipts**. The live consult is a single **bounded** completion (`load_bounded_source` caps lines/file + total + files/dir, then `reasoning.complete_simple`), idle-aware (defers when any space has queued turns).
+
 ---
 
 ## 11c. Workflow Loop Primitive
