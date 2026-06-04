@@ -250,3 +250,21 @@ def test_full_capped_spec_cycle():
     )
     assert state.outcome == "ABORTED_UNCONVERGED"
     assert state.iteration == 2
+
+
+def test_proportionality_clause_in_all_roles():
+    """Every role must carry the proportionality guidance so a trivial change
+    doesn't get gold-plated through many rounds (regression for att_02243d:
+    6 spec rounds + ~hundreds of impl ops for a 3-sentence doc)."""
+    for role in ("spec_author", "spec_reviewer", "impl_author", "impl_reviewer"):
+        text = render_prompt(role, spec_requirement="x", spec_text="y",
+                             workspace_dir="/tmp/wt").lower()
+        assert "proportion" in text or "right-size" in text, role
+
+
+def test_reviewers_told_to_green_trivial_first_pass():
+    spec_rev = render_prompt("spec_reviewer", spec_text="y").lower()
+    impl_rev = render_prompt("impl_reviewer", spec_text="y",
+                             workspace_dir="/tmp/wt").lower()
+    assert "green" in spec_rev and "trivial" in spec_rev
+    assert "trivial" in impl_rev

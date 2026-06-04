@@ -166,8 +166,20 @@ def step_iteration(
 _SHARED_FRAMING = (
     "You are participating in Kernos's autonomous-improvement "
     "loop. This is a substrate that modifies its own source "
-    "code under operator approval at the commit gate. Your "
-    "output must end with a single line in this exact form:\n\n"
+    "code under operator approval at the commit gate.\n\n"
+    "PROPORTIONALITY — match your effort and rigor to the SIZE "
+    "of the change. A one-file doc or a trivial additive helper "
+    "is NOT a substrate refactor: don't re-read the whole repo, "
+    "don't invent acceptance criteria it doesn't need, and don't "
+    "withhold GREEN over style nits or hypothetical edge cases. "
+    "The bar is 'correct, in-scope, and safe', NOT 'maximally "
+    "thorough'. Gold-plating a trivial change by forcing extra "
+    "review rounds is itself a failure mode — it burns the loop's "
+    "budget and the operator's patience. Reserve deep scrutiny "
+    "for changes that actually touch behavior, interfaces, or "
+    "guardrails.\n\n"
+    "Your output must end with a single line in this exact form:"
+    "\n\n"
     "    STATUS: GREEN\n"
     "  OR\n"
     "    STATUS: NEEDS_REVISION <one-or-more findings>\n\n"
@@ -203,7 +215,10 @@ _ROLE_FRAMING = {
         "STATUS: GREEN if the spec is ready for implementation; "
         "STATUS: NEEDS_REVISION <specific findings> otherwise. "
         "Be specific in findings — vague reviews force the "
-        "author to guess."
+        "author to guess. GREEN a small, correct, in-scope spec "
+        "on the first pass; only send NEEDS_REVISION for a real "
+        "defect (wrong/missing scope, unsafe, ACs that don't "
+        "match the ask), never for polish on a trivial change."
     ),
     "impl_author": (
         "Your role: IMPLEMENTATION AUTHOR. The spec has been "
@@ -216,7 +231,11 @@ _ROLE_FRAMING = {
         "you changed + which ACs the diff covers. At the "
         "bottom of impl_notes.md output the STATUS line.\n\n"
         "If rewriting after reviewer findings, address each "
-        "finding explicitly in the new diff + notes."
+        "finding explicitly in the new diff + notes.\n\n"
+        "Right-size your exploration: for a small, well-scoped "
+        "change (a new doc, a single helper), go straight to the "
+        "edit — don't crawl the whole repo first. Read only what "
+        "you need to make the change correct and in-scope."
     ),
     "impl_reviewer": (
         "Your role: IMPLEMENTATION REVIEWER. Review the diff "
@@ -227,7 +246,11 @@ _ROLE_FRAMING = {
         "agent-facing surfaces stay natural-prose. Output "
         "STATUS: GREEN if the implementation matches the spec "
         "and tests pin the invariants properly; "
-        "STATUS: NEEDS_REVISION <specific findings> otherwise."
+        "STATUS: NEEDS_REVISION <specific findings> otherwise. "
+        "Right-size scrutiny to the diff: a correct trivial change "
+        "gets GREEN now — don't hold it for extra tests or polish "
+        "the spec didn't ask for. Reserve NEEDS_REVISION for a "
+        "genuine gap (an AC with no test, a real bug, scope creep)."
     ),
 }
 
