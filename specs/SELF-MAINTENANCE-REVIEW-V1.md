@@ -2,11 +2,16 @@
 
 Status: DRAFT (founder direction 2026-06-04 — "a task passed out ~once a day to review Kernos code and systems intention vs healthiest implementation, then report surfaced to the main Kernos agent itself to consider")
 
-## 1. Principle: reflect daily, bring concerns to yourself
+## 1. Principle: reflect daily, bring concerns AND ideas to yourself
 
-Once a day, within the ark of the governing principles + covenants, KERNOS holds a slice of its own code and systems up against its stated **intention** and asks: *is this still the healthiest implementation?* It produces a short, honest report and surfaces it **to the main KERNOS agent to consider** — not to act on autonomously.
+Once a day, within the ark of the governing principles + covenants, KERNOS holds a slice of its own code and systems up to the light through **two lenses**:
 
-> Reflection, not autonomy. The review only ever produces a thought for KERNOS to consider. Every actual change still flows through the existing approval-gated `improve_kernos`. This is the self-stewardship vision made routine: "KERNOS should be the one monitoring, identifying, and surfacing the issue."
+- **Corrective** — is this still the healthiest implementation of its intention, or has it drifted / decayed / grown an unguarded edge?
+- **Generative** — *even when it is functional and healthy*, is there a more efficient or effective way to do this? And does this function's **validity and role still hold up against the overarching intention of the whole KERNOS harness**? This is creative, holistic pondering, not bug-hunting.
+
+It produces a short, honest report and surfaces it **to the main KERNOS agent to consider** — not to act on autonomously.
+
+> Reflection, not autonomy. **Thoughtful evolution, not out-of-hand mutation — one minor improvement at a time.** The review only ever produces a thought for KERNOS to consider; every actual change still flows through the existing approval-gated `improve_kernos`. This is the self-stewardship vision made routine — KERNOS not only monitoring and surfacing issues, but slowly, deliberately evolving toward a better version of itself.
 
 ## 2. The line that matters
 
@@ -18,12 +23,13 @@ Once a day, within the ark of the governing principles + covenants, KERNOS holds
 
 1. **Cadence — daily, idle-aware.** Fires at most once per 24h, off-peak, and DEFERS if a turn is in flight or an `improve_kernos` attempt is running. Reuses the existing interval/workflow scheduling; no new scheduler.
 2. **Scope — one rotating slice per day.** Review a single subsystem per run (e.g. handler → reasoning → kernel-state → awareness → workflows → providers → improvement-loop → …), advancing a cursor pinned in state. Cheap, focused, sustainable; covers the whole system over ~a week. NOT a whole-codebase sweep.
-3. **The review — intention vs healthiest implementation.** For the day's slice, read the *intent* (TECHNICAL-ARCHITECTURE, kernel outline, the relevant spec) and the *as-built* code, then assess in ONE bounded reasoning consult (not a multi-agent gauntlet):
-   - Does the implementation still serve the documented intention, or has it drifted?
-   - Is there a healthier / simpler / more elegant shape?
-   - Dead code, redundancy, an unguarded failure mode, a violated principle/covenant?
-   Output a short structured report: `{slice, intention_summary, findings[], overall_health, suggested_direction}`.
-4. **Surface — a whisper to the agent.** Emit the report as an agent-facing whisper: "Here's today's self-review of `<slice>`. Consider whether any of it warrants raising to the founder or proposing an improvement." The agent considers it on its next turn.
+3. **The review — two lenses.** For the day's slice, read the *intent* (TECHNICAL-ARCHITECTURE, kernel outline, the relevant spec) and the *as-built* code, then assess in ONE bounded reasoning consult (not a multi-agent gauntlet):
+   - **Corrective lens:** Does the implementation still serve the documented intention, or has it drifted? Is there a healthier / simpler / more elegant shape? Dead code, redundancy, an unguarded failure mode, a violated principle/covenant?
+   - **Generative lens (runs even when the slice is healthy):** Is there a more *efficient or effective* way to handle this function? Does its **validity and role still hold up against the overarching intention of the whole KERNOS system** — is it still pulling its weight, still in the right place, still worth its complexity? If a thoughtful evolution suggests itself, propose **exactly one minor, well-reasoned step** — never a sweeping rewrite.
+   Output a short structured report: `{slice, intention_summary, corrective_findings[], evolution_idea (≤1, optional), serves_the_whole (bool + why), overall_health, suggested_direction}`.
+
+   **Evolution discipline (binding):** at most ONE evolution idea per review, and it must be *minor, reversible, and justified by how it serves the whole* — not novelty for its own sake. If nothing is genuinely worth evolving, the generative lens returns nothing. Thoughtful evolution earns its place; churn does not.
+4. **Surface — a whisper to the agent.** Emit the report as an agent-facing whisper: "Here's today's self-review of `<slice>` — health, and one idea for thoughtful evolution if there is one. Consider whether any of it warrants raising to the founder or proposing a single minor improvement." The agent considers it on its next turn and decides whether to act through the gate.
 5. **De-dup.** Track surfaced findings (fingerprint per slice+concern); suppress a repeat for N days so the same observation doesn't nag every rotation.
 6. **Receipts.** Log each review (slice, findings, surfaced?) to an audit trail so the founder can see the cadence + what KERNOS has been noticing over time.
 
@@ -33,8 +39,9 @@ Once a day, within the ark of the governing principles + covenants, KERNOS holds
 - Bounded cost: one reasoning consult per day, one slice.
 - Idle-aware: never competes with a live turn or an in-flight improvement.
 - Covenant-bound: the review respects the governing principles + covenants; it may FLAG a principle violation but never override one.
-- Default-on, env kill switch (`KERNOS_SELF_MAINTENANCE_REVIEW`), so it can be silenced instantly.
-- Honest-when-healthy (no manufactured concern).
+- **Evolution discipline:** ≤1 minor, reversible, well-justified evolution idea per review; serves-the-whole or it isn't raised. No sweeping rewrites, no novelty-for-its-own-sake, no compounding churn. Thoughtful evolution, one minor step at a time.
+- Env kill switch (`KERNOS_SELF_MAINTENANCE_REVIEW`); v1 ships **default-off** and is enabled deliberately after the first watched cycle.
+- Honest-when-healthy (no manufactured concern) AND honest-when-nothing-to-evolve (the generative lens returns nothing rather than inventing an idea).
 
 ## 5. Why it's safe + elegant
 
