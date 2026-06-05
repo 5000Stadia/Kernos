@@ -157,6 +157,39 @@ async def test_coverage_scan_records_fingerprint_no_gap_on_full_map(tmp_path):
     assert st.get("gap_surfaced_fingerprint", "") == ""     # full map → no gap surfaced
 
 
+async def test_coverage_gap_retries_on_failed_surface(tmp_path, monkeypatch):
+    # Trim the map so evals modules are unassigned → a real gap. First surface
+    # FAILS; the gap must re-surface next scan (Codex must-fix: gate on
+    # gap_surfaced_fingerprint, not on 'changed since last scan').
+    trimmed = tuple(s for s in smr.REVIEW_SLICES if s.name != "evals-soak")
+    monkeypatch.setattr(smr, "REVIEW_SLICES", trimmed)
+    seen = {"gap_calls": 0, "fail_next": True}
+
+    async def whisper(text, report):
+        if report.get("kind") == "coverage_gap":
+            seen["gap_calls"] += 1
+            if seen["fail_next"]:
+                seen["fail_next"] = False
+                raise RuntimeError("surface boom")
+
+    async def consult(prompt, slice_):
+        return HEALTHY
+
+    await smr.maybe_run_daily(data_dir=str(tmp_path), now_iso=NOW,
+                              consult_fn=consult, whisper_fn=whisper,
+                              force=True, repo_root=".")
+    st = json.loads((tmp_path / "self_maintenance_review.json").read_text())
+    assert seen["gap_calls"] == 1
+    assert st.get("gap_surfaced_fingerprint", "") == ""   # failed → not marked
+
+    await smr.maybe_run_daily(data_dir=str(tmp_path), now_iso=NOW,
+                              consult_fn=consult, whisper_fn=whisper,
+                              force=True, repo_root=".")
+    assert seen["gap_calls"] == 2                          # RETRIED
+    st2 = json.loads((tmp_path / "self_maintenance_review.json").read_text())
+    assert st2["gap_surfaced_fingerprint"] == st2["shape_fingerprint"]
+
+
 async def test_v1_state_migrates_and_runs(tmp_path):
     (tmp_path / "self_maintenance_review.json").write_text(
         json.dumps({"cursor": 3, "last_run_iso": "x", "seen": {}}))

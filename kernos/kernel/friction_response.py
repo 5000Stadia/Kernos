@@ -571,6 +571,8 @@ def verify_and_archive(data_dir: str, *, now_iso: str) -> dict:
                 body = p.read_text(errors="replace")
             except Exception:
                 body = ""
+            if report_class(body) == "opportunity":
+                continue  # V3: opportunity notes are not Shape B detector activity
             _t, s = signature_from_report(p.name, body)
             report_index.append((s, p.stat().st_mtime))
 

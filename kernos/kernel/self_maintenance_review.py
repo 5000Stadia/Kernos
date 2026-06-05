@@ -1133,9 +1133,11 @@ async def maybe_run_daily(
         _repo = repo_root or os.getenv("KERNOS_REPO_DIR", ".")
         _fp = shape_fingerprint(_repo)
         if _fp:
-            _changed = _fp != state.get("shape_fingerprint", "")
-            state["shape_fingerprint"] = _fp
-            if (_changed and _fp != state.get("gap_surfaced_fingerprint", "")
+            state["shape_fingerprint"] = _fp   # record every successful scan
+            # Gate surfacing on the SURFACED fingerprint, not on "changed since
+            # last scan" — else a failed surface (or absent whisper_fn) records
+            # the shape but never re-tries (Codex code-review must-fix).
+            if (_fp != state.get("gap_surfaced_fingerprint", "")
                     and whisper_fn is not None):
                 _gaps = unassigned_modules(REVIEW_SLICES, _repo)
                 if _gaps:
@@ -1146,7 +1148,7 @@ async def maybe_run_daily(
                                           "unassigned": _gaps[:50]})
                         state["gap_surfaced_fingerprint"] = _fp
                     except Exception:
-                        pass
+                        pass  # gap_surfaced unchanged → retries next tick
             save_state(data_dir, state)
     except Exception:
         pass
