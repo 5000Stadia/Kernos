@@ -39,6 +39,7 @@ VERIFY_WINDOW_HOURS = 6.0     # post-deploy opportunity window before "resolved"
 # Friction whose source is Shape B's OWN machinery must never be auto-handled —
 # else a response that emits friction triggers another response, forever (§2).
 SELF_FRICTION_SOURCES = frozenset({
+    "self",  # content-derived: the report's context implicates our own machinery
     "friction_response", "diagnose_issue", "improve_kernos",
     "friction_resolution_ledger", "friction_archive", "friction_daily_sweep",
     "self_maintenance_review", "recursive_self_heal",
@@ -105,6 +106,43 @@ def signature_of_filename(name: str) -> tuple[str, str]:
     return ftype, friction_signature(friction_type=ftype)
 
 
+_RECOMMENDATION_RE = re.compile(r"^#*\s*Recommendation:\s*(.+)$", re.MULTILINE)
+
+
+def signature_from_report(name: str, body: str = "") -> tuple[str, str]:
+    """A STABLE per-problem (type, signature) using the report BODY, not just
+    the coarse filename type (Codex code-review High-4). Folds the report's
+    Recommendation (a stable detector field) into the signature, so two
+    different problems sharing a generic type don't collapse — while same-cause
+    repeats (e.g. one connection leak) still share a signature. Falls back to
+    type-only when there's no body."""
+    ftype, _ = signature_of_filename(name)
+    rec = ""
+    if body:
+        m = _RECOMMENDATION_RE.search(body)
+        if m:
+            rec = " ".join(m.group(1).split())[:120]
+    return ftype, friction_signature(friction_type=ftype, code=rec)
+
+
+# Markers of friction emitted BY our own remediation machinery — content-based
+# provenance, since the detectors don't (yet) stamp a source field. Conservative
+# by intent: if a report's context mentions a remediation lane, treat it as
+# self-friction and never auto-respond (Codex code-review High-3).
+_SELF_MARKERS = (
+    "improve_kernos", "friction_response", "friction-response",
+    "self_maintenance", "self-maintenance", "diagnose_issue",
+    "recursive_self_heal", "recursive self-heal", "att_",
+)
+
+
+def source_of_report(body: str) -> str:
+    """'self' if the report's context implicates our own remediation machinery
+    (so the self-friction denylist can actually fire); else 'detector'."""
+    low = (body or "").lower()
+    return "self" if any(m in low for m in _SELF_MARKERS) else "detector"
+
+
 # ---------------------------------------------------------------------------
 # Durable resolution ledger (§4) — the anti-loop memory + in-flight reservation
 # ---------------------------------------------------------------------------
@@ -124,14 +162,12 @@ def _ledger_path(data_dir: str) -> Path:
     return Path(data_dir) / "diagnostics" / "friction_resolutions.jsonl"
 
 
-def record_attempt(
-    data_dir: str, *, friction_signature: str, friction_type: str,
-    resolution_fingerprint: str, state: str, now_iso: str,
-    attempted_resolution: str = "", commit_sha: str = "", source: str = "",
-    notes: str = "",
-) -> None:
-    """Append one resolution record (best-effort; never raises into caller)."""
-    rec = {
+def _build_record(
+    *, friction_signature: str, friction_type: str, resolution_fingerprint: str,
+    state: str, now_iso: str, attempted_resolution: str = "", commit_sha: str = "",
+    source: str = "", notes: str = "",
+) -> dict:
+    return {
         "ts": now_iso, "friction_signature": friction_signature,
         "friction_type": friction_type,
         "resolution_fingerprint": resolution_fingerprint,
@@ -139,22 +175,58 @@ def record_attempt(
         "state": state, "commit_sha": commit_sha, "source": source,
         "notes": str(notes)[:300],
     }
+
+
+def record_attempt(
+    data_dir: str, *, friction_signature: str, friction_type: str,
+    resolution_fingerprint: str, state: str, now_iso: str,
+    attempted_resolution: str = "", commit_sha: str = "", source: str = "",
+    notes: str = "",
+) -> bool:
+    """Append one resolution record under an exclusive file lock + fsync.
+    Returns True on durable success, False on failure (so a caller relying on
+    persistence — e.g. the reservation — can refuse rather than proceed on a
+    silently-lost write; Codex code-review Med-6)."""
+    rec = _build_record(
+        friction_signature=friction_signature, friction_type=friction_type,
+        resolution_fingerprint=resolution_fingerprint, state=state,
+        now_iso=now_iso, attempted_resolution=attempted_resolution,
+        commit_sha=commit_sha, source=source, notes=notes,
+    )
     try:
         p = _ledger_path(data_dir)
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("a") as fh:
+            _flock(fh)
             fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        return True
     except Exception:
-        pass
+        return False
 
 
-def load_attempts(data_dir: str, *, limit: int = 500) -> list[dict]:
+def _flock(fh) -> None:
+    try:
+        import fcntl
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        pass  # non-POSIX or unsupported FS — single-process bot tolerates it
+
+
+def load_attempts(data_dir: str, *, limit: int | None = None) -> list[dict]:
+    """Read the resolution ledger. ``limit`` tails the most recent N rows;
+    None reads ALL — guard checks (anti-loop, cooldown) MUST read all so an old
+    failed fix isn't retried once the tail scrolls past it (Codex Med-5)."""
     p = _ledger_path(data_dir)
     if not p.exists():
         return []
     out: list[dict] = []
     try:
-        for line in p.read_text(errors="replace").splitlines()[-limit:]:
+        lines = p.read_text(errors="replace").splitlines()
+        if limit is not None:
+            lines = lines[-limit:]
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
@@ -199,19 +271,37 @@ def reserve_in_flight(
     data_dir: str, *, friction_signature: str, friction_type: str,
     now_iso: str,
 ) -> bool:
-    """Durably claim a response slot for this SIGNATURE before any expensive
-    work. Returns False if one is already open (in_flight / pending) — no
-    concurrency, no double-spend (§2). The maintenance mutex (live wiring) is
-    the cross-lane guard; this is the per-signature guard."""
-    attempts = load_attempts(data_dir)
-    if _latest_state(attempts, friction_signature) in _OPEN_STATES:
+    """Durably + ATOMICALLY claim a response slot for this SIGNATURE before any
+    expensive work: load-check-append happens under a single exclusive lock, so
+    there's no load-then-append race (Codex Med-6). Returns False if one is
+    already open (in_flight / pending) OR the write didn't persist."""
+    try:
+        p = _ledger_path(data_dir)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a+") as fh:
+            _flock(fh)
+            fh.seek(0)
+            attempts = []
+            for line in fh.read().splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        attempts.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+            if _latest_state(attempts, friction_signature) in _OPEN_STATES:
+                return False
+            rec = _build_record(
+                friction_signature=friction_signature,
+                friction_type=friction_type, resolution_fingerprint="",
+                state=IN_FLIGHT, now_iso=now_iso, source="friction_response",
+            )
+            fh.write(json.dumps(rec, separators=(",", ":")) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        return True
+    except Exception:
         return False
-    record_attempt(
-        data_dir, friction_signature=friction_signature,
-        friction_type=friction_type, resolution_fingerprint="",
-        state=IN_FLIGHT, now_iso=now_iso, source="friction_response",
-    )
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +321,7 @@ def should_respond(
     if source in SELF_FRICTION_SOURCES:
         return False, "self_friction_source"
 
-    attempts = load_attempts(data_dir)
+    attempts = load_attempts(data_dir)  # None => full scan (anti-loop must be durable)
 
     # Already being handled / awaiting verification.
     if _latest_state(attempts, friction_signature) in _OPEN_STATES:
@@ -252,11 +342,12 @@ def should_respond(
             return False, "within_cooldown"
         break
 
-    # Global daily budget (count). Cost budget is a live governor (§7).
+    # Global daily budget — charge ONCE per response (each response makes
+    # exactly one IN_FLIGHT reservation), not per ledger row (Codex Med-7).
     day = (now_iso or "")[:10]
     todays = sum(1 for r in attempts
                  if str(r.get("ts", ""))[:10] == day
-                 and str(r.get("state")) != UNKNOWN_NO_OBS)
+                 and str(r.get("state")) == IN_FLIGHT)
     if todays >= MAX_RESPONSES_PER_DAY:
         return False, "daily_budget_reached"
 
@@ -309,7 +400,11 @@ def archive_resolved_signature(
     dest.mkdir(parents=True, exist_ok=True)
     moved: list[str] = []
     for p in list(fdir.glob("*.md")):
-        _ftype, sig = signature_of_filename(p.name)
+        try:
+            body = p.read_text(errors="replace")
+        except Exception:
+            body = ""
+        _ftype, sig = signature_from_report(p.name, body)  # SAME key as elsewhere
         if sig != friction_signature:
             continue
         try:
@@ -348,19 +443,23 @@ def list_open_signatures(data_dir: str, *, max_files: int = 300) -> list[dict]:
                    key=lambda p: p.stat().st_mtime, reverse=True)[:max_files]
     groups: dict[str, dict] = {}
     for p in files:
-        ftype, sig = signature_of_filename(p.name)
+        try:
+            body = p.read_text(errors="replace")
+        except Exception:
+            body = ""
+        ftype, sig = signature_from_report(p.name, body)  # body-aware, stable
+        src = source_of_report(body)
         g = groups.setdefault(sig, {
             "signature": sig, "type": ftype, "count": 0,
-            "latest_mtime": 0.0, "sample_body": "",
+            "latest_mtime": 0.0, "sample_body": "", "source": "detector",
         })
         g["count"] += 1
+        if src == "self":
+            g["source"] = "self"  # any self-tagged report taints the group
         mt = p.stat().st_mtime
         if mt >= g["latest_mtime"]:
             g["latest_mtime"] = mt
-            try:
-                g["sample_body"] = p.read_text(errors="replace")[:1500]
-            except Exception:
-                pass
+            g["sample_body"] = body[:1500]
     return sorted(groups.values(), key=lambda g: -g["count"])
 
 
@@ -377,7 +476,8 @@ async def respond_once(
     for info in list_open_signatures(data_dir):
         sig, ftype = info["signature"], info["type"]
         ok, reason = should_respond(
-            data_dir, friction_signature=sig, source="detector", now_iso=now_iso,
+            data_dir, friction_signature=sig,
+            source=info.get("source", "detector"), now_iso=now_iso,
         )
         if not ok:
             continue
@@ -428,35 +528,47 @@ async def respond_once(
     return {"outcome": "nothing_eligible"}
 
 
-def verify_and_archive(data_dir: str, *, now_iso: str, active: bool) -> dict:
+def verify_and_archive(data_dir: str, *, now_iso: str) -> dict:
     """Close the loop on PENDING_VERIFICATION signatures. A NEW report of the
     signature after we surfaced ⇒ recurred_failed (feeds the anti-loop). Quiet
-    for the window WITH detector activity ⇒ resolved ⇒ archive. Quiet but the
-    bot was idle ⇒ stay unknown (idle is not proof). Returns a small summary."""
+    for the window WITH real detector opportunity ⇒ resolved ⇒ archive. Quiet
+    but no opportunity (bot idle / down) ⇒ unknown — idle is NOT proof of
+    resolution (Codex High-2: opportunity is derived from actual post-pending
+    friction activity, not from 'the loop happened to run')."""
+    from datetime import datetime
     fdir = Path(data_dir) / "diagnostics" / "friction"
-    attempts = load_attempts(data_dir)
-    # latest state per signature
+    attempts = load_attempts(data_dir)  # full scan
     latest: dict[str, dict] = {}
     for r in attempts:
         latest[str(r.get("friction_signature"))] = r
+
+    # Index open reports once: (signature -> recurred?) and a global "any
+    # friction at all after pending" = real detector opportunity.
+    report_index: list[tuple[str, float]] = []
+    if fdir.is_dir():
+        for p in fdir.glob("*.md"):
+            try:
+                body = p.read_text(errors="replace")
+            except Exception:
+                body = ""
+            _t, s = signature_from_report(p.name, body)
+            report_index.append((s, p.stat().st_mtime))
+
     resolved, recurred = [], []
     for sig, rec in latest.items():
         if str(rec.get("state")) != PENDING_VERIFICATION:
             continue
         pending_ts = str(rec.get("ts", ""))
-        # did a same-signature report land AFTER we surfaced?
-        recurred_after = False
-        if fdir.is_dir():
-            from datetime import datetime
-            try:
-                pend_epoch = datetime.fromisoformat(pending_ts).timestamp()
-            except (ValueError, TypeError):
-                pend_epoch = 0.0
-            for p in fdir.glob("*.md"):
-                _t, s = signature_of_filename(p.name)
-                if s == sig and p.stat().st_mtime > pend_epoch + 1:
-                    recurred_after = True
-                    break
+        try:
+            pend_epoch = datetime.fromisoformat(pending_ts).timestamp()
+        except (ValueError, TypeError):
+            pend_epoch = 0.0
+        recurred_after = any(
+            s == sig and mt > pend_epoch + 1 for s, mt in report_index)
+        # detector opportunity = ANY friction (of any signature) was produced
+        # after we surfaced ⇒ the detectors were live and would have re-fired
+        # this signature if it were still broken.
+        had_opportunity = any(mt > pend_epoch + 1 for _s, mt in report_index)
         if recurred_after:
             record_attempt(
                 data_dir, friction_signature=sig,
@@ -470,7 +582,7 @@ def verify_and_archive(data_dir: str, *, now_iso: str, active: bool) -> dict:
         gap = _hours_between(pending_ts, now_iso)
         if gap is None or gap < RESOLVED_WINDOW_HOURS:
             continue  # still pending
-        if not active:
+        if not had_opportunity:
             record_attempt(
                 data_dir, friction_signature=sig,
                 friction_type=str(rec.get("friction_type", "")),

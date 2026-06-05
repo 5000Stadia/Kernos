@@ -161,7 +161,7 @@ def test_should_respond_daily_budget(tmp_path, monkeypatch):
     d = str(tmp_path)
     for i in range(fr.MAX_RESPONSES_PER_DAY):
         fr.record_attempt(d, friction_signature=f"sig_{i}", friction_type="T",
-                          resolution_fingerprint="", state=fr.ATTEMPTED,
+                          resolution_fingerprint="", state=fr.IN_FLIGHT,
                           now_iso=f"2026-06-05T0{i}:00:00+00:00")
     ok, why = fr.should_respond(d, friction_signature="sig_new",
                                 source="detector", now_iso=_now())
@@ -282,7 +282,10 @@ def test_verify_archives_quiet_resolved(tmp_path):
     fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
                       resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
                       now_iso="2026-06-04T00:00:00+00:00")
-    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00", active=True)
+    # opportunity: a DIFFERENT-signature report lands after pending, proving
+    # the detectors were live (so the quiet pool-leak is genuinely resolved)
+    _seed_friction(tmp_path, "2026-06-05T11-00-00_INTEGRATION_NO_TOOL_USE_abcdef12.md")
+    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")
     assert sig in out["resolved"]
     # reports archived out of the active folder
     assert not list((tmp_path / "diagnostics" / "friction").glob("*CONNECTION_POOL_LEAK*"))
@@ -296,6 +299,42 @@ def test_verify_marks_recurred_failed(tmp_path):
                       now_iso="2026-06-04T00:00:00+00:00")
     # a NEW report lands after the pending timestamp (recurred)
     _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
-    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00", active=True)
+    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")
     assert sig in out["recurred"]
     assert "fix_1" in fr.failed_fingerprints(fr.load_attempts(d), sig)
+
+
+# --- Codex final-review folds ----------------------------------------------
+
+
+def test_idle_with_no_opportunity_is_unknown_not_resolved(tmp_path):
+    """Quiet but NO friction produced after pending ⇒ unknown, never resolved
+    (Codex High-2: idle is not proof)."""
+    d = str(tmp_path)
+    (tmp_path / "diagnostics" / "friction").mkdir(parents=True)
+    sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+    fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
+                      resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
+                      now_iso="2026-06-04T00:00:00+00:00")
+    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")  # 36h, no activity
+    assert sig not in out["resolved"]
+    assert fr._latest_state(fr.load_attempts(d), sig) == fr.UNKNOWN_NO_OBS
+
+
+def test_source_self_friction_denied_by_content(tmp_path, monkeypatch):
+    """A report whose context implicates our own machinery is self-friction
+    (Codex High-3: the denylist must actually fire)."""
+    assert fr.source_of_report("...spec: Kernos, run improve_kernos ...") == "self"
+    assert fr.source_of_report("plain detector evidence") == "detector"
+
+
+def test_signature_from_report_folds_recommendation(tmp_path):
+    """Two same-type reports with DIFFERENT recommendations get DIFFERENT
+    signatures (Codex High-4: don't collapse a coarse type)."""
+    name = "2026-06-02T00-25-01_INTEGRATION_NO_TOOL_USE_cfdb47e4.md"
+    _t1, s1 = fr.signature_from_report(name, "## Recommendation: ENFORCE_A\nx")
+    _t2, s2 = fr.signature_from_report(name, "## Recommendation: ENFORCE_B\nx")
+    assert s1 != s2
+    # same recommendation ⇒ same signature
+    _t3, s3 = fr.signature_from_report(name, "## Recommendation: ENFORCE_A\ny")
+    assert s1 == s3

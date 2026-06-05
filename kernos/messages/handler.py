@@ -1741,9 +1741,13 @@ class MessageHandler:
             self._remediation_mutex = lock
         return lock
 
-    async def _friction_diagnose(self, sig: str, ftype: str, body: str) -> dict:
+    async def _friction_diagnose(
+        self, instance_id: str, sig: str, ftype: str, body: str,
+    ) -> dict:
         """Diagnose seam: KERNOS's existing diagnose_issue on a friction sample
-        → a structured-enough dict for the fingerprint + surface."""
+        → a structured-enough dict for the fingerprint + surface. instance_id
+        is threaded explicitly (Codex code-review High-1 — the handler does not
+        reliably carry _current_instance_id in a background loop)."""
         import re as _re
         from kernos.kernel.diagnostics import handle_diagnose_issue
         desc = (
@@ -1754,8 +1758,7 @@ class MessageHandler:
         prose = ""
         try:
             prose = await handle_diagnose_issue(
-                getattr(self, "_current_instance_id", ""), "",
-                {"description": desc},
+                instance_id, "", {"description": desc},
                 getattr(self, "_runtime_trace", None), self.reasoning,
             )
         except Exception as exc:
@@ -1764,13 +1767,14 @@ class MessageHandler:
         return {"cause": (prose or "")[:400], "touched": touched,
                 "proposed_fix": prose or ""}
 
-    async def _friction_surface(self, sig: str, ftype: str, diag: dict) -> None:
+    async def _friction_surface(
+        self, instance_id: str, sig: str, ftype: str, diag: dict,
+    ) -> None:
         """Surface-first: passive file in the System space (admin surface) — a
         diagnosis to consider, NOT an autonomous change."""
         files = getattr(self, "_files", None)
         if files is None:
             raise RuntimeError("file service unavailable")
-        instance_id = getattr(self, "_current_instance_id", "")
         space = await self._get_system_space(instance_id)
         if space is None:
             raise RuntimeError("no system space to surface into")
@@ -1802,11 +1806,16 @@ class MessageHandler:
         while True:
             try:
                 if fro.is_enabled() and not self._self_maintenance_busy():
+                    async def _diag(sig, ftype, body, _iid=instance_id):
+                        return await self._friction_diagnose(_iid, sig, ftype, body)
+
+                    async def _surface(sig, ftype, diag, _iid=instance_id):
+                        await self._friction_surface(_iid, sig, ftype, diag)
+
                     async with self._remediation_lock():
                         res = await fro.respond_once(
                             data_dir, now_iso=utc_now(),
-                            diagnose_fn=self._friction_diagnose,
-                            surface_fn=self._friction_surface,
+                            diagnose_fn=_diag, surface_fn=_surface,
                         )
                         if res.get("outcome") == "surfaced":
                             logger.info(
@@ -1814,11 +1823,10 @@ class MessageHandler:
                                 "signature=%s type=%s", instance_id,
                                 res.get("signature"), res.get("type"),
                             )
-                        # close the loop — idle-aware "active" proxy
-                        fro.verify_and_archive(
-                            data_dir, now_iso=utc_now(),
-                            active=not self._self_maintenance_busy(),
-                        )
+                        # Close the loop — opportunity is derived inside
+                        # verify_and_archive from real post-pending friction
+                        # activity, not from "the loop ran".
+                        fro.verify_and_archive(data_dir, now_iso=utc_now())
             except Exception as exc:
                 logger.warning("FRICTION_RESPONSE_LOOP error instance=%s: %s",
                                instance_id, exc)
