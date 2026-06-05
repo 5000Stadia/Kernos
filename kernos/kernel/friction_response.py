@@ -128,6 +128,7 @@ def record_attempt(
     data_dir: str, *, friction_signature: str, friction_type: str,
     resolution_fingerprint: str, state: str, now_iso: str,
     attempted_resolution: str = "", commit_sha: str = "", source: str = "",
+    notes: str = "",
 ) -> None:
     """Append one resolution record (best-effort; never raises into caller)."""
     rec = {
@@ -136,6 +137,7 @@ def record_attempt(
         "resolution_fingerprint": resolution_fingerprint,
         "attempted_resolution": str(attempted_resolution)[:500],
         "state": state, "commit_sha": commit_sha, "source": source,
+        "notes": str(notes)[:300],
     }
     try:
         p = _ledger_path(data_dir)
@@ -328,6 +330,168 @@ def archive_resolved_signature(
     return len(moved)
 
 
+# ---------------------------------------------------------------------------
+# Open-friction inventory + the response orchestrator (seam-injected)
+# ---------------------------------------------------------------------------
+
+RESOLVED_WINDOW_HOURS = 24.0  # quiet this long (with activity) ⇒ resolved
+
+
+def list_open_signatures(data_dir: str, *, max_files: int = 300) -> list[dict]:
+    """Group the OPEN friction reports by signature (recurring first). Each:
+    {signature, type, count, latest_mtime, sample_body}. Reads both naming
+    conventions; archived reports live elsewhere so they're excluded."""
+    fdir = Path(data_dir) / "diagnostics" / "friction"
+    if not fdir.is_dir():
+        return []
+    files = sorted(fdir.glob("*.md"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)[:max_files]
+    groups: dict[str, dict] = {}
+    for p in files:
+        ftype, sig = signature_of_filename(p.name)
+        g = groups.setdefault(sig, {
+            "signature": sig, "type": ftype, "count": 0,
+            "latest_mtime": 0.0, "sample_body": "",
+        })
+        g["count"] += 1
+        mt = p.stat().st_mtime
+        if mt >= g["latest_mtime"]:
+            g["latest_mtime"] = mt
+            try:
+                g["sample_body"] = p.read_text(errors="replace")[:1500]
+            except Exception:
+                pass
+    return sorted(groups.values(), key=lambda g: -g["count"])
+
+
+async def respond_once(
+    data_dir: str, *, now_iso: str, diagnose_fn, surface_fn,
+) -> dict:
+    """Process the single most-pressing eligible open friction signature:
+    gate → reserve → diagnose → surface-first → record. Seam-injected
+    (``diagnose_fn(sig, ftype, body) -> {cause, touched, proposed_fix}``;
+    ``surface_fn(sig, ftype, diag) -> None``) so it's testable without the live
+    diagnose/whisper paths. Surface-first v1 — no autonomous code change."""
+    if not is_enabled():
+        return {"outcome": "disabled"}
+    for info in list_open_signatures(data_dir):
+        sig, ftype = info["signature"], info["type"]
+        ok, reason = should_respond(
+            data_dir, friction_signature=sig, source="detector", now_iso=now_iso,
+        )
+        if not ok:
+            continue
+        if not reserve_in_flight(
+            data_dir, friction_signature=sig, friction_type=ftype, now_iso=now_iso,
+        ):
+            continue
+        try:
+            diag = await diagnose_fn(sig, ftype, info.get("sample_body", "")) or {}
+        except Exception as exc:
+            # Clear the in-flight claim so it can retry after cooldown.
+            record_attempt(
+                data_dir, friction_signature=sig, friction_type=ftype,
+                resolution_fingerprint="", state=ATTEMPTED, now_iso=now_iso,
+                notes=f"diagnose_failed:{str(exc)[:80]}", source="friction_response",
+            )
+            return {"outcome": "diagnose_error", "signature": sig,
+                    "error": str(exc)[:200]}
+        fp = resolution_fingerprint(
+            cause=str(diag.get("cause", "")), touched=diag.get("touched", []),
+        )
+        # Anti-loop: never re-surface a plan that already failed for this sig.
+        if fp in failed_fingerprints(load_attempts(data_dir), sig):
+            record_attempt(
+                data_dir, friction_signature=sig, friction_type=ftype,
+                resolution_fingerprint=fp, state=ATTEMPTED, now_iso=now_iso,
+                notes="skipped: resolution already failed",
+                source="friction_response",
+            )
+            continue
+        try:
+            await surface_fn(sig, ftype, diag)
+        except Exception:
+            record_attempt(
+                data_dir, friction_signature=sig, friction_type=ftype,
+                resolution_fingerprint=fp, state=ATTEMPTED, now_iso=now_iso,
+                notes="surface_failed", source="friction_response",
+            )
+            return {"outcome": "surface_error", "signature": sig}
+        record_attempt(
+            data_dir, friction_signature=sig, friction_type=ftype,
+            resolution_fingerprint=fp, state=PENDING_VERIFICATION, now_iso=now_iso,
+            attempted_resolution=str(diag.get("proposed_fix", ""))[:500],
+            source="friction_response",
+        )
+        return {"outcome": "surfaced", "signature": sig, "type": ftype,
+                "resolution_fingerprint": fp}
+    return {"outcome": "nothing_eligible"}
+
+
+def verify_and_archive(data_dir: str, *, now_iso: str, active: bool) -> dict:
+    """Close the loop on PENDING_VERIFICATION signatures. A NEW report of the
+    signature after we surfaced ⇒ recurred_failed (feeds the anti-loop). Quiet
+    for the window WITH detector activity ⇒ resolved ⇒ archive. Quiet but the
+    bot was idle ⇒ stay unknown (idle is not proof). Returns a small summary."""
+    fdir = Path(data_dir) / "diagnostics" / "friction"
+    attempts = load_attempts(data_dir)
+    # latest state per signature
+    latest: dict[str, dict] = {}
+    for r in attempts:
+        latest[str(r.get("friction_signature"))] = r
+    resolved, recurred = [], []
+    for sig, rec in latest.items():
+        if str(rec.get("state")) != PENDING_VERIFICATION:
+            continue
+        pending_ts = str(rec.get("ts", ""))
+        # did a same-signature report land AFTER we surfaced?
+        recurred_after = False
+        if fdir.is_dir():
+            from datetime import datetime
+            try:
+                pend_epoch = datetime.fromisoformat(pending_ts).timestamp()
+            except (ValueError, TypeError):
+                pend_epoch = 0.0
+            for p in fdir.glob("*.md"):
+                _t, s = signature_of_filename(p.name)
+                if s == sig and p.stat().st_mtime > pend_epoch + 1:
+                    recurred_after = True
+                    break
+        if recurred_after:
+            record_attempt(
+                data_dir, friction_signature=sig,
+                friction_type=str(rec.get("friction_type", "")),
+                resolution_fingerprint=str(rec.get("resolution_fingerprint", "")),
+                state=RECURRED_FAILED, now_iso=now_iso, source="friction_response",
+                notes="recurred after surfaced fix",
+            )
+            recurred.append(sig)
+            continue
+        gap = _hours_between(pending_ts, now_iso)
+        if gap is None or gap < RESOLVED_WINDOW_HOURS:
+            continue  # still pending
+        if not active:
+            record_attempt(
+                data_dir, friction_signature=sig,
+                friction_type=str(rec.get("friction_type", "")),
+                resolution_fingerprint=str(rec.get("resolution_fingerprint", "")),
+                state=UNKNOWN_NO_OBS, now_iso=now_iso, source="friction_response",
+            )
+            continue
+        n = archive_resolved_signature(
+            data_dir, friction_signature=sig, now_iso=now_iso, ledger_ref=pending_ts,
+        )
+        record_attempt(
+            data_dir, friction_signature=sig,
+            friction_type=str(rec.get("friction_type", "")),
+            resolution_fingerprint=str(rec.get("resolution_fingerprint", "")),
+            state=RESOLVED, now_iso=now_iso, source="friction_response",
+            notes=f"quiet {RESOLVED_WINDOW_HOURS}h, archived {n}",
+        )
+        resolved.append(sig)
+    return {"resolved": resolved, "recurred": recurred}
+
+
 __all__ = [
     "is_enabled", "SELF_FRICTION_SOURCES", "COOLDOWN_HOURS",
     "MAX_RESPONSES_PER_DAY", "VERIFY_WINDOW_HOURS",
@@ -336,5 +500,6 @@ __all__ = [
     "RECURRED_FAILED", "UNKNOWN_NO_OBS",
     "record_attempt", "load_attempts", "failed_fingerprints",
     "reserve_in_flight", "should_respond", "judge_resolution",
-    "archive_resolved_signature",
+    "archive_resolved_signature", "RESOLVED_WINDOW_HOURS",
+    "list_open_signatures", "respond_once", "verify_and_archive",
 ]

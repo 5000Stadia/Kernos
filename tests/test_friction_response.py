@@ -220,3 +220,82 @@ def test_archive_only_matching_signature(tmp_path):
     resolved = tmp_path / "diagnostics" / "friction_resolved"
     assert (resolved / "_manifest.jsonl").exists()  # manifest written
     assert len(list(resolved.glob("*CONNECTION_POOL_LEAK*.md"))) == 2
+
+
+# --- orchestrator + verification (seam-injected) ---------------------------
+
+
+def _seed_friction(tmp_path, fname, body="x"):
+    fdir = tmp_path / "diagnostics" / "friction"
+    fdir.mkdir(parents=True, exist_ok=True)
+    (fdir / fname).write_text(body)
+    return fdir / fname
+
+
+@pytest.mark.asyncio
+async def test_respond_once_surfaces_top_signature(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    d = str(tmp_path)
+    # 2 of one signature (recurring) + 1 of another
+    _seed_friction(tmp_path, "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md")
+    _seed_friction(tmp_path, "2026-06-01T08-21-41_CONNECTION_POOL_LEAK_0a84419a.md")
+    _seed_friction(tmp_path, "2026-06-02T00-25-01_INTEGRATION_NO_TOOL_USE_cfdb47e4.md")
+
+    surfaced = []
+    async def _diag(sig, ftype, body):
+        return {"cause": f"root cause of {ftype}", "touched": ["kernos/x.py"],
+                "proposed_fix": "do the thing"}
+    async def _surface(sig, ftype, diag):
+        surfaced.append((ftype, diag["proposed_fix"]))
+
+    res = await fr.respond_once(d, now_iso="2026-06-05T12:00:00+00:00",
+                                diagnose_fn=_diag, surface_fn=_surface)
+    assert res["outcome"] == "surfaced"
+    assert res["type"] == "CONNECTION_POOL_LEAK"   # recurring one first
+    assert surfaced and surfaced[0][0] == "CONNECTION_POOL_LEAK"
+    # recorded pending; a second call is blocked by in-flight/cooldown
+    res2 = await fr.respond_once(d, now_iso="2026-06-05T12:01:00+00:00",
+                                 diagnose_fn=_diag, surface_fn=_surface)
+    assert res2["outcome"] in ("surfaced", "nothing_eligible")
+    if res2["outcome"] == "surfaced":
+        assert res2["type"] != "CONNECTION_POOL_LEAK"   # moved on, not looping
+
+
+@pytest.mark.asyncio
+async def test_respond_once_disabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("KERNOS_FRICTION_RESPONSE", raising=False)
+    async def _d(*a): return {}
+    async def _s(*a): pass
+    res = await fr.respond_once(str(tmp_path), now_iso="2026-06-05T12:00:00+00:00",
+                                diagnose_fn=_d, surface_fn=_s)
+    assert res["outcome"] == "disabled"
+
+
+def test_verify_archives_quiet_resolved(tmp_path):
+    d = str(tmp_path)
+    f = _seed_friction(tmp_path, "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md")
+    sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+    # mark pending 25h ago (> 24h window), no new reports since
+    import os as _os, time as _time
+    old = _time.time() - 100 * 3600
+    _os.utime(f, (old, old))
+    fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
+                      resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
+                      now_iso="2026-06-04T00:00:00+00:00")
+    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00", active=True)
+    assert sig in out["resolved"]
+    # reports archived out of the active folder
+    assert not list((tmp_path / "diagnostics" / "friction").glob("*CONNECTION_POOL_LEAK*"))
+
+
+def test_verify_marks_recurred_failed(tmp_path):
+    d = str(tmp_path)
+    sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+    fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
+                      resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
+                      now_iso="2026-06-04T00:00:00+00:00")
+    # a NEW report lands after the pending timestamp (recurred)
+    _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
+    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00", active=True)
+    assert sig in out["recurred"]
+    assert "fix_1" in fr.failed_fingerprints(fr.load_attempts(d), sig)

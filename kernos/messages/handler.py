@@ -1556,6 +1556,19 @@ class MessageHandler:
                 task.add_done_callback(
                     lambda t, _i=instance_id: self._self_maint_tasks.pop(_i, None)
                 )
+            # FRICTION-RESPONSE-V1 (Shape B): the reactive friction sweep, same
+            # per-instance + default-off + tracked pattern.
+            if not hasattr(self, "_friction_tasks"):
+                self._friction_tasks: dict[str, "asyncio.Task"] = {}
+            if instance_id not in self._friction_tasks:
+                ftask = asyncio.create_task(
+                    self._run_friction_response_loop(instance_id),
+                    name=f"friction_response:{instance_id}",
+                )
+                self._friction_tasks[instance_id] = ftask
+                ftask.add_done_callback(
+                    lambda t, _i=instance_id: self._friction_tasks.pop(_i, None)
+                )
         except Exception as exc:
             logger.warning("Failed to start self-maintenance loop for %s: %s",
                            instance_id, exc)
@@ -1697,12 +1710,16 @@ class MessageHandler:
                 if smr.is_enabled():
                     async def _whisper(text, report, _iid=instance_id):
                         await self._surface_self_maintenance(_iid, text, report)
-                    res = await smr.maybe_run_daily(
-                        data_dir=data_dir, now_iso=utc_now(),
-                        consult_fn=self._self_maintenance_consult,
-                        whisper_fn=_whisper,
-                        busy=self._self_maintenance_busy(),
-                    )
+                    # Shared maintenance mutex: only one remediation lane (this
+                    # creative review, friction response, recursive heal) runs
+                    # at a time (FRICTION-RESPONSE-V1 §7).
+                    async with self._remediation_lock():
+                        res = await smr.maybe_run_daily(
+                            data_dir=data_dir, now_iso=utc_now(),
+                            consult_fn=self._self_maintenance_consult,
+                            whisper_fn=_whisper,
+                            busy=self._self_maintenance_busy(),
+                        )
                     if str(res.get("outcome", "")).startswith("reviewed"):
                         logger.info(
                             "SELF_MAINTENANCE_REVIEW instance=%s outcome=%s "
@@ -1711,6 +1728,99 @@ class MessageHandler:
                         )
             except Exception as exc:
                 logger.warning("SELF_MAINTENANCE_LOOP error instance=%s: %s",
+                               instance_id, exc)
+            await asyncio.sleep(interval)
+
+    def _remediation_lock(self) -> "asyncio.Lock":
+        """The single shared maintenance mutex across all remediation lanes —
+        creative review (Shape A), friction response (Shape B), recursive heal.
+        Lazy so it binds to the running loop (FRICTION-RESPONSE-V1 §7)."""
+        lock = getattr(self, "_remediation_mutex", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._remediation_mutex = lock
+        return lock
+
+    async def _friction_diagnose(self, sig: str, ftype: str, body: str) -> dict:
+        """Diagnose seam: KERNOS's existing diagnose_issue on a friction sample
+        → a structured-enough dict for the fingerprint + surface."""
+        import re as _re
+        from kernos.kernel.diagnostics import handle_diagnose_issue
+        desc = (
+            f"Operational friction `{ftype}` (signature {sig}) is recurring. "
+            f"Most recent report:\n{body}\n\nDiagnose the root cause and "
+            "propose ONE minimal, reversible fix."
+        )
+        prose = ""
+        try:
+            prose = await handle_diagnose_issue(
+                getattr(self, "_current_instance_id", ""), "",
+                {"description": desc},
+                getattr(self, "_runtime_trace", None), self.reasoning,
+            )
+        except Exception as exc:
+            prose = f"(diagnosis unavailable: {exc})"
+        touched = sorted(set(_re.findall(r"kernos/[\w/]+\.py", prose or "")))[:8]
+        return {"cause": (prose or "")[:400], "touched": touched,
+                "proposed_fix": prose or ""}
+
+    async def _friction_surface(self, sig: str, ftype: str, diag: dict) -> None:
+        """Surface-first: passive file in the System space (admin surface) — a
+        diagnosis to consider, NOT an autonomous change."""
+        files = getattr(self, "_files", None)
+        if files is None:
+            raise RuntimeError("file service unavailable")
+        instance_id = getattr(self, "_current_instance_id", "")
+        space = await self._get_system_space(instance_id)
+        if space is None:
+            raise RuntimeError("no system space to surface into")
+        content = (
+            f"# Friction Response — `{ftype}`\n\n_signature: `{sig}`_\n\n"
+            "A recurring operational friction was diagnosed. Consider whether "
+            "to address it via `improve_kernos` (it stops at the approval "
+            "gate). Reflection, not an autonomous change.\n\n## Diagnosis\n\n"
+            f"{diag.get('proposed_fix', '')}\n"
+        )
+        await files.write_file(
+            instance_id, space.id, "friction-response.md", content,
+            "KERNOS's latest friction diagnosis — a reflection to consider",
+        )
+
+    async def _run_friction_response_loop(self, instance_id: str) -> None:
+        """Shape B: short-interval sweep that responds to the most-pressing
+        eligible open friction (gate → diagnose → surface), then closes the
+        loop on pending verifications. Default-off, idle-aware, mutex-guarded —
+        near-zero cost while the kill switch is off."""
+        from kernos.kernel import friction_response as fro
+        from kernos.utils import utc_now
+        try:
+            interval = max(60, int(os.getenv(
+                "KERNOS_FRICTION_RESPONSE_INTERVAL_SEC", "600")))
+        except (TypeError, ValueError):
+            interval = 600
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+        while True:
+            try:
+                if fro.is_enabled() and not self._self_maintenance_busy():
+                    async with self._remediation_lock():
+                        res = await fro.respond_once(
+                            data_dir, now_iso=utc_now(),
+                            diagnose_fn=self._friction_diagnose,
+                            surface_fn=self._friction_surface,
+                        )
+                        if res.get("outcome") == "surfaced":
+                            logger.info(
+                                "FRICTION_RESPONSE instance=%s surfaced "
+                                "signature=%s type=%s", instance_id,
+                                res.get("signature"), res.get("type"),
+                            )
+                        # close the loop — idle-aware "active" proxy
+                        fro.verify_and_archive(
+                            data_dir, now_iso=utc_now(),
+                            active=not self._self_maintenance_busy(),
+                        )
+            except Exception as exc:
+                logger.warning("FRICTION_RESPONSE_LOOP error instance=%s: %s",
                                instance_id, exc)
             await asyncio.sleep(interval)
 
@@ -4974,6 +5084,16 @@ class MessageHandler:
                     pass
         if hasattr(self, "_self_maint_tasks"):
             self._self_maint_tasks.clear()
+        # FRICTION-RESPONSE-V1: cancel the friction sweep loops too.
+        for _iid, task in list(getattr(self, "_friction_tasks", {}).items()):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        if hasattr(self, "_friction_tasks"):
+            self._friction_tasks.clear()
 
     # -----------------------------------------------------------------------
     # AUTO-WAKE-V1 (2026-05-19): consult completion → wake turn
