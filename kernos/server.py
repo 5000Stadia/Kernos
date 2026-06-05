@@ -273,7 +273,7 @@ async def debug_command(interaction: discord.Interaction, category: str = "trace
         if not friction_dir.exists():
             await interaction.followup.send("No friction reports.", ephemeral=True)
             return
-        reports = sorted(friction_dir.glob("FRICTION_*.md"), reverse=True)[:5]
+        reports = sorted(friction_dir.glob("*.md"), key=lambda _p: _p.stat().st_mtime, reverse=True)[:5]  # both naming conventions, by recency
         if not reports:
             await interaction.followup.send("No friction reports.", ephemeral=True)
             return

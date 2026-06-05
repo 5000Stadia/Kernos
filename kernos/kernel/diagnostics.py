@@ -212,7 +212,7 @@ async def handle_diagnose_issue(
     data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
     friction_dir = Path(data_dir) / "diagnostics" / "friction"
     if friction_dir.exists():
-        reports = sorted(friction_dir.glob("FRICTION_*.md"), reverse=True)[:3]
+        reports = sorted(friction_dir.glob("*.md"), key=lambda _p: _p.stat().st_mtime, reverse=True)[:3]  # both naming conventions, by recency
         for rpt in reports:
             try:
                 content = rpt.read_text(encoding="utf-8")[:500]
