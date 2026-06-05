@@ -63,6 +63,47 @@ commit) are the OPERATOR/audit layer; the person just has a normal exchange.
 > deliberately once the discernment is trusted. Either way the user surface is
 > the same: simple, conversational, one answer — or nothing at all.
 
+## 3A. Authorization + audit (BINDING — Codex spec-review v3 §1–§3)
+
+The conversational simplicity is the USER's view; underneath, nothing is
+loosened. Three binding rules:
+
+**(i) A natural "yes" binds to ONE pending-fix authorization, or it no-ops.**
+The ask creates a durable single-use authorization object:
+`{auth_id, friction_signature, resolution_fingerprint, ask_message_id,
+user_id, space_id, created_at, ttl}`. A plain affirmative authorizes it ONLY
+when ALL hold: same `user_id`, same `space_id`/thread, it is the direct reply
+or the immediate next turn, within a short TTL, single-use, **exactly one**
+pending fix outstanding, and no intervening prompt. A stale / ambiguous /
+multiple-pending / out-of-context "yes" does NOT authorize anything — it no-ops
+and (if still relevant) re-asks with a fresh prompt. (This is a thin product
+framing over the existing REQUEST-APPROVAL-ACTION-V1 receipt — natural language
+in, durable single-use receipt underneath.)
+
+**(ii) Auto-without-asking is fail-closed against an EXPLICIT allowlist.** A fix
+is auto-applied with no prompt ONLY if it provably meets ALL of: allowlisted
+`friction_signature`; confidence ≥ threshold; deterministic repro/verification
+available; small, bounded touched-path set (low blast radius); reversible; a
+clean, protected worktree; no prior failed `resolution_fingerprint`; and it
+touches NONE of — data deletion / migration, auth / security, guardrail or
+constitutional machinery (reuse `recursive_self_heal`'s set), schema, or a user
+preference / product trade-off. Anything not provably meeting every criterion
+falls through to **ask-once**; anything touching guardrails is **operator-only**
+(never auto, never a simple ask). "Proportional caution" is the intent; THIS
+list is the boundary. **v1 ships auto-without-asking OFF — ask-once is the
+default — until the discernment is trusted.**
+
+**(iii) The commit binding is PRESERVED, not narrowed; the audit receipt is
+mandatory.** The user never sees a diff, but the actual change STILL runs
+through the existing commit-approval binding (parent SHA + `expected_diff_hash`
+from IMPROVEMENT-LOOP-WORKFLOW-V1 / SUBSTRATE-SELF-TEST-V1) — the conversational
+authorization simply SUPPLIES that gate's authorization instead of a separate
+operator click. Every response writes a durable operator/audit receipt:
+`{auth_id, friction_signature, resolution_fingerprint, trigger, auto_or_ask +
+rationale, parent_sha, diff_hash, touched_paths, commit_sha, tests/preflight
+result, verification_state, rollback_artifact}`. Operator gets the full
+receipts; the user gets one sentence and one answer.
+
 ## 4. Durable memory — two keys, precise anti-loop
 
 `diagnostics/friction_resolutions.jsonl`, append-only. The de-dupe rests on **two** keys, not one:
@@ -116,17 +157,17 @@ Verdict YELLOW → these are required before code:
 4. **Ledger = two keys:** `friction_signature` + `resolution_fingerprint`; anti-loop is per-(signature, failed-fingerprint) (§4).
 5. **Verification states** post-deploy over an opportunity window; idle ≠ resolved (§5).
 6. **Archive by signature + manifest + reader exclusion** (§6).
-7. **Surface-first default**, deduped while an attempt is open/pending (§3a).
-8. **Auto-trigger guards:** allowlist + confidence + repro + clean/protected worktree + path denylist + per-signature cap + preflight + cancel (§3b).
+7. **Ask-once is the v1 default** (auto-without-asking OFF until trusted); the conversational ask is deduped while an attempt is open/pending (§3, §3A-i). A natural "yes" binds to exactly ONE durable single-use pending-fix authorization or no-ops (§3A-i).
+8. **Auto-without-asking is fail-closed** against the explicit allowlist (§3A-ii); the underlying change keeps the existing commit-binding + the mandatory audit receipt (§3A-iii) — allowlist + confidence + repro + clean/protected worktree + path denylist + per-signature cap + preflight + cancel.
 9. **Shared governors, not isolation:** maintenance mutex + global budget + receipts + surface shared; triggers/queues/content not (§7).
 
 ## 10. Build sequence
 
 1. Friction reader (both conventions) + `friction_signature`/`resolution_fingerprint` derivation + resolution ledger.
 2. Maintenance mutex + cost budget (shared governor) + in-flight reservation + self-friction denylist + signature cooldown.
-3. Diagnose → resolve (a surface-first, deduped) → verification-state machine.
+3. Diagnose → decide (auto-criteria §3A-ii) → ask-once conversational confirm (default) with the single-use natural-"yes" authorization (§3A-i) → on yes, the gated fix + mandatory audit receipt (§3A-iii) → verification-state machine.
 4. Archive-by-signature + manifest + reader exclusion.
 5. Daily sweep backstop; fix the existing reader globs.
-6. (opt-in, later) auto-trigger (b) with the §3b guard set.
+6. (opt-in, later, OFF in v1) auto-without-asking on the obvious — gated by the explicit fail-closed allowlist (§3A-ii); the commit-binding + audit receipt (§3A-iii) are identical to the ask-once path.
 
 Re-run Codex spec pass → GREEN before code. Then implement → Codex code review.
