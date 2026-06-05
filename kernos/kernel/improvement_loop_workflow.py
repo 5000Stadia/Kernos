@@ -44,7 +44,13 @@ IMPROVE_KERNOS_TOOL: dict = {
     "name": "improve_kernos",
     "description": (
         "Start an autonomous improvement against Kernos's own "
-        "source: trusted coding agents draft + implement the "
+        "PLATFORM source — code shared by every instance, committed + "
+        "pushed to GitHub. Use this ONLY for changes that are obviously "
+        "universal (any Kernos, any user, would want them). It is NOT for "
+        "building a tool or project for one user's specific need — that is "
+        "the workshop (execute_code/register_tool/manage_workspace), which "
+        "stays in the user's instance and is never committed. "
+        "Trusted coding agents draft + implement the "
         "change, then commit + deploy automatically after review "
         "unless the change needs explicit approval. Returns immediately "
         "with a tracking handle; the work continues in the "
