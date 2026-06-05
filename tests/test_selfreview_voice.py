@@ -148,8 +148,8 @@ async def test_run_self_review_tool_refuses_non_owner():
 async def test_run_self_review_tool_runs_for_owner():
     calls = []
 
-    async def _run(iid):
-        calls.append(iid)
+    async def _run(iid, target=None):
+        calls.append((iid, target))
         return "voiced review"
 
     stub = types.SimpleNamespace(
@@ -159,7 +159,7 @@ async def test_run_self_review_tool_runs_for_owner():
     out = await MessageHandler._handle_self_review_tool(stub, "inst", "mem_owner")
 
     assert out == "voiced review"                   # delegates to shared core
-    assert calls == ["inst"]
+    assert calls == [("inst", None)]
 
 
 async def test_run_self_review_is_a_real_dispatchable_pinned_tool():

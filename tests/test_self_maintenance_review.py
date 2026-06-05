@@ -237,7 +237,7 @@ async def test_maybe_run_defers_when_busy(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_maybe_run_surfaces_and_advances_cursor(tmp_path, monkeypatch):
+async def test_maybe_run_surfaces_and_records_coverage(tmp_path, monkeypatch):
     monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
     d = str(tmp_path)
     payload = (
@@ -252,11 +252,15 @@ async def test_maybe_run_surfaces_and_advances_cursor(tmp_path, monkeypatch):
     res = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
         consult_fn=_consult_returning(payload), whisper_fn=_whisper,
+        repo_root=d,   # no churn signal → deterministic floor pick
     )
     assert res["outcome"] == "reviewed_surfaced"
     assert len(whispers) == 1
     assert "evolution" in whispers[0][0].lower()
-    assert smr.load_state(d)["cursor"] == 1   # advanced
+    # V2: per-slice coverage recorded for exactly the reviewed slice
+    st = smr.load_state(d)
+    assert len(st["last_reviewed"]) == 1
+    assert res["report"]["slice"] in st["last_reviewed"]
 
 
 @pytest.mark.asyncio
@@ -269,22 +273,22 @@ async def test_maybe_run_not_due_second_time_same_day(tmp_path, monkeypatch):
     )
     r1 = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
-        consult_fn=_consult_returning(healthy),
+        consult_fn=_consult_returning(healthy), repo_root=d,
     )
     assert r1["outcome"] == "reviewed_quiet"   # healthy => nothing surfaced
     # an hour later -> not due (< 20h)
     r2 = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T01:00:00+00:00",
-        consult_fn=_consult_returning(healthy),
+        consult_fn=_consult_returning(healthy), repo_root=d,
     )
     assert r2["outcome"] == "not_due"
-    # next day -> due again, cursor advanced to slice 2
+    # next day -> due again, the floor moves to a fresh (distinct) slice
     r3 = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-05T00:00:00+00:00",
-        consult_fn=_consult_returning(healthy),
+        consult_fn=_consult_returning(healthy), repo_root=d,
     )
     assert r3["outcome"] == "reviewed_quiet"
-    assert smr.load_state(d)["cursor"] == 2
+    assert len(smr.load_state(d)["last_reviewed"]) == 2   # two distinct slices covered
 
 
 # --- the methodology reviews itself (constitutional, human-gated) ----------
@@ -325,9 +329,8 @@ def test_constitutional_whisper_routes_to_founder_not_self_apply():
 async def test_constitutional_flag_survives_to_report(tmp_path, monkeypatch):
     monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
     d = str(tmp_path)
-    # advance cursor to the first constitutional slice
-    meta_idx = next(i for i, s in enumerate(smr.REVIEW_SLICES) if s.constitutional)
-    smr.save_state(d, {"cursor": meta_idx, "last_run_iso": "", "seen": {}})
+    # V2: target the first constitutional slice directly
+    meta = next(s for s in smr.REVIEW_SLICES if s.constitutional)
     payload = (
         '```json\n{"overall_health":"healthy","corrective_findings":[],'
         '"evolution_idea":"a minor tweak","serves_the_whole":true}\n```'
@@ -337,6 +340,7 @@ async def test_constitutional_flag_survives_to_report(tmp_path, monkeypatch):
     res = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
         consult_fn=_consult_returning(payload), whisper_fn=_whisper,
+        target=meta.name, repo_root=d,
     )
     assert res["report"]["constitutional"] is True
     assert captured and captured[0]["constitutional"] is True
@@ -404,17 +408,17 @@ async def test_force_runs_even_when_disabled_and_not_due(tmp_path, monkeypatch):
     # forced run works despite the kill switch being off + not-due + busy
     r1 = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:00:00+00:00",
-        consult_fn=_c, busy=True, force=True,
+        consult_fn=_c, busy=True, force=True, repo_root=d,
     )
     assert r1["outcome"] == "reviewed_quiet"
-    assert smr.load_state(d)["cursor"] == 1
+    assert len(smr.load_state(d)["last_reviewed"]) == 1
     # immediately again (would be not_due) — force still runs, next slice
     r2 = await smr.maybe_run_daily(
         data_dir=d, now_iso="2026-06-04T00:05:00+00:00",
-        consult_fn=_c, force=True,
+        consult_fn=_c, force=True, repo_root=d,
     )
     assert r2["outcome"] == "reviewed_quiet"
-    assert smr.load_state(d)["cursor"] == 2
+    assert len(smr.load_state(d)["last_reviewed"]) == 2
 
 
 @pytest.mark.asyncio

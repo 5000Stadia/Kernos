@@ -1587,11 +1587,13 @@ class MessageHandler:
         except Exception:
             return True  # on doubt, defer
 
-    async def _handle_selfreview(self, ctx) -> str:
+    async def _handle_selfreview(self, ctx, cmd: str = "") -> str:
         """Owner-only on-demand self-maintenance review. Runs ONE review NOW
         (force — bypasses the kill switch + daily gate so you can induce + watch
-        it anytime), writes the note to the System space, advances the rotating
-        cursor, and returns a short summary."""
+        it anytime), writes the note to the System space, records per-slice
+        coverage, and returns the result in KERNOS's voice. `/selfreview <name>`
+        targets a specific section; bare `/selfreview` lets KERNOS pick the most
+        relevant one."""
         _is_owner = False
         try:
             if getattr(self, "_instance_db", None) and getattr(ctx, "member_id", ""):
@@ -1602,20 +1604,30 @@ class MessageHandler:
         if not _is_owner:
             return "Only the owner can run `/selfreview`."
 
+        target = ""
+        try:
+            rest = (cmd or "").strip()
+            if rest.lower().startswith("/selfreview"):
+                rest = rest[len("/selfreview"):]
+            target = rest.strip().strip('"').strip("'")
+        except Exception:
+            target = ""
+
         instance_id = (getattr(ctx, "instance_id", "")
                        or getattr(self, "_current_instance_id", ""))
-        return await self._run_self_review_now(instance_id)
+        return await self._run_self_review_now(instance_id, target=(target or None))
 
     async def _handle_self_review_tool(
-        self, instance_id: str, member_id: str,
+        self, instance_id: str, member_id: str, target: str | None = None,
     ) -> str:
         """Agent-callable `run_self_review` tool — the agent's own entry point
         to run a self-maintenance review on demand (same engine as the owner's
         /selfreview slash command). Owner-gated: only runs when the requesting
         member is the owner, so the agent can fulfil "review yourself" when the
-        owner asks but can't self-trigger in anyone else's context. Reflection
-        only — it surfaces a note to consider; any actual change still flows
-        through the approval-gated improve_kernos loop."""
+        owner asks but can't self-trigger in anyone else's context. Optional
+        ``target`` reviews a specific named section. Reflection only — it
+        surfaces a note to consider; any actual change still flows through the
+        approval-gated improve_kernos loop."""
         is_owner = False
         try:
             if getattr(self, "_instance_db", None) and member_id:
@@ -1627,14 +1639,19 @@ class MessageHandler:
             return ("A self-review is an owner-only reflection — I can run one "
                     "when the owner asks.")
         return await self._run_self_review_now(
-            instance_id or getattr(self, "_current_instance_id", ""))
+            instance_id or getattr(self, "_current_instance_id", ""),
+            target=target)
 
-    async def _run_self_review_now(self, instance_id: str) -> str:
+    async def _run_self_review_now(
+        self, instance_id: str, target: str | None = None,
+    ) -> str:
         """Shared core for /selfreview + the run_self_review tool: run ONE
         self-maintenance review NOW (force — bypasses the kill switch + daily
-        gate), surface the note to the System space, advance the rotating
-        cursor, and return the result rendered in KERNOS's own voice. Callers
-        own the owner check."""
+        gate), surface the note to the System space, record per-slice coverage,
+        and return the result rendered in KERNOS's own voice. With ``target``,
+        review that specific named section (SELF-MAINTENANCE-REVIEW-V2);
+        otherwise KERNOS signal-promotes the most relevant slice with a rotation
+        floor. Callers own the owner check."""
         from kernos.kernel import self_maintenance_review as smr
         from kernos.utils import utc_now
         data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
@@ -1646,8 +1663,14 @@ class MessageHandler:
             data_dir=data_dir, now_iso=utc_now(),
             consult_fn=self._self_maintenance_consult,
             whisper_fn=_whisper, force=True,
+            target=(target or None),
+            repo_root=os.getenv("KERNOS_REPO_DIR", "."),
         )
         outcome = res.get("outcome", "")
+        if outcome == "unknown_target":
+            valid = ", ".join(res.get("valid", []))
+            return (f"I don't have a section called \"{res.get('target', '')}\" "
+                    f"to review. I can look at any of: {valid}.")
         if outcome == "error":
             return (f"Self-review hit an error on `{res.get('slice', '?')}`: "
                     f"{res.get('error', '')}")
@@ -1815,7 +1838,7 @@ class MessageHandler:
         data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
         while True:
             try:
-                if smr.is_enabled():
+                if smr.is_enabled() and smr.instance_allowed(instance_id):
                     async def _whisper(text, report, _iid=instance_id):
                         await self._surface_self_maintenance(_iid, text, report)
                     # Shared maintenance mutex: only one remediation lane (this
@@ -4811,7 +4834,7 @@ class MessageHandler:
                         _cmd_lower == "/selfreview"
                         or _cmd_lower.startswith("/selfreview ")
                     ):
-                        response = await self._handle_selfreview(primary_ctx)
+                        response = await self._handle_selfreview(primary_ctx, _cmd)
                     elif _cmd_lower == "/restart":
                         # Owner-only restart — works on all platforms
                         _is_owner = False

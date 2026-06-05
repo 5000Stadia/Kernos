@@ -1607,7 +1607,9 @@ class ReasoningService:
                 # /selfreview). Owner-gated in the handler; reflection only.
                 if getattr(self, "_handler", None):
                     return await self._handler._handle_self_review_tool(
-                        request.instance_id, request.member_id)
+                        request.instance_id, request.member_id,
+                        target=(tool_input.get("target") if isinstance(
+                            tool_input, dict) else None))
                 return ("I can't reach the self-review engine in this context "
                         "right now.")
             elif tool_name == "improve_kernos":

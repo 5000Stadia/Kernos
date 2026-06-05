@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -229,15 +230,16 @@ def _state_path(data_dir: str) -> Path:
 def load_state(data_dir: str) -> dict:
     p = _state_path(data_dir)
     if not p.exists():
-        return {"cursor": 0, "last_run_iso": "", "seen": {}}
+        return {"cursor": 0, "last_run_iso": "", "seen": {}, "last_reviewed": {}}
     try:
         data = json.loads(p.read_text())
         data.setdefault("cursor", 0)
         data.setdefault("last_run_iso", "")
         data.setdefault("seen", {})
+        data.setdefault("last_reviewed", {})  # V2: per-slice {name: iso}
         return data
     except Exception:
-        return {"cursor": 0, "last_run_iso": "", "seen": {}}
+        return {"cursor": 0, "last_run_iso": "", "seen": {}, "last_reviewed": {}}
 
 
 def save_state(data_dir: str, state: dict) -> None:
@@ -503,6 +505,173 @@ def to_whisper_text(report: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# V2: signal-promoted selection with a rotation floor (SELF-MAINTENANCE-REVIEW-V2)
+# ---------------------------------------------------------------------------
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def instance_allowed(instance_id: str) -> bool:
+    """When ``KERNOS_SMR_INSTANCE_ALLOWLIST`` is set (comma-separated), the daily
+    loop runs only for listed instances. Unset → all instances (single-instance
+    host is the common case)."""
+    allow = os.getenv("KERNOS_SMR_INSTANCE_ALLOWLIST", "").strip()
+    if not allow:
+        return True
+    return instance_id in {x.strip() for x in allow.split(",") if x.strip()}
+
+
+def resolve_target(name: str) -> "ReviewSlice | None":
+    """Resolve an on-demand target slice name (case/sep-insensitive)."""
+    if not name:
+        return None
+    key = name.strip().lower()
+    norm = key.replace(" ", "-").replace("_", "-")
+    for s in REVIEW_SLICES:
+        if s.name.lower() in (key, norm):
+            return s
+    return None
+
+
+def _path_matches(changed_file: str, slice_path: str) -> bool:
+    """Prefix-safe: a changed file matches a slice path iff the path is that
+    exact file, or the file lives under that path on a directory boundary. No
+    basename matching (Codex spec review)."""
+    cf = changed_file.strip().lstrip("./")
+    sp = slice_path.strip().lstrip("./")
+    if not cf or not sp:
+        return False
+    if sp.endswith("/"):
+        return cf.startswith(sp)
+    return cf == sp or cf.startswith(sp + "/")
+
+
+def _churn_scores(slices, repo_root: str, window_days: int) -> dict:
+    """Per-slice count of files changed by commits in the window that fall under
+    the slice's paths. Best-effort: no git / error → all zero."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "-C", repo_root, "log", f"--since={window_days} days ago",
+             "--name-only", "--pretty=format:"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode != 0:
+            return {s.name: 0 for s in slices}
+        changed = {ln.strip() for ln in out.stdout.splitlines() if ln.strip()}
+    except Exception:
+        return {s.name: 0 for s in slices}
+    return {
+        s.name: sum(1 for f in changed
+                    if any(_path_matches(f, p) for p in s.paths))
+        for s in slices
+    }
+
+
+def _friction_scores(slices, data_dir: str, window_days: int,
+                     now_iso: str) -> dict:
+    """Per-slice count of recent friction reports (bounded read, newest first,
+    within the window) whose text names one of the slice's paths or the slice
+    name on a word boundary. Best-effort: missing dir / error → all zero."""
+    scores = {s.name: 0 for s in slices}
+    try:
+        fdir = Path(data_dir) / "diagnostics" / "friction"
+        if not fdir.is_dir():
+            return scores
+        files = sorted(fdir.glob("*.md"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:20]
+    except Exception:
+        return scores
+    try:
+        from datetime import datetime
+        cutoff = datetime.fromisoformat(now_iso).timestamp() - window_days * 86400
+    except Exception:
+        cutoff = 0.0
+    for f in files:
+        try:
+            if f.stat().st_mtime < cutoff:
+                continue
+            text = f.read_text(errors="replace")[:4000].lower()
+        except Exception:
+            continue
+        for s in slices:
+            hit = any(p.strip().lstrip("./").lower() in text for p in s.paths)
+            if not hit:
+                hit = re.search(r"\b" + re.escape(s.name.lower()) + r"\b",
+                                text) is not None
+            if hit:
+                scores[s.name] += 1
+    return scores
+
+
+def collect_signal_scores(slices, repo_root: str, data_dir: str,
+                          window_days: int, cap: int, now_iso: str) -> dict:
+    """Combined, per-source-isolated, capped signal score per slice."""
+    try:
+        churn = _churn_scores(slices, repo_root, window_days)
+    except Exception:
+        churn = {}
+    try:
+        fric = _friction_scores(slices, data_dir, window_days, now_iso)
+    except Exception:
+        fric = {}
+    return {s.name: min(cap, churn.get(s.name, 0) + fric.get(s.name, 0))
+            for s in slices}
+
+
+def _age_days(last_reviewed: dict, name: str, now_iso: str) -> float:
+    iso = last_reviewed.get(name)
+    if not iso:
+        return float("inf")
+    try:
+        from datetime import datetime
+        delta = datetime.fromisoformat(now_iso) - datetime.fromisoformat(iso)
+        return max(0.0, delta.total_seconds() / 86400.0)
+    except Exception:
+        return float("inf")
+
+
+def select_slice(slices, state: dict, signal_scores: dict,
+                 now_iso: str) -> "ReviewSlice":
+    """Signal-promoted pick with a hard coverage floor. Step 1: any slice aged
+    past COVERAGE_MAX_DAYS is picked over everything (stalest first) — the
+    rotation guarantee, bounding worst-case time-to-review. Step 2 (nothing past
+    the floor): argmax of W_SIGNAL*signal + W_STALE*age_days. Tie-break by
+    REVIEW_SLICES index in both steps."""
+    last = state.get("last_reviewed")
+    if not isinstance(last, dict):      # malformed/legacy container → treat as empty
+        last = {}
+    cov = float(_env_int("KERNOS_SMR_COVERAGE_MAX_DAYS", 10))
+    ages = [(s, _age_days(last, s.name, now_iso)) for s in slices]
+    floored = [(s, a) for s, a in ages if a >= cov]
+    if floored:
+        maxage = max(a for _, a in floored)
+        for s, a in ages:               # REVIEW_SLICES order → lowest index wins
+            if a >= cov and a == maxage:
+                return s
+    ws = _env_float("KERNOS_SMR_W_SIGNAL", 6.0)
+    wst = _env_float("KERNOS_SMR_W_STALE", 1.0)
+    best, best_score = slices[0], None
+    for s, a in ages:
+        score = ws * signal_scores.get(s.name, 0) + wst * min(a, cov)
+        if best_score is None or score > best_score:   # strict → lowest index on ties
+            best, best_score = s, score
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Orchestration — idle-aware, once/24h, behind the kill switch
 # ---------------------------------------------------------------------------
 
@@ -515,6 +684,8 @@ async def maybe_run_daily(
     whisper_fn: Callable[..., Any] | None = None,  # async (text, report) -> None
     busy: bool = False,
     force: bool = False,
+    target: str | None = None,        # V2: on-demand specific slice
+    repo_root: str = "",              # V2: for churn signal (defaults to env)
 ) -> dict:
     """Run today's review. Returns a result dict with ``outcome``: disabled |
     busy | not_due | reviewed_quiet | reviewed_surfaced | parse_error | error.
@@ -523,6 +694,14 @@ async def maybe_run_daily(
     command): it bypasses the kill switch, the busy check, and the once/24h
     gate, because the operator is explicitly asking and is present to watch.
     The autonomous daily loop never sets force, so it stays fully gated."""
+    # Resolve an explicit target UP FRONT — an unknown target must short-circuit
+    # before any state read, gate, or consult (Codex code-review must-fix).
+    target_slice = None
+    if target:
+        target_slice = resolve_target(target)
+        if target_slice is None:
+            return {"outcome": "unknown_target", "target": target,
+                    "valid": [s.name for s in REVIEW_SLICES]}
     if not force:
         if not is_enabled():
             return {"outcome": "disabled"}
@@ -534,8 +713,21 @@ async def maybe_run_daily(
     if not force and not due_for_review(state, now_iso):
         return {"outcome": "not_due"}
 
-    cursor = int(state.get("cursor", 0))
-    slice_ = slice_for_cursor(cursor)
+    # --- slice selection (V2) ---------------------------------------------
+    if target_slice is not None:
+        slice_ = target_slice
+        bypass_dedup = True  # an explicitly-targeted review returns raw findings
+    else:
+        bypass_dedup = False
+        root = repo_root or os.getenv("KERNOS_REPO_DIR", ".")
+        try:
+            signal_scores = collect_signal_scores(
+                REVIEW_SLICES, root, data_dir,
+                _env_int("KERNOS_SMR_SIGNAL_WINDOW_DAYS", 7),
+                _env_int("KERNOS_SMR_SIGNAL_CAP", 5), now_iso)
+        except Exception:
+            signal_scores = {s.name: 0 for s in REVIEW_SLICES}
+        slice_ = select_slice(REVIEW_SLICES, state, signal_scores, now_iso)
     try:
         # consult_fn receives (prompt, slice) — the slice carries the paths a
         # live, tool-less single completion needs to pre-load source.
@@ -562,7 +754,13 @@ async def maybe_run_daily(
         return {"outcome": "parse_error", "slice": slice_.name, "report": report}
 
     pruned = prune_seen(state.get("seen", {}), now_iso)
-    filtered, fresh = filter_seen(report, pruned, now_iso)
+    if bypass_dedup:
+        # Targeted on-demand review: raw findings, no seen-filter, and don't
+        # commit fresh fingerprints — you asked about THIS slice, you get its
+        # real current state even if a finding was surfaced recently.
+        filtered, fresh = dict(report), {}
+    else:
+        filtered, fresh = filter_seen(report, pruned, now_iso)
     filtered["constitutional"] = slice_.constitutional
 
     surfaced = False
@@ -577,7 +775,10 @@ async def maybe_run_daily(
     # absent whisper doesn't bury the concern for the TTL (Codex #2). A quiet
     # healthy slice (nothing fresh) commits just the pruned set.
     state["seen"] = {**pruned, **fresh} if surfaced else pruned
-    state["cursor"] = cursor + 1
+    # V2: record per-slice coverage (replaces the cursor advance). Stamped only
+    # on a clean reviewed slice — error/parse_error returned earlier without
+    # touching last_reviewed, so a failed read keeps the slice eligible.
+    state.setdefault("last_reviewed", {})[slice_.name] = now_iso
     state["last_run_iso"] = now_iso
     save_state(data_dir, state)
 
@@ -610,12 +811,25 @@ RUN_SELF_REVIEW_TOOL: dict = {
         "yourself — not just describe it. Owner-only, and it runs even when the "
         "daily background review is disabled. Reflection only: it surfaces a "
         "note to consider and never changes code on its own (any change still "
-        "flows through the approval-gated improve_kernos loop). Takes no "
-        "arguments; it reviews the next slice in the rotation."
+        "flows through the approval-gated improve_kernos loop). "
+        "Pass an optional `target` to review a specific section by name "
+        "(e.g. 'dispatch-gate', 'reasoning', 'memory', 'message-pipeline', "
+        "'improvement-loop', 'governing-intention'); omit it and KERNOS picks "
+        "the section most worth a look right now (recent friction or code "
+        "churn), with a rotation floor so nothing goes unreviewed. An unknown "
+        "target lists the valid section names."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": (
+                    "Optional. The section to review by name. Omit to let "
+                    "KERNOS choose the most relevant section."
+                ),
+            },
+        },
     },
 }
 
