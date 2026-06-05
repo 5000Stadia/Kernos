@@ -720,6 +720,7 @@ def has_anything_to_say(report: dict) -> bool:
         report.get("corrective_findings")
         or report.get("evolution_idea")
         or report.get("role_concern_fresh")
+        or report.get("opportunities")     # V3: open docket items folded in
     )
 
 
@@ -742,6 +743,16 @@ def to_whisper_text(report: dict) -> str:
             "Role check: this may not be earning its place in the whole — "
             f"{report.get('serves_the_whole_why', '')}".rstrip()
         )
+    opps = report.get("opportunities") or []
+    if opps:
+        lines.append("")
+        lines.append(
+            f"Open improvement opportunities from the docket ({len(opps)} lived "
+            "'this could be better' moment(s) worth working during downtime):")
+        lines.extend(f"  • {o.get('desc', '')}" for o in opps[:5])
+        lines.append(
+            "If one is a clean single improvement, consider proposing it through "
+            "the normal approval gate; otherwise leave it on the docket.")
     if report.get("constitutional"):
         lines.append(
             "This slice is governance/maintenance machinery — CONSTITUTIONAL. "
@@ -880,6 +891,64 @@ def _coverage_gap_text(unassigned: list) -> str:
     if n > len(shown):
         lines.append(f"- …and {n - len(shown)} more")
     return "\n".join(lines)
+
+
+def _opportunity_class(body: str) -> str:
+    for line in (body or "").splitlines()[:12]:
+        s = line.strip().lower()
+        if s.startswith("class:"):
+            return "opportunity" if s.split(":", 1)[1].strip() == "opportunity" else "error"
+    return "error"
+
+
+def _opportunity_desc(body: str) -> str:
+    lines = (body or "").splitlines()
+    for i, ln in enumerate(lines):
+        if ln.strip().lower().startswith("## description"):
+            for nxt in lines[i + 1:i + 5]:
+                if nxt.strip():
+                    return nxt.strip()[:200]
+    for ln in lines:
+        if ln.startswith("# Friction Report:"):
+            return ln.split(":", 1)[1].strip()[:200]
+    return "(opportunity)"
+
+
+def open_opportunities(data_dir: str, now_iso: str, *, slice_paths=(),
+                       limit: int = 5, window_days: int = 30) -> list:
+    """The improvement docket: OPEN opportunity-class friction notes, newest
+    first within the window, biased toward those touching the reviewed element's
+    paths. Returns [{desc, signature, mtime}]. Best-effort — [] on any error."""
+    try:
+        fdir = Path(data_dir) / "diagnostics" / "friction"
+        if not fdir.is_dir():
+            return []
+        files = sorted(fdir.glob("*.md"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:200]
+    except Exception:
+        return []
+    try:
+        from datetime import datetime
+        cutoff = datetime.fromisoformat(now_iso).timestamp() - window_days * 86400
+    except Exception:
+        cutoff = 0.0
+    norm_paths = [p.strip().lstrip("./").lower() for p in slice_paths]
+    relevant, others = [], []
+    for p in files:
+        try:
+            if p.stat().st_mtime < cutoff:
+                continue
+            body = p.read_text(errors="replace")
+        except Exception:
+            continue
+        if _opportunity_class(body) != "opportunity":
+            continue
+        item = {"desc": _opportunity_desc(body), "signature": p.stem,
+                "mtime": p.stat().st_mtime}
+        low = body.lower()
+        touches = any(sp and sp in low for sp in norm_paths)
+        (relevant if touches else others).append(item)
+    return (relevant + others)[:limit]
 
 
 def _changed_files_since(repo_root: str, window_days: int) -> set:
@@ -1131,6 +1200,14 @@ async def maybe_run_daily(
     else:
         filtered, fresh = filter_seen(report, pruned, now_iso)
     filtered["constitutional"] = slice_.constitutional
+    # V3: fold open improvement-docket opportunities (biased to this element)
+    # into what the review surfaces — so a healthy slice with lived
+    # 'this could be better' moments still raises them.
+    try:
+        filtered["opportunities"] = open_opportunities(
+            data_dir, now_iso, slice_paths=slice_.paths)
+    except Exception:
+        filtered["opportunities"] = []
 
     surfaced = False
     if has_anything_to_say(filtered) and whisper_fn is not None:

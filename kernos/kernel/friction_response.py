@@ -439,6 +439,17 @@ def archive_resolved_signature(
 RESOLVED_WINDOW_HOURS = 24.0  # quiet this long (with activity) ⇒ resolved
 
 
+def report_class(body: str) -> str:
+    """Parse the report's `Class:` front-matter (SELF-MAINTENANCE-REVIEW-V3).
+    A class-less report — every legacy/error report — defaults to ``error``;
+    only ``opportunity`` is special-cased so reactive Shape B skips it."""
+    for line in (body or "").splitlines()[:12]:
+        s = line.strip().lower()
+        if s.startswith("class:"):
+            return "opportunity" if s.split(":", 1)[1].strip() == "opportunity" else "error"
+    return "error"
+
+
 def list_open_signatures(data_dir: str, *, max_files: int = 300) -> list[dict]:
     """Group the OPEN friction reports by signature (recurring first). Each:
     {signature, type, count, latest_mtime, sample_body}. Reads both naming
@@ -454,6 +465,8 @@ def list_open_signatures(data_dir: str, *, max_files: int = 300) -> list[dict]:
             body = p.read_text(errors="replace")
         except Exception:
             body = ""
+        if report_class(body) == "opportunity":
+            continue  # V3: opportunity notes are worked by the daily self-review, not reactively
         ftype, sig = signature_from_report(p.name, body)  # body-aware, stable
         src = source_of_report(body)
         g = groups.setdefault(sig, {

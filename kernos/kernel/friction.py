@@ -44,6 +44,25 @@ class FrictionSignal:
     evidence: list[str]       # Log-like evidence lines
     context: dict             # Snapshot: user message, space, tools, etc.
     heuristic: bool = False   # True for low-confidence signals (2, 4)
+    # SELF-MAINTENANCE-REVIEW-V3 improvement docket: "error" (the default —
+    # reactive Shape B resolves it) or "opportunity" (suboptimal-but-worked /
+    # future need — Shape A daily review works it during downtime; reactive Shape
+    # B and the active-pattern/autonomy escalation path both SKIP it).
+    report_class: str = "error"
+
+
+# Opportunity detector cues (SELF-MAINTENANCE-REVIEW-V3). High-precision: a
+# deferral phrase AND a build/capability cue AND first-person/need framing.
+_DEFERRED_CUES = (
+    "down the road", "eventually", "at some point", "someday", "some day",
+    "later we", "later i", "in the future", "one day", "when i get around",
+    "down the line",
+)
+_CAPABILITY_CUES = (
+    "tool", "feature", "track", "automate", "build", "set up", "set-up",
+    "integration", "capability", "handle", "system for", "a way to",
+)
+_NEED_CUES = ("i ", "i'll", "i'd", "i need", "we need", "we'll", "my ", "our ")
 
 
 class FrictionObserver:
@@ -162,6 +181,17 @@ class FrictionObserver:
 
         # Signal 8: PROVIDER_ERROR_REPEATED
         sig = self._check_provider_errors(provider_errors or [], ctx_snapshot)
+        if sig:
+            signals.append(sig)
+
+        # --- Opportunity detectors (SELF-MAINTENANCE-REVIEW-V3 docket) -----
+        # Suboptimal-but-worked / future-need moments. Written as
+        # `opportunity`-class reports: NOT escalated, NOT resolved reactively —
+        # they wait for the daily self-review to work them during downtime.
+        sig = self._check_better_method_on_retry(tool_trace, ctx_snapshot)
+        if sig:
+            signals.append(sig)
+        sig = self._check_deferred_capability(user_message, ctx_snapshot)
         if sig:
             signals.append(sig)
 
@@ -433,6 +463,63 @@ class FrictionObserver:
     # Report writing
     # ------------------------------------------------------------------
 
+    def _check_better_method_on_retry(
+        self, tool_trace: list, ctx: dict,
+    ) -> "FrictionSignal | None":
+        """OPPORTUNITY: within the turn a tool FAILED and a DIFFERENT tool later
+        SUCCEEDED — the working method should perhaps be the default. Conservative:
+        requires failure → different-name success in the same turn (uses the
+        per-entry ``success`` flag on ctx.tool_calls_trace)."""
+        failed: list = []
+        for call in tool_trace:
+            name = call.get("name", "")
+            if not name:
+                continue
+            if not call.get("success", True):
+                failed.append(name)
+            else:
+                worse = next((f for f in failed if f != name), None)
+                if worse is not None:
+                    return FrictionSignal(
+                        signal_type="BETTER_METHOD_ON_RETRY",
+                        description=(
+                            f"`{worse}` failed, then `{name}` succeeded for the "
+                            "same request — consider making the working method the "
+                            "default here so it isn't reached for via the slower path."),
+                        evidence=[f"failed: {worse}", f"succeeded: {name}",
+                                  f"user message: {ctx.get('user_message', '')[:160]}"],
+                        context=ctx,
+                        heuristic=True,
+                        report_class="opportunity",
+                    )
+        return None
+
+    def _check_deferred_capability(
+        self, user_message: str, ctx: dict,
+    ) -> "FrictionSignal | None":
+        """OPPORTUNITY: the user names a FUTURE capability need ("down the road
+        I'll need invoicing"). High-precision: a deferral phrase AND a build/tool
+        cue AND first-person/need framing — not ordinary future-tense chatter."""
+        text = (user_message or "").lower()
+        if not text:
+            return None
+        if not any(c in text for c in _DEFERRED_CUES):
+            return None
+        if not any(c in text for c in _CAPABILITY_CUES):
+            return None
+        if not any(c in text for c in _NEED_CUES):
+            return None
+        return FrictionSignal(
+            signal_type="DEFERRED_CAPABILITY_REQUEST",
+            description=(
+                "The user mentioned a capability they'll want down the road — "
+                "worth considering building ahead of the explicit ask."),
+            evidence=[f"user said: {user_message[:240]}"],
+            context=ctx,
+            heuristic=True,
+            report_class="opportunity",
+        )
+
     async def _write_report(self, signal: FrictionSignal, instance_id: str) -> None:
         """Write a friction report file with LLM-generated description."""
         # FRICTION-PATTERN-STABLE-IDS-V1 round-1 Finding 8: UUID8 suffix
@@ -470,6 +557,7 @@ class FrictionObserver:
         report = (
             f"# Friction Report: {signal.signal_type}\n"
             f"Generated: {datetime.now(timezone.utc).isoformat()}\n"
+            f"Class: {signal.report_class}\n"
             f"{heuristic_note}\n"
             f"## Description\n{llm_description}\n\n"
             f"## Recommendation: {recommendation}\n"
@@ -497,7 +585,12 @@ class FrictionObserver:
         # round-2 Blocker 2: dispatch by lifecycle_state with the proper
         # classified_by vocabulary; classifier failure logs and continues,
         # never blocks the report write.
-        if self._pattern_store is not None:
+        # SELF-MAINTENANCE-REVIEW-V3: opportunity-class reports skip the
+        # active-pattern / threshold-crossing / autonomy-emit path entirely —
+        # they are written-and-enriched only (pure sink), and wait for the daily
+        # self-review. Routing them here would create a feedback path and
+        # undermine "wait for Shape A" (Codex spec review).
+        if self._pattern_store is not None and signal.report_class != "opportunity":
             try:
                 await self._classify_and_record(signal, instance_id, filepath)
             except Exception as exc:
