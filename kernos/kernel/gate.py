@@ -370,6 +370,15 @@ class DispatchGate:
             # doesn't mutate substrate state — the file is an
             # artifact, like inspect_state's return value).
             "dump_context",
+            # SELF-MAINTENANCE-REVIEW-V1: run_self_review surfaces a
+            # reflection note to the System space (an artifact, like
+            # dump_context) and advances its own rotating cursor — it
+            # doesn't mutate user substrate, and it's owner-gated +
+            # reflection-only in the handler. Classify read (like
+            # dump_context) so an owner-requested self-review isn't
+            # treated as a covenant-gated write — not an unconditional
+            # gate bypass (reads still flow through evaluate()).
+            "run_self_review",
             # TOOL-INTROSPECTION-V1 (2026-05-22): pure read of the
             # catalog metadata. No state mutation. Composes prose
             # from get_metadata; agent reads the sentence.

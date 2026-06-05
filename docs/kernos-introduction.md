@@ -302,7 +302,7 @@ For depth on any surface, follow the link.
 | Document | What it covers |
 |----------|----------------|
 | [`capabilities/overview.md`](capabilities/overview.md) | Catalog of connected services |
-| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | The full kernel-tool catalog (75 tools) — effect classifications, per-tool documentation links |
+| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | The full kernel-tool catalog (76 tools) — effect classifications, per-tool documentation links |
 | [`capabilities/references.md`](capabilities/references.md) | Reference primitive tools — `request_reference`, `store_reference`, recovery primitives |
 | [`capabilities/calendar.md`](capabilities/calendar.md) | Calendar management |
 | [`capabilities/web-browsing.md`](capabilities/web-browsing.md) | Web search and page browsing |

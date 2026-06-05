@@ -597,7 +597,31 @@ async def maybe_run_daily(
     }
 
 
+RUN_SELF_REVIEW_TOOL: dict = {
+    "name": "run_self_review",
+    "description": (
+        "Run a self-maintenance review right now and report what you find. "
+        "You review ONE rotating slice of your own code through a corrective "
+        "lens (drift, decay, unguarded edges vs. the documented intention) and "
+        "a generative lens (is there a better way; does this still serve the "
+        "whole?), then tell the owner the result in your own voice. This is the "
+        "same review the owner can trigger with /selfreview, exposed to you as "
+        "a tool so you can actually run it when the owner asks you to review "
+        "yourself — not just describe it. Owner-only, and it runs even when the "
+        "daily background review is disabled. Reflection only: it surfaces a "
+        "note to consider and never changes code on its own (any change still "
+        "flows through the approval-gated improve_kernos loop). Takes no "
+        "arguments; it reviews the next slice in the rotation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+
 __all__ = [
+    "RUN_SELF_REVIEW_TOOL",
     "is_enabled",
     "REVIEW_SLICES",
     "ReviewSlice",

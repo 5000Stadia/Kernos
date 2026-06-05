@@ -91,6 +91,11 @@ ALWAYS_PINNED: set[str] = {
     # always has the capability surfaced ("any turn, you can
     # ask me to improve myself").
     "improve_kernos",
+    # SELF-MAINTENANCE-REVIEW-V1: agent-callable self-review (owner-gated,
+    # reflection-only). Pinned so the agent always KNOWS it can run a real
+    # self-review and never disclaims the capability ("any turn, the owner
+    # can ask me to review myself"). The tool form of /selfreview.
+    "run_self_review",
 }
 
 # Common MCP tools that get priority in the active window (not pinned, but preferred)

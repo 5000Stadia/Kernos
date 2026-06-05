@@ -1602,10 +1602,41 @@ class MessageHandler:
         if not _is_owner:
             return "Only the owner can run `/selfreview`."
 
-        from kernos.kernel import self_maintenance_review as smr
-        from kernos.utils import utc_now
         instance_id = (getattr(ctx, "instance_id", "")
                        or getattr(self, "_current_instance_id", ""))
+        return await self._run_self_review_now(instance_id)
+
+    async def _handle_self_review_tool(
+        self, instance_id: str, member_id: str,
+    ) -> str:
+        """Agent-callable `run_self_review` tool — the agent's own entry point
+        to run a self-maintenance review on demand (same engine as the owner's
+        /selfreview slash command). Owner-gated: only runs when the requesting
+        member is the owner, so the agent can fulfil "review yourself" when the
+        owner asks but can't self-trigger in anyone else's context. Reflection
+        only — it surfaces a note to consider; any actual change still flows
+        through the approval-gated improve_kernos loop."""
+        is_owner = False
+        try:
+            if getattr(self, "_instance_db", None) and member_id:
+                _m = await self._instance_db.get_member(member_id)
+                is_owner = bool(_m and _m.get("role") == "owner")
+        except Exception:
+            is_owner = False
+        if not is_owner:
+            return ("A self-review is an owner-only reflection — I can run one "
+                    "when the owner asks.")
+        return await self._run_self_review_now(
+            instance_id or getattr(self, "_current_instance_id", ""))
+
+    async def _run_self_review_now(self, instance_id: str) -> str:
+        """Shared core for /selfreview + the run_self_review tool: run ONE
+        self-maintenance review NOW (force — bypasses the kill switch + daily
+        gate), surface the note to the System space, advance the rotating
+        cursor, and return the result rendered in KERNOS's own voice. Callers
+        own the owner check."""
+        from kernos.kernel import self_maintenance_review as smr
+        from kernos.utils import utc_now
         data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
 
         async def _whisper(text, report, _iid=instance_id):

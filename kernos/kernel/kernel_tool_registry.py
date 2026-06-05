@@ -156,6 +156,9 @@ def _import_kernel_schemas() -> list[dict]:
     from kernos.kernel.self_test_gate import (
         RUN_SELF_TEST_SUITE_TOOL,
     )
+    from kernos.kernel.self_maintenance_review import (
+        RUN_SELF_REVIEW_TOOL,
+    )
     from kernos.kernel.improvement_loop_workflow import (
         ABANDON_ATTEMPT_TOOL,
         IMPROVE_KERNOS_TOOL,
@@ -299,6 +302,9 @@ def _import_kernel_schemas() -> list[dict]:
         # SELF-TEST-GATE-V1 (2026-05-22): curated smoke test
         # runner for the autonomous-improvement loop.
         RUN_SELF_TEST_SUITE_TOOL,
+        # SELF-MAINTENANCE-REVIEW-V1: agent-callable self-review
+        # (owner-gated, reflection-only) — the tool form of /selfreview.
+        RUN_SELF_REVIEW_TOOL,
         # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22): the
         # autonomous-improvement orchestrator entry point.
         IMPROVE_KERNOS_TOOL,

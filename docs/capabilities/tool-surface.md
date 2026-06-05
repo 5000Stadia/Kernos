@@ -1,6 +1,6 @@
 # Capability: Tool Surface
 
-The full kernel-tool catalog as of 2026-06-04. 75 kernel tools registered through the [canonical registry](../architecture/kernel-tool-registry.md) (authoritative source: `ReasoningService._KERNEL_TOOLS` in `kernos/kernel/reasoning.py`; the live surface is also reachable at runtime via `inspect_tools`). MCP (Model Context Protocol) tools layer on top per-space; this page covers the kernel surface only.
+The full kernel-tool catalog as of 2026-06-05. 76 kernel tools registered through the [canonical registry](../architecture/kernel-tool-registry.md) (authoritative source: `ReasoningService._KERNEL_TOOLS` in `kernos/kernel/reasoning.py`; the live surface is also reachable at runtime via `inspect_tools`). MCP (Model Context Protocol) tools layer on top per-space; this page covers the kernel surface only.
 
 This is a navigation document. Each tool below has its own dedicated page or lives inside a capability page covering its domain.
 
@@ -32,8 +32,9 @@ These appear in every turn's tool surface regardless of context (`ALWAYS_PINNED`
 | `dump_context` | read | (snapshots the assembled context) |
 | `restart_self` | hard_write | (restarts the running process) |
 | `improve_kernos` | soft_write | (entry point to the self-improvement loop) |
+| `run_self_review` | read | (owner-gated self-maintenance review — tool form of `/selfreview`) |
 
-(22 always-pinned tools total; `ALWAYS_PINNED` set in `kernos/kernel/tool_catalog.py`.)
+(23 always-pinned tools total; `ALWAYS_PINNED` set in `kernos/kernel/tool_catalog.py`.)
 
 ## Reference primitive (REFERENCE-PRIMITIVE-V1)
 

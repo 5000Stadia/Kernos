@@ -56,7 +56,7 @@ These pages cover substrate that shipped after the Multi-Member V1 era. The agen
 | [`architecture/trigger-runtime.md`](architecture/trigger-runtime.md) | Unified time + event trigger runtime (WORKFLOW-TRIGGERS-CONSOLIDATION v1) |
 | [`architecture/workflow-drafts.md`](architecture/workflow-drafts.md) | Workflow Draft Primitive (WDP) — persistent conversational drafts |
 | [`architecture/kernel-tool-registry.md`](architecture/kernel-tool-registry.md) | The canonical kernel-tool registry (KERNEL-TOOL-REGISTRY-V1) |
-| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | Full kernel-tool catalog (75 tools) with effect classifications |
+| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | Full kernel-tool catalog (76 tools) with effect classifications |
 | [`capabilities/references.md`](capabilities/references.md) | Agent-facing guide to `request_reference` / `store_reference` and the recovery primitives |
 | [`capabilities/cross-space-requests.md`](capabilities/cross-space-requests.md) | `request_space_action` summary |
 | [`capabilities/external-agents.md`](capabilities/external-agents.md) | `consult` summary |

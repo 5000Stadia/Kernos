@@ -720,7 +720,7 @@ class ReasoningService:
         return "".join(text_parts)
 
     # Kernel tools: intercepted before MCP, never passed through to external servers
-    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "start_project", "record_project_decision", "surface_project_status", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "proceed_with_recovery", "abandon_attempt", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants", "record_fix_authorization", "classify_proposed_fix", "validate_investigation_response", "maybe_run_closure_for_fix", "surface_to_user"}
+    _KERNEL_TOOLS = {"remember", "remember_details", "write_file", "read_file", "list_files", "delete_file", "dismiss_whisper", "read_source", "read_soul", "update_soul", "manage_covenants", "manage_capabilities", "manage_channels", "send_to_channel", "manage_schedule", "start_project", "record_project_decision", "surface_project_status", "inspect_state", "request_tool", "execute_code", "manage_workspace", "register_tool", "manage_plan", "read_runtime_trace", "diagnose_issue", "propose_fix", "submit_spec", "manage_members", "send_relational_message", "resolve_relational_message", "set_chain_model", "diagnose_llm_chain", "diagnose_messenger", "canvas_list", "canvas_create", "page_read", "page_write", "page_list", "page_search", "canvas_preference_extract", "canvas_preference_confirm", "consult", "request_space_action", "request_reference", "store_reference", "create_reference_collection", "move_reference_to_canvas", "mark_reference_superseded", "quarantine_reference", "restore_reference_from_quarantine", "note_this", "ask_coding_session", "read_coding_session_response", "dump_context", "restart_self", "inspect_tools", "git_fetch", "git_rev_parse", "git_status", "git_diff_for_review", "git_commit", "git_push", "run_self_test_suite", "improve_kernos", "proceed_with_recovery", "abandon_attempt", "record_closure_attempt", "run_closure_probe", "lookup_pattern_invariants", "record_fix_authorization", "classify_proposed_fix", "validate_investigation_response", "maybe_run_closure_for_fix", "surface_to_user", "run_self_review"}
 
     # SELF-IMPROVEMENT-CLOSURE-V1 (AC17): explicit dispatchability
     # registry. Every name in this set MUST have a concrete branch
@@ -782,6 +782,8 @@ class ReasoningService:
         "record_fix_authorization", "classify_proposed_fix",
         "validate_investigation_response",
         "maybe_run_closure_for_fix", "surface_to_user",
+        # SELF-MAINTENANCE-REVIEW-V1: agent-callable self-review (owner-gated)
+        "run_self_review",
     })
 
     def get_dispatchable_kernel_tools(self) -> set[str]:
@@ -949,6 +951,7 @@ class ReasoningService:
         "validate_investigation_response":    frozenset({"confirmed"}),
         "maybe_run_closure_for_fix":          frozenset({"confirmed"}),
         "surface_to_user":                    frozenset({"confirmed"}),
+        "run_self_review":                    frozenset({"confirmed"}),
     }
 
     # ---------------------------------------------------------------------------
@@ -1598,6 +1601,15 @@ class ReasoningService:
                     instance_id=request.instance_id,
                     data_dir=os.environ.get("KERNOS_DATA_DIR", "./data"),
                 )
+            elif tool_name == "run_self_review":
+                # SELF-MAINTENANCE-REVIEW-V1: agent-callable entry point to run
+                # a self-review on demand (same engine as the owner's
+                # /selfreview). Owner-gated in the handler; reflection only.
+                if getattr(self, "_handler", None):
+                    return await self._handler._handle_self_review_tool(
+                        request.instance_id, request.member_id)
+                return ("I can't reach the self-review engine in this context "
+                        "right now.")
             elif tool_name == "improve_kernos":
                 # IMPROVEMENT-LOOP-WORKFLOW-V1 (2026-05-22):
                 # autonomous-improvement orchestrator entry point.
