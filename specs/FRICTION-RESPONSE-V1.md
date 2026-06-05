@@ -35,15 +35,16 @@ commit) are the OPERATOR/audit layer; the person just has a normal exchange.
 
 1. **Diagnose** with `diagnose_issue` → cause + proposed fix + confidence + a
    `resolution_fingerprint` (§4).
-2. **Decide whether the human is even needed** — proportional caution (the same
-   judgement the dispatch gate uses): *low ambiguity + low loss-cost + high
-   confidence* ⇒ act without asking; *ambiguous or higher-stakes* ⇒ ask.
-3. **Resolve, two paths — both ACTIVE, never a passive note:**
-   - **Auto (the obvious).** When it's clearly worth doing and low-risk, KERNOS
-     runs the scoped fix itself through the existing gate. The everyday user is
-     not shown a diff; at most a plain after-the-fact line in KERNOS's voice
-     ("I tidied up the connection leak that was nagging us"). The diff/commit
-     live in the operator/audit layer.
+2. **Decide whether the human is even needed** — proportional caution, made
+   concrete by the fail-closed criteria in §3A-ii: a fix provably meeting the
+   whole allowlist *could* run without asking; everything else ⇒ ask.
+3. **Resolve — never a passive note. The v1 ACTIVE path is Ask-once; Auto is
+   off-by-default until the discernment is trusted (§3A-ii):**
+   - **Auto (the obvious) — OFF in v1.** When (later) enabled, a fix that
+     provably clears §3A-ii's allowlist runs through the existing gate with no
+     prompt; the everyday user is not shown a diff, at most a plain after-the-
+     fact line in KERNOS's voice ("I tidied up the connection leak that was
+     nagging us"). The diff/commit live in the operator/audit layer.
    - **Ask-once (judgement call).** KERNOS surfaces the situation
      CONVERSATIONALLY in its own voice — one plain sentence: *"I noticed the bot
      keeps dropping its database connections; I can fix that — want me to?"* — and
