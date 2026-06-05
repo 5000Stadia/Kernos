@@ -1624,6 +1624,26 @@ class MessageHandler:
             return (f"Self-review of `{res.get('slice', '?')}` ran but I "
                     "couldn't parse a clean verdict — try once more.")
         rep = res.get("report", {}) or {}
+        where = ("saved to your System space + receipts"
+                 if outcome == "reviewed_surfaced" else "logged to receipts")
+        # Best of both worlds: present the REAL run's findings through KERNOS's
+        # own interpretation layer (conversational, honest) rather than a dry
+        # template. The structured details still land; the voice carries them.
+        try:
+            voiced = await self._render_selfreview_voice(rep)
+            if voiced and voiced.strip():
+                # The authoritative health verdict anchors the footer so the
+                # voiced prose can never silently contradict ground truth.
+                return (
+                    f"{voiced.strip()}\n\n"
+                    f"_Self-review of `{rep.get('slice', '?')}` · health: "
+                    f"**{rep.get('overall_health', '?')}** — full note {where}. "
+                    f"Say the word to take the next slice._"
+                )
+        except Exception:
+            logger.exception(
+                "selfreview voice render failed; falling back to summary")
+        # Fallback: the mechanical summary — never crash, details still get through.
         sl = rep.get("slice", "?")
         consti = " (constitutional — human-gated)" if rep.get("constitutional") else ""
         findings = rep.get("corrective_findings") or []
@@ -1639,10 +1659,67 @@ class MessageHandler:
             lines.append(f"Evolution idea: {idea}")
         if not findings and not idea:
             lines.append("Nothing fresh to surface — healthy and on-purpose.")
-        where = ("written to the System space + receipts"
-                 if outcome == "reviewed_surfaced" else "logged to receipts")
         lines.append(f"_Full note {where}. Run again to review the next slice._")
         return "\n".join(lines)
+
+    async def _render_selfreview_voice(self, report: dict) -> str:
+        """Present the REAL self-review through KERNOS's own interpretation
+        layer — the "best of both worlds": the concrete findings of the run the
+        owner just induced, spoken in KERNOS's voice instead of a dry template.
+        Honest: present only what the review found; never invent severity; when
+        healthy with nothing to evolve, say so plainly and briefly. Structured
+        facts in, conversational briefing out."""
+        sl = report.get("slice", "?")
+        consti = bool(report.get("constitutional"))
+        health = report.get("overall_health", "unknown")
+        findings = report.get("corrective_findings") or []
+        idea = report.get("evolution_idea")
+        facts = [f"slice reviewed: {sl}", f"overall health: {health}"]
+        if consti:
+            facts.append(
+                "this slice is constitutional — any change is human-gated, "
+                "never self-applied")
+        if findings:
+            facts.append("corrective findings:")
+            facts.extend(f"  - {f}" for f in findings)
+        else:
+            facts.append("corrective findings: none")
+        facts.append(
+            f"evolution idea: {idea}" if idea
+            else "evolution idea: none (nothing worth evolving this pass)")
+        facts_block = "\n".join(facts)
+        user = (
+            "The owner just induced a self-maintenance review of your own code "
+            "with /selfreview. Below are the real, structured results of that "
+            "run. Brief the owner in your own voice — conversational, honest, "
+            "concrete, like a capable partner reporting back. Lead with the "
+            "takeaway: is this slice healthy, and is there anything actually "
+            "worth doing? Then the specifics that matter. If it's healthy with "
+            "nothing to evolve, say so plainly and keep it short — don't "
+            "manufacture concern. Don't expose machinery (no internal ids, file "
+            "paths, or step logs). A few sentences is plenty.\n\n"
+            f"--- REVIEW RESULTS ---\n{facts_block}\n--- END ---"
+        )
+        voiced = await self.reasoning.complete_simple(
+            system_prompt=(
+                "You are KERNOS, reporting to your owner on a self-review you "
+                "just ran on a slice of your own code. Speak in your own voice "
+                "— honest, concrete, a partner not a process log."
+            ),
+            user_content=user,
+            max_tokens=900,
+        )
+        voiced = (voiced or "").strip()
+        # Deterministic constitutional guard (Codex must-fix): a constitutional
+        # slice is human-gated — that invariant must survive into the
+        # user-facing text regardless of what the voice layer produced. The
+        # facts reaching the prompt aren't enough; if the model dropped the
+        # framing, append it so the voiced output can never imply self-application.
+        if consti and voiced and "human-gated" not in voiced.lower() \
+                and "human gated" not in voiced.lower():
+            voiced += ("\n\n_(This slice is constitutional — any change here is "
+                       "human-gated, never self-applied.)_")
+        return voiced
 
     async def _self_maintenance_consult(self, prompt: str, slice_) -> str:
         """Single bounded completion: pre-load a capped excerpt of the slice's
