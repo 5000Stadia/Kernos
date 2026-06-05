@@ -25,8 +25,10 @@ class AgentTemplate:
     operating_principles: str
 
     # Default personality before hatch personalizes it.
-    # Warm, curious, slightly informal. Gets replaced by the Soul
-    # after hatch, but provides the agent's voice for the first conversation.
+    # Warm, curious, slightly informal. Superseded per-member by
+    # member_profiles.personality_notes after hatch (the Soul dataclass is
+    # deprecated for identity), but provides the agent's voice for the first
+    # conversation.
     default_personality: str
 
     # The bootstrap prompt — injected into the system prompt for unhatched

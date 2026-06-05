@@ -2,7 +2,7 @@
 
 Capabilities are external tools that Kernos connects to via the Model Context Protocol (MCP). Each capability is an MCP server that the system connects to, discovers tools from, and routes tool calls through.
 
-> **Looking for the full kernel-tool list?** The kernel provides ~48 tools that ship with Kernos itself (memory, files, references, canvas, covenants, channels, scheduling, diagnostics, etc.). See [`tool-surface.md`](tool-surface.md) for the complete catalog with effect classifications and per-tool documentation links.
+> **Looking for the full kernel-tool list?** The kernel provides 75 tools that ship with Kernos itself (memory, files, references, canvas, covenants, channels, scheduling, diagnostics, coding sessions, git, the self-improvement loop, etc.). See [`tool-surface.md`](tool-surface.md) for the complete catalog with effect classifications and per-tool documentation links.
 
 ## Unified Capability Registry
 

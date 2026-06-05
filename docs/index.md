@@ -20,7 +20,7 @@ Kernos has three layers:
 2. **The Message Handler** orchestrates everything: routing messages to the right context space, assembling conversation history, calling the reasoning engine, extracting knowledge, and persisting state.
 3. **The Kernel** provides the intelligence infrastructure: events, state, memory, reasoning, behavioral rules, file storage, capabilities, and proactive awareness.
 
-The agent (currently Claude Sonnet) runs inside the handler's reasoning service. The kernel is not the agent — it's the infrastructure that gives the agent context, memory, tools, and boundaries. The kernel owns all state and safety enforcement. The agent's job is to think, respond, and use the tools the kernel surfaces.
+The agent runs inside the handler's reasoning service on the configured primary provider chain (currently gpt-5.5, with gpt-5.4-mini on the lightweight tier, via the Codex provider). The lineup is provider-neutral — no feature is load-bearing on any one vendor. The kernel is not the agent — it's the infrastructure that gives the agent context, memory, tools, and boundaries. The kernel owns all state and safety enforcement. The agent's job is to think, respond, and use the tools the kernel surfaces.
 
 ## Core Principles
 
@@ -56,7 +56,7 @@ These pages cover substrate that shipped after the Multi-Member V1 era. The agen
 | [`architecture/trigger-runtime.md`](architecture/trigger-runtime.md) | Unified time + event trigger runtime (WORKFLOW-TRIGGERS-CONSOLIDATION v1) |
 | [`architecture/workflow-drafts.md`](architecture/workflow-drafts.md) | Workflow Draft Primitive (WDP) — persistent conversational drafts |
 | [`architecture/kernel-tool-registry.md`](architecture/kernel-tool-registry.md) | The canonical kernel-tool registry (KERNEL-TOOL-REGISTRY-V1) |
-| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | Full kernel-tool catalog (48 tools) with effect classifications |
+| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | Full kernel-tool catalog (75 tools) with effect classifications |
 | [`capabilities/references.md`](capabilities/references.md) | Agent-facing guide to `request_reference` / `store_reference` and the recovery primitives |
 | [`capabilities/cross-space-requests.md`](capabilities/cross-space-requests.md) | `request_space_action` summary |
 | [`capabilities/external-agents.md`](capabilities/external-agents.md) | `consult` summary |

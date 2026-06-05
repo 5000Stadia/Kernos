@@ -37,7 +37,7 @@ These are admin-tier tools — they create artifacts visible to the founder and 
 
 ## Provider chain diagnostics
 
-Kernos uses three named LLM provider chains: `primary`, `simple`, `cheap`. Each chain is an ordered list of `ChainEntry(provider, model)`. Fallback proceeds entry-by-entry on transient failure; the canonical fallback shape is the `_call_chain()` entry point.
+Kernos uses two named LLM provider chains: `primary` (main model) and `lightweight` (fast/cheap tier). Each chain is an ordered list of `ChainEntry(provider, model)`. (The legacy three-chain split — `primary`/`simple`/`cheap` — was collapsed; `simple` was removed as muddled.) Fallback proceeds entry-by-entry on transient failure; the canonical fallback shape is the `_call_chain()` entry point.
 
 `diagnose_llm_chain` shows you:
 
@@ -50,7 +50,7 @@ Kernos uses three named LLM provider chains: `primary`, `simple`, `cheap`. Each 
 
 ```
 set_chain_model(chain_name="primary")  # switch to a named chain
-set_chain_model(provider="anthropic", model="claude-haiku-4-5")  # pin head
+set_chain_model(provider="openai-codex", model="gpt-5.4-mini")  # pin head
 ```
 
 This is for diagnosing a problem with a specific model; revert by calling without overrides.

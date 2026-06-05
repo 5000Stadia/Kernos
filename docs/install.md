@@ -161,7 +161,7 @@ Kernos creates subdirectories under this for instances, spaces, members, convers
 
 ### Provider Fallback Chains
 
-Kernos uses three named provider chains (`primary`, `simple`, `cheap`) built from environment configuration. Default construction uses the primary provider (Anthropic or Codex) for all three chains, but chains can be customized. See `kernos/providers/chains.py` for chain construction.
+Kernos uses two named provider chains (`primary` for the main model, `lightweight` for the fast/cheap tier) built from environment configuration. The default lineup is gpt-5.5 / gpt-5.4-mini via the Codex provider, but the provider and chains can be customized. See `kernos/providers/chains.py` for chain construction.
 
 Ollama endpoints are configured through chain-specific variables.
 

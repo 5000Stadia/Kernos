@@ -178,6 +178,28 @@ See [`architecture/integration-layer.md`](architecture/integration-layer.md),
 [`architecture/presence-decoupling.md`](architecture/presence-decoupling.md),
 and [`architecture/integration-wire-live.md`](architecture/integration-wire-live.md).
 
+### Self-improvement loop
+
+Kernos can rewrite its own code. The `improve_kernos` loop drafts a
+spec, implements it with an external coding agent, reviews the diff —
+checking not just correctness but **fidelity to the original request**
+— gates the commit on the owner's approval, pushes, redeploys via
+restart, and runs a **post-restart self-test** to confirm the new
+build is healthy. If the self-test fails it enters a bounded recovery
+flow (a small number of approval-gated fix-up commits) or abandons and
+rolls back. The loop never goes silent: it narrates each step and
+wakes the owner on completion, on a needed approval, or on failure.
+`start.sh` (the un-protectable bootstrap) is off-limits to this loop by
+construction.
+
+Two quieter self-stewardship lanes share the same machinery: a **daily
+self-maintenance review** (a creative two-lens pass over one slice of
+the system per day) and an **immediate friction response** (reactive,
+anti-looping resolution of the system's own operational errors). All
+three ship **default-off** and opt-in.
+
+See [`TECHNICAL-ARCHITECTURE.md`](TECHNICAL-ARCHITECTURE.md) §11b.
+
 ---
 
 ## What you can do with it
@@ -203,6 +225,11 @@ and [`architecture/integration-wire-live.md`](architecture/integration-wire-live
   whispers when there's a concrete actionable idea. See
   [`architecture/gardener.md`](architecture/gardener.md) and
   [`behaviors/proactive-awareness.md`](behaviors/proactive-awareness.md).
+- **Improve its own code.** Ask it to make itself better and the
+  `improve_kernos` loop specs, implements, reviews, gets your
+  approval, deploys, and self-tests — rolling back if the new build
+  fails. Default-off self-maintenance and friction-response lanes
+  round it out. See [`TECHNICAL-ARCHITECTURE.md`](TECHNICAL-ARCHITECTURE.md) §11b.
 
 ---
 
@@ -275,7 +302,7 @@ For depth on any surface, follow the link.
 | Document | What it covers |
 |----------|----------------|
 | [`capabilities/overview.md`](capabilities/overview.md) | Catalog of connected services |
-| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | The full kernel-tool catalog (~48 tools) — effect classifications, per-tool documentation links |
+| [`capabilities/tool-surface.md`](capabilities/tool-surface.md) | The full kernel-tool catalog (75 tools) — effect classifications, per-tool documentation links |
 | [`capabilities/references.md`](capabilities/references.md) | Reference primitive tools — `request_reference`, `store_reference`, recovery primitives |
 | [`capabilities/calendar.md`](capabilities/calendar.md) | Calendar management |
 | [`capabilities/web-browsing.md`](capabilities/web-browsing.md) | Web search and page browsing |

@@ -12,6 +12,8 @@ Kernos is a personal AI agent operating system. It lives in the cloud, works 24/
 - **Manages your calendar, searches the web, browses pages.** Connected to Google Calendar, Brave Search, and a web browser. Creates events, checks schedules, looks things up — all from natural language.
 - **Follows your rules.** Behavioral contracts you set are enforced at the infrastructure level. "Always confirm before spending money" or "don't ask follow-ups about food logging" — these are captured once and respected permanently.
 - **Gets smarter over time.** Learns your procedures, detects capability gaps, proposes solutions. A 30-minute awareness cycle watches for patterns and suggests improvements.
+- **A first-class agent for every person it serves.** Multi-member: each person gets their own hatched agent — its own name, personality, memory, and conversations — with relationship-scoped disclosure between members (you choose what's shared with whom). Not one shared bot; a distinct relationship per person.
+- **Improves its own code.** Kernos can rewrite itself: an autonomous loop drafts a spec, implements it with a coding agent, reviews the diff for fidelity to your request, gets your approval, commits, redeploys, and self-tests after restart — recovering or rolling back if the new build fails. Two quieter self-stewardship lanes round it out: a daily creative self-review and immediate response to its own operational friction. All of this ships default-off and is opt-in.
 
 ## How It Works (Technical)
 
@@ -22,7 +24,7 @@ Kernos is a personal AI agent operating system. It lives in the cloud, works 24/
 - **Behavioral contracts:** Covenants captured from user instructions, enforced at infrastructure level. Space-scoped for domain-specific rules. The agent thinks; the kernel enforces.
 - **Procedural knowledge:** Domain-specific workflows stored as `_procedures.md` files, inherited through the space tree. Covenants define behavior; procedures define processes.
 - **Agentic workspace:** The agent can write code, test it, register tools, and track artifacts. Workspace-built tools become permanently available across all spaces.
-- **Provider-neutral:** Works with any LLM backend through three named provider chains (`primary`, `simple`, `cheap`), each an ordered list of `(provider, model)` entries with automatic fallback on transient failure. No load-bearing features on any specific provider's capabilities.
+- **Provider-neutral:** Works with any LLM backend through two named provider chains (`primary` for the main model, `lightweight` for the fast/cheap tier), each an ordered list of `(provider, model)` entries with automatic fallback on transient failure. The current lineup is gpt-5.5 / gpt-5.4-mini via the Codex provider, but no feature is load-bearing on any specific provider's capabilities.
 
 ## What Makes It Different
 
@@ -40,6 +42,8 @@ Every AI agent framework faces the same set of hard problems. Kernos solves them
 
 **The scaling problem.** As users do more, most agent systems slow down — context windows overflow, tool lists bloat, response quality degrades. Kernos scales through compaction (conversation history compresses without losing truth), domain separation (each topic has its own focused context), and the tool window (token-budgeted with automatic eviction). More activity makes the system smarter, not slower.
 
+**The evolution problem.** Most agent systems can only be improved by their developers, out of band. Kernos closes the loop on itself: it can author a spec, implement it with a coding agent, review the change for fidelity to the original request, gate the commit on your approval, redeploy, and verify the new build with a post-restart self-test — rolling back or entering a bounded recovery flow if it fails. The same machinery powers a daily self-maintenance review and immediate, anti-looping response to its own operational friction. The system that runs your life can also tend its own.
+
 ## Who Built It
 
-Designed and constructed from first principles over several months. 5,400+ automated tests as of REFERENCE-PRIMITIVE-V1 (2026-05-05). Every mechanism — from the compaction system to the hierarchical context spaces to the tool-building workspace to the reference primitive — designed, specified, implemented, and tested as part of one continuous design arc with one vision: a second brain that works while you sleep.
+Designed and constructed from first principles over several months, backed by a comprehensive automated test suite (several thousand tests). Every mechanism — from the compaction system to the hierarchical context spaces to the tool-building workspace to the reference primitive to the self-improvement loop — designed, specified, implemented, and tested as part of one continuous design arc with one vision: a second brain that works while you sleep.

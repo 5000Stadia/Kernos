@@ -97,7 +97,7 @@ The kernel has five core primitives that compose into three modes of operation. 
 
 **3. Capability Graph** — Three tiers: connected (active, tools available), available (not connected, agent can suggest setup), discoverable (exists in ecosystem, can be installed). This maps to OSBuilder's accidental three-tier system. Critical warning from OSBuilder: "Don't let agents install capabilities without user awareness." Capability installation is a high-sensitivity action requiring confirmation.
 
-**4. Reasoning Service** — LLM as a managed kernel resource, not a hardcoded dependency. The agent doesn't know or care which model it's running on. The kernel selects the model. Today it's always Claude Sonnet. Tomorrow it's routing based on task type, cost, capability needs. The interface is: "here's a task, here's context, give me a response." The model selection happens above the agent.
+**4. Reasoning Service** — LLM as a managed kernel resource, not a hardcoded dependency. The agent doesn't know or care which model it's running on. The kernel selects the model. Today it's gpt-5.5 / gpt-5.4-mini via the Codex provider. Tomorrow it's routing based on task type, cost, capability needs. The interface is: "here's a task, here's context, give me a response." The model selection happens above the agent.
 
 **5. Task Engine** — Every inbound request becomes a Task with lifecycle tracking. The task engine wraps reasoning calls, emits events, tracks costs. For simple messages it's a thin pass-through (zero-cost path). For complex work it will eventually decompose, prioritize, and schedule.
 
@@ -369,7 +369,7 @@ The capability graph needs to understand prerequisites, not just availability. O
 
 **OSBuilder's advice (validated by our approach):** Make model a parameter, not a constant. The routing logic sits in the kernel, above the handler. Don't build intelligent routing until volume justifies complexity.
 
-**What we built:** The Reasoning Service (1B.2) already abstracts the LLM call. Today it always calls Claude Sonnet. The interface is: "here's a reasoning request, give me a response." Swapping in model routing later means changing the Reasoning Service internals, not the agent interface.
+**What we built:** The Reasoning Service (1B.2) already abstracts the LLM call. Today it calls gpt-5.5 (with gpt-5.4-mini on the lightweight tier) via the Codex provider. The interface is: "here's a reasoning request, give me a response." Swapping in model routing later means changing the Reasoning Service internals, not the agent interface.
 
 ### The Cost Tracking Foundation
 
