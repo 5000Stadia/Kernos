@@ -342,3 +342,68 @@ def test_signature_from_report_folds_recommendation(tmp_path):
     # same recommendation ⇒ same signature
     _t3, s3 = fr.signature_from_report(name, "## Recommendation: ENFORCE_A\ny")
     assert s1 == s3
+
+
+# --- conversational natural-yes binding (§3A-i) ----------------------------
+
+
+def test_is_affirmative_conservative():
+    for yes in ["yes", "Yes!", "yeah", "go ahead", "do it", "yes please",
+                "sure", "ok", "Approved.", "go for it"]:
+        assert fr.is_affirmative(yes) is True, yes
+    for no in ["no", "not now", "don't", "stop", "wait", "maybe later",
+               "hold off", "", "can you explain what that means first",
+               "yes but only the first one and not the second one please"]:
+        assert fr.is_affirmative(no) is False, no
+
+
+def _pending(approval_id="ap1", user="u1", space="s1", ask_msg="m1"):
+    return {"approval_id": approval_id, "user_id": user, "space_id": space,
+            "ask_message_id": ask_msg}
+
+
+def test_yes_authorizes_single_pending_same_user_space():
+    ap, why = fr.authorize_natural_yes(
+        [_pending()], user_id="u1", space_id="s1", in_reply_to="m1", text="yes")
+    assert ap == "ap1" and why == "authorized"
+
+
+def test_yes_with_no_reply_thread_still_binds_single_pending():
+    ap, why = fr.authorize_natural_yes(
+        [_pending()], user_id="u1", space_id="s1", in_reply_to="", text="go ahead")
+    assert ap == "ap1" and why == "authorized"
+
+
+def test_multiple_pending_in_space_noops():
+    ap, why = fr.authorize_natural_yes(
+        [_pending("ap1", ask_msg="m1"), _pending("ap2", ask_msg="m2")],
+        user_id="u1", space_id="s1", in_reply_to="", text="yes")
+    assert ap is None and why == "multiple_pending"
+
+
+def test_different_user_noops():
+    ap, why = fr.authorize_natural_yes(
+        [_pending(user="owner")], user_id="someone_else", space_id="s1",
+        in_reply_to="m1", text="yes")
+    assert ap is None and why == "different_user"
+
+
+def test_reply_to_other_message_noops():
+    ap, why = fr.authorize_natural_yes(
+        [_pending(ask_msg="m1")], user_id="u1", space_id="s1",
+        in_reply_to="some_other_msg", text="yes")
+    assert ap is None and why == "reply_to_other"
+
+
+def test_non_affirmative_noops():
+    ap, why = fr.authorize_natural_yes(
+        [_pending()], user_id="u1", space_id="s1", in_reply_to="m1",
+        text="not yet, explain it first")
+    assert ap is None and why == "not_affirmative"
+
+
+def test_pending_in_other_space_not_counted():
+    ap, why = fr.authorize_natural_yes(
+        [_pending(space="other_space")], user_id="u1", space_id="s1",
+        in_reply_to="", text="yes")
+    assert ap is None and why == "no_pending"

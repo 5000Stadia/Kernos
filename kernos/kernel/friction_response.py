@@ -611,8 +611,72 @@ def verify_and_archive(data_dir: str, *, now_iso: str) -> dict:
     return {"resolved": resolved, "recurred": recurred}
 
 
+# ---------------------------------------------------------------------------
+# Conversational authorization (§3, §3A-i) — bind a plain "yes" to ONE pending
+# fix, or no-op. A thin layer over REQUEST-APPROVAL-ACTION-V1 receipts: the
+# durable single-use + TTL state lives in the receipt; THIS adds the natural-
+# language + same-user/space/reply binding rules on top.
+# ---------------------------------------------------------------------------
+
+PENDING_FIX_KIND = "friction_fix_authorization"
+ASK_TTL_SECONDS = 900  # short — the ask expects an answer in the moment
+
+_AFFIRMATIVES = frozenset({
+    "yes", "yeah", "yep", "yup", "ya", "sure", "ok", "okay", "k", "go",
+    "do it", "go ahead", "go for it", "please do", "yes please", "do that",
+    "sounds good", "fix it", "approved", "approve", "confirm", "confirmed",
+    "send it", "make it so", "proceed",
+})
+_NEGATIONS = ("no", "not", "don't", "dont", "stop", "wait", "hold", "cancel",
+              "nope", "nah", "never")
+
+
+def is_affirmative(text: str) -> bool:
+    """Conservative: a SHORT, clearly-affirmative reply with no negation.
+    Anything ambiguous returns False so it no-ops + re-asks rather than acting
+    on a stray 'yes' (§3A-i)."""
+    norm = " ".join((text or "").lower().split())
+    norm = norm.strip(" .!?,")
+    if not norm or len(norm.split()) > 4:
+        return False
+    if any(neg in norm.split() for neg in _NEGATIONS):
+        return False
+    if norm in _AFFIRMATIVES:
+        return True
+    # allow a leading affirmative phrase ("yes please do it")
+    return any(norm == a or norm.startswith(a + " ") for a in _AFFIRMATIVES)
+
+
+def authorize_natural_yes(
+    pending: list[dict], *, user_id: str, space_id: str,
+    in_reply_to: str, text: str,
+) -> tuple[str | None, str]:
+    """Decide whether a reply authorizes a pending fix. ``pending`` is the list
+    of OPEN (non-expired, un-consumed) friction-fix receipts, each a dict with
+    ``approval_id`` + binding fields ``user_id``/``space_id``/``ask_message_id``.
+    Returns ``(approval_id, reason)`` to consume, or ``(None, reason)`` to no-op.
+    Enforces ALL of §3A-i: same user + space, exactly one pending, direct reply
+    OR a bare next-turn affirmative, and a genuinely affirmative message."""
+    here = [p for p in pending if p.get("space_id") == space_id]
+    if len(here) != 1:
+        return None, ("no_pending" if not here else "multiple_pending")
+    p = here[0]
+    if p.get("user_id") != user_id:
+        return None, "different_user"
+    # Direct reply to the ask, OR a bare affirmative next-turn (no reply
+    # threading). A reply to some OTHER message is not a binding yes.
+    rt = (in_reply_to or "").strip()
+    if rt and rt != str(p.get("ask_message_id", "")):
+        return None, "reply_to_other"
+    if not is_affirmative(text):
+        return None, "not_affirmative"
+    return str(p.get("approval_id", "")), "authorized"
+
+
 __all__ = [
     "is_enabled", "SELF_FRICTION_SOURCES", "COOLDOWN_HOURS",
+    "PENDING_FIX_KIND", "ASK_TTL_SECONDS", "is_affirmative",
+    "authorize_natural_yes",
     "MAX_RESPONSES_PER_DAY", "VERIFY_WINDOW_HOURS",
     "friction_signature", "resolution_fingerprint", "signature_of_filename",
     "ATTEMPTED", "IN_FLIGHT", "PENDING_VERIFICATION", "RESOLVED",
