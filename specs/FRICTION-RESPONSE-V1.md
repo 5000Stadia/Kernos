@@ -25,13 +25,43 @@ A friction report is written → a friction event fires → Shape B evaluates el
 
 A **daily sweep backstop** (Shape B, not Shape A) catches signatures the event path missed.
 
-## 3. Diagnose → resolve → close the loop
+## 3. Diagnose → decide → resolve (the human surface is CONVERSATIONAL)
 
-1. **Diagnose** with `diagnose_issue` (runtime trace + source + friction reports) → structured cause + proposed fix + a `resolution_fingerprint` (§4).
-2. **Resolve** (staged autonomy):
-   - **(a) surface-first — v1 default.** Surface the diagnosis + proposed fix to the System space / whisper. **Deduped while an open or pending-verification attempt exists** for that signature (no repeated nagging).
-   - **(b) auto-trigger — opt-in flag, after (a) soaks.** Fire a scoped `improve_kernos`. Beyond the commit-approval gate it ALSO requires: **allowlisted signatures** only; a **confidence threshold** on the diagnosis; **deterministic repro/verification** where possible; a **clean, protected worktree**; a **path denylist** for guardrail/constitutional machinery (reuse `recursive_self_heal`'s constitutional set); a **per-signature auto-attempt cap**; a **visible preflight**; and a **cancel switch**.
-3. **Close the loop — per signature, post-deploy, windowed (§5).**
+KERNOS is for non-technical people: it presents situations simply, acts on its
+own when it safely can, and when it needs a human it asks **once, in plain
+conversation, with a single natural answer** — never a diff, a slash command,
+or a back-and-forth. Technical artifacts (diagnosis, spec, the change, the
+commit) are the OPERATOR/audit layer; the person just has a normal exchange.
+
+1. **Diagnose** with `diagnose_issue` → cause + proposed fix + confidence + a
+   `resolution_fingerprint` (§4).
+2. **Decide whether the human is even needed** — proportional caution (the same
+   judgement the dispatch gate uses): *low ambiguity + low loss-cost + high
+   confidence* ⇒ act without asking; *ambiguous or higher-stakes* ⇒ ask.
+3. **Resolve, two paths — both ACTIVE, never a passive note:**
+   - **Auto (the obvious).** When it's clearly worth doing and low-risk, KERNOS
+     runs the scoped fix itself through the existing gate. The everyday user is
+     not shown a diff; at most a plain after-the-fact line in KERNOS's voice
+     ("I tidied up the connection leak that was nagging us"). The diff/commit
+     live in the operator/audit layer.
+   - **Ask-once (judgement call).** KERNOS surfaces the situation
+     CONVERSATIONALLY in its own voice — one plain sentence: *"I noticed the bot
+     keeps dropping its database connections; I can fix that — want me to?"* — and
+     a single natural affirmative ("yes" / "go ahead") carries the WHOLE thing:
+     it then runs the fix invisibly. No special command, no second prompt, no
+     diff. Deduped while an attempt is open/pending (no nagging).
+4. **Engine guards (unchanged, operator-layer):** whichever path, the actual
+   change runs through the scoped-`improve_kernos` guard set — allowlisted
+   signatures, confidence threshold, deterministic repro where possible, clean
+   protected worktree, guardrail/constitutional path denylist (reuse
+   `recursive_self_heal`'s set), per-signature attempt cap, preflight, cancel.
+   These bound the machinery; they are NOT shown to the everyday user.
+5. **Close the loop — per signature, post-deploy, windowed (§5).**
+
+> v1 ships the conversational ask-once path as default (safe, simple); the
+> fully-autonomous "act without asking on the obvious" path is enabled
+> deliberately once the discernment is trusted. Either way the user surface is
+> the same: simple, conversational, one answer — or nothing at all.
 
 ## 4. Durable memory — two keys, precise anti-loop
 
