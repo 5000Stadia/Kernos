@@ -122,6 +122,41 @@ async def test_parse_error_does_not_stamp_last_reviewed(tmp_path):
     assert st.get("last_reviewed", {}) == {}         # failed read stays eligible
 
 
+def test_functional_map_covers_every_module_single_owner():
+    mods = smr.list_modules(".")
+    assert mods, "expected to find kernos modules"
+    owner = smr.assign_owners(smr.REVIEW_SLICES, mods)
+    assert all(owner.get(m) for m in mods)                 # nothing unassigned
+    assert smr.unassigned_modules(smr.REVIEW_SLICES, ".") == []
+    names = {s.name for s in smr.REVIEW_SLICES}
+    assert set(owner.values()) <= names                    # owners are real elements
+
+
+def test_single_owner_specificity_beats_prefix():
+    owner = smr.assign_owners(smr.REVIEW_SLICES, smr.list_modules("."))
+    # exact-file ownership beats a broader dir prefix in another element
+    assert owner.get("kernos/kernel/tools/operation_resolver.py") == "dispatch-gate"
+    assert owner.get("kernos/kernel/workflows/self_improvement_helper.py") == "improvement-loop"
+
+
+def test_shape_fingerprint_is_stable_and_nonempty():
+    fp = smr.shape_fingerprint(".")
+    assert fp and fp == smr.shape_fingerprint(".")
+
+
+async def test_coverage_scan_records_fingerprint_no_gap_on_full_map(tmp_path):
+    async def consult(prompt, slice_):
+        return HEALTHY
+
+    await smr.maybe_run_daily(
+        data_dir=str(tmp_path), now_iso=NOW, consult_fn=consult,
+        whisper_fn=None, force=True, repo_root=".")
+
+    st = json.loads((tmp_path / "self_maintenance_review.json").read_text())
+    assert st["shape_fingerprint"]                          # recorded every scan
+    assert st.get("gap_surfaced_fingerprint", "") == ""     # full map → no gap surfaced
+
+
 async def test_v1_state_migrates_and_runs(tmp_path):
     (tmp_path / "self_maintenance_review.json").write_text(
         json.dumps({"cursor": 3, "last_run_iso": "x", "seen": {}}))

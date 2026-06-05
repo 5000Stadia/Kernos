@@ -65,29 +65,83 @@ class ReviewSlice:
     #   itself, but it cannot quietly rewrite its own rules.
 
 
+# SELF-MAINTENANCE-REVIEW-V3: a COMPREHENSIVE functional map — every substantive
+# module belongs to exactly one intention-defined element (single-owner: the
+# most-specific matching path wins). `paths` are exact files or directory
+# prefixes (trailing "/") only — NO globs (matches `_path_matches`). The 11
+# original slice names are preserved.
 REVIEW_SLICES: tuple[ReviewSlice, ...] = (
+    # --- Turn pipeline & cognition ---------------------------------------
     ReviewSlice(
         "message-pipeline",
-        "Turn pipeline + context assembly: provision→route→assemble→reason→"
-        "consequence→persist, adapter/handler isolation.",
-        ("kernos/messages/handler.py",),
+        "Six-phase turn pipeline (provision→route→assemble→reason→consequence→"
+        "persist) + handler orchestration + slash commands; adapter/handler "
+        "isolation.",
+        ("kernos/messages/handler.py", "kernos/messages/pipeline.py",
+         "kernos/messages/phases/", "kernos/messages/phase_context.py",
+         "kernos/messages/models.py", "kernos/messages/reference.py"),
+    ),
+    ReviewSlice(
+        "message-adapters",
+        "Platform adapters (Discord/Telegram/SMS): translate events to/from "
+        "NormalizedMessage; never import the handler.",
+        ("kernos/messages/adapters/", "kernos/sms_poller.py",
+         "kernos/telegram_poller.py"),
     ),
     ReviewSlice(
         "reasoning",
         "Tool loop, provider chains, kernel-tool dispatch, cost logging.",
-        ("kernos/kernel/reasoning.py", "kernos/providers/chains.py"),
+        ("kernos/kernel/reasoning.py", "kernos/providers/chains.py",
+         "kernos/kernel/exceptions.py", "kernos/kernel/turn_runner.py",
+         "kernos/kernel/turn_runner_provider.py"),
     ),
     ReviewSlice(
-        "state-store",
-        "Instance state: per-member profiles, relationships, abuse prevention "
-        "— the runtime query surface keyed to instance_id.",
-        ("kernos/kernel/instance_db.py",),
+        "providers",
+        "Provider-agnostic model backends behind a common ABC + model routing.",
+        ("kernos/providers/base.py", "kernos/providers/anthropic_provider.py",
+         "kernos/providers/codex_provider.py", "kernos/providers/ollama_provider.py",
+         "kernos/models/", "kernos/kernel/model_routing.py"),
     ),
+    ReviewSlice(
+        "cognitive-context-assembly",
+        "The typed cognitive substrate + seven Cognitive-UI zones + response "
+        "delivery.",
+        ("kernos/kernel/cognitive_context/", "kernos/kernel/response_delivery.py"),
+    ),
+    ReviewSlice(
+        "context-routing",
+        "Message→ContextSpace routing, candidate selection, per-space evidence.",
+        ("kernos/kernel/router.py", "kernos/kernel/space_candidates.py",
+         "kernos/kernel/space_evidence.py", "kernos/kernel/spaces.py"),
+    ),
+    ReviewSlice(
+        "dispatch-gate",
+        "Action-based tool classification + scoped amortization at the dispatch "
+        "boundary; proportional caution on user data; binding diagnostics.",
+        ("kernos/kernel/gate.py", "kernos/kernel/dispatch_diagnostics.py",
+         "kernos/kernel/tools/operation_resolver.py"),
+    ),
+    # --- Memory, knowledge & stewardship ---------------------------------
     ReviewSlice(
         "stewardship",
         "Compaction harvest: value extraction, tension detection, sensitivity "
-        "classification, operational insights as whispers.",
-        ("kernos/kernel/compaction.py", "kernos/kernel/fact_harvest.py"),
+        "classification, operational insights as whispers; token accounting.",
+        ("kernos/kernel/compaction.py", "kernos/kernel/fact_harvest.py",
+         "kernos/kernel/tokens.py", "kernos/kernel/token_estimator.py"),
+    ),
+    ReviewSlice(
+        "knowledge-retrieval",
+        "The memory moat: retrieval over knowledge/entities/archives, entity "
+        "resolution, dedup, embeddings.",
+        ("kernos/kernel/retrieval.py", "kernos/kernel/resolution.py",
+         "kernos/kernel/entities.py", "kernos/kernel/dedup.py",
+         "kernos/kernel/embeddings.py", "kernos/kernel/embedding_store.py",
+         "kernos/kernel/note_this.py"),
+    ),
+    ReviewSlice(
+        "projectors",
+        "Post-response tier1/tier2 extraction coordinator, per-member writes.",
+        ("kernos/kernel/projectors/",),
     ),
     ReviewSlice(
         "awareness",
@@ -96,35 +150,205 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         ("kernos/kernel/awareness.py",),
     ),
     ReviewSlice(
-        "dispatch-gate",
-        "Action-based tool classification + scoped amortization at the "
-        "dispatch boundary; proportional caution on user data.",
-        ("kernos/kernel/gate.py", "kernos/kernel/spaces.py"),
+        "reference-primitive",
+        "Cataloging cohort, hash-validated injection, auto-induction, baked "
+        "catalog.",
+        ("kernos/kernel/reference/",),
     ),
     ReviewSlice(
-        "improvement-loop",
-        "Autonomous self-improvement: spec→impl→approval→commit→deploy→verify, "
-        "with request-fidelity + proportionality.",
-        ("kernos/kernel/improvement_loop_workflow.py",
-         "kernos/kernel/improvement_review_protocol.py"),
+        "canvas",
+        "Scoped markdown pages, wiki-link reference index, Gardener shape "
+        "authority.",
+        ("kernos/kernel/canvas.py", "kernos/kernel/canvas_reference_index.py",
+         "kernos/kernel/gardener.py", "kernos/cohorts/gardener.py",
+         "kernos/cohorts/gardener_prompts.py",
+         "kernos/kernel/cohorts/gardener_cohort.py",
+         "kernos/setup/seed_canvases.py"),
     ),
+    # --- Members & coordination ------------------------------------------
+    ReviewSlice(
+        "multi-member-identity",
+        "Per-member profiles, hatching, member management, display names; the "
+        "Soul shim (deprecated for identity).",
+        ("kernos/kernel/members.py", "kernos/kernel/soul.py",
+         "kernos/kernel/display_names.py", "kernos/kernel/conversation_log.py"),
+    ),
+    ReviewSlice(
+        "relationships-covenants-disclosure",
+        "Pairwise relationships, permission profiles, covenants, cross-member "
+        "disclosure gate, preference reconcile, messenger stewardship.",
+        ("kernos/kernel/covenant_manager.py", "kernos/kernel/contract_parser.py",
+         "kernos/kernel/disclosure_gate.py", "kernos/kernel/preference_parser.py",
+         "kernos/kernel/preference_reconcile.py",
+         "kernos/kernel/cohorts/covenant_cohort.py", "kernos/cohorts/messenger.py",
+         "kernos/cohorts/messenger_prompt.py", "kernos/cohorts/admin.py"),
+    ),
+    ReviewSlice(
+        "member-coordination",
+        "Member-to-member relational messaging + parcels + cross-space request "
+        "dispatch.",
+        ("kernos/kernel/relational_messaging.py",
+         "kernos/kernel/relational_dispatch.py", "kernos/kernel/relational_tools.py",
+         "kernos/kernel/parcel.py", "kernos/kernel/cross_space/"),
+    ),
+    # --- Kernel substrate ------------------------------------------------
+    ReviewSlice(
+        "event-stream",
+        "The append-only nervous system: best-effort emission, durable timeline, "
+        "runtime trace, log buffer.",
+        ("kernos/kernel/events.py", "kernos/kernel/event_stream.py",
+         "kernos/kernel/event_types.py", "kernos/kernel/runtime_trace.py",
+         "kernos/kernel/log_buffer.py"),
+    ),
+    ReviewSlice(
+        "state-store",
+        "The runtime query surface: State Store (JSON/SQLite), instance.db "
+        "member/relationship/abuse tables, shadow-archive semantics.",
+        ("kernos/kernel/state.py", "kernos/kernel/state_json.py",
+         "kernos/kernel/state_sqlite.py", "kernos/kernel/instance_db.py",
+         "kernos/persistence/"),
+    ),
+    ReviewSlice(
+        "task-engine",
+        "The kernel execution layer: Task model, engine, self-directed plan "
+        "step execution + budget, protocols.",
+        ("kernos/kernel/engine.py", "kernos/kernel/task.py",
+         "kernos/kernel/execution.py", "kernos/kernel/protocols.py"),
+    ),
+    ReviewSlice(
+        "introspection-dump",
+        "'What Kernos believes is true' views + state introspection for /dump.",
+        ("kernos/kernel/introspection.py",),
+    ),
+    # --- Tools & capabilities --------------------------------------------
+    ReviewSlice(
+        "tool-catalog-registry",
+        "Universal tool catalog + canonical kernel-tool registry, schemas, "
+        "aliases, audit, introspection.",
+        ("kernos/kernel/tool_catalog.py", "kernos/kernel/kernel_tool_registry.py",
+         "kernos/kernel/tools/", "kernos/kernel/tool_aliases.py",
+         "kernos/kernel/tool_audit.py", "kernos/kernel/tool_introspection.py",
+         "kernos/kernel/tool_gate_routing.py"),
+    ),
+    ReviewSlice(
+        "workshop-tool-primitive",
+        "Tool-making: descriptors, runtime context + enforcement, authoring-"
+        "pattern validation, the external-service registry.",
+        ("kernos/kernel/tool_descriptor.py", "kernos/kernel/tool_runtime.py",
+         "kernos/kernel/tool_runtime_enforcement.py", "kernos/kernel/tool_validation.py",
+         "kernos/kernel/services.py", "kernos/kernel/self_admin_tools.py"),
+    ),
+    ReviewSlice(
+        "capability-registry",
+        "The three-tier capability graph + MCP client; single source of truth "
+        "for capability status.",
+        ("kernos/kernel/capabilities.py", "kernos/kernel/channels.py",
+         "kernos/capability/"),
+    ),
+    ReviewSlice(
+        "capability-install-bus",
+        "Capability/workflow install proposals: CRB approval flow + SubstrateTools "
+        "register/query facade.",
+        ("kernos/kernel/crb/", "kernos/kernel/substrate_tools/"),
+    ),
+    # --- Workflows & cohorts ---------------------------------------------
     ReviewSlice(
         "workflows",
         "Background trigger-driven workflows on the event-stream post-flush "
         "hook; compose existing surfaces, no parallel substrate.",
         ("kernos/kernel/workflows/",),
     ),
-    # --- The methodology reviews itself (constitutional: human-gated) ------
     ReviewSlice(
-        "self-maintenance-methodology",
-        "HOW KERNOS reviews + evolves itself: the daily two-lens review, the "
-        "request-fidelity + proportionality gates, the evolution discipline "
-        "(thoughtful, one minor step at a time). Is the way I improve myself "
-        "still the healthiest, most effective approach, and does it serve the "
-        "whole? Nothing is exempt — the methodology audits itself.",
-        ("kernos/kernel/self_maintenance_review.py",
-         "kernos/kernel/improvement_review_protocol.py",
-         "specs/SELF-MAINTENANCE-REVIEW-V1.md"),
+        "triggers-scheduler",
+        "Unified time+event trigger runtime + scheduler + webhook receiver.",
+        ("kernos/kernel/triggers/", "kernos/kernel/scheduler.py",
+         "kernos/kernel/webhooks/"),
+    ),
+    ReviewSlice(
+        "drafts-primitive",
+        "Persistent conversational workflow drafts (WDP).",
+        ("kernos/kernel/drafts/",),
+    ),
+    ReviewSlice(
+        "cohorts-and-drafter",
+        "The cohort fan-out substrate (descriptor/registry/runner/redaction/"
+        "durable substrate) + the tool-starved Drafter cohort.",
+        ("kernos/kernel/cohorts/",),
+    ),
+    ReviewSlice(
+        "four-layer-cognition",
+        "The PDI four-layer path: enactment (planner/dispatcher/presence/tiers/"
+        "friction-observer) + integration prep + agent/inbox registries.",
+        ("kernos/kernel/enactment/", "kernos/kernel/integration/",
+         "kernos/kernel/agents/"),
+    ),
+    # --- Build & external ------------------------------------------------
+    ReviewSlice(
+        "external-agents-consult",
+        "The consult tool + external-agent harnesses (Codex/Claude/Gemini/Aider) "
+        "+ ACPX bridge + subprocess substrate.",
+        ("kernos/kernel/external_agents/", "kernos/kernel/coding_session_bridge.py"),
+    ),
+    ReviewSlice(
+        "builders-codeexec",
+        "The agentic workspace + sandboxed build/execute + file service.",
+        ("kernos/kernel/workspace.py", "kernos/kernel/code_exec.py",
+         "kernos/kernel/builders/", "kernos/kernel/sandbox_preamble.py",
+         "kernos/kernel/files.py"),
+    ),
+    ReviewSlice(
+        "mcp-integrations",
+        "Concrete MCP-backed integration tools (Notion/Drive) + the browser MCP "
+        "server.",
+        ("kernos/kernel/integrations/", "kernos/browser/"),
+    ),
+    ReviewSlice(
+        "credentials",
+        "Provider + per-member workshop credential resolution, OAuth device-code/"
+        "PKCE, operator onboarding CLI.",
+        ("kernos/kernel/credentials.py", "kernos/kernel/credentials_member.py",
+         "kernos/kernel/credentials_cli.py", "kernos/kernel/oauth_device_code.py"),
+    ),
+    ReviewSlice(
+        "projects-long-horizon",
+        "Long-horizon project tools binding a ContextSpace + pinned canvas + "
+        "workflow.",
+        ("kernos/kernel/projects.py",),
+    ),
+    # --- Friction & health -----------------------------------------------
+    ReviewSlice(
+        "friction-and-diagnostics",
+        "The friction observer (pure sink) + reactive response loop + pattern "
+        "catalog + gateway/dispatch-layer health observation.",
+        ("kernos/kernel/friction.py", "kernos/kernel/friction_response.py",
+         "kernos/kernel/friction_patterns.py", "kernos/kernel/pattern_heuristics.py",
+         "kernos/kernel/diagnostics.py", "kernos/kernel/gateway_health.py",
+         "kernos/kernel/behavioral_patterns.py",
+         "kernos/setup/seed_friction_patterns.py"),
+    ),
+    # --- Approval & self-governance (constitutional: human-gated) --------
+    ReviewSlice(
+        "approval-receipts",
+        "Durable approval-receipt substrate + fix authorization — the human-"
+        "gating record layer.",
+        ("kernos/kernel/approval_receipts.py", "kernos/kernel/fix_authorization.py"),
+        constitutional=True,
+    ),
+    ReviewSlice(
+        "improvement-loop",
+        "Autonomous self-improvement: spec→impl→approval→commit→deploy→verify, "
+        "with request-fidelity + proportionality; ledger, workspace, git ops, "
+        "self-test gate, closure substrate.",
+        ("kernos/kernel/improvement_loop_workflow.py",
+         "kernos/kernel/improvement_ledger.py",
+         "kernos/kernel/improvement_workspace.py", "kernos/kernel/git_operations.py",
+         "kernos/kernel/self_test_gate.py", "kernos/kernel/closure_store.py",
+         "kernos/kernel/workflows/self_improvement_helper.py",
+         "kernos/kernel/workflows/user_initiated_improvement_helper.py",
+         "kernos/kernel/workflows/loop_health_helper.py",
+         "kernos/kernel/workflows/closure_tools.py",
+         "kernos/kernel/workflows/autonomy_tools.py",
+         "kernos/kernel/workflows/autonomy_emitters.py"),
         constitutional=True,
     ),
     ReviewSlice(
@@ -136,12 +360,41 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         constitutional=True,
     ),
     ReviewSlice(
+        "self-maintenance-methodology",
+        "HOW KERNOS reviews + evolves itself: the daily two-lens review, the "
+        "request-fidelity + proportionality gates, the evolution discipline "
+        "(thoughtful, one minor step at a time). Is the way I improve myself "
+        "still the healthiest, most effective approach, and does it serve the "
+        "whole? Nothing is exempt — the methodology audits itself.",
+        ("kernos/kernel/self_maintenance_review.py",
+         "kernos/kernel/improvement_review_protocol.py",
+         "specs/SELF-MAINTENANCE-REVIEW-V1.md",
+         "specs/SELF-MAINTENANCE-REVIEW-V2.md",
+         "specs/SELF-MAINTENANCE-REVIEW-V3.md"),
+        constitutional=True,
+    ),
+    ReviewSlice(
         "governing-intention",
         "The constitution the rest serves: operating principles, identity, "
         "hatching guidance, conservative-by-default posture. Does the lived "
         "system still embody these, and do they still serve the whole?",
         ("kernos/kernel/template.py",),
         constitutional=True,
+    ),
+    ReviewSlice(
+        "boot-deploy-bringup",
+        "Setup, boot-guard auto-rollback, self-update, substrate bring-up, "
+        "entrypoints. Boot-guard + self-update are human-gated self-modification.",
+        ("kernos/setup/", "kernos/server.py", "kernos/cli.py", "kernos/chat.py",
+         "kernos/repl.py", "kernos/utils.py"),
+        constitutional=True,
+    ),
+    # --- Eval ------------------------------------------------------------
+    ReviewSlice(
+        "evals-soak",
+        "Substrate-fidelity eval scenario runner/rubrics/reports + the soak "
+        "harness.",
+        ("kernos/evals/", "kernos/soak.py"),
     ),
 )
 
@@ -229,17 +482,17 @@ def _state_path(data_dir: str) -> Path:
 
 def load_state(data_dir: str) -> dict:
     p = _state_path(data_dir)
+    _fresh = {"cursor": 0, "last_run_iso": "", "seen": {}, "last_reviewed": {},
+              "shape_fingerprint": "", "gap_surfaced_fingerprint": ""}
     if not p.exists():
-        return {"cursor": 0, "last_run_iso": "", "seen": {}, "last_reviewed": {}}
+        return dict(_fresh)
     try:
         data = json.loads(p.read_text())
-        data.setdefault("cursor", 0)
-        data.setdefault("last_run_iso", "")
-        data.setdefault("seen", {})
-        data.setdefault("last_reviewed", {})  # V2: per-slice {name: iso}
+        for k, v in _fresh.items():
+            data.setdefault(k, v)
         return data
     except Exception:
-        return {"cursor": 0, "last_run_iso": "", "seen": {}, "last_reviewed": {}}
+        return dict(_fresh)
 
 
 def save_state(data_dir: str, state: dict) -> None:
@@ -558,9 +811,78 @@ def _path_matches(changed_file: str, slice_path: str) -> bool:
     return cf == sp or cf.startswith(sp + "/")
 
 
-def _churn_scores(slices, repo_root: str, window_days: int) -> dict:
-    """Per-slice count of files changed by commits in the window that fall under
-    the slice's paths. Best-effort: no git / error → all zero."""
+def list_modules(repo_root: str) -> list:
+    """Sorted relative posix paths of substantive kernos/**/*.py modules
+    (__init__.py + __pycache__ excluded). Best-effort: [] on error."""
+    try:
+        root = Path(repo_root).resolve()
+    except Exception:
+        return []
+    base = root / "kernos"
+    if not base.is_dir():
+        return []
+    out: list = []
+    for p in base.rglob("*.py"):
+        if p.name == "__init__.py" or "__pycache__" in p.parts:
+            continue
+        try:
+            out.append(p.resolve().relative_to(root).as_posix())
+        except Exception:
+            continue
+    return sorted(out)
+
+
+def _match_specificity(module: str, slice_path: str) -> int:
+    """Length of the matching path (exact file or dir prefix) if it matches the
+    module, else -1. Longer = more specific — an exact file beats a dir prefix."""
+    return (len(slice_path.strip().lstrip("./"))
+            if _path_matches(module, slice_path) else -1)
+
+
+def assign_owners(slices, modules: list) -> dict:
+    """Single-owner assignment: each module → the element whose matching path is
+    MOST specific (longest); ties break by REVIEW_SLICES order. Unmatched → ''."""
+    owner: dict = {}
+    for m in modules:
+        best_name, best_spec = "", -1
+        for s in slices:
+            spec = max((_match_specificity(m, p) for p in s.paths), default=-1)
+            if spec > best_spec:          # strict '>' → earliest slice wins ties
+                best_spec, best_name = spec, s.name
+        owner[m] = best_name
+    return owner
+
+
+def unassigned_modules(slices, repo_root: str) -> list:
+    """Substantive modules owned by no element (the coverage gap)."""
+    modules = list_modules(repo_root)
+    owner = assign_owners(slices, modules)
+    return [m for m in modules if not owner.get(m)]
+
+
+def shape_fingerprint(repo_root: str) -> str:
+    """Stable hash of the SET of module paths — changes only on add/remove
+    (structural), not on content edits."""
+    return hashlib.sha256(
+        "\n".join(list_modules(repo_root)).encode()).hexdigest()[:16]
+
+
+def _coverage_gap_text(unassigned: list) -> str:
+    n = len(unassigned)
+    shown = unassigned[:25]
+    lines = [
+        f"**Coverage gap:** {n} module(s) aren't in the self-review functional "
+        "map yet — which element should each belong to (or is a new element "
+        "warranted)? Until slotted in, they aren't getting reviewed.",
+        "",
+    ]
+    lines += [f"- `{m}`" for m in shown]
+    if n > len(shown):
+        lines.append(f"- …and {n - len(shown)} more")
+    return "\n".join(lines)
+
+
+def _changed_files_since(repo_root: str, window_days: int) -> set:
     try:
         import subprocess
         out = subprocess.run(
@@ -569,22 +891,29 @@ def _churn_scores(slices, repo_root: str, window_days: int) -> dict:
             capture_output=True, text=True, timeout=10,
         )
         if out.returncode != 0:
-            return {s.name: 0 for s in slices}
-        changed = {ln.strip() for ln in out.stdout.splitlines() if ln.strip()}
+            return set()
+        return {ln.strip() for ln in out.stdout.splitlines() if ln.strip()}
     except Exception:
-        return {s.name: 0 for s in slices}
-    return {
-        s.name: sum(1 for f in changed
-                    if any(_path_matches(f, p) for p in s.paths))
-        for s in slices
-    }
+        return set()
+
+
+def _churn_scores(slices, repo_root: str, window_days: int, owner: dict) -> dict:
+    """Per-element count of changed modules in the window, attributed to each
+    module's SINGLE owner (no double-counting). Best-effort."""
+    scores = {s.name: 0 for s in slices}
+    for f in _changed_files_since(repo_root, window_days):
+        nm = owner.get(f)
+        if nm in scores:
+            scores[nm] += 1
+    return scores
 
 
 def _friction_scores(slices, data_dir: str, window_days: int,
-                     now_iso: str) -> dict:
-    """Per-slice count of recent friction reports (bounded read, newest first,
-    within the window) whose text names one of the slice's paths or the slice
-    name on a word boundary. Best-effort: missing dir / error → all zero."""
+                     now_iso: str, owner: dict) -> dict:
+    """Per-element count of recent friction reports (bounded read, newest first,
+    within the window) whose text references one of the element's OWNED modules
+    (single-owner) or the element name on a word boundary. Each element credited
+    at most once per report. Best-effort: missing dir / error → all zero."""
     scores = {s.name: 0 for s in slices}
     try:
         fdir = Path(data_dir) / "diagnostics" / "friction"
@@ -599,6 +928,8 @@ def _friction_scores(slices, data_dir: str, window_days: int,
         cutoff = datetime.fromisoformat(now_iso).timestamp() - window_days * 86400
     except Exception:
         cutoff = 0.0
+    modules = list(owner.keys())
+    names = [s.name for s in slices]
     for f in files:
         try:
             if f.stat().st_mtime < cutoff:
@@ -606,25 +937,36 @@ def _friction_scores(slices, data_dir: str, window_days: int,
             text = f.read_text(errors="replace")[:4000].lower()
         except Exception:
             continue
-        for s in slices:
-            hit = any(p.strip().lstrip("./").lower() in text for p in s.paths)
-            if not hit:
-                hit = re.search(r"\b" + re.escape(s.name.lower()) + r"\b",
-                                text) is not None
-            if hit:
-                scores[s.name] += 1
+        credited: set = set()
+        for m in modules:
+            if m.lower() in text:
+                nm = owner.get(m)
+                if nm and nm not in credited:
+                    scores[nm] += 1
+                    credited.add(nm)
+        for nm in names:
+            if nm not in credited and re.search(
+                    r"\b" + re.escape(nm.lower()) + r"\b", text):
+                scores[nm] += 1
+                credited.add(nm)
     return scores
 
 
 def collect_signal_scores(slices, repo_root: str, data_dir: str,
                           window_days: int, cap: int, now_iso: str) -> dict:
-    """Combined, per-source-isolated, capped signal score per slice."""
+    """Combined, per-source-isolated, capped signal score per element. Uses the
+    single-owner assignment so a changed/referenced module promotes exactly one
+    element (no double-counting — Codex spec review)."""
     try:
-        churn = _churn_scores(slices, repo_root, window_days)
+        owner = assign_owners(slices, list_modules(repo_root))
+    except Exception:
+        owner = {}
+    try:
+        churn = _churn_scores(slices, repo_root, window_days, owner)
     except Exception:
         churn = {}
     try:
-        fric = _friction_scores(slices, data_dir, window_days, now_iso)
+        fric = _friction_scores(slices, data_dir, window_days, now_iso, owner)
     except Exception:
         fric = {}
     return {s.name: min(cap, churn.get(s.name, 0) + fric.get(s.name, 0))
@@ -712,6 +1054,33 @@ async def maybe_run_daily(
     state = load_state(data_dir)
     if not force and not due_for_review(state, now_iso):
         return {"outcome": "not_due"}
+
+    # --- coverage-gap check (V3): structural-only, surface once per shape change
+    # Record shape_fingerprint on every successful scan; surface a gap note only
+    # when the shape changed AND there's an unassigned module AND we haven't
+    # already surfaced for this shape; set gap_surfaced_fingerprint only on a
+    # successful surface (a failed surface re-tries next shape-change tick).
+    try:
+        _repo = repo_root or os.getenv("KERNOS_REPO_DIR", ".")
+        _fp = shape_fingerprint(_repo)
+        if _fp:
+            _changed = _fp != state.get("shape_fingerprint", "")
+            state["shape_fingerprint"] = _fp
+            if (_changed and _fp != state.get("gap_surfaced_fingerprint", "")
+                    and whisper_fn is not None):
+                _gaps = unassigned_modules(REVIEW_SLICES, _repo)
+                if _gaps:
+                    try:
+                        await whisper_fn(_coverage_gap_text(_gaps),
+                                         {"kind": "coverage_gap",
+                                          "slice": "coverage-gap",
+                                          "unassigned": _gaps[:50]})
+                        state["gap_surfaced_fingerprint"] = _fp
+                    except Exception:
+                        pass
+            save_state(data_dir, state)
+    except Exception:
+        pass
 
     # --- slice selection (V2) ---------------------------------------------
     if target_slice is not None:

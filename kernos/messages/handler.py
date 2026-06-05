@@ -1812,6 +1812,16 @@ class MessageHandler:
         space = await self._get_system_space(instance_id)
         if space is None:
             raise RuntimeError("no system space to surface into")
+        if report.get("kind") == "coverage_gap":
+            # V3: the functional map fell behind the code — its own file so it
+            # doesn't overwrite the latest review.
+            content = f"# Self-Review Coverage Gap\n\n{text}\n"
+            await files.write_file(
+                instance_id, space.id, "self-review-coverage-gap.md", content,
+                "Modules not yet in the self-review functional map — slot them "
+                "into an element (passive; reflection to consider)",
+            )
+            return
         content = (
             "# Daily Self-Maintenance Review\n\n"
             f"_slice: `{report.get('slice', '?')}`"
