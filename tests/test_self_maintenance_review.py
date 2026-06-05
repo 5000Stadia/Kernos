@@ -14,16 +14,18 @@ from kernos.kernel import self_maintenance_review as smr
 # --- kill switch -----------------------------------------------------------
 
 
-def test_default_off(monkeypatch):
+def test_default_on(monkeypatch):
+    # SELF-MAINTENANCE-REVIEW-V3: ships DEFAULT-ON (reflection-only, idle-aware).
     monkeypatch.delenv("KERNOS_SELF_MAINTENANCE_REVIEW", raising=False)
-    assert smr.is_enabled() is False
+    assert smr.is_enabled() is True
 
 
-def test_enabled_when_set(monkeypatch):
+def test_explicit_off_disables(monkeypatch):
     monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
     assert smr.is_enabled() is True
-    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "off")
-    assert smr.is_enabled() is False
+    for off in ("0", "false", "off", "no"):
+        monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", off)
+        assert smr.is_enabled() is False
 
 
 # --- rotating slices -------------------------------------------------------
@@ -218,7 +220,7 @@ def _consult_returning(payload: str):
 
 @pytest.mark.asyncio
 async def test_maybe_run_inert_when_disabled(tmp_path, monkeypatch):
-    monkeypatch.delenv("KERNOS_SELF_MAINTENANCE_REVIEW", raising=False)
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "0")  # explicit off
     res = await smr.maybe_run_daily(
         data_dir=str(tmp_path), now_iso="2026-06-04T00:00:00+00:00",
         consult_fn=_consult_returning("x"),
@@ -398,7 +400,7 @@ def test_load_bounded_source_handles_directory_and_missing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_force_runs_even_when_disabled_and_not_due(tmp_path, monkeypatch):
-    monkeypatch.delenv("KERNOS_SELF_MAINTENANCE_REVIEW", raising=False)  # OFF
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "0")  # explicit OFF
     d = str(tmp_path)
     healthy = (
         '```json\n{"overall_health":"healthy","corrective_findings":[],'
@@ -423,7 +425,7 @@ async def test_force_runs_even_when_disabled_and_not_due(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_force_still_gated_by_kill_switch(tmp_path, monkeypatch):
-    monkeypatch.delenv("KERNOS_SELF_MAINTENANCE_REVIEW", raising=False)
+    monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "0")  # explicit OFF
     async def _c(_p, _s=None): return "x"
     r = await smr.maybe_run_daily(
         data_dir=str(tmp_path), now_iso="2026-06-04T00:00:00+00:00",

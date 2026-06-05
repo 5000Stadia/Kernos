@@ -40,10 +40,13 @@ DEDUP_TTL_DAYS = 14.0  # don't re-surface the same observation for two weeks.
 
 
 def is_enabled() -> bool:
-    """v1 is inert unless explicitly enabled — a new (even read-only) recurring
-    behavior ships default-off and is turned on after one watched cycle."""
-    return os.environ.get("KERNOS_SELF_MAINTENANCE_REVIEW", "").strip().lower() in (
-        "1", "true", "on", "yes",
+    """SELF-MAINTENANCE-REVIEW-V3: ships DEFAULT-ON. The daily review is
+    reflection-only (never changes code on its own), idle-aware (defers to live
+    turns), and costs ~one bounded LLM call/day, so it's on out of the box.
+    Disable explicitly with ``KERNOS_SELF_MAINTENANCE_REVIEW`` in
+    {0, false, off, no}."""
+    return os.environ.get("KERNOS_SELF_MAINTENANCE_REVIEW", "").strip().lower() not in (
+        "0", "false", "off", "no",
     )
 
 
