@@ -91,12 +91,19 @@ def signature_of_filename(name: str) -> tuple[str, str]:
     AND ``<ts>_<TYPE>_<hash>.md``) — the existing readers glob only the first
     and miss the rest (§8)."""
     stem = name[:-3] if name.endswith(".md") else name
+    _hex = re.compile(r"^[0-9a-f]{6,}$")
     if stem.startswith("FRICTION_"):
-        # FRICTION_<date>_<time>_<hash>_<TYPE> — hash is in the MIDDLE; the
-        # type is everything after the first three (date, time, hash) tokens.
-        rest = stem[len("FRICTION_"):]
-        m = re.match(r"^\d+_\d+_[0-9a-f]+_(.+)$", rest)
-        ftype = m.group(1) if m else rest
+        # Two historical orderings exist in the wild, BOTH FRICTION_<date>_
+        # <time>_…: the CURRENT writer (friction.py:446) is <TYPE>_<uuid8>
+        # (hash trailing); older reports are <hash>_<TYPE> (hash leading).
+        toks = stem[len("FRICTION_"):].split("_")
+        while toks and toks[0].isdigit():   # drop date + time (both numeric)
+            toks.pop(0)
+        if toks and _hex.match(toks[-1]):
+            toks = toks[:-1]                 # current: <TYPE>_<uuid8>
+        elif toks and _hex.match(toks[0]):
+            toks = toks[1:]                  # legacy: <hash>_<TYPE>
+        ftype = "_".join(toks)
     else:
         # <ts>_<TYPE>_<hash> — strip a leading timestamp + a trailing hex hash.
         s = re.sub(r"^\d{4}[-_]?\d{2}[-_]?\d{2}[T_]?[\d\-:.]*_", "", stem)

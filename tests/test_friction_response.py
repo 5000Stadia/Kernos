@@ -53,12 +53,16 @@ def test_resolution_fingerprint_ignores_commit():
     assert c != a
 
 
-def test_signature_of_filename_both_conventions():
-    # FRICTION_<date>_<time>_<hash>_<TYPE>: hash is in the MIDDLE
-    t1, s1 = fr.signature_of_filename(
-        "FRICTION_20260603_222930_c4184cbc_ACPX_TIMEOUT_CLAUDE_CODE.md")
-    assert t1 == "ACPX_TIMEOUT_CLAUDE_CODE"      # exact — no hash leakage
-    # <ts>_<TYPE>_<hash>: hash trailing (the convention existing globs MISS)
+def test_signature_of_filename_all_three_conventions():
+    # CURRENT writer (friction.py:446): FRICTION_<date>_<time>_<TYPE>_<uuid8>
+    t0, _ = fr.signature_of_filename(
+        "FRICTION_20260522_160433_PREFERENCE_STATED_BUT_NOT_CAPTURED_63aaecd1.md")
+    assert t0 == "PREFERENCE_STATED_BUT_NOT_CAPTURED"   # no uuid leakage
+    # LEGACY FRICTION_: hash in the MIDDLE
+    t1, _ = fr.signature_of_filename(
+        "FRICTION_20260529_070502_faf2916a_ACPX_TIMEOUT_CLAUDE_CODE.md")
+    assert t1 == "ACPX_TIMEOUT_CLAUDE_CODE"
+    # timestamp-prefixed (the convention the existing globs MISS)
     t2, s2 = fr.signature_of_filename(
         "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md")
     assert t2 == "CONNECTION_POOL_LEAK"
