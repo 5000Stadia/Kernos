@@ -1,0 +1,222 @@
+"""FRICTION-RESPONSE-V1 safety core — the guards Codex's spec review (§9)
+made binding: self-friction denylist + in-flight reservation, two-key
+signature/fingerprint anti-loop, signature cooldown + daily budget, post-deploy
+verification states, archive-by-signature."""
+from __future__ import annotations
+
+import pytest
+
+from kernos.kernel import friction_response as fr
+
+
+# --- kill switch -----------------------------------------------------------
+
+
+def test_default_off(monkeypatch):
+    monkeypatch.delenv("KERNOS_FRICTION_RESPONSE", raising=False)
+    assert fr.is_enabled() is False
+
+
+def test_enabled_when_set(monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    assert fr.is_enabled() is True
+
+
+# --- two-key identity ------------------------------------------------------
+
+
+def test_signature_is_stable_and_noise_free():
+    a = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK",
+                              resource="instance.db")
+    b = fr.friction_signature(friction_type="connection_pool_leak",
+                              resource="INSTANCE.DB")
+    assert a == b                      # case/whitespace normalized
+    c = fr.friction_signature(friction_type="ACPX_TIMEOUT")
+    assert c != a                      # different problem -> different sig
+    assert a.startswith("sig_")
+
+
+def test_pattern_id_takes_precedence():
+    a = fr.friction_signature(friction_type="X", pattern_id="POOL_LEAK_V1")
+    b = fr.friction_signature(friction_type="Y", pattern_id="POOL_LEAK_V1")
+    assert a == b
+
+
+def test_resolution_fingerprint_ignores_commit():
+    a = fr.resolution_fingerprint(cause="close conn on error",
+                                  touched=["kernos/kernel/state.py"])
+    b = fr.resolution_fingerprint(cause="Close  conn on error",
+                                  touched=["kernos/kernel/state.py"])
+    assert a == b and a.startswith("fix_")
+    c = fr.resolution_fingerprint(cause="raise pool size",
+                                  touched=["kernos/kernel/state.py"])
+    assert c != a
+
+
+def test_signature_of_filename_both_conventions():
+    # FRICTION_<date>_<time>_<hash>_<TYPE>: hash is in the MIDDLE
+    t1, s1 = fr.signature_of_filename(
+        "FRICTION_20260603_222930_c4184cbc_ACPX_TIMEOUT_CLAUDE_CODE.md")
+    assert t1 == "ACPX_TIMEOUT_CLAUDE_CODE"      # exact — no hash leakage
+    # <ts>_<TYPE>_<hash>: hash trailing (the convention existing globs MISS)
+    t2, s2 = fr.signature_of_filename(
+        "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md")
+    assert t2 == "CONNECTION_POOL_LEAK"
+    assert s2 == fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+
+
+# --- ledger + anti-loop ----------------------------------------------------
+
+
+def test_record_and_load(tmp_path):
+    d = str(tmp_path)
+    fr.record_attempt(d, friction_signature="sig_a", friction_type="T",
+                      resolution_fingerprint="fix_1", state=fr.RECURRED_FAILED,
+                      now_iso="2026-06-05T00:00:00+00:00")
+    rows = fr.load_attempts(d)
+    assert len(rows) == 1 and rows[0]["state"] == fr.RECURRED_FAILED
+
+
+def test_failed_fingerprints_anti_loop(tmp_path):
+    d = str(tmp_path)
+    fr.record_attempt(d, friction_signature="sig_a", friction_type="T",
+                      resolution_fingerprint="fix_bad", state=fr.RECURRED_FAILED,
+                      now_iso="2026-06-05T00:00:00+00:00")
+    fr.record_attempt(d, friction_signature="sig_a", friction_type="T",
+                      resolution_fingerprint="fix_ok", state=fr.RESOLVED,
+                      now_iso="2026-06-05T01:00:00+00:00")
+    failed = fr.failed_fingerprints(fr.load_attempts(d), "sig_a")
+    assert failed == {"fix_bad"}       # only the failed one; resolved excluded
+
+
+def test_reserve_in_flight_one_per_signature(tmp_path):
+    d = str(tmp_path)
+    assert fr.reserve_in_flight(d, friction_signature="sig_a",
+                                friction_type="T",
+                                now_iso="2026-06-05T00:00:00+00:00") is True
+    # second reservation for the same signature is refused while open
+    assert fr.reserve_in_flight(d, friction_signature="sig_a",
+                                friction_type="T",
+                                now_iso="2026-06-05T00:01:00+00:00") is False
+
+
+# --- eligibility gate ------------------------------------------------------
+
+
+def _now():
+    return "2026-06-05T12:00:00+00:00"
+
+
+def test_should_respond_disabled(tmp_path, monkeypatch):
+    monkeypatch.delenv("KERNOS_FRICTION_RESPONSE", raising=False)
+    ok, why = fr.should_respond(str(tmp_path), friction_signature="sig_a",
+                                source="detector", now_iso=_now())
+    assert ok is False and why == "disabled"
+
+
+def test_should_respond_self_friction_denied(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    ok, why = fr.should_respond(str(tmp_path), friction_signature="sig_a",
+                                source="improve_kernos", now_iso=_now())
+    assert ok is False and why == "self_friction_source"
+
+
+def test_should_respond_eligible_then_in_flight(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    d = str(tmp_path)
+    ok, why = fr.should_respond(d, friction_signature="sig_a",
+                                source="detector", now_iso=_now())
+    assert ok is True and why == "eligible"
+    fr.reserve_in_flight(d, friction_signature="sig_a", friction_type="T",
+                         now_iso=_now())
+    ok2, why2 = fr.should_respond(d, friction_signature="sig_a",
+                                  source="detector", now_iso=_now())
+    assert ok2 is False and why2 == "already_in_flight"
+
+
+def test_should_respond_anti_loop(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    d = str(tmp_path)
+    fr.record_attempt(d, friction_signature="sig_a", friction_type="T",
+                      resolution_fingerprint="fix_bad", state=fr.RECURRED_FAILED,
+                      now_iso="2026-06-04T00:00:00+00:00")
+    ok, why = fr.should_respond(d, friction_signature="sig_a", source="detector",
+                                now_iso=_now(), candidate_fingerprint="fix_bad")
+    assert ok is False and why == "resolution_already_failed"
+
+
+def test_should_respond_cooldown(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    d = str(tmp_path)
+    fr.record_attempt(d, friction_signature="sig_a", friction_type="T",
+                      resolution_fingerprint="", state=fr.ATTEMPTED,
+                      now_iso="2026-06-05T11:00:00+00:00")  # 1h ago < 6h
+    ok, why = fr.should_respond(d, friction_signature="sig_a", source="detector",
+                                now_iso=_now())
+    assert ok is False and why == "within_cooldown"
+
+
+def test_should_respond_daily_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
+    d = str(tmp_path)
+    for i in range(fr.MAX_RESPONSES_PER_DAY):
+        fr.record_attempt(d, friction_signature=f"sig_{i}", friction_type="T",
+                          resolution_fingerprint="", state=fr.ATTEMPTED,
+                          now_iso=f"2026-06-05T0{i}:00:00+00:00")
+    ok, why = fr.should_respond(d, friction_signature="sig_new",
+                                source="detector", now_iso=_now())
+    assert ok is False and why == "daily_budget_reached"
+
+
+# --- verification states ---------------------------------------------------
+
+
+def test_judge_recurred_is_failed():
+    assert fr.judge_resolution(
+        deployed_iso="2026-06-05T00:00:00+00:00",
+        recurred_iso="2026-06-05T02:00:00+00:00",
+        now_iso="2026-06-05T10:00:00+00:00", had_detector_opportunity=True,
+    ) == fr.RECURRED_FAILED
+
+
+def test_judge_pending_within_window():
+    assert fr.judge_resolution(
+        deployed_iso="2026-06-05T09:00:00+00:00",
+        now_iso="2026-06-05T10:00:00+00:00", had_detector_opportunity=True,
+    ) == fr.PENDING_VERIFICATION
+
+
+def test_judge_unknown_when_idle():
+    # window elapsed but no detector opportunity -> NOT resolved
+    assert fr.judge_resolution(
+        deployed_iso="2026-06-05T00:00:00+00:00",
+        now_iso="2026-06-05T10:00:00+00:00", had_detector_opportunity=False,
+    ) == fr.UNKNOWN_NO_OBS
+
+
+def test_judge_resolved():
+    assert fr.judge_resolution(
+        deployed_iso="2026-06-05T00:00:00+00:00",
+        now_iso="2026-06-05T10:00:00+00:00", had_detector_opportunity=True,
+    ) == fr.RESOLVED
+
+
+# --- archive by signature --------------------------------------------------
+
+
+def test_archive_only_matching_signature(tmp_path):
+    d = str(tmp_path)
+    fdir = tmp_path / "diagnostics" / "friction"
+    fdir.mkdir(parents=True)
+    (fdir / "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md").write_text("x")
+    (fdir / "2026-06-01T08-21-41_CONNECTION_POOL_LEAK_0a84419a.md").write_text("x")
+    (fdir / "FRICTION_20260603_222930_c4184cbc_ACPX_TIMEOUT_CLAUDE_CODE.md").write_text("y")
+    sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+    n = fr.archive_resolved_signature(d, friction_signature=sig,
+                                      now_iso="2026-06-05T00:00:00+00:00",
+                                      ledger_ref="r1")
+    assert n == 2                                   # only the pool-leak pair
+    assert (fdir / "FRICTION_20260603_222930_c4184cbc_ACPX_TIMEOUT_CLAUDE_CODE.md").exists()
+    resolved = tmp_path / "diagnostics" / "friction_resolved"
+    assert (resolved / "_manifest.jsonl").exists()  # manifest written
+    assert len(list(resolved.glob("*CONNECTION_POOL_LEAK*.md"))) == 2
