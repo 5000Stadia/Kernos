@@ -54,7 +54,16 @@ _TOOL_ALIASES: dict[str, str] = {
     # tool — closest surface is plain consult (advisory-mode is
     # achievable via prompt framing rather than a separate tool).
     "advisory_spec_retrieval_consult": "consult",
+    # 2026-06-05 v1 self-test: agent reached for the consult tool under a
+    # dotted namespace; it isn't registered, so the dispatcher rejected it.
+    "external_agent.consult": "consult",
 }
+
+# Canonical names that are commonly reached for under a hallucinated dotted
+# namespace (``some_namespace.consult``). Used by the general dotted-suffix
+# fallback so a NEW namespace prefix on a known tool self-heals instead of
+# bouncing. Conservative: only the canonical targets we've already curated.
+_DOTTED_SUFFIX_CANONICALS: frozenset = frozenset(_TOOL_ALIASES.values())
 
 
 def canonicalize_tool_name(name: str) -> tuple[str, bool]:
@@ -65,9 +74,17 @@ def canonicalize_tool_name(name: str) -> tuple[str, bool]:
     auditable + new entries can be detected by operator log review.
     """
     canonical = _TOOL_ALIASES.get(name)
-    if canonical is None:
-        return (name, False)
-    return (canonical, True)
+    if canonical is not None:
+        return (canonical, True)
+    # General dotted-suffix repair: a `<namespace>.<tool>` form whose final
+    # segment is a known canonical tool resolves to that tool (e.g. any
+    # `*.consult` → consult). Removes the whole class of "agent prefixed a
+    # real tool with a made-up namespace" bounces, conservatively.
+    if "." in name:
+        suffix = name.rsplit(".", 1)[-1]
+        if suffix in _DOTTED_SUFFIX_CANONICALS:
+            return (suffix, True)
+    return (name, False)
 
 
 async def emit_alias_repair_receipt(

@@ -229,6 +229,20 @@ into the event stream — same shape legacy reasoning loop produces."""
 # timeout via OperationClassification.timeout_ms.
 DEFAULT_TOOL_TIMEOUT_MS = 30_000
 
+# Long-running tools whose work legitimately exceeds the 30s default: they
+# spawn external coding agents, run test suites, or drive the improvement
+# loop. Without a floor, the blanket default kills them before they return
+# (v1 self-test: `consult` timed out at ~30s though its own envelope is 600s).
+# An explicit per-op OperationClassification.timeout_ms still wins over this.
+_LONG_RUNNING_TOOL_TIMEOUT_MS: dict = {
+    "consult": 600_000,
+    "ask_coding_session": 600_000,
+    "read_coding_session_response": 60_000,
+    "improve_kernos": 1_800_000,
+    "run_self_test_suite": 600_000,
+    "execute_code": 120_000,
+}
+
 
 class StepDispatcher:
     """Concrete StepDispatcher conforming to PDI's StepDispatcherLike.
@@ -455,7 +469,7 @@ class StepDispatcher:
             )
 
         # Per-operation timeout.
-        timeout_ms = self._timeout_ms_for(descriptor, resolution)
+        timeout_ms = self._timeout_ms_for(descriptor, resolution, step.tool_id)
 
         await self._emit_tool_called(briefing, step)
 
@@ -575,14 +589,19 @@ class StepDispatcher:
         self,
         descriptor: ToolDescriptor,
         resolution: OperationResolution,
+        tool_id: str = "",
     ) -> int:
-        """Look up per-operation timeout via PDI C1's
-        OperationClassification.timeout_ms. 0 / unset → default."""
+        """Per-operation timeout. An explicit OperationClassification.timeout_ms
+        wins; otherwise long-running tools get a realistic floor; otherwise the
+        blanket default."""
         op_name = resolution.operation_name
         if op_name:
             op = descriptor.operation_for(op_name)
             if op is not None and op.timeout_ms > 0:
                 return op.timeout_ms
+        floor = _LONG_RUNNING_TOOL_TIMEOUT_MS.get(tool_id)
+        if floor:
+            return floor
         return self._default_timeout_ms
 
     def _classify_failure(
