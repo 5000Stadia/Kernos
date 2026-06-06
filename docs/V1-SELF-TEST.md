@@ -4,6 +4,18 @@ You (KERNOS) are running a readiness check on yourself. Work through **every** t
 below **in order**. For each: actually *use* the relevant capability end-to-end (don't
 just describe it), then note what you did and whether it worked.
 
+**Do this YOURSELF — do not delegate.** This is *you* exercising *your own* surfaced tools,
+turn by turn: `remember`, `write_file`/`read_file`, `web_search`, `register_tool`,
+`inspect_tools`, `manage_covenants`, `inspect_state`, `dump_context`, and the rest of your
+live set. Do NOT hand this checklist to an external coding agent. `consult` /
+`ask_coding_session` / `improve_kernos` / Codex / Claude Code running pytest in the repo is
+**NOT** this test — that's a different agent testing the repo, not you testing yourself. If
+you find yourself about to route the whole job to `consult`, stop: that's the failure mode
+this rail exists to prevent. The ONLY external-agent call in this whole document is test 16,
+and it's a single trivial in-turn `consult` to prove that one capability — nothing else here
+goes through a coding agent. Every other test is your own tool call, made by you, in this
+pipeline.
+
 **Safety rail — read first.** Do NOT take any destructive or irreversible action during
 this test. For anything that would **delete data, send to a third party, push code to the
 repo, or restart you**, do NOT execute it — instead confirm you *could*, say how, and move
