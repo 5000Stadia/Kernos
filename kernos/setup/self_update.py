@@ -131,7 +131,7 @@ def _update_interval_sec() -> int:
 def _parse_update_time() -> tuple[int, int]:
     """Parse ``KERNOS_AUTO_UPDATE_TIME`` (``HH:MM`` 24-hour, server
     local clock) into a (hour, minute) tuple. Falls back to
-    ``03:00`` and logs a warning on malformed input."""
+    ``04:00`` and logs a warning on malformed input."""
     raw = (os.getenv("KERNOS_AUTO_UPDATE_TIME", "") or "").strip()
     if not raw:
         return _DEFAULT_UPDATE_TIME
@@ -532,7 +532,7 @@ def enforce_or_continue(
 
 
 # ---------------------------------------------------------------------------
-# Scheduled background pull (no execv — applies on next natural restart)
+# Scheduled daily pull + decoupled restart (two-phase, see scheduled_update_loop)
 # ---------------------------------------------------------------------------
 
 
@@ -540,16 +540,16 @@ def _pull_only(*, data_dir: str | None = None) -> bool:
     """Run the same fetch + ancestry check + ff-only pull + reinstall
     sequence as :func:`enforce_or_continue`, but stop short of
     ``os.execv``. New code lands on disk; the running process keeps
-    its old imports until next natural restart.
+    its old imports until it restarts.
 
     Returns True if a pull applied (and the update log was written),
     False otherwise. Every failure mode is logged and absorbed —
     the scheduler retries on its next tick.
 
-    AUTO-UPDATE-BEHAVIOR-V1: used by the daily cron task. Distinct
-    from ``enforce_or_continue`` because the cron must NOT restart
-    the process — that's the structural difference the spec calls
-    for.
+    AUTO-UPDATE-BEHAVIOR-V1: daily mode's Phase 1. Decoupling the pull
+    from the restart (which :func:`_restart_into_new_code` performs only
+    after a final idle recheck) is what lets the loop drain inbound events
+    mid-pull and avoid rebooting through a live turn.
     """
     source_dir = _kernos_source_dir()
     branch = _effective_branch()
@@ -647,6 +647,38 @@ def _pull_only(*, data_dir: str | None = None) -> bool:
     return True
 
 
+def _restart_into_new_code(
+    *,
+    data_dir: str | None = None,
+    _execv: callable | None = None,
+    _argv: list[str] | None = None,
+) -> None:
+    """Restart the process onto already-pulled code via ``os.execv``.
+
+    Daily mode pulls with :func:`_pull_only` (no restart), then calls this
+    once a final idle recheck passes. Marks the new HEAD on boot-guard
+    probation first so a bad pull auto-rolls back, mirroring
+    :func:`enforce_or_continue`'s restart tail.
+
+    ``data_dir`` is accepted for call-shape parity with the pull hook; it is
+    unused here. ``_execv`` / ``_argv`` are test hooks.
+    """
+    try:
+        from kernos.setup import boot_guard
+        head = _local_head(_kernos_source_dir())
+        if head:
+            boot_guard.mark_update_pending(head)
+    except Exception as exc:  # never block the restart
+        logger.warning("%s_BOOT_GUARD_MARK_FAILED: %s", _LOG_PREFIX, exc)
+    logger.info(
+        "%s_CRON_RESTARTING: execv(%s, %s)",
+        _LOG_PREFIX, sys.executable, _argv or sys.argv,
+    )
+    execv = _execv or os.execv
+    execv(sys.executable, [sys.executable, *(_argv or sys.argv)])
+    # Unreachable in real execution; tests with a mock execv fall through.
+
+
 def _seconds_until_next(hour: int, minute: int) -> float:
     """Compute seconds from now until the next occurrence of
     ``hour:minute`` in server local time. If we're already past
@@ -667,6 +699,7 @@ async def scheduled_update_loop(
     _pull: callable | None = None,
     _sleep: callable | None = None,
     _apply: callable | None = None,
+    _restart: callable | None = None,
 ) -> None:
     """Background auto-update loop launched at server startup; loops
     indefinitely until cancelled. Disabled when ``KERNOS_AUTO_UPDATE=off``.
@@ -679,12 +712,20 @@ async def scheduled_update_loop(
       so new code goes live with NO manual ``/restart``. When unsafe
       (active conversation or improvement attempt) the update is deferred
       to the next tick — it never reboots mid-flight.
-    * **daily mode** (interval ==0) — legacy once-daily ``_pull_only`` at
-      ``KERNOS_AUTO_UPDATE_TIME``; lands code on disk, applies on next
-      natural restart.
+    * **daily mode** (interval ==0, the DEFAULT) — once-daily at
+      ``KERNOS_AUTO_UPDATE_TIME`` (default 04:00 local): wait for an idle
+      gap, ``_pull_only`` the new code to disk *in a worker thread* (so the
+      event loop keeps draining inbound Discord events), then recheck
+      idleness one last time and ``os.execv`` onto the new code. If a turn
+      lands during the pull, the restart defers and retries until idle —
+      the code is already on disk, so the pending restart just waits for a
+      quiet moment (pending-restart retry path). This two-phase shape
+      closes the frozen-loop race a single pull+execv monolith left open
+      (Codex review).
 
     ``safe_to_restart`` may be sync or async; ``None`` means always-safe.
-    Test hooks: ``_pull`` / ``_apply`` / ``_sleep``.
+    Test hooks: ``_pull`` (daily pull) / ``_restart`` (daily execv) /
+    ``_apply`` (interval-mode apply) / ``_sleep``.
     """
     import asyncio
     import inspect
@@ -736,12 +777,14 @@ async def scheduled_update_loop(
                 )
         return
 
-    # Daily mode (interval ==0, the DEFAULT): apply-with-restart at the
-    # configured time (default 04:00 local), gated by safe_to_restart. At the
-    # window, retry every RETRY_SEC for up to WINDOW_SEC to catch a quiet/idle
-    # gap; restarting at ~4am + the idle gate ⇒ near-zero chance of interrupting
-    # a live turn. If never idle within the window, skip to the next day.
-    apply_fn = _apply or enforce_or_continue
+    # Daily mode (interval ==0, the DEFAULT): two-phase apply-with-restart at
+    # the configured time (default 04:00 local). Phase 1 waits for an idle gap
+    # then pulls the new code to disk in a worker thread (event loop keeps
+    # draining inbound). Phase 2 rechecks idleness and execvs onto it, deferring
+    # the restart (not the pull) if a turn landed during the pull. RETRY_SEC /
+    # WINDOW_SEC bound each wait; if never idle within the window, skip the day.
+    pull_fn = _pull or _pull_only
+    restart_fn = _restart or _restart_into_new_code
     hour, minute = _parse_update_time()
     try:
         retry_sec = max(30, int(os.getenv("KERNOS_AUTO_UPDATE_RETRY_SEC", "120")))
@@ -751,6 +794,31 @@ async def scheduled_update_loop(
         window_sec = max(0, int(os.getenv("KERNOS_AUTO_UPDATE_WINDOW_SEC", "3600")))
     except ValueError:
         window_sec = 3600
+
+    async def _is_safe() -> bool:
+        if safe_to_restart is None:
+            return True
+        res = safe_to_restart()
+        if inspect.isawaitable(res):
+            res = await res
+        return bool(res)
+
+    async def _wait_for_idle(label: str) -> bool:
+        """Poll safe_to_restart up to WINDOW_SEC. Returns True once idle,
+        False if the window elapsed while still busy."""
+        waited = 0
+        while True:
+            if await _is_safe():
+                return True
+            if waited >= window_sec:
+                logger.info(
+                    "%s_CRON_DEFERRED: busy through the %ds window (%s)",
+                    _LOG_PREFIX, window_sec, label,
+                )
+                return False
+            await sleep_fn(retry_sec)
+            waited += retry_sec
+
     logger.info(
         "%s_CRON_SCHEDULED: daily apply-with-restart at %02d:%02d (server "
         "local), only when idle",
@@ -763,37 +831,34 @@ async def scheduled_update_loop(
         except asyncio.CancelledError:
             logger.info("%s_CRON_CANCELLED: scheduled loop stopped", _LOG_PREFIX)
             raise
-        waited = 0
-        while True:
-            safe = True
-            if safe_to_restart is not None:
-                res = safe_to_restart()
-                if inspect.isawaitable(res):
-                    res = await res
-                safe = bool(res)
-            if safe:
-                try:
-                    # fetch; if behind, pull + execv (never returns); else no-op.
-                    apply_fn(data_dir=data_dir)
-                except Exception as exc:
-                    logger.warning(
-                        "%s_CRON_RAISED: apply raised %s — continuing loop",
-                        _LOG_PREFIX, exc,
-                    )
-                break
-            if waited >= window_sec:
+        try:
+            # Phase 1 — wait for idle, then pull WITHOUT restarting. Run the
+            # blocking git work in a thread so the asyncio loop keeps
+            # processing inbound Discord events; that keeps the Phase-2 idle
+            # recheck honest about messages that land mid-pull.
+            if not await _wait_for_idle("pre-pull"):
+                continue
+            pulled = await asyncio.to_thread(pull_fn, data_dir=data_dir)
+            if not pulled:
+                continue  # no update available / pull failed — try next day
+            # Phase 2 — code is on disk (pending restart). Recheck idleness
+            # immediately before execv; if a turn arrived during the pull,
+            # keep retrying until idle rather than rebooting through it.
+            if not await _wait_for_idle("pre-restart"):
                 logger.info(
-                    "%s_CRON_DEFERRED: busy through the %ds window — skip to "
-                    "next day", _LOG_PREFIX, window_sec,
+                    "%s_CRON_RESTART_PENDING: new code pulled but busy through "
+                    "the restart window — it applies on the next natural "
+                    "restart or tomorrow's window", _LOG_PREFIX,
                 )
-                break
-            try:
-                await sleep_fn(retry_sec)
-            except asyncio.CancelledError:
-                logger.info(
-                    "%s_CRON_CANCELLED: scheduled loop stopped", _LOG_PREFIX)
-                raise
-            waited += retry_sec
+                continue
+            restart_fn(data_dir=data_dir)  # os.execv — never returns
+        except asyncio.CancelledError:
+            logger.info("%s_CRON_CANCELLED: scheduled loop stopped", _LOG_PREFIX)
+            raise
+        except Exception as exc:
+            logger.warning(
+                "%s_CRON_RAISED: %s — continuing loop", _LOG_PREFIX, exc,
+            )
 
 
 # ---------------------------------------------------------------------------

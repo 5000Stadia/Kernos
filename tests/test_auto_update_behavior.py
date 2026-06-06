@@ -318,17 +318,21 @@ class TestScheduledUpdateLoop:
         assert sleep_calls == []
 
     async def test_loop_applies_when_idle(self, monkeypatch):
-        """Daily mode: sleep to the window, apply-with-restart when idle,
-        sleep again — interrupt on the second sleep to exit cleanly."""
+        """Daily mode (two-phase): sleep to the window, pull-then-restart when
+        idle, sleep again — interrupt on the second daily sleep to exit."""
         monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
         monkeypatch.setenv("KERNOS_AUTO_UPDATE_TIME", "04:00")
         monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")  # daily mode
 
-        apply_calls: list[dict] = []
+        pull_calls: list[dict] = []
+        restart_calls: list[dict] = []
 
-        def _fake_apply(**kwargs):
-            apply_calls.append(kwargs)
-            return True
+        def _fake_pull(**kwargs):
+            pull_calls.append(kwargs)
+            return True  # new code landed on disk
+
+        def _fake_restart(**kwargs):
+            restart_calls.append(kwargs)  # stand-in for os.execv (never returns)
 
         sleep_count = [0]
 
@@ -341,22 +345,29 @@ class TestScheduledUpdateLoop:
         with pytest.raises(asyncio.CancelledError):
             await self_update.scheduled_update_loop(
                 data_dir="/tmp/test", safe_to_restart=lambda: True,
-                _apply=_fake_apply, _sleep=_fake_sleep,
+                _pull=_fake_pull, _restart=_fake_restart, _sleep=_fake_sleep,
             )
-        # One apply executed (idle) between the two daily sleeps.
-        assert len(apply_calls) == 1
-        assert apply_calls[0] == {"data_dir": "/tmp/test"}
+        # One pull + one restart (idle through both phases) between daily sleeps.
+        assert len(pull_calls) == 1
+        assert pull_calls[0] == {"data_dir": "/tmp/test"}
+        assert len(restart_calls) == 1
+        assert restart_calls[0] == {"data_dir": "/tmp/test"}
 
-    async def test_loop_continues_after_apply_raises(self, monkeypatch):
-        """If apply raises, the loop logs and continues — doesn't crash."""
+    async def test_loop_continues_after_pull_raises(self, monkeypatch):
+        """If the pull raises, the loop logs and continues — doesn't crash,
+        and never reaches the restart."""
         monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
         monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")  # daily mode
 
-        apply_calls = [0]
+        pull_calls = [0]
+        restart_calls = [0]
 
-        def _fake_apply(**kwargs):
-            apply_calls[0] += 1
-            raise RuntimeError("simulated apply failure")
+        def _fake_pull(**kwargs):
+            pull_calls[0] += 1
+            raise RuntimeError("simulated pull failure")
+
+        def _fake_restart(**kwargs):
+            restart_calls[0] += 1
 
         sleep_count = [0]
 
@@ -368,44 +379,82 @@ class TestScheduledUpdateLoop:
         with pytest.raises(asyncio.CancelledError):
             await self_update.scheduled_update_loop(
                 data_dir=None, safe_to_restart=lambda: True,
-                _apply=_fake_apply, _sleep=_fake_sleep,
+                _pull=_fake_pull, _restart=_fake_restart, _sleep=_fake_sleep,
             )
-        # Loop survived two apply failures (3 sleeps means 2 applies).
-        assert apply_calls[0] == 2
+        # Loop survived two pull failures (3 sleeps means 2 pull attempts).
+        assert pull_calls[0] == 2
+        # A failed pull never restarts.
+        assert restart_calls[0] == 0
 
-    async def test_daily_defers_while_busy_then_applies_when_idle(self, monkeypatch):
-        """Daily mode at the 4am window: not idle → retry within the window;
-        applies once a quiet gap opens — never reboots over a live turn."""
+    async def test_daily_no_update_does_not_restart(self, monkeypatch):
+        """Daily mode: when the pull reports no new code (False), the loop
+        skips the restart and waits for the next day."""
         monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
         monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")  # daily mode
-        monkeypatch.setenv("KERNOS_AUTO_UPDATE_RETRY_SEC", "60")
-        monkeypatch.setenv("KERNOS_AUTO_UPDATE_WINDOW_SEC", "600")
 
-        safe_seq = [False, False, True]  # busy, busy, then idle
+        restart_calls = [0]
 
-        def _safe():
-            return safe_seq.pop(0) if safe_seq else True
+        def _fake_pull(**kwargs):
+            return False  # already current
 
-        apply_calls = [0]
-
-        def _fake_apply(**kwargs):
-            apply_calls[0] += 1
-            return True
+        def _fake_restart(**kwargs):
+            restart_calls[0] += 1
 
         sleep_count = [0]
 
         async def _fake_sleep(seconds):
             sleep_count[0] += 1
-            if sleep_count[0] >= 4:  # daily + 2 retry sleeps + next daily
+            if sleep_count[0] >= 2:
+                raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await self_update.scheduled_update_loop(
+                data_dir=None, safe_to_restart=lambda: True,
+                _pull=_fake_pull, _restart=_fake_restart, _sleep=_fake_sleep,
+            )
+        assert restart_calls[0] == 0
+
+    async def test_daily_defers_restart_while_busy_then_restarts_when_idle(self, monkeypatch):
+        """Two-phase daily mode: idle for the pull, then a turn lands during
+        the apply window → restart defers and retries until idle. The code is
+        already on disk, so only the *restart* waits — never reboots over a
+        live turn."""
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE", "on")
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")  # daily mode
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_RETRY_SEC", "60")
+        monkeypatch.setenv("KERNOS_AUTO_UPDATE_WINDOW_SEC", "600")
+
+        # phase1 idle check (True) → pull → phase2: busy, busy, then idle.
+        safe_seq = [True, False, False, True]
+
+        def _safe():
+            return safe_seq.pop(0) if safe_seq else True
+
+        pull_calls = [0]
+        restart_calls = [0]
+
+        def _fake_pull(**kwargs):
+            pull_calls[0] += 1
+            return True
+
+        def _fake_restart(**kwargs):
+            restart_calls[0] += 1
+
+        sleep_count = [0]
+
+        async def _fake_sleep(seconds):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 4:  # daily + 2 restart-retry sleeps + next daily
                 raise asyncio.CancelledError()
 
         with pytest.raises(asyncio.CancelledError):
             await self_update.scheduled_update_loop(
                 data_dir=None, safe_to_restart=_safe,
-                _apply=_fake_apply, _sleep=_fake_sleep,
+                _pull=_fake_pull, _restart=_fake_restart, _sleep=_fake_sleep,
             )
-        # Applied exactly once — only after the two busy checks cleared.
-        assert apply_calls[0] == 1
+        # Pulled once; restarted exactly once — only after the busy gap cleared.
+        assert pull_calls[0] == 1
+        assert restart_calls[0] == 1
 
     async def test_interval_mode_applies_when_safe(self, monkeypatch):
         """Interval mode: when safe_to_restart() is truthy, the loop

@@ -59,32 +59,23 @@ _TOOL_ALIASES: dict[str, str] = {
     "external_agent.consult": "consult",
 }
 
-# Canonical names that are commonly reached for under a hallucinated dotted
-# namespace (``some_namespace.consult``). Used by the general dotted-suffix
-# fallback so a NEW namespace prefix on a known tool self-heals instead of
-# bouncing. Conservative: only the canonical targets we've already curated.
-_DOTTED_SUFFIX_CANONICALS: frozenset = frozenset(_TOOL_ALIASES.values())
-
 
 def canonicalize_tool_name(name: str) -> tuple[str, bool]:
     """Return ``(canonical_name, was_repaired)``.
 
-    Callers MUST log ``TOOL_ALIAS_REPAIR alias=X canonical=Y`` at
-    INFO level when ``was_repaired=True`` so the agent's misuse stays
-    auditable + new entries can be detected by operator log review.
+    Curated exact-match only. A general "strip any dotted namespace off a known
+    canonical" rule was considered and rejected (Codex review): this canonicalizer
+    is registry-blind, so it could misroute a legitimate dotted/MCP tool whose
+    final segment happens to match a curated name. New hallucinated shapes get a
+    curated entry above as they're observed.
+
+    Callers MUST log ``TOOL_ALIAS_REPAIR alias=X canonical=Y`` at INFO level when
+    ``was_repaired=True`` so the agent's misuse stays auditable.
     """
     canonical = _TOOL_ALIASES.get(name)
-    if canonical is not None:
-        return (canonical, True)
-    # General dotted-suffix repair: a `<namespace>.<tool>` form whose final
-    # segment is a known canonical tool resolves to that tool (e.g. any
-    # `*.consult` → consult). Removes the whole class of "agent prefixed a
-    # real tool with a made-up namespace" bounces, conservatively.
-    if "." in name:
-        suffix = name.rsplit(".", 1)[-1]
-        if suffix in _DOTTED_SUFFIX_CANONICALS:
-            return (suffix, True)
-    return (name, False)
+    if canonical is None:
+        return (name, False)
+    return (canonical, True)
 
 
 async def emit_alias_repair_receipt(

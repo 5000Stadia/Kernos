@@ -17,15 +17,15 @@ def test_external_agent_consult_resolves():
     assert canonicalize_tool_name("external_agent.consult") == ("consult", True)
 
 
-def test_general_dotted_suffix_self_heals():
-    # any made-up namespace on a known canonical tool resolves
-    assert canonicalize_tool_name("whatever_ns.consult") == ("consult", True)
-    assert canonicalize_tool_name("x.improve_kernos") == ("improve_kernos", True)
-
-
-def test_real_name_and_unknown_dotted_untouched():
-    assert canonicalize_tool_name("consult") == ("consult", False)
+def test_only_curated_dotted_forms_resolve_not_arbitrary():
+    # registry-safety (Codex review): a NON-curated dotted name is left alone,
+    # so a legitimate dotted/MCP tool can't be misrouted by suffix-matching.
+    assert canonicalize_tool_name("whatever_ns.consult") == ("whatever_ns.consult", False)
     assert canonicalize_tool_name("foo.not_a_tool") == ("foo.not_a_tool", False)
+
+
+def test_real_name_untouched():
+    assert canonicalize_tool_name("consult") == ("consult", False)
 
 
 # --- Issue B: long-tool timeout floor -------------------------------------

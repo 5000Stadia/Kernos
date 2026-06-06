@@ -1534,6 +1534,23 @@ async def on_ready():
             quiet = 120.0
         if (_t.time() - _last_inbound_event_ts) < quiet:
             return False
+        # No active/queued turn in flight. The quiet-window above is a
+        # proxy for "nobody's talking", but a single long turn (now up to
+        # 600s for consult) can outlast the 120s window while still
+        # mid-response — restarting then would drop the in-flight turn.
+        # The handler tracks live turns directly; consult that ground
+        # truth so we never reboot through someone's turn. (Codex review.)
+        try:
+            _h = globals().get("handler")
+            if _h is not None:
+                if getattr(_h, "_active_turn_count", 0) > 0:
+                    return False
+                _busy = getattr(_h, "_self_maintenance_busy", None)
+                if callable(_busy) and _busy():
+                    return False
+        except Exception:
+            # Fail-closed: if we can't read turn state, defer the restart.
+            return False
         # No in-flight improvement attempt (final_state still NULL).
         try:
             import aiosqlite
