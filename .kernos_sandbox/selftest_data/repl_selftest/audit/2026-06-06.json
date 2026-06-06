@@ -2,10 +2,10 @@
   {
     "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
+    "member_id": "mem_3cafc7e4",
     "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T20:53:14.657202+00:00",
-    "fan_out_completed_at": "2026-06-06T20:53:14.658580+00:00",
+    "fan_out_started_at": "2026-06-06T21:20:17.994491+00:00",
+    "fan_out_completed_at": "2026-06-06T21:20:17.996318+00:00",
     "global_timeout_engaged": false,
     "registered_cohort_ids": [
       "covenant"
@@ -24,10 +24,10 @@
   },
   {
     "type": "tool_call",
-    "timestamp": "2026-06-06T20:53:19.739457+00:00",
+    "timestamp": "2026-06-06T21:20:24.069873+00:00",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
     "tool_name": "read_file",
     "operation": "",
     "service_id": "",
@@ -37,42 +37,60 @@
     "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
     "success": true,
     "error": "",
-    "audit_entry_id": "60d4b04c6f7d466bb59b1d5c5859598e",
+    "audit_entry_id": "ad84e5bed33e47fcbb2347bbfccfdcaf",
     "escalated": false
   },
   {
-    "audit_category": "integration.retry",
-    "turn_id": "operator",
-    "integration_run_id": "int-f1c98d335bfc",
+    "category": "tool.dispatch",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "attempt": 1,
-    "max_retries": 3,
-    "component": "briefing_validation",
-    "reason": "redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields.",
-    "iterations": 2,
-    "tools_called": [
-      "read_file:iter1"
+    "turn_id": "operator",
+    "tool_id": "member_management.manage_members",
+    "operation_name": "manage_members:list",
+    "tool_class": "member_management",
+    "completed": false,
+    "duration_ms": 0,
+    "failure_label": "tool_not_registered"
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "manage_members",
+    "operation_name": "manage_members:list",
+    "tool_class": "member_management",
+    "completed": true,
+    "duration_ms": 2973,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:21:17.962083+00:00",
+    "fan_out_completed_at": "2026-06-06T21:21:17.963384+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
     ],
-    "phase_durations_ms": {
-      "collect": 0,
-      "integrate_iter_1": 3728,
-      "dispatch_iter_1": 1352,
-      "integrate_iter_2": 25146
-    },
-    "cohort_outputs": [
-      "operator:covenant:0"
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
     ],
-    "success": false,
-    "error": "briefing_validation: redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
   },
   {
     "type": "tool_call",
-    "timestamp": "2026-06-06T20:53:48.123769+00:00",
+    "timestamp": "2026-06-06T21:21:21.382198+00:00",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
     "tool_name": "read_file",
     "operation": "",
     "service_id": "",
@@ -82,156 +100,60 @@
     "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
     "success": true,
     "error": "",
-    "audit_entry_id": "c42b0aa1028d45daa6fee461384a1972",
+    "audit_entry_id": "1f2e2791c77f492cb6c4824986c40401",
     "escalated": false
   },
   {
     "category": "tool.dispatch",
     "instance_id": "repl:selftest",
     "turn_id": "operator",
-    "tool_id": "note_this",
-    "operation_name": "note_this",
-    "tool_class": "memory",
-    "completed": true,
-    "duration_ms": 3,
-    "failure_label": ""
+    "tool_id": "member_management.manage_members",
+    "operation_name": "manage_members",
+    "tool_class": "member_management",
+    "completed": false,
+    "duration_ms": 0,
+    "failure_label": "tool_not_registered"
   },
   {
     "category": "tool.dispatch",
     "instance_id": "repl:selftest",
     "turn_id": "operator",
-    "tool_id": "note_this",
-    "operation_name": "note_this",
-    "tool_class": "memory",
+    "tool_id": "manage_members",
+    "operation_name": "manage_members",
+    "tool_class": "member_management",
     "completed": true,
-    "duration_ms": 3,
+    "duration_ms": 4,
     "failure_label": ""
   },
   {
-    "category": "tool.dispatch",
+    "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
     "turn_id": "operator",
-    "tool_id": "note_this",
-    "operation_name": "note_this",
-    "tool_class": "memory",
-    "completed": true,
-    "duration_ms": 3,
-    "failure_label": ""
+    "fan_out_started_at": "2026-06-06T21:22:27.149019+00:00",
+    "fan_out_completed_at": "2026-06-06T21:22:27.150165+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
   },
   {
     "type": "tool_call",
-    "timestamp": "2026-06-06T20:54:48.921430+00:00",
+    "timestamp": "2026-06-06T21:22:52.949953+00:00",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "note_this",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "a6c1e89543e723c9dcd589eafe62da14ff14f3ce28f43421bc23f7c24e85dafd",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "34971d11de7e42d79e0fdef6914e3805",
-    "escalated": true
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:54:59.350285+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_state",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "030e79156f42490cb07f167a5119aa21",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:54:59.358467+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "write_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "94d3313e63d327940092727994b1213356424816584d8be8fb3dff3555322a65",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "12e3d8b60fe942a3a751427d96fa6a02",
-    "escalated": true
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:02.960792+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "manage_schedule",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "e228512f32a67a9e557748624e6ce488d1d65e4034c6646b54ea4f6e37a6a0d7",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "84a18f09f60f4c66aacf578e3eadbbdf",
-    "escalated": true
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:08.152901+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "manage_members",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "584e7600815c4c752e42f8f3c00aa4bf1597f13bb08ed5de443b33097e1a1751",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "17a7f136219e4cccbe8b1ce243da72f5",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:08.160847+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "manage_members",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "8119135f744b5001fcf58fcd6d4ee7068e2fca6cfb763f8972616571b7d358b0",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "e5db24f2d1264a3d9c29d3944e034cb7",
-    "escalated": true
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:31.548363+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
     "tool_name": "run_self_review",
     "operation": "",
     "service_id": "",
@@ -241,197 +163,152 @@
     "payload_digest": "0754885ad3ec62ed77bb2cca8074dbf142294b8befe9485eb5b8d5c02a0dc831",
     "success": true,
     "error": "",
-    "audit_entry_id": "d3468658746548deb13f7eaf4bb0c4a2",
+    "audit_entry_id": "9ae24b575ee543b580c6cccfaf5b3760",
     "escalated": false
   },
   {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:32.714864+00:00",
+    "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:23:21.622419+00:00",
+    "fan_out_completed_at": "2026-06-06T21:23:21.623661+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-06T21:23:27.487785+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
+    "tool_name": "read_file",
     "operation": "",
     "service_id": "",
     "authority": [],
     "audit_category": "read",
     "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
     "success": true,
     "error": "",
-    "audit_entry_id": "a9f3a532c23c414d847dd3d404b18da2",
+    "audit_entry_id": "70647df85f6c4a4e8810354998a46fbe",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:24:07.588839+00:00",
+    "fan_out_completed_at": "2026-06-06T21:24:07.590013+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "consult",
+    "operation_name": "consult",
+    "tool_class": "external_agent_consultation",
+    "completed": true,
+    "duration_ms": 5,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "consult",
+    "operation_name": "consult",
+    "tool_class": "external_agent_consultation",
+    "completed": true,
+    "duration_ms": 13566,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:25:31.891092+00:00",
+    "fan_out_completed_at": "2026-06-06T21:25:31.892281+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-06T21:25:36.956982+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "932be27ac9724b0fadc3f177756bf0f4",
     "escalated": false
   },
   {
     "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:34.712508+00:00",
+    "timestamp": "2026-06-06T21:25:46.224076+00:00",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
     "tool_name": "dump_context",
     "operation": "",
     "service_id": "",
     "authority": [],
     "audit_category": "read",
     "normalized_category": "tool.invocation.internal",
-    "payload_digest": "4a80a62ad5dbe4f27f769878fc71bfe2e3580c7d1d02a93a5a244c7e71a1d5e4",
+    "payload_digest": "4ef4df325af8b93bc0b6a1a373c3a1e66cd3a5de4dd9f3edec2ef13ae485b370",
     "success": true,
     "error": "",
-    "audit_entry_id": "47bb1259166e45398ba30a44d68f561a",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:39.581030+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "bf12f17a8dae8c8981751fe9aae9c6825c0331102616981afb74905408f61f6b",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "411729e9538f483d9a960961f59fe0cf",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:41.749828+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "write_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "451ccf57bdc7a7b21be1ba77a8e08052abfe51d8a045fe5aee01baaaf535fdb1",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "d1c7583bfca5457aa5fa7cf25b0cfd70",
-    "escalated": true
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:55:47.413930+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "execute_code",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "e92fae3bc42b1cb6561163faef7a8e3d644bd498b69d54b83723b46992f9e458",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "f2638a820cec44a08cc78ebdd1919ad2",
-    "escalated": true
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T20:56:03.386595+00:00",
-    "fan_out_completed_at": "2026-06-06T20:56:03.388149+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:56:06.862777+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "fd08289e733e4b2ea69ace1c27c45ae6",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:56:12.091774+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_state",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "905c53e309d64e498016dc74398cb70a",
-    "escalated": false
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T20:56:54.412629+00:00",
-    "fan_out_completed_at": "2026-06-06T20:56:54.414392+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:56:58.684151+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a2bd1103f3a64a79a3b7f3d2153cb27d",
+    "audit_entry_id": "e337f9afc55846cf9ea5b2cd7b109905",
     "escalated": false
   },
   {
@@ -448,10 +325,10 @@
   {
     "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
+    "member_id": "mem_3cafc7e4",
     "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T20:57:43.118498+00:00",
-    "fan_out_completed_at": "2026-06-06T20:57:43.119956+00:00",
+    "fan_out_started_at": "2026-06-06T21:27:13.227026+00:00",
+    "fan_out_completed_at": "2026-06-06T21:27:13.228311+00:00",
     "global_timeout_engaged": false,
     "registered_cohort_ids": [
       "covenant"
@@ -469,59 +346,99 @@
     "required_safety_cohort_failures": []
   },
   {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:57:48.916560+00:00",
+    "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:27:42.723525+00:00",
+    "fan_out_completed_at": "2026-06-06T21:27:42.724847+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:28:06.066382+00:00",
+    "fan_out_completed_at": "2026-06-06T21:28:06.067521+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-06T21:28:13.014683+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "space_id": "space_973224d6",
     "tool_name": "read_file",
     "operation": "",
     "service_id": "",
     "authority": [],
     "audit_category": "read",
     "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "payload_digest": "ef1329c5e83a5a4afdae0886abb6d6447ea8148952fe8db8f29560f9d85f44b1",
     "success": true,
     "error": "",
-    "audit_entry_id": "3816bfb4de3842ddb30903cc5b2251f8",
+    "audit_entry_id": "a616e26bff83423991062ff1fc8e738f",
     "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:57:52.007371+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "bf12f17a8dae8c8981751fe9aae9c6825c0331102616981afb74905408f61f6b",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "0169a1959a494ad3a3491297c2ccde78",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "write_file",
-    "operation_name": "write_file",
-    "tool_class": "files",
-    "completed": true,
-    "duration_ms": 15,
-    "failure_label": ""
   },
   {
     "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
+    "member_id": "mem_3cafc7e4",
     "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T20:58:33.885359+00:00",
-    "fan_out_completed_at": "2026-06-06T20:58:33.886710+00:00",
+    "fan_out_started_at": "2026-06-06T21:28:31.482848+00:00",
+    "fan_out_completed_at": "2026-06-06T21:28:31.483983+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_3cafc7e4",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-06T21:28:57.826626+00:00",
+    "fan_out_completed_at": "2026-06-06T21:28:57.827924+00:00",
     "global_timeout_engaged": false,
     "registered_cohort_ids": [
       "covenant"
@@ -539,99 +456,12 @@
     "required_safety_cohort_failures": []
   },
   {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:58:37.304937+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a70665686a6c4e12a483f9b6b4b7bd2f",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:58:45.971591+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "request_tool",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "8f24995c61a734e11237bb248d947fe523b544f7e5ff728e58ffbcd1c3060611",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "f3acc7d4d722412e999dcdbc1315960b",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "reminders",
-    "operation_name": "create",
-    "tool_class": "reminders",
-    "completed": false,
-    "duration_ms": 0,
-    "failure_label": "tool_not_registered"
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "remember",
-    "operation_name": "create",
-    "tool_class": "reminders",
-    "completed": true,
-    "duration_ms": 2909,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "reminders",
-    "operation_name": "create",
-    "tool_class": "reminders",
-    "completed": false,
-    "duration_ms": 0,
-    "failure_label": "tool_not_registered"
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T20:59:46.918326+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "manage_schedule",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "e228512f32a67a9e557748624e6ce488d1d65e4034c6646b54ea4f6e37a6a0d7",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "f0ad2dfffb0f4d3e851000c20e58b849",
-    "escalated": true
-  },
-  {
     "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
+    "member_id": "mem_3cafc7e4",
     "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:00:07.606143+00:00",
-    "fan_out_completed_at": "2026-06-06T21:00:07.607464+00:00",
+    "fan_out_started_at": "2026-06-06T21:29:33.153122+00:00",
+    "fan_out_completed_at": "2026-06-06T21:29:33.154390+00:00",
     "global_timeout_engaged": false,
     "registered_cohort_ids": [
       "covenant"
@@ -649,41 +479,12 @@
     "required_safety_cohort_failures": []
   },
   {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:00:10.781866+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "070b835fa4b547838a322c22bb7f6daf",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "execute_code",
-    "operation_name": "execute_code",
-    "tool_class": "local_code_execution",
-    "completed": true,
-    "duration_ms": 85,
-    "failure_label": ""
-  },
-  {
     "audit_category": "cohort.fan_out",
     "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
+    "member_id": "mem_3cafc7e4",
     "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:01:23.709848+00:00",
-    "fan_out_completed_at": "2026-06-06T21:01:23.711260+00:00",
+    "fan_out_started_at": "2026-06-06T21:30:01.205763+00:00",
+    "fan_out_completed_at": "2026-06-06T21:30:01.207105+00:00",
     "global_timeout_engaged": false,
     "registered_cohort_ids": [
       "covenant"
@@ -699,1209 +500,5 @@
     ],
     "required_cohort_failures": [],
     "required_safety_cohort_failures": []
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "tool_registration",
-    "completed": true,
-    "duration_ms": 9,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "tool_registration",
-    "completed": true,
-    "duration_ms": 9,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "tool_registration",
-    "completed": true,
-    "duration_ms": 9,
-    "failure_label": ""
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:01:59.371274+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "79c72c2dd725b208ef263a728fc66409ac5ccd0bac595eeff7c94eed66733180",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "c706726ea31448438b31a1210a355dd9",
-    "escalated": false
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:02:13.278076+00:00",
-    "fan_out_completed_at": "2026-06-06T21:02:13.279422+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:02:20.617608+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "26e16770ed73481fb51282ec5c56cb62",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "write_file",
-    "operation_name": "write_file",
-    "tool_class": "files",
-    "completed": true,
-    "duration_ms": 21,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:03:04.929011+00:00",
-    "fan_out_completed_at": "2026-06-06T21:03:04.930327+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:03:08.720490+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "37f1f0f9116f40c98b2090a0df2c38e2",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:03:13.788463+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a6d94c38947f438596dac79d4ce3ce6d",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 11,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:03:56.570452+00:00",
-    "fan_out_completed_at": "2026-06-06T21:03:56.572010+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:04:04.410897+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "9065034f7d804d1facdcf392c8fdbd42",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:04:11.016379+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "1d4471128d8442cab8bd5df51f571412",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 12,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:05:02.384791+00:00",
-    "fan_out_completed_at": "2026-06-06T21:05:02.386150+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:05:06.328527+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "b9ca8e8ad7704ee4b70dbb82adb29966",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:05:12.171466+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "bc760193805f48f9b7bbeeda046e830f",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "tool_registration",
-    "completed": true,
-    "duration_ms": 13,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:05:50.568433+00:00",
-    "fan_out_completed_at": "2026-06-06T21:05:50.569791+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:05:57.669781+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "71eefe2f5a8c4034a24b9f09805abf08",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "workspace_tool_registration.register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": false,
-    "duration_ms": 0,
-    "failure_label": "tool_not_registered"
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 13,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:06:44.602667+00:00",
-    "fan_out_completed_at": "2026-06-06T21:06:44.604157+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:06:50.190988+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "17837071b3ad4e77a7842178ee47cf51",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 14,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 14,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 14,
-    "failure_label": ""
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:07:34.061381+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "register_tool",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "7e5f08aad66d71fb1eba32eb93f61f15c8fff1803422f0264003d31a43133032",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "7723cd7baa6b4ae8b27bcb46d831b69c",
-    "escalated": true
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:07:47.493707+00:00",
-    "fan_out_completed_at": "2026-06-06T21:07:47.495254+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:07:50.912582+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "6f2ac4daf2404832825844842f04c89a",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:07:54.814003+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "5bc64507d3115e030e7181240fd509fe2bfd52be05f8d878447e66c04b7bd799",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "996389d9329b4381beb3c097506b7a20",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "write_file",
-    "operation_name": "write_file",
-    "tool_class": "files",
-    "completed": true,
-    "duration_ms": 15,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:08:56.934393+00:00",
-    "fan_out_completed_at": "2026-06-06T21:08:56.935761+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:09:06.582272+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "8d6aaea25ff2472598694a7100825cf6",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:09:14.787219+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "57a9089beb9945559da8942e76d716d9",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "kernel",
-    "completed": true,
-    "duration_ms": 16,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "kernel",
-    "completed": true,
-    "duration_ms": 16,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "kernel",
-    "completed": true,
-    "duration_ms": 16,
-    "failure_label": ""
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:09:49.284720+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "register_tool",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "7e5f08aad66d71fb1eba32eb93f61f15c8fff1803422f0264003d31a43133032",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "803179dcffbf46818b8e39d87164ee48",
-    "escalated": true
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:10:01.652187+00:00",
-    "fan_out_completed_at": "2026-06-06T21:10:01.653419+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:10:06.469124+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a6ff2ad93ff247b78a5a5c68e55a118e",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:10:10.807384+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "5bc64507d3115e030e7181240fd509fe2bfd52be05f8d878447e66c04b7bd799",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "c80211591a504f71bcc1cf08e3c4476d",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "code_execution.execute_code",
-    "operation_name": "execute_code",
-    "tool_class": "code_execution",
-    "completed": false,
-    "duration_ms": 0,
-    "failure_label": "tool_not_registered"
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "execute_code",
-    "operation_name": "execute_code",
-    "tool_class": "code_execution",
-    "completed": true,
-    "duration_ms": 178,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:11:46.933836+00:00",
-    "fan_out_completed_at": "2026-06-06T21:11:46.935151+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:11:51.431587+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "8e79fc00d96a496aa6827154c91437c6",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 18,
-    "failure_label": ""
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "workspace_tool_registration",
-    "completed": true,
-    "duration_ms": 18,
-    "failure_label": ""
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:12:41.975586+00:00",
-    "fan_out_completed_at": "2026-06-06T21:12:41.976941+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:12:49.680898+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "9b5a1fb0304c46d98f18cd2b40513082",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:12:53.958551+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "4e6bb42a4f6a475285c51abb053dc9ab",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:12:57.834370+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "5bc64507d3115e030e7181240fd509fe2bfd52be05f8d878447e66c04b7bd799",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "1d7c315b5c024645919895de80483611",
-    "escalated": false
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "register_tool",
-    "operation_name": "register_tool",
-    "tool_class": "kernel_tool_registration",
-    "completed": true,
-    "duration_ms": 17,
-    "failure_label": ""
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:13:32.013346+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "register_tool",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "soft_write",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "7e5f08aad66d71fb1eba32eb93f61f15c8fff1803422f0264003d31a43133032",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a6a837aaed1c4e73b13b2de5e08f01e5",
-    "escalated": true
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:13:50.668287+00:00",
-    "fan_out_completed_at": "2026-06-06T21:13:50.669539+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:13:53.971530+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a1bcbd7f356f40e5b9ee61de0fe53a03",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:14:01.914498+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "b4b4da5255284ca19750629d5767b7fb",
-    "escalated": false
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:14:40.680561+00:00",
-    "fan_out_completed_at": "2026-06-06T21:14:40.681922+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "category": "tool.dispatch",
-    "instance_id": "repl:selftest",
-    "turn_id": "operator",
-    "tool_id": "note_this",
-    "operation_name": "note_this",
-    "tool_class": "rules",
-    "completed": true,
-    "duration_ms": 11,
-    "failure_label": ""
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:15:10.060464+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_state",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "d1c303593d3541b49418d9974fa46be1",
-    "escalated": false
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:15:34.789461+00:00",
-    "fan_out_completed_at": "2026-06-06T21:15:34.790864+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:15:38.837275+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "read_file",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "d23997f2be664661974cdc9acd861421",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:15:43.487927+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_state",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "7308912ab5044873a26bd75e9eb5adf6",
-    "escalated": false
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:16:27.584325+00:00",
-    "fan_out_completed_at": "2026-06-06T21:16:27.585701+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:16:33.226111+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_state",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "b6b0a18346e848c886096a5b915e4214",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:16:41.624686+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "29fc37967cda413298aa7a012e8d92de",
-    "escalated": false
-  },
-  {
-    "audit_category": "cohort.fan_out",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "turn_id": "operator",
-    "fan_out_started_at": "2026-06-06T21:17:09.651115+00:00",
-    "fan_out_completed_at": "2026-06-06T21:17:09.652482+00:00",
-    "global_timeout_engaged": false,
-    "registered_cohort_ids": [
-      "covenant"
-    ],
-    "outcomes": [
-      {
-        "cohort_id": "covenant",
-        "cohort_run_id": "operator:covenant:0",
-        "outcome": "success",
-        "duration_ms": 1,
-        "error_summary": ""
-      }
-    ],
-    "required_cohort_failures": [],
-    "required_safety_cohort_failures": []
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:17:13.824337+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "list_files",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "a7b2208670b64fb8b0def84f55d8cfb6",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:17:20.238785+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "remember",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "79ecffafde76d5b0184590a40de5de35018f69b9cf2d7ccdce6769e02fa542e6",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "7b4cfffc49f34901be80490ab8309319",
-    "escalated": false
-  },
-  {
-    "type": "tool_call",
-    "timestamp": "2026-06-06T21:17:28.277499+00:00",
-    "instance_id": "repl:selftest",
-    "member_id": "mem_87294592",
-    "space_id": "space_2e080a73",
-    "tool_name": "inspect_tools",
-    "operation": "",
-    "service_id": "",
-    "authority": [],
-    "audit_category": "read",
-    "normalized_category": "tool.invocation.internal",
-    "payload_digest": "6f7c863f7e1d9e76e169ad9113fc1c2a89fbec82b34e97db806bf402d0c498a4",
-    "success": true,
-    "error": "",
-    "audit_entry_id": "2e56868238d8463a87409835db19ee15",
-    "escalated": false
   }
 ]
