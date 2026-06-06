@@ -66,6 +66,10 @@ _TOOL_ALIASES: dict[str, str] = {
     "files.list_files": "list_files",
     "files.delete_file": "delete_file",
     "context_space_read": "read_file",
+    # 2026-06-06 v1 self-test: agent reached for manage_plan under a dotted
+    # "planning." namespace before correcting to the flat name.
+    "planning.manage_plan": "manage_plan",
+    "planning.create_plan": "manage_plan",
 }
 
 
