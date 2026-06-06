@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "instance_id": "repl:selftest",
+  "space_id": "space_13363999",
+  "artifacts": [
+    {
+      "id": "artifact_027fc6d8",
+      "name": "coin_flip",
+      "type": "data_tool",
+      "description": "Flip a fair coin and return heads or tails.",
+      "files": {
+        "descriptor": "coin_flip.tool.json",
+        "implementation": "coin_flip_tool.py",
+        "store": ""
+      },
+      "catalog_entry": "coin_flip",
+      "created_at": "2026-06-06T20:44:10.903968+00:00",
+      "last_modified": "2026-06-06T20:44:10.903968+00:00",
+      "version": 1,
+      "status": "active",
+      "home_space": "space_13363999",
+      "stateful": true
+    }
+  ]
+}

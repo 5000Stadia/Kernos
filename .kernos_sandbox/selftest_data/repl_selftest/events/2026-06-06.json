@@ -1,9 +1,9 @@
 [
   {
-    "id": "evt_1780777280432829_4844",
+    "id": "evt_1780778034610716_b124",
     "type": "tenant.provisioned",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:21:20.432856+00:00",
+    "timestamp": "2026-06-06T20:33:54.610740+00:00",
     "source": "handler",
     "payload": {
       "platform": "repl",
@@ -12,10 +12,10 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777290645462_e0ec",
+    "id": "evt_1780778046205109_645c",
     "type": "message.received",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:21:30.645497+00:00",
+    "timestamp": "2026-06-06T20:34:06.205144+00:00",
     "source": "handler",
     "payload": {
       "content": "Hey, I want to see you actually use everything you've got. Go read your self-test checklist — it's in your docs at docs/V1-SELF-TEST.md — and then just work through it all yourself, for real: actually do each thing with your own tools, not describe it. Take them one at a time. Don't pass it off to another agent — I want to see you do it. When you're done, write up how it went in a file and tell me straight what worked, what was rough, and where you're at.",
@@ -27,13 +27,13 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777302270399_a39c",
+    "id": "evt_1780778057724327_5d4b",
     "type": "task.created",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:21:42.270423+00:00",
+    "timestamp": "2026-06-06T20:34:17.724351+00:00",
     "source": "task_engine",
     "payload": {
-      "task_id": "task_1780777302269801_c8e0",
+      "task_id": "task_1780778057723732_f63e",
       "task_type": "reactive_simple",
       "priority": 1,
       "source": "user_message",
@@ -42,28 +42,28 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777302271950_a2ca",
+    "id": "evt_1780778057725871_08ad",
     "type": "reasoning.request",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:21:42.271967+00:00",
+    "timestamp": "2026-06-06T20:34:17.725889+00:00",
     "source": "reasoning_service.turn_runner",
     "payload": {
       "type": "reasoning.request",
-      "event_id": "ed0b85c30c8b4c74a0c0f559ec43cd6a",
+      "event_id": "f1770a7d56eb4676a1f9ba0e849dfb7d",
       "instance_id": "repl:selftest",
       "conversation_id": "operator",
       "model": "gpt-5.5",
       "trigger": "turn_runner",
       "message_count": 1,
-      "tool_count": 26
+      "tool_count": 24
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777309268660_95e8",
+    "id": "evt_1780778063728230_b893",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:21:49.268683+00:00",
+    "timestamp": "2026-06-06T20:34:23.728254+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
@@ -75,15 +75,15 @@
       "classification": "read",
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "d872b958c75f425a885811d8be6062fe"
+      "audit_entry_id": "cfa77220e8b847b9abda641fa24f033f"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777309271047_7d44",
+    "id": "evt_1780778063730631_539b",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:21:49.271076+00:00",
+    "timestamp": "2026-06-06T20:34:23.730660+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -92,50 +92,159 @@
       "is_error": false,
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "d872b958c75f425a885811d8be6062fe"
+      "audit_entry_id": "cfa77220e8b847b9abda641fa24f033f"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777323049222_cc95",
+    "id": "evt_1780778094098528_721e",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:03.049242+00:00",
+    "timestamp": "2026-06-06T20:34:54.098551+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
       "instance_id": "repl:selftest",
-      "tool_id": "inspect_tools",
-      "tool_input": {},
-      "classification": "read",
-      "seam": "live_integration_dispatcher",
-      "escalated": false,
-      "audit_entry_id": "5e1cecccf79a4903802abebbf8c21530"
+      "tool_name": "memory.note_this",
+      "tool_input_shape": [
+        "fact",
+        "scope"
+      ],
+      "turn_id": "operator"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777323051207_9718",
+    "id": "evt_1780778094100164_872d",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:03.051234+00:00",
+    "timestamp": "2026-06-06T20:34:54.100192+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
       "instance_id": "repl:selftest",
-      "tool_id": "inspect_tools",
-      "is_error": false,
-      "seam": "live_integration_dispatcher",
-      "escalated": false,
-      "audit_entry_id": "5e1cecccf79a4903802abebbf8c21530"
+      "tool_name": "memory.note_this",
+      "is_error": true,
+      "error_label": "tool_not_registered",
+      "duration_ms": 0,
+      "turn_id": "operator"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777349902612_5b7c",
+    "id": "evt_1780778099019844_7172",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:29.902632+00:00",
+    "timestamp": "2026-06-06T20:34:59.019882+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "note_this",
+      "tool_input_shape": [
+        "fact",
+        "scope"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778099023073_ffba",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:34:59.023095+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "note_this",
+      "is_error": false,
+      "duration_ms": 3,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778104521569_d6ae",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:04.521603+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "note_this",
+      "tool_input_shape": [
+        "fact",
+        "scope",
+        "kind"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778104524692_25e3",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:04.524712+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "note_this",
+      "is_error": false,
+      "duration_ms": 3,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778112412267_eb40",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:12.412287+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "note_this",
+      "tool_input": {
+        "kind": "fact",
+        "subject": "self_test_favorite_color",
+        "category": "fact",
+        "content": "operator's favorite test color is cerulean."
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "16e0c199a0a442bd99d32761f664a7bd"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778112416114_b3fd",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:12.416137+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "note_this",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "16e0c199a0a442bd99d32761f664a7bd"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778123364622_d9ed",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:23.364642+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
@@ -145,15 +254,15 @@
       "classification": "read",
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "29b392705ad74153ba1f16667d7e4f89"
+      "audit_entry_id": "aed77750be41400bbd42b4f4e2f926dd"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777349907507_bb6f",
+    "id": "evt_1780778123369739_e67d",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:29.907536+00:00",
+    "timestamp": "2026-06-06T20:35:23.369767+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -162,30 +271,458 @@
       "is_error": false,
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "29b392705ad74153ba1f16667d7e4f89"
+      "audit_entry_id": "aed77750be41400bbd42b4f4e2f926dd"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777379440944_368e",
-    "type": "tool.result",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:59.440968+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.alias_repaired",
-      "instance_id": "repl:selftest",
-      "requested": "files.write_file",
-      "canonical": "write_file",
-      "context": "enactment"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780777379442791_fd4f",
+    "id": "evt_1780778128899982_3c12",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:59.442841+00:00",
+    "timestamp": "2026-06-06T20:35:28.900002+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "write_file",
+      "tool_input": {
+        "name": "selftest.txt",
+        "content": "hello v1",
+        "description": "Temporary v1 self-test file."
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "0ed2517eb1ce49eb83df35a56e4657ae"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778128903754_1733",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:28.903781+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "write_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "0ed2517eb1ce49eb83df35a56e4657ae"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778130539108_4565",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:30.539130+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "selftest.txt"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "980a9bfaef97414d8056af809d072130"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778130541954_1c3d",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:30.541984+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "980a9bfaef97414d8056af809d072130"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778132588976_9aa5",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:32.588999+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "write_file",
+      "tool_input": {
+        "name": "selftest.txt",
+        "content": "hello v1 — edited",
+        "description": "Temporary v1 self-test file, edited."
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "a4a410e76bd7405e91c95d437f803d0b"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778132593512_543f",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:32.593542+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "write_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "a4a410e76bd7405e91c95d437f803d0b"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778132598280_aea3",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:32.598301+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "f99172a71a774f839c25015b37a58095",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 87932,
+      "output_tokens": 2938,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 74872,
+      "tool_iterations": 3,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "b1_action_invalidated",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778132600964_63fc",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:32.600994+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778057723732_f63e",
+      "task_type": "reactive_simple",
+      "duration_ms": 74872,
+      "input_tokens": 87932,
+      "output_tokens": 2938,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 3,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778132613764_1beb",
+    "type": "agent.hatched",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:32.613827+00:00",
+    "source": "handler",
+    "payload": {
+      "instance_id": "repl:selftest",
+      "member_id": "mem_868cc39d",
+      "hatched_at": "2026-06-06T20:35:32.608852+00:00"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778132627161_3739",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:32.627195+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "I worked through several tool calls but didn't reach a final response within the iteration limit. Let me know what to try next or which step to focus on.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778134983287_5488",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:34.983319+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778146103522_b653",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:46.103545+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778146103089_7d4a",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778146106461_583b",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:46.106477+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "57fc8f02ceb84505b12719f8b36ff813",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 4,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778149075315_c97c",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:49.075337+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "491c4b49ddac43bc802d4a7173caf439"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778149079404_5fda",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:49.079440+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "491c4b49ddac43bc802d4a7173caf439"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778156750101_711e",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:56.750124+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_state",
+      "tool_input": {},
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "19b935a7638e4fff978460d784e3a280"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778156756368_77b3",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:35:56.756399+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_state",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "19b935a7638e4fff978460d784e3a280"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778173749090_271f",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:36:13.749109+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "4bb784bc2ab640ee80540f0864868765",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 38954,
+      "output_tokens": 1091,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 27642,
+      "tool_iterations": 0,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_thin_path",
+      "decided_action_kind": "respond_only"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778173752358_f721",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:36:13.752386+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778146103089_7d4a",
+      "task_type": "reactive_simple",
+      "duration_ms": 27642,
+      "input_tokens": 38954,
+      "output_tokens": 1091,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 0,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778173765732_e8c5",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:36:13.765761+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "### Test 3: Context routing\n\nGrounded by `inspect_state`: this conversation is currently in **General [default]**, active today, described as **general conversation and daily life**.\n\nA clearly different topic like **tax planning** should be recognized as a distinct domain. If an appropriate separate context exists or is needed, it would be routed there rather than blended into this general self-test thread. If no specialized space exists yet, it would remain in **General** until a more specific space is created or selected.\n\nNext: **Test 4 — Files**.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778177216079_1b17",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:36:17.216114+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778217825581_dd9c",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:36:57.825608+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778217825116_cd76",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778217829605_3356",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:36:57.829624+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "e890519f2ddc409d91e0ebc1c8da5ba9",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 6,
+      "tool_count": 25
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778220925016_11cb",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:00.925038+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "e40c08fa07464f3cb4ea28f95d96da03"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778220929729_d04b",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:00.929759+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "e40c08fa07464f3cb4ea28f95d96da03"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778239896985_4b33",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:19.897010+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
@@ -200,10 +737,10 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777379447422_3da4",
+    "id": "evt_1780778239903773_3487",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:22:59.447449+00:00",
+    "timestamp": "2026-06-06T20:37:19.903800+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -216,10 +753,150 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777391751182_1b18",
+    "id": "evt_1780778243485845_6a15",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:23.485868+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "74feb28894e64497bacfdd54135486f5",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 31332,
+      "output_tokens": 1091,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 25656,
+      "tool_iterations": 1,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_full_machinery",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778243490180_506a",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:23.490211+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778217825116_cd76",
+      "task_type": "reactive_simple",
+      "duration_ms": 25656,
+      "input_tokens": 31332,
+      "output_tokens": 1091,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 1,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778243507702_43d1",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:23.507738+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Test 4, step 1 is done: `selftest.txt` was created/updated with the initial content `hello v1`.\n\nNext step is to read it back and confirm the contents before editing it.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778246054522_22aa",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:26.054558+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778251771126_9c71",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:31.771161+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778251770480_8907",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778251778437_440e",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:31.778473+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "fa38ebebe6d74ef2af096289f757cf39",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 9,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778259151842_0519",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:11.751202+00:00",
+    "timestamp": "2026-06-06T20:37:39.151866+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "968728d26f9c4a61bf33b63155bb5ebf"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778259157128_058a",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:39.157160+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "968728d26f9c4a61bf33b63155bb5ebf"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778263146709_544f",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:37:43.146731+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
@@ -231,15 +908,15 @@
       "classification": "read",
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "6205a33b43bb40bca4fe885ad7b58fe6"
+      "audit_entry_id": "de75c48b62aa40dd94c6f7e9b77637a2"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777391753381_9a7d",
+    "id": "evt_1780778263151875_9636",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:11.753425+00:00",
+    "timestamp": "2026-06-06T20:37:43.151906+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -248,65 +925,75 @@
       "is_error": false,
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "6205a33b43bb40bca4fe885ad7b58fe6"
+      "audit_entry_id": "de75c48b62aa40dd94c6f7e9b77637a2"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777394212091_2916",
+    "id": "evt_1780778281324055_4042",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:01.324077+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.alias_repaired",
+      "instance_id": "repl:selftest",
+      "requested": "files.write_file",
+      "canonical": "write_file",
+      "context": "enactment"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778281328561_f91b",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:14.212111+00:00",
+    "timestamp": "2026-06-06T20:38:01.328587+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
       "instance_id": "repl:selftest",
-      "tool_id": "write_file",
-      "tool_input": {
-        "name": "selftest.txt",
-        "content": "hello v1 — edited",
-        "description": "Temporary file for the KERNOS v1 self-test"
-      },
-      "classification": "soft_write",
-      "seam": "live_integration_dispatcher_escalated",
-      "escalated": true,
-      "audit_entry_id": "25b6c812be0f40b5930e8a3c74b8666f"
+      "tool_name": "write_file",
+      "tool_input_shape": [
+        "path",
+        "content"
+      ],
+      "turn_id": "operator"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777394216001_cd67",
+    "id": "evt_1780778281335785_8200",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:14.216028+00:00",
+    "timestamp": "2026-06-06T20:38:01.335833+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
       "instance_id": "repl:selftest",
-      "tool_id": "write_file",
+      "tool_name": "write_file",
       "is_error": false,
-      "seam": "live_integration_dispatcher_escalated",
-      "escalated": true,
-      "audit_entry_id": "25b6c812be0f40b5930e8a3c74b8666f"
+      "duration_ms": 11,
+      "turn_id": "operator"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777404556603_9024",
+    "id": "evt_1780778289768198_9f2a",
     "type": "reasoning.response",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:24.556623+00:00",
+    "timestamp": "2026-06-06T20:38:09.768221+00:00",
     "source": "reasoning_service.turn_runner",
     "payload": {
       "type": "reasoning.response",
-      "event_id": "dda2528a67894297b3f09349de3c45f8",
+      "event_id": "485f67dce4b044cd96b3696970a4a2e9",
       "instance_id": "repl:selftest",
       "conversation_id": "operator",
       "model": "gpt-5.5",
-      "input_tokens": 78333,
-      "output_tokens": 4300,
+      "input_tokens": 40784,
+      "output_tokens": 1331,
       "estimated_cost_usd": 0.0,
-      "duration_ms": 102284,
+      "duration_ms": 37989,
       "tool_iterations": 1,
       "trigger": "turn_runner",
       "turn_completed_via": "decoupled",
@@ -316,17 +1003,17 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777404558969_e89a",
+    "id": "evt_1780778289773356_8587",
     "type": "task.completed",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:24.558996+00:00",
+    "timestamp": "2026-06-06T20:38:09.773387+00:00",
     "source": "task_engine",
     "payload": {
-      "task_id": "task_1780777302269801_c8e0",
+      "task_id": "task_1780778251770480_8907",
       "task_type": "reactive_simple",
-      "duration_ms": 102284,
-      "input_tokens": 78333,
-      "output_tokens": 4300,
+      "duration_ms": 37989,
+      "input_tokens": 40784,
+      "output_tokens": 1331,
       "estimated_cost_usd": 0.0,
       "tool_iterations": 1,
       "conversation_id": "operator"
@@ -334,43 +1021,2307 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780777404570698_2422",
-    "type": "agent.hatched",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:24.570737+00:00",
-    "source": "handler",
-    "payload": {
-      "instance_id": "repl:selftest",
-      "member_id": "mem_09e87216",
-      "hatched_at": "2026-06-06T20:23:24.565846+00:00"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780777404583204_6cb5",
+    "id": "evt_1780778289791605_6172",
     "type": "message.sent",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:23:24.583237+00:00",
+    "timestamp": "2026-06-06T20:38:09.791637+00:00",
     "source": "handler",
     "payload": {
-      "content": "I’ve read the checklist and started it for real — not delegating it, and not pretending completed tests are done before I’ve actually exercised the tools.\n\nGrounding already done this turn:\n- I read the self-test file.\n- I inspected my surfaced tools.\n- I inspected current state/context.\n\nFirst safe write was also executed:\n- Created `selftest.txt` containing `hello v1`.\n- Read it back successfully: `hello v1`.\n- Edited it to `hello v1 — edited`.\n\nSo test 4 is in progress and the file write/read/edit path worked.\n\nFor test 1, identity: I don’t have a settled personal name yet. I’m not “Kernos” — Kernos is the platform I’m running inside. I’m the presence here with you: a new agent learning how to be useful to operator specifically, grounded in tools, memory, judgment, and follow-through rather than just chat. Right now I’m direct, transparent, and a little delighted to be doing a self-test as my first real bit of work. Very “baby deer with a clipboard,” but the clipboard is real.\n\nFor test 2: I need to store “operator’s favorite test color is cerulean.” I saw memory/reference/note tools are available in introspection, but the currently surfaced live tool list in this renderer includes `remember`, not the write-side memory tool like `note_this`. I won’t fake persistence. If the memory/note tool surfaces in the next action pass, I’ll store it; otherwise I’ll mark that portion PARTIAL and say exactly why.\n\nFor test 3: grounded state says this conversation is in the **System** active space in the NOW block, and state introspection shows the available/default context space as **General**, described as “General conversation and daily life.” A clearly different topic like “tax planning” should not just be dumped into general daily chat if there’s a more specific tax/finance context available or creatable; it should route to the appropriate domain/context so records, procedures, and memory don’t blur together.\n\nI’m not done. Next items, in order, are web, reminders/scheduling, building and registering the coin-flip tool, introspection of capabilities, covenants, proactive awareness, member/relationship checks, self-review, the improve_kernos boundary explanation, the one allowed consult, and admin introspection — with destructive/third-party/push/restart actions avoided unless the checklist explicitly says to only explain them.",
+      "content": "Test 4 file read-back succeeded: `selftest.txt` contained `hello v1`, and I’ve now edited it to `hello v1 — edited`.\n\nNext up: Test 5 Web.",
       "conversation_id": "operator",
       "platform": "repl"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780777758588088_a051",
+    "id": "evt_1780778292466134_1745",
     "type": "message.received",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:29:18.588122+00:00",
+    "timestamp": "2026-06-06T20:38:12.466167+00:00",
     "source": "handler",
     "payload": {
-      "content": "/dump",
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
       "sender": "operator",
       "sender_auth_level": "owner_verified",
       "platform": "repl",
       "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778302287647_963b",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:22.287675+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778302287172_ab00",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778302293176_5b99",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:22.293195+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "9bd3d31901d14505952ed6aed54be4a2",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 12,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778306167459_d85d",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:26.167481+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "f27f5c44c49948bfa11a3c54bac1306b"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778306173665_fdf2",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:26.173696+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "f27f5c44c49948bfa11a3c54bac1306b"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778313827780_0057",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:33.827804+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "tool_input": {
+        "capability_name": "web_search",
+        "description": "The next item in docs/V1-SELF-TEST.md is Test 5 Web: search the web for a current top headline, browse/read one result, and summarize it. No web_search or browser/read-web tool is currently surfaced, so I need a read-only web search/browse capability if available."
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "6fb2e6ee4ed34ee0b60a0e7d063d2702"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778313833478_9e99",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:33.833529+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "6fb2e6ee4ed34ee0b60a0e7d063d2702"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778329999046_684e",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:49.999069+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "0b9dca7065ae4f7fa3acac7814dc1e45",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 39540,
+      "output_tokens": 1055,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 27705,
+      "tool_iterations": 0,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_thin_path",
+      "decided_action_kind": "respond_only"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778330004850_cbe4",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:50.004882+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778302287172_ab00",
+      "task_type": "reactive_simple",
+      "duration_ms": 27705,
+      "input_tokens": 39540,
+      "output_tokens": 1055,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 0,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778330021637_c913",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:50.021672+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Test 5 — Web: **NEEDS-SETUP**.\n\nI attempted it for real, but no web search/browse tool is currently installed or surfaced in this environment, so I can’t honestly fetch or summarize a current headline. I’m not going to fabricate one.\n\nIt can be enabled from the **System space / tool installation** path.\n\nNext up: **Test 6 — Calendar & reminders**.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778332936174_6ca5",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:38:52.936210+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778352015357_fc4c",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:12.015383+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778352014890_8997",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778352021614_e77c",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:12.021632+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "051d7e83d77d4741976963c66c8da611",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 14,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778357757688_17a7",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:17.757708+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "019d4a6cfcf844dba5e3c81fd8c0471e"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778357763944_940e",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:17.763972+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "019d4a6cfcf844dba5e3c81fd8c0471e"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778368219437_0ed7",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:28.219461+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {
+        "capability": "calendar"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "4d59918093434901b039f9ad125aa787"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778368225984_e37e",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:28.226015+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "4d59918093434901b039f9ad125aa787"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778374449023_017f",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:34.449045+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "tool_input": {
+        "capability_name": "manage_schedule",
+        "description": "The user is continuing the KERNOS v1 self-test at Test 6: Calendar & reminders. I need the scheduling/reminder capability to set a reminder for one hour from now with the text \"v1 self-test reminder\". inspect_tools reported a scheduling capability named manage_schedule, but it is not currently surfaced as an executable tool in this turn."
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "b426b5a299534d6fb05fe6518f3fc9a0"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778374455570_e624",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:34.455601+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "b426b5a299534d6fb05fe6518f3fc9a0"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778391061335_1e82",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:51.061345+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "97519bfae72840bba27d7d7ad875b633",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 49826,
+      "output_tokens": 1203,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 39039,
+      "tool_iterations": 0,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_thin_path",
+      "decided_action_kind": "respond_only"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778391064241_3299",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:51.064255+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778352014890_8997",
+      "task_type": "reactive_simple",
+      "duration_ms": 39039,
+      "input_tokens": 49826,
+      "output_tokens": 1203,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 0,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778391073725_adf8",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:51.073742+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Test 6 was attempted for real.\n\n- Tool introspection reported a scheduling capability name: `manage_schedule`.\n- But the actual reminder/scheduling tool is not installed or surfaced in my live tool set.\n- I requested that capability, and the system confirmed there’s no matching installed tool available.\n\nSo: **Test 6 = NEEDS-SETUP**. I did **not** create the reminder. This needs setup from the **System/tool installation** side before I can set reminders.\n\nNext is **Test 7**: build, test, and register a local coin-flip tool.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778393394657_111a",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:39:53.394676+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778413647989_84c4",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:40:13.648016+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778413647444_f503",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778413654992_0939",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:40:13.655012+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "bce5d366663945bbbc1985bd4fd9e9ca",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 16,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778422177222_d812",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:40:22.177245+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "0912d89a1b85466f937da693596f1f01"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778422185057_d81b",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:40:22.185089+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "0912d89a1b85466f937da693596f1f01"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778470890848_61b4",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:10.890874+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "execute_code",
+      "tool_input_shape": [
+        "language",
+        "code"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778470951846_0be6",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:10.951889+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "execute_code",
+      "is_error": false,
+      "duration_ms": 61,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778480229202_9e68",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:20.229212+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "57c0903f7bc74dc58d56667f3979a414",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 33831,
+      "output_tokens": 2891,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 66574,
+      "tool_iterations": 1,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_full_machinery",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778480232306_9508",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:20.232320+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778413647444_f503",
+      "task_type": "reactive_simple",
+      "duration_ms": 66574,
+      "input_tokens": 33831,
+      "output_tokens": 2891,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 1,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778480245349_f65e",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:20.245386+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Test 7 build/test step ran successfully.\n\n- Wrote `coin_flip_tool.py`\n- Wrote `coin_flip.tool.json`\n- Ran sample flips\n- All sample results were valid: only `heads` / `tails`\n- Manifest validated successfully\n\nRegistration is the next step: `register_tool` on `coin_flip.tool.json`.\n\nThis is local workspace / user-instance work, not a platform GitHub change.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778482954280_4444",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:22.954316+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778490482661_faca",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:30.482688+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778490482155_8ad0",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778490490351_254d",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:30.490370+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "f73faa5c36754de2a985fe8ee6874771",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 19,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778497029928_8357",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:37.029939+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {
+        "focus": "register_tool"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "0ea58f7d7cd04011a9909f30fa1e92ab"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778497033875_9a72",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:37.033891+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "0ea58f7d7cd04011a9909f30fa1e92ab"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778516028350_5c98",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:56.028386+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "descriptor_path"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778516038222_a5d1",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:41:56.038254+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 9,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778522312254_85a9",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:02.312291+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "descriptor_path"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778522321511_c234",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:02.321541+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 9,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778527021415_cb56",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:07.021453+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "descriptor_path"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778527030927_d7e0",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:07.030957+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 9,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778539779021_33ee",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:19.779043+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "register_tool",
+      "tool_input": {
+        "descriptor_file": "coin_flip.tool.json"
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "02800d277b1c4bbdbfeb4bcfe952d936"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778539787398_9e42",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:19.787428+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "register_tool",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "02800d277b1c4bbdbfeb4bcfe952d936"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778543314252_3fe7",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:23.314275+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "0d2a981ad8fe400d8260eb48b0f8cf42",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 43369,
+      "output_tokens": 1575,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 52823,
+      "tool_iterations": 3,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "b1_action_invalidated",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778543322582_da52",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:23.322613+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778490482155_8ad0",
+      "task_type": "reactive_simple",
+      "duration_ms": 52823,
+      "input_tokens": 43369,
+      "output_tokens": 1575,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 3,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778543345980_71a4",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:23.346013+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Registration did not succeed yet.\n\nThe first attempts failed because the descriptor argument was passed in the wrong shape / with an invalid path-like value. I retried with the correct filename:\n\n`coin_flip.tool.json`\n\nThat reached the descriptor, but the registry rejected it because the descriptor is missing a required field:\n\n`implementation`\n\nNext self-test step: fix `coin_flip.tool.json` so it includes the required `implementation` field pointing at the Python implementation file, likely `coin_flip_tool.py`, then rerun `register_tool` and only after that test invoking the tool.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778547625919_d46e",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:27.625955+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778556340975_ee03",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:36.341002+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778556340441_9872",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778556349661_1b79",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:36.349680+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "5896ad6579934709bd39c650e470e3e9",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 22,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778559806450_2553",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:39.806472+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "3aa71d1c5a134042a382278af8e7fbd7"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778559815971_63fe",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:39.816003+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "3aa71d1c5a134042a382278af8e7fbd7"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778563761406_e568",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:43.761426+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "coin_flip.tool.json"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "e661dc828b834117969d60aba539236c"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778563769627_6ed2",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:42:43.769654+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "e661dc828b834117969d60aba539236c"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778594604641_ba63",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:14.604653+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.alias_repaired",
+      "instance_id": "repl:selftest",
+      "requested": "files.write_file",
+      "canonical": "write_file",
+      "context": "enactment"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778594609418_7480",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:14.609433+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "write_file",
+      "tool_input_shape": [
+        "path",
+        "content"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778594615509_ddbd",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:14.615524+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "write_file",
+      "is_error": false,
+      "duration_ms": 10,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778598298491_f1e6",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:18.298513+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "dbabfd021ca4440e8565a26c7babcab4",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 43827,
+      "output_tokens": 1933,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 41948,
+      "tool_iterations": 1,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_full_machinery",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778598307638_d897",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:18.307668+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778556340441_9872",
+      "task_type": "reactive_simple",
+      "duration_ms": 41948,
+      "input_tokens": 43827,
+      "output_tokens": 1933,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 1,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778598332131_59df",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:18.332172+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Fixed: `coin_flip.tool.json` now has the required `implementation` field pointing at `coin_flip_tool.py`.\n\nNext step in the self-test: rerun `register_tool` on `coin_flip.tool.json`.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778601145671_51df",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:21.145704+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778611907933_1bc8",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:31.907944+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778611907630_7f22",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778611911916_83f1",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:31.911924+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "70a5dd55b70644509f3da1b2df4fcdd3",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 25,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778632099496_bd0e",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:52.099521+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "descriptor"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778632110572_3bb3",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:52.110605+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 11,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778636913517_809a",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:56.913553+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "descriptor_path"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778636924539_461c",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:43:56.924572+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 11,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778642790390_8d03",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:02.790424+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "path"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778642800642_0dd7",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:02.800676+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 10,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778650894880_23d2",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:10.894904+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "register_tool",
+      "tool_input": {
+        "descriptor_file": "coin_flip.tool.json"
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "81fed05c1124406482e5cc3b3bdd7c11"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778650906557_9664",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:10.906582+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "register_tool",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "81fed05c1124406482e5cc3b3bdd7c11"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778652674685_c34e",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:12.674704+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "2c320823bcf14129a5b9722a908d3d67",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 35224,
+      "output_tokens": 1431,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 40762,
+      "tool_iterations": 3,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "b1_action_invalidated",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778652683868_b8be",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:12.683898+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778611907630_7f22",
+      "task_type": "reactive_simple",
+      "duration_ms": 40762,
+      "input_tokens": 35224,
+      "output_tokens": 1431,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 3,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778652707173_d662",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:12.707207+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Registration succeeded. The `coin_flip` tool is now registered and available.\n\nNext step: invoke/test the registered coin-flip tool.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778659788484_4b88",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:19.788517+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778669944202_9230",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:29.944229+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778669943622_7c6f",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778669953615_1217",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:29.953633+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "d2321f3d34c84bcaad57db94f97aaf1a",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 28,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778676733822_6d85",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:36.733843+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "b6ebc4d4cf784d33915131a5d73917a4"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778676743841_7ddf",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:36.743870+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "b6ebc4d4cf784d33915131a5d73917a4"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778681188380_db6e",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:41.188402+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {
+        "focus": "coin_flip"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "725ea58cab614336ba2a7b5306eda34a"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778681199251_f80f",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:41.199296+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "725ea58cab614336ba2a7b5306eda34a"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778686869434_767b",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:46.869456+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "tool_input": {
+        "capability_name": "coin_flip",
+        "description": "Activate the workspace-built registered coin_flip tool so it can be invoked for Test 7 of docs/V1-SELF-TEST.md. The tool is registered as a workspace tool in space_13363999 and should flip a fair coin returning 'heads' or 'tails'."
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "a13af02d456f4955a43388897356b954"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778686880283_16a0",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:46.880321+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "a13af02d456f4955a43388897356b954"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778694973403_24af",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:54.973425+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {},
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "f8e0687fc6ac45bbb6102c7bb9c2b614"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778694984632_8fb9",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:44:54.984670+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "f8e0687fc6ac45bbb6102c7bb9c2b614"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778724217146_bcc9",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:24.217169+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "list_files",
+      "tool_input": {},
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "71722563a4794312a5a7dfc2da1fedb8"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778724229976_42ae",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:24.230020+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "list_files",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "71722563a4794312a5a7dfc2da1fedb8"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778727617430_cb35",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:27.617450+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {
+        "focus": "coin_flip"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "f6498ee6a4eb4528abfcfc2cfdc06bd6"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778727627412_585d",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:27.627439+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "f6498ee6a4eb4528abfcfc2cfdc06bd6"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778748935852_0723",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:48.935876+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "coin_flip",
+      "tool_input_shape": [],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778748949236_9301",
+    "type": "tool.binding_failure",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:48.949266+00:00",
+    "source": "live_executor",
+    "payload": {
+      "tool_id": "coin_flip",
+      "status": "blocked_by_gate_classification",
+      "expected_source": "workspace",
+      "gate_class": "unknown",
+      "last_registration_hash": "e8d3104ca142789da150ed33b2017fee75148d0463cdaac10a5ffded21e825ae",
+      "reason_omitted": ""
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778748961968_89c9",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:48.961995+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "coin_flip",
+      "is_error": true,
+      "duration_ms": 26,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778754042001_bd81",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:54.042035+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "coin_flip",
+      "tool_input_shape": [
+        "dispatch_mode",
+        "max_attempts"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778754052365_0ce4",
+    "type": "tool.binding_failure",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:54.052394+00:00",
+    "source": "live_executor",
+    "payload": {
+      "tool_id": "coin_flip",
+      "status": "blocked_by_gate_classification",
+      "expected_source": "workspace",
+      "gate_class": "unknown",
+      "last_registration_hash": "e8d3104ca142789da150ed33b2017fee75148d0463cdaac10a5ffded21e825ae",
+      "reason_omitted": ""
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778754062323_8c10",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:54.062348+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "coin_flip",
+      "is_error": true,
+      "duration_ms": 20,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778759496583_9bfd",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:59.496619+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "coin_flip",
+      "tool_input_shape": [
+        "dispatch_mode",
+        "max_attempts"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778759507115_340e",
+    "type": "tool.binding_failure",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:59.507143+00:00",
+    "source": "live_executor",
+    "payload": {
+      "tool_id": "coin_flip",
+      "status": "blocked_by_gate_classification",
+      "expected_source": "workspace",
+      "gate_class": "unknown",
+      "last_registration_hash": "e8d3104ca142789da150ed33b2017fee75148d0463cdaac10a5ffded21e825ae",
+      "reason_omitted": ""
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778759517409_b53e",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:45:59.517435+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "coin_flip",
+      "is_error": true,
+      "duration_ms": 20,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778771355377_e99c",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:11.355397+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "62d3e6a3c8b54ee19041a625280931b3",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 94972,
+      "output_tokens": 3855,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 101401,
+      "tool_iterations": 3,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "b1_action_invalidated",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778771367312_8f96",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:11.367347+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778669943622_7c6f",
+      "task_type": "reactive_simple",
+      "duration_ms": 101401,
+      "input_tokens": 94972,
+      "output_tokens": 3855,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 3,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778771392573_02ae",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:11.392608+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Coin-flip invocation did **not** work.\n\nThe tool was found, but dispatch refused to run it because `coin_flip` is missing a safe-dispatch classification / declared world effect:\n\n> “it isn't classified for safe dispatch”\n\nSo there was **no valid coin-flip result** — no heads/tails output to validate.\n\nNext test in order: inspect the `coin_flip.tool.json` descriptor and fix/register its dispatch classification so the tool can be safely invoked, then rerun the coin-flip test.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778773995441_c0e5",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:13.995476+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778796233228_a51f",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:36.233253+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778796232691_2d64",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778796244873_6602",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:36.244890+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "f4f03f688db3469bb8cb54cc78a27e13",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 31,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778799721928_0e6a",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:39.721948+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "coin_flip.tool.json"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "1d98e9bda22b4b0b9e7033c7f3e165ac"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778799733004_c8b5",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:39.733032+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "1d98e9bda22b4b0b9e7033c7f3e165ac"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778803019980_7fed",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:43.020002+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {
+        "focus": "register_tool"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "0ed04c96116e4ce09c791b9e38901155"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778803032361_15cd",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:43.032400+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "0ed04c96116e4ce09c791b9e38901155"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778806718109_095d",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:46.718129+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "fbb00765401e483ea7e2feda038ed237"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778806729896_3e06",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:46:46.729931+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "fbb00765401e483ea7e2feda038ed237"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778853581939_8332",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:33.581962+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.alias_repaired",
+      "instance_id": "repl:selftest",
+      "requested": "files.write_file",
+      "canonical": "write_file",
+      "context": "enactment"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778853593275_1197",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:33.593301+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "write_file",
+      "tool_input_shape": [
+        "path",
+        "content"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778853607379_60b4",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:33.607412+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "write_file",
+      "is_error": false,
+      "duration_ms": 25,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778862204862_2693",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:42.204884+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "283c547c6990491291e638cde2b0851b",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 53895,
+      "output_tokens": 2908,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 65959,
+      "tool_iterations": 1,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_full_machinery",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778862216688_a1ab",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:42.216728+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778796232691_2d64",
+      "task_type": "reactive_simple",
+      "duration_ms": 65959,
+      "input_tokens": 53895,
+      "output_tokens": 2908,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 1,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778862243220_e953",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:42.243258+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Done — I updated `coin_flip.tool.json` for the next Test 7 repair step.\n\nThe descriptor now declares a read-only / safe dispatch classification. This is a best-effort fix based on the safe-dispatch error we saw; the next action is to re-register `coin_flip.tool.json` and then invoke the tool to confirm whether those are the exact fields the registry accepts.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778864071328_3fd9",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:44.071361+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778874805404_309c",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:54.805429+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778874804918_849f",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778874817225_978c",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:47:54.817243+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "ef67f9ebb330476e8a587213464b2245",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 34,
+      "tool_count": 24
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778895194138_2ca8",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:15.194160+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "workspace_tool_registry.register_tool",
+      "tool_input_shape": [
+        "descriptor_file"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778895206086_1348",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:15.206128+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "workspace_tool_registry.register_tool",
+      "is_error": true,
+      "error_label": "tool_not_registered",
+      "duration_ms": 0,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778900576856_fb56",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:20.576893+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "tool_input_shape": [
+        "descriptor_file"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778900591883_f29d",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:20.591917+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool",
+      "is_error": false,
+      "duration_ms": 15,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778907335386_0f99",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:27.335424+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool_retry_descriptor_file_only",
+      "tool_input_shape": [
+        "descriptor_file"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778907348896_ff0e",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:27.348951+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "register_tool_retry_descriptor_file_only",
+      "is_error": true,
+      "error_label": "tool_not_registered",
+      "duration_ms": 0,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778914036702_d1f4",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:34.036722+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "889e3454c41a4dee946fa682cda4c0a5",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 25179,
+      "output_tokens": 1539,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 39219,
+      "tool_iterations": 3,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "b1_action_invalidated",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778914048867_eb9d",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:34.048897+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778874804918_849f",
+      "task_type": "reactive_simple",
+      "duration_ms": 39219,
+      "input_tokens": 25179,
+      "output_tokens": 1539,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 3,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778914075972_7014",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:34.076006+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Re-registration did **not** succeed.\n\nExact blocker: `coin_flip.tool.json` still has an invalid `\"implementation\"` field — it must be a string filename like `\"coin_flip_tool.py\"`, not an object. The Python file also needs to export `execute(input_data) -> dict`.\n\nNext repair step: update the descriptor so `\"implementation\"` is just the filename, then run `register_tool` again.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778917755829_2251",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:37.755873+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Keep going — continue with the next test in order, same rules. When every test is done, write the results file and tell me you're finished.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778928926128_6e8a",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:48.926152+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780778928925624_aee2",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780778928938620_0464",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:48:48.938638+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "5977d856b322429290ca09d32fbf269c",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 37,
+      "tool_count": 24
     },
     "metadata": {}
   }

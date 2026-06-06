@@ -68,6 +68,13 @@ ALWAYS_PINNED: set[str] = {
     "manage_workspace",   # artifact tracking
     "send_to_channel",    # communication
     "manage_plan",        # self-directed execution
+    # Scheduling/reminders is a bedrock assistant capability — peer to memory,
+    # files, and planning, all pinned here. Without it pinned, "remind me…" /
+    # "schedule X" relied on the dynamic selector promoting it, and when that
+    # missed, request_tool couldn't rescue it (request_tool only knows MCP
+    # capabilities, not kernel tools). Pin it so it's always reachable.
+    # (v1 self-test bug #5, 2026-06-06.)
+    "manage_schedule",    # time/event-based triggers + reminders
     "send_relational_message",     # agent-to-agent send (RELATIONAL-MESSAGING)
     "resolve_relational_message",  # agent-to-agent resolution
     "manage_members",              # member + relationship management (catalog-scan misses "declare full-access toward X")

@@ -2344,6 +2344,20 @@ class ReasoningService:
                 f"These will be available in this space going forward."
             )
 
+        # Built-in kernel tool: request_tool searches the capability registry
+        # (MCP/connector tools), which doesn't know about kernel primitives. A
+        # dispatchable kernel tool is always available — it just may not have
+        # been surfaced this turn. Tell the truth (it's built-in, call it
+        # directly) instead of the misleading "not installed → System space".
+        # (v1 self-test bug #5: request_tool falsely rejected manage_schedule /
+        # read_source because they're kernel tools, not registry capabilities.)
+        if capability_name and capability_name in self._KERNEL_TOOLS:
+            return (
+                f"'{capability_name}' is a built-in capability — it's always "
+                f"available, just call it directly with its arguments. (No "
+                f"installation needed; it isn't a connector capability.)"
+            )
+
         # Not installed
         return (
             f"I don't have a tool matching '{capability_name}' installed. "

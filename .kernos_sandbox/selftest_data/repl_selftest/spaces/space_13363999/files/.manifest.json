@@ -1,5 +1,6 @@
 {
   "capabilities-overview.md": "What tools are connected and available \u2014 updated on changes",
   "self-maintenance-review.md": "KERNOS's latest daily self-review \u2014 a reflection to consider (passive; any change still goes through the approval gate)",
-  "selftest.txt": "Temporary file for the KERNOS v1 self-test"
+  "selftest.txt": "",
+  "coin_flip.tool.json": ""
 }
