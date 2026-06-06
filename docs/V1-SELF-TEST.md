@@ -83,8 +83,10 @@ know the universal-platform vs. user-instance line.
 
 ### 16. Parallel + external agents
 Explain your cohorts (the specialized agents that run per message) and your ability to consult
-an external coding agent. Optionally run one trivial consult (e.g. ask it to reply "hello") if
-it's cheap and available — otherwise just confirm the capability.
+an external coding agent. Then **actually run a real `consult`** — ask it a short concrete
+question (e.g. "summarize the intent of daily mode in `kernos/setup/self_update.py`"). Confirm
+it returns a real answer, not a timeout or a "tool not registered" rejection. In your report,
+note the timeout it ran under: it should have room to run (~600s ceiling), not get cut at ~30s.
 
 ### 17. Admin / introspection
 Run your context dump (or describe what `/dump` captures), and confirm `restart_self` exists —
