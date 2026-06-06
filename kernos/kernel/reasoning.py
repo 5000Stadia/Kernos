@@ -1032,11 +1032,27 @@ class ReasoningService:
                 return "File system is not available."
             elif tool_name == "read_file":
                 if self._files:
-                    return await self._files.read_file(
+                    _name = tool_input.get("name", "")
+                    _result = await self._files.read_file(
                         request.instance_id,
                         request.active_space_id,
-                        tool_input.get("name", ""),
+                        _name,
                     )
+                    # "Read the thing" should just work. read_file is
+                    # space-scoped; if it misses and the path points at the repo
+                    # (docs/ specs/ kernos/), transparently fall through to the
+                    # source reader rather than surfacing the reader-choice as a
+                    # user-facing failure. Safe direction only: read_source has
+                    # its own repo-root containment; we never let the repo reader
+                    # probe into space/user data.
+                    if (isinstance(_result, str)
+                            and _result.startswith("Error: File")
+                            and "not found" in _result
+                            and _name.startswith(("kernos/", "specs/", "docs/"))):
+                        _src = _read_source(_name)
+                        if isinstance(_src, str) and not _src.startswith("Error:"):
+                            return _src
+                    return _result
                 return "File system is not available."
             elif tool_name == "list_files":
                 if self._files:
