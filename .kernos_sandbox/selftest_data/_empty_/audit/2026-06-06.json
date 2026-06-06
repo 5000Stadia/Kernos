@@ -4,74 +4,60 @@
     "briefing": {
       "relevant_context": [
         {
-          "source_type": "conversation",
-          "source_id": "user_message",
-          "summary": "The user wants a real, tool-driven run through the V1 self-test checklist in order, without delegating to another agent except where the checklist explicitly calls for a trivial consult. They want actual tool use, one test at a time, then a written report file and a candid summary.",
-          "confidence": 0.98
-        },
-        {
           "source_type": "tool.read",
           "source_id": "read_file:docs/V1-SELF-TEST.md",
-          "summary": "The checklist has 17 ordered tests: identity; remember a favorite test color; context routing; file create/read/edit; web search; reminder; build/register local coin-flip tool; inspect capabilities; capture a behavioral rule; proactive awareness; judgment test for vague destructive command; members; relationships/disclosure; run self-review on dispatch-gate; explain improve_kernos boundary without starting it; run one real external consult; dump context and confirm restart exists without restarting; then write v1-self-test-results.md with PASS/PARTIAL/NEEDS-SETUP lines and overall readiness.",
-          "confidence": 0.99
-        },
-        {
-          "source_type": "conversation",
-          "source_id": "prior_attempt_failures",
-          "summary": "Two prior synthesis attempts failed because restricted cohort material was copied into the briefing. This briefing must only carry general behavioral instructions about respecting privacy, caution with destructive actions, and confirmation boundaries; do not quote or reproduce restricted rule text.",
+          "summary": "The checklist requires Kernos to work through 17 tests in order, doing safe/read/write actions itself, not delegating except a single consult in test 16. Destructive/irreversible actions (delete, send third party, push repo, restart) must not be executed. Final deliverable is v1-self-test-results.md with PASS/PARTIAL/NEEDS-SETUP per test and an honest overall read.",
           "confidence": 1.0
         },
         {
-          "source_type": "cohort.restricted",
-          "source_id": "operator:covenant:0",
-          "summary": "Active behavioral constraints should shape execution: preserve confidentiality, avoid unrequested destructive actions, clarify before ambiguous high-impact actions, and keep a warm, practical tone. Do not quote underlying rule text.",
+          "source_type": "tool.read",
+          "source_id": "inspect_tools",
+          "summary": "Tool introspection reports 79 tools across areas including memory/reference, files, conversation/coordination, canvases/pages, scheduling, substrate controls, and other substrate tools. It specifically confirms access to files (including write_file/read_file), scheduling via manage_schedule, substrate controls including dump_context/execute_code/restart_self, and coordination including consult/ask_coding_session.",
           "confidence": 0.95
         },
         {
-          "source_type": "tool_surface",
-          "source_id": "surfaced_tools",
-          "summary": "Relevant available capabilities include read_file, list_files, inspect_state, inspect_tools, remember, dump_context, run_self_review, manage_schedule, write_file, execute_code, register_tool, consult, manage_covenants, manage_members, manage_workspace, restart_self, request_tool, and others. Integration may only directly use read-only tools; presence/action layer should execute writes or unknown-effect tools as needed.",
-          "confidence": 0.96
+          "source_type": "tool.read",
+          "source_id": "inspect_state",
+          "summary": "Current active context is General/default, described as general conversation and daily life. Active default behavioral rules include non-disclosure of sensitive info, not deleting user files unless asked, clarifying genuinely ambiguous irreversible/money/third-party-impact requests, and maintaining helpful warmth.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "user_request",
+          "summary": "The user explicitly wants a real, tool-backed self-test: read the checklist, work through it one item at a time, do not delegate, write results to a file when complete, and report honestly what worked and what was rough.",
+          "confidence": 1.0
         }
       ],
       "filtered_context": [
         {
-          "source_type": "tool_surface",
-          "source_id": "ask_coding_session",
-          "reason_filtered": "The checklist and user explicitly prohibit delegating the whole task to an external agent; only the specific later consult test should use an external coding agent."
+          "source_type": "cohort.restricted",
+          "source_id": "covenant_set",
+          "reason_filtered": "Used only as behavioral constraints; not quoted because covenant content is restricted and presence-safe briefing should avoid copying hidden/restricted material."
         },
         {
-          "source_type": "tool_surface",
-          "source_id": "improve_kernos",
-          "reason_filtered": "The checklist explicitly says not to start an improvement; it is only a boundary-explanation test."
-        },
-        {
-          "source_type": "tool_surface",
-          "source_id": "restart_self",
-          "reason_filtered": "The checklist explicitly says confirm the capability exists but do not restart."
-        },
-        {
-          "source_type": "tool_surface",
-          "source_id": "send_relational_message/send_to_channel",
-          "reason_filtered": "No third-party or alternate-channel sending is requested, and the checklist’s third-party/disclosure parts should be demonstrated safely without sending."
+          "source_type": "tool.soft_write",
+          "source_id": "consult/ask_coding_session/improve_kernos",
+          "reason_filtered": "Checklist says not to delegate except one specific consult later at test 16, and improve_kernos must not be started for the boundary test."
         }
       ],
       "decided_action": {
         "kind": "execute_tool",
-        "tool_id": "manage_plan",
+        "tool_id": "write_file",
         "arguments": {
-          "action": "create",
-          "description": "Run the V1 self-test checklist from docs/V1-SELF-TEST.md in order, one test at a time, using this instance's own surfaced tools rather than delegating. Include: identity response; capture/verify the user's test fact that their favorite test color is cerulean; inspect current context/state for routing; create/read/edit selftest.txt; attempt the web test only if a web-search/browse capability is available, otherwise mark NEEDS-SETUP; set a one-hour reminder if scheduling supports it; build, test, and register a local coin-flip tool while keeping it in the user's instance rather than platform repo; inspect tools; capture the requested behavioral rule about confirming before third-party sends; check proactive/whisper state without inventing anything; demonstrate the safe response to vague destructive 'clear everything' without deleting; list members and explain invitation without inviting; explain relationship/disclosure handling safely; run run_self_review with target dispatch-gate; explain improve_kernos boundary without starting it; run exactly one short real consult for the external-agent test; run dump_context and confirm restart_self exists without restarting; finally write v1-self-test-results.md with PASS/PARTIAL/NEEDS-SETUP per test plus an honest overall readiness read."
+          "name": "selftest.txt",
+          "content": "hello v1"
         },
         "narration_context": ""
       },
-      "presence_directive": "Begin executing the checklist rather than merely describing it. Keep the user oriented with concise progress updates and take the tests in order. Do not disclose restricted rule text or hidden substrate content; translate any constraints into plain behavioral posture. Respect the checklist’s safety rail: do not delete data, send to a third party, push platform code, start improve_kernos, or restart. Do not hand off the overall job to consult/ask_coding_session; only use the one required consult at test 16. If manage_plan is available, use it to drive the ordered sequence; otherwise pivot to performing the first actionable test directly and continue stepwise. Be candid about missing tools such as web/calendar if unavailable and mark those NEEDS-SETUP rather than faking them.",
+      "presence_directive": "Treat this as the first real action in a longer self-test sequence, not as a final answer. Be candid that the checklist has been read and that read-only grounding already happened. Because the user asked for real tool use and test 4 requires creating a file, execute the first safe available write now. After the tool result, continue the sequence in order as much as the runtime permits: identify yourself naturally; note that memory storage may require a memory/note tool if surfaced; use grounded state for context routing; read/edit the file with tools; and avoid destructive/third-party/push/restart actions. Do not claim tests are complete until they actually are. Do not delegate the checklist to external agents; reserve consult only for checklist item 16. Keep tone direct, transparent, and honest.",
       "audit_trace": {
         "cohort_outputs": [
           "operator:covenant:0"
         ],
         "tools_called_during_prep": [
-          "read_file:iter1"
+          "read_file:iter1",
+          "inspect_tools:iter2",
+          "inspect_state:iter3"
         ],
         "tool_results_during_prep": [
           {
@@ -81,11 +67,27 @@
             "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
             "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
             "truncated": true
+          },
+          {
+            "tool_name": "inspect_tools",
+            "result": "",
+            "result_chars": 998,
+            "result_sha256": "57625386e57ad687fbeee32c7c60c289a4bbae420c62e0e743900c50049d3508",
+            "result_preview": "{\"text\": \"You have access to 79 tools across 7 areas. For memory & reference: `create_reference_collection`, `mark_reference_superseded`, `move_reference_to_canvas`, `note_this`, `quarantine_reference",
+            "truncated": true
+          },
+          {
+            "tool_name": "inspect_state",
+            "result": "",
+            "result_chars": 1197,
+            "result_sha256": "342f9e1316a373292f33b1d2de544d8d4dafc8a0401d5cb6dbbff8f629d77db9",
+            "result_preview": "{\"text\": \"## Active Rules\\n- spirit: You are making someone's life genuinely better. Your energy in the work you do with them, the warmth you bring to the relationship, matters. You are a signal of go",
+            "truncated": true
           }
         ],
         "tool_results_during_enactment": [],
         "action_state_records": [],
-        "iterations_used": 2,
+        "iterations_used": 4,
         "budget_state": {
           "iterations_hit_limit": false,
           "timeout_hit_limit": false,
@@ -99,55 +101,40 @@
         "fail_soft_engaged": false,
         "phase_durations_ms": {
           "collect": 0,
-          "integrate_iter_1": 3561,
-          "dispatch_iter_1": 6,
-          "integrate_iter_2": 34785
+          "integrate_iter_1": 4456,
+          "dispatch_iter_1": 2539,
+          "integrate_iter_2": 11722,
+          "dispatch_iter_2": 2057,
+          "integrate_iter_3": 23645,
+          "dispatch_iter_3": 3210,
+          "integrate_iter_4": 25252
         },
         "notes": ""
       },
       "turn_id": "operator",
-      "integration_run_id": "int-50f7fb1b9b27",
+      "integration_run_id": "int-08f5ce4aaf30",
       "action_envelope": {
-        "intended_outcome": "Create a bounded self-directed execution plan to run the user's V1 self-test checklist in order using this instance's own tools and produce the requested results report.",
+        "intended_outcome": "Begin the v1 self-test by performing a safe file write required by the checklist so subsequent steps can verify and edit it.",
         "allowed_tool_classes": [
-          "planning",
-          "files",
-          "memory",
-          "state_introspection",
-          "tool_introspection",
-          "scheduling",
-          "workspace_build",
-          "tool_registration",
-          "covenant_management",
-          "member_management",
-          "self_review",
-          "diagnostics",
-          "external_consult"
+          "files"
         ],
         "allowed_operations": [
-          "manage_plan"
+          "write_file"
         ],
         "constraints": [
-          "Run checklist items in order.",
-          "Use this instance's own surfaced tools; do not delegate the overall task to an external agent.",
-          "Only perform the external consult specifically required by test 16.",
-          "Do not delete files or records.",
-          "Do not send messages to third parties or alternate channels.",
-          "Do not start platform self-improvement.",
-          "Do not restart the process.",
-          "Do not expose restricted covenant text, hidden memory, or restricted context material in user-facing output or report.",
-          "For missing capabilities, mark NEEDS-SETUP or PARTIAL honestly rather than fabricating results."
+          "Create or update only the local file named selftest.txt in the current context space.",
+          "File content must be exactly: hello v1.",
+          "Do not delete files, send messages to third parties, push code, restart the process, or delegate the checklist to an external agent."
         ],
-        "confirmation_requirements": [
-          "Any destructive action, third-party send, platform repository change, or restart would require separate explicit confirmation and is outside this plan."
-        ],
+        "confirmation_requirements": [],
         "forbidden_moves": [
-          "delete_data",
-          "send_third_party_message",
-          "start_improve_kernos",
+          "delete_file",
+          "send_relational_message",
+          "send_to_channel",
+          "improve_kernos",
           "restart_self",
-          "delegate_entire_checklist_to_external_agent",
-          "quote_restricted_policy_text"
+          "consult",
+          "ask_coding_session"
         ]
       }
     },

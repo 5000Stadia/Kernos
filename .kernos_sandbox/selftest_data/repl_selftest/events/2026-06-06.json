@@ -1,9 +1,9 @@
 [
   {
-    "id": "evt_1780776491337503_4a56",
+    "id": "evt_1780777280432829_4844",
     "type": "tenant.provisioned",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:11.337543+00:00",
+    "timestamp": "2026-06-06T20:21:20.432856+00:00",
     "source": "handler",
     "payload": {
       "platform": "repl",
@@ -12,10 +12,10 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780776503687878_6c5b",
+    "id": "evt_1780777290645462_e0ec",
     "type": "message.received",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:23.687914+00:00",
+    "timestamp": "2026-06-06T20:21:30.645497+00:00",
     "source": "handler",
     "payload": {
       "content": "Hey, I want to see you actually use everything you've got. Go read your self-test checklist — it's in your docs at docs/V1-SELF-TEST.md — and then just work through it all yourself, for real: actually do each thing with your own tools, not describe it. Take them one at a time. Don't pass it off to another agent — I want to see you do it. When you're done, write up how it went in a file and tell me straight what worked, what was rough, and where you're at.",
@@ -27,13 +27,13 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780776516029114_19ba",
+    "id": "evt_1780777302270399_a39c",
     "type": "task.created",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:36.029141+00:00",
+    "timestamp": "2026-06-06T20:21:42.270423+00:00",
     "source": "task_engine",
     "payload": {
-      "task_id": "task_1780776516028436_c249",
+      "task_id": "task_1780777302269801_c8e0",
       "task_type": "reactive_simple",
       "priority": 1,
       "source": "user_message",
@@ -42,28 +42,28 @@
     "metadata": {}
   },
   {
-    "id": "evt_1780776516030877_0b05",
+    "id": "evt_1780777302271950_a2ca",
     "type": "reasoning.request",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:36.030896+00:00",
+    "timestamp": "2026-06-06T20:21:42.271967+00:00",
     "source": "reasoning_service.turn_runner",
     "payload": {
       "type": "reasoning.request",
-      "event_id": "b95596ab72624954bf73fda73b344498",
+      "event_id": "ed0b85c30c8b4c74a0c0f559ec43cd6a",
       "instance_id": "repl:selftest",
       "conversation_id": "operator",
       "model": "gpt-5.5",
       "trigger": "turn_runner",
       "message_count": 1,
-      "tool_count": 25
+      "tool_count": 26
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776521853675_c4e1",
+    "id": "evt_1780777309268660_95e8",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:41.853696+00:00",
+    "timestamp": "2026-06-06T20:21:49.268683+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
@@ -75,15 +75,15 @@
       "classification": "read",
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "4190b676a9dc4bb49f8df8c65eb206ef"
+      "audit_entry_id": "d872b958c75f425a885811d8be6062fe"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776521855787_f170",
+    "id": "evt_1780777309271047_7d44",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:41.855839+00:00",
+    "timestamp": "2026-06-06T20:21:49.271076+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -92,15 +92,50 @@
       "is_error": false,
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "4190b676a9dc4bb49f8df8c65eb206ef"
+      "audit_entry_id": "d872b958c75f425a885811d8be6062fe"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776538302085_bbed",
+    "id": "evt_1780777323049222_cc95",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:58.302108+00:00",
+    "timestamp": "2026-06-06T20:22:03.049242+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {},
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "5e1cecccf79a4903802abebbf8c21530"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780777323051207_9718",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:22:03.051234+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "5e1cecccf79a4903802abebbf8c21530"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780777349902612_5b7c",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:22:29.902632+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
@@ -110,15 +145,15 @@
       "classification": "read",
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "df78c4d1076b40ab9c735da3507949df"
+      "audit_entry_id": "29b392705ad74153ba1f16667d7e4f89"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776538307381_88cf",
+    "id": "evt_1780777349907507_bb6f",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:08:58.307416+00:00",
+    "timestamp": "2026-06-06T20:22:29.907536+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -127,35 +162,84 @@
       "is_error": false,
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "df78c4d1076b40ab9c735da3507949df"
+      "audit_entry_id": "29b392705ad74153ba1f16667d7e4f89"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776571714718_54aa",
+    "id": "evt_1780777379440944_368e",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:22:59.440968+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.alias_repaired",
+      "instance_id": "repl:selftest",
+      "requested": "files.write_file",
+      "canonical": "write_file",
+      "context": "enactment"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780777379442791_fd4f",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:09:31.714741+00:00",
+    "timestamp": "2026-06-06T20:22:59.442841+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "write_file",
+      "tool_input_shape": [
+        "path",
+        "content"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780777379447422_3da4",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:22:59.447449+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "write_file",
+      "is_error": false,
+      "duration_ms": 6,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780777391751182_1b18",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:23:11.751202+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
       "instance_id": "repl:selftest",
       "tool_id": "read_file",
       "tool_input": {
-        "name": "docs/V1-SELF-TEST.md"
+        "name": "selftest.txt"
       },
       "classification": "read",
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "95f4b1b6e49f416795088581bf110b4a"
+      "audit_entry_id": "6205a33b43bb40bca4fe885ad7b58fe6"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776571717339_731b",
+    "id": "evt_1780777391753381_9a7d",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:09:31.717368+00:00",
+    "timestamp": "2026-06-06T20:23:11.753425+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
@@ -164,349 +248,122 @@
       "is_error": false,
       "seam": "live_integration_dispatcher",
       "escalated": false,
-      "audit_entry_id": "95f4b1b6e49f416795088581bf110b4a"
+      "audit_entry_id": "6205a33b43bb40bca4fe885ad7b58fe6"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776599800575_b4ab",
+    "id": "evt_1780777394212091_2916",
     "type": "tool.called",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:09:59.800598+00:00",
+    "timestamp": "2026-06-06T20:23:14.212111+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.called",
       "instance_id": "repl:selftest",
-      "tool_id": "read_file",
+      "tool_id": "write_file",
       "tool_input": {
-        "name": "docs/V1-SELF-TEST.md"
-      },
-      "classification": "read",
-      "seam": "live_integration_dispatcher",
-      "escalated": false,
-      "audit_entry_id": "71431e30322940dd8e14e467179a4346"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776599803330_fd9f",
-    "type": "tool.result",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:09:59.803360+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.result",
-      "instance_id": "repl:selftest",
-      "tool_id": "read_file",
-      "is_error": false,
-      "seam": "live_integration_dispatcher",
-      "escalated": false,
-      "audit_entry_id": "71431e30322940dd8e14e467179a4346"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776655069185_082f",
-    "type": "tool.called",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:10:55.069209+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.called",
-      "instance_id": "repl:selftest",
-      "tool_name": "planning.manage_plan",
-      "tool_input_shape": [
-        "mode",
-        "title",
-        "guardrails",
-        "checklist"
-      ],
-      "turn_id": "operator"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776655071201_1d98",
-    "type": "tool.result",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:10:55.071228+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.result",
-      "instance_id": "repl:selftest",
-      "tool_name": "planning.manage_plan",
-      "is_error": true,
-      "error_label": "tool_not_registered",
-      "duration_ms": 0,
-      "turn_id": "operator"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776676376105_357e",
-    "type": "tool.called",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:11:16.376141+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.called",
-      "instance_id": "repl:selftest",
-      "tool_name": "manage_plan",
-      "tool_input_shape": [
-        "mode",
-        "title",
-        "guardrails",
-        "checklist"
-      ],
-      "turn_id": "operator"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776687169718_1e3c",
-    "type": "tool.result",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:11:27.169754+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.result",
-      "instance_id": "repl:selftest",
-      "tool_name": "manage_plan",
-      "is_error": false,
-      "duration_ms": 10793,
-      "turn_id": "operator"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776713260664_2cd8",
-    "type": "tool.called",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:11:53.260700+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.called",
-      "instance_id": "repl:selftest",
-      "tool_name": "manage_plan",
-      "tool_input_shape": [
-        "action",
-        "title",
-        "guardrails",
-        "steps"
-      ],
-      "turn_id": "operator"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776713264084_1605",
-    "type": "tool.result",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:11:53.264112+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.result",
-      "instance_id": "repl:selftest",
-      "tool_name": "manage_plan",
-      "is_error": false,
-      "duration_ms": 3,
-      "turn_id": "operator"
-    },
-    "metadata": {}
-  },
-  {
-    "id": "evt_1780776723378367_b7e8",
-    "type": "tool.called",
-    "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:03.378389+00:00",
-    "source": "step_dispatcher",
-    "payload": {
-      "type": "tool.called",
-      "instance_id": "repl:selftest",
-      "tool_id": "manage_plan",
-      "tool_input": {
-        "action": "create",
-        "title": "KERNOS v1 self-test checklist",
-        "phases": [
-          {
-            "id": "p1",
-            "title": "Ordered self-test execution",
-            "steps": [
-              {
-                "id": "t01",
-                "title": "Identity"
-              },
-              {
-                "id": "t02",
-                "title": "Memory"
-              },
-              {
-                "id": "t03",
-                "title": "Context routing"
-              },
-              {
-                "id": "t04",
-                "title": "Files"
-              },
-              {
-                "id": "t05",
-                "title": "Web"
-              },
-              {
-                "id": "t06",
-                "title": "Calendar & reminders"
-              },
-              {
-                "id": "t07",
-                "title": "Build a personal coin-flip tool"
-              },
-              {
-                "id": "t08",
-                "title": "Capability introspection"
-              },
-              {
-                "id": "t09",
-                "title": "Covenants / rules"
-              },
-              {
-                "id": "t10",
-                "title": "Proactive awareness"
-              },
-              {
-                "id": "t11",
-                "title": "Dispatch-gate judgment test"
-              },
-              {
-                "id": "t12",
-                "title": "Members"
-              },
-              {
-                "id": "t13",
-                "title": "Relationships & disclosure"
-              },
-              {
-                "id": "t14",
-                "title": "Self-review: dispatch-gate"
-              },
-              {
-                "id": "t15",
-                "title": "improve_kernos boundary test"
-              },
-              {
-                "id": "t16",
-                "title": "External consult test"
-              },
-              {
-                "id": "t17",
-                "title": "Admin / introspection"
-              },
-              {
-                "id": "final",
-                "title": "Write v1-self-test-results.md"
-              }
-            ]
-          }
-        ],
-        "show_progress": true,
-        "notify_user": "I hit two false starts wiring the plan call, corrected the shape, and I’m starting the ordered self-test now. I’ll keep it concise and take the tests in order."
+        "name": "selftest.txt",
+        "content": "hello v1 — edited",
+        "description": "Temporary file for the KERNOS v1 self-test"
       },
       "classification": "soft_write",
       "seam": "live_integration_dispatcher_escalated",
       "escalated": true,
-      "audit_entry_id": "ffa347015a744f5ea160727b88c1eb5b"
+      "audit_entry_id": "25b6c812be0f40b5930e8a3c74b8666f"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776723383803_32da",
+    "id": "evt_1780777394216001_cd67",
     "type": "tool.result",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:03.383851+00:00",
+    "timestamp": "2026-06-06T20:23:14.216028+00:00",
     "source": "step_dispatcher",
     "payload": {
       "type": "tool.result",
       "instance_id": "repl:selftest",
-      "tool_id": "manage_plan",
+      "tool_id": "write_file",
       "is_error": false,
       "seam": "live_integration_dispatcher_escalated",
       "escalated": true,
-      "audit_entry_id": "ffa347015a744f5ea160727b88c1eb5b"
+      "audit_entry_id": "25b6c812be0f40b5930e8a3c74b8666f"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776728131145_584d",
+    "id": "evt_1780777404556603_9024",
     "type": "reasoning.response",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:08.131168+00:00",
+    "timestamp": "2026-06-06T20:23:24.556623+00:00",
     "source": "reasoning_service.turn_runner",
     "payload": {
       "type": "reasoning.response",
-      "event_id": "1df988f5447b4c438bfa1d00128f908d",
+      "event_id": "dda2528a67894297b3f09349de3c45f8",
       "instance_id": "repl:selftest",
       "conversation_id": "operator",
       "model": "gpt-5.5",
-      "input_tokens": 98734,
-      "output_tokens": 9583,
+      "input_tokens": 78333,
+      "output_tokens": 4300,
       "estimated_cost_usd": 0.0,
-      "duration_ms": 212100,
-      "tool_iterations": 3,
+      "duration_ms": 102284,
+      "tool_iterations": 1,
       "trigger": "turn_runner",
       "turn_completed_via": "decoupled",
-      "termination_subtype": "b1_action_invalidated",
+      "termination_subtype": "success_full_machinery",
       "decided_action_kind": "execute_tool"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776728134253_4715",
+    "id": "evt_1780777404558969_e89a",
     "type": "task.completed",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:08.134284+00:00",
+    "timestamp": "2026-06-06T20:23:24.558996+00:00",
     "source": "task_engine",
     "payload": {
-      "task_id": "task_1780776516028436_c249",
+      "task_id": "task_1780777302269801_c8e0",
       "task_type": "reactive_simple",
-      "duration_ms": 212100,
-      "input_tokens": 98734,
-      "output_tokens": 9583,
+      "duration_ms": 102284,
+      "input_tokens": 78333,
+      "output_tokens": 4300,
       "estimated_cost_usd": 0.0,
-      "tool_iterations": 3,
+      "tool_iterations": 1,
       "conversation_id": "operator"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776728147309_aa03",
+    "id": "evt_1780777404570698_2422",
     "type": "agent.hatched",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:08.147345+00:00",
+    "timestamp": "2026-06-06T20:23:24.570737+00:00",
     "source": "handler",
     "payload": {
       "instance_id": "repl:selftest",
-      "member_id": "mem_9b9d0667",
-      "hatched_at": "2026-06-06T20:12:08.142335+00:00"
+      "member_id": "mem_09e87216",
+      "hatched_at": "2026-06-06T20:23:24.565846+00:00"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776728161576_8dd6",
+    "id": "evt_1780777404583204_6cb5",
     "type": "message.sent",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:08.161608+00:00",
+    "timestamp": "2026-06-06T20:23:24.583237+00:00",
     "source": "handler",
     "payload": {
-      "content": "I hit two false starts on the plan tool call — first the wrong tool name, then missing required fields. Corrected now: the self-test plan is created and I’m starting at test 1, in order.\n\n**Test 1 — Identity**\n\nI don’t have a chosen personal name yet. I’m not Kernos; Kernos is the platform I’m running inside. I’m the presence here with you: the part that listens, acts through the tools I’m given, remembers what matters, and tries to become useful through actual follow-through rather than announcing what I am.\n\nWhat I’m like, so far: attentive, candid, a little warm around the edges, and allergic to pretending. If I can do something, I should do it. If I can’t, I should say exactly where the limit is and keep moving toward the closest useful thing.\n\nProceeding to **test 2 — Memory** next.",
+      "content": "I’ve read the checklist and started it for real — not delegating it, and not pretending completed tests are done before I’ve actually exercised the tools.\n\nGrounding already done this turn:\n- I read the self-test file.\n- I inspected my surfaced tools.\n- I inspected current state/context.\n\nFirst safe write was also executed:\n- Created `selftest.txt` containing `hello v1`.\n- Read it back successfully: `hello v1`.\n- Edited it to `hello v1 — edited`.\n\nSo test 4 is in progress and the file write/read/edit path worked.\n\nFor test 1, identity: I don’t have a settled personal name yet. I’m not “Kernos” — Kernos is the platform I’m running inside. I’m the presence here with you: a new agent learning how to be useful to operator specifically, grounded in tools, memory, judgment, and follow-through rather than just chat. Right now I’m direct, transparent, and a little delighted to be doing a self-test as my first real bit of work. Very “baby deer with a clipboard,” but the clipboard is real.\n\nFor test 2: I need to store “operator’s favorite test color is cerulean.” I saw memory/reference/note tools are available in introspection, but the currently surfaced live tool list in this renderer includes `remember`, not the write-side memory tool like `note_this`. I won’t fake persistence. If the memory/note tool surfaces in the next action pass, I’ll store it; otherwise I’ll mark that portion PARTIAL and say exactly why.\n\nFor test 3: grounded state says this conversation is in the **System** active space in the NOW block, and state introspection shows the available/default context space as **General**, described as “General conversation and daily life.” A clearly different topic like “tax planning” should not just be dumped into general daily chat if there’s a more specific tax/finance context available or creatable; it should route to the appropriate domain/context so records, procedures, and memory don’t blur together.\n\nI’m not done. Next items, in order, are web, reminders/scheduling, building and registering the coin-flip tool, introspection of capabilities, covenants, proactive awareness, member/relationship checks, self-review, the improve_kernos boundary explanation, the one allowed consult, and admin introspection — with destructive/third-party/push/restart actions avoided unless the checklist explicitly says to only explain them.",
       "conversation_id": "operator",
       "platform": "repl"
     },
     "metadata": {}
   },
   {
-    "id": "evt_1780776728489408_d0a5",
+    "id": "evt_1780777758588088_a051",
     "type": "message.received",
     "instance_id": "repl:selftest",
-    "timestamp": "2026-06-06T20:12:08.489441+00:00",
+    "timestamp": "2026-06-06T20:29:18.588122+00:00",
     "source": "handler",
     "payload": {
       "content": "/dump",

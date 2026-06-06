@@ -49,8 +49,15 @@ TOOL_TOKEN_BUDGET = int(os.environ.get("KERNOS_TOOL_TOKEN_BUDGET", "8000"))
 # surfaced by the assemble's analyzer (often missed); now it's
 # unconditionally pinned alongside the other always-loaded tools.
 ALWAYS_PINNED: set[str] = {
-    "remember",           # memory retrieval
+    "remember",           # memory retrieval (search side)
     "remember_details",   # deep memory retrieval
+    # note_this is the WRITE side of memory — the explicit "remember this
+    # fact / capture this rule" primitive. Pinned alongside `remember` so the
+    # store side is as always-available as the search side; without it a plain
+    # "remember X" had no surfaced home (remember only searches), and the agent
+    # had to know to request_tool it — which it didn't reliably do. (v1
+    # self-test bug #4, 2026-06-06.)
+    "note_this",          # memory + rule capture (write side)
     "write_file",         # file creation
     "read_file",          # file reading
     "list_files",         # file listing
