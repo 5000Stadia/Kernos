@@ -103,7 +103,7 @@ def _verbose_enabled() -> bool:
     return val == "on"
 
 
-_DEFAULT_UPDATE_TIME = (3, 0)
+_DEFAULT_UPDATE_TIME = (4, 0)
 
 
 def _update_interval_sec() -> int:
@@ -114,15 +114,18 @@ def _update_interval_sec() -> int:
           recent conversation, no improvement attempt running),
           applies any update and cleanly restarts so the new code goes
           live without a manual ``/restart``.
-    0   → legacy once-daily ``KERNOS_AUTO_UPDATE_TIME`` pull (lands code
-          on disk, applies on next natural restart).
+    0   → (DEFAULT) once-daily at ``KERNOS_AUTO_UPDATE_TIME`` (default
+          04:00 local): apply-with-restart when idle. A restart at ~4am
+          plus the idle gate makes interrupting a live turn near-zero —
+          far better than gambling every few minutes.
 
-    Default 600s (10 min). ``KERNOS_AUTO_UPDATE_INTERVAL_SEC``.
+    Default 0 (daily-at-4am). ``KERNOS_AUTO_UPDATE_INTERVAL_SEC``; set >0
+    only if you want frequent in-day updates.
     """
     try:
-        return max(0, int(os.getenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "600")))
+        return max(0, int(os.getenv("KERNOS_AUTO_UPDATE_INTERVAL_SEC", "0")))
     except ValueError:
-        return 600
+        return 0
 
 
 def _parse_update_time() -> tuple[int, int]:
@@ -733,11 +736,24 @@ async def scheduled_update_loop(
                 )
         return
 
-    # Legacy daily mode (interval ==0).
-    pull_fn = _pull or _pull_only
+    # Daily mode (interval ==0, the DEFAULT): apply-with-restart at the
+    # configured time (default 04:00 local), gated by safe_to_restart. At the
+    # window, retry every RETRY_SEC for up to WINDOW_SEC to catch a quiet/idle
+    # gap; restarting at ~4am + the idle gate ⇒ near-zero chance of interrupting
+    # a live turn. If never idle within the window, skip to the next day.
+    apply_fn = _apply or enforce_or_continue
     hour, minute = _parse_update_time()
+    try:
+        retry_sec = max(30, int(os.getenv("KERNOS_AUTO_UPDATE_RETRY_SEC", "120")))
+    except ValueError:
+        retry_sec = 120
+    try:
+        window_sec = max(0, int(os.getenv("KERNOS_AUTO_UPDATE_WINDOW_SEC", "3600")))
+    except ValueError:
+        window_sec = 3600
     logger.info(
-        "%s_CRON_SCHEDULED: daily pull at %02d:%02d (server local)",
+        "%s_CRON_SCHEDULED: daily apply-with-restart at %02d:%02d (server "
+        "local), only when idle",
         _LOG_PREFIX, hour, minute,
     )
     while True:
@@ -747,13 +763,37 @@ async def scheduled_update_loop(
         except asyncio.CancelledError:
             logger.info("%s_CRON_CANCELLED: scheduled loop stopped", _LOG_PREFIX)
             raise
-        try:
-            pull_fn(data_dir=data_dir)
-        except Exception as exc:
-            logger.warning(
-                "%s_CRON_RAISED: pull task raised %s — continuing loop",
-                _LOG_PREFIX, exc,
-            )
+        waited = 0
+        while True:
+            safe = True
+            if safe_to_restart is not None:
+                res = safe_to_restart()
+                if inspect.isawaitable(res):
+                    res = await res
+                safe = bool(res)
+            if safe:
+                try:
+                    # fetch; if behind, pull + execv (never returns); else no-op.
+                    apply_fn(data_dir=data_dir)
+                except Exception as exc:
+                    logger.warning(
+                        "%s_CRON_RAISED: apply raised %s — continuing loop",
+                        _LOG_PREFIX, exc,
+                    )
+                break
+            if waited >= window_sec:
+                logger.info(
+                    "%s_CRON_DEFERRED: busy through the %ds window — skip to "
+                    "next day", _LOG_PREFIX, window_sec,
+                )
+                break
+            try:
+                await sleep_fn(retry_sec)
+            except asyncio.CancelledError:
+                logger.info(
+                    "%s_CRON_CANCELLED: scheduled loop stopped", _LOG_PREFIX)
+                raise
+            waited += retry_sec
 
 
 # ---------------------------------------------------------------------------
