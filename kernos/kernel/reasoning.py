@@ -52,6 +52,32 @@ from kernos.kernel.tools import (
 )
 
 
+# Filename argument synonyms for the file tools. The canonical schema field is
+# ``name``, but a model asked in plain English to "read docs/X" or "save the
+# report to results.md" routinely emits ``path`` / ``filename`` / ``file``
+# instead. The dispatcher used to read only ``name`` and silently default to
+# "" — so the call reached the handler with an empty filename and failed with
+# "Invalid filename ''", breaking ALL file I/O in a live turn (caught by the
+# v1 self-test, 2026-06-06). Resolving any of these synonyms makes file
+# read/write robust to natural argument phrasing. Order = preference.
+_FILE_NAME_ARG_KEYS = ("name", "filename", "file_name", "path", "filepath", "file")
+
+
+def _resolve_file_name(tool_input: dict) -> str:
+    """Return the first non-empty filename-like argument from ``tool_input``.
+
+    Tolerates the canonical ``name`` plus the common synonyms a model reaches
+    for when phrasing is natural. Returns "" if none are present, preserving
+    the handler's existing "Invalid filename ''" behavior for a truly empty
+    call.
+    """
+    for key in _FILE_NAME_ARG_KEYS:
+        val = tool_input.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # KERNOS-native content types — no provider types leak past this module
 # ---------------------------------------------------------------------------
@@ -1024,7 +1050,7 @@ class ReasoningService:
                     return await self._files.write_file(
                         request.instance_id,
                         request.active_space_id,
-                        tool_input.get("name", ""),
+                        _resolve_file_name(tool_input),
                         tool_input.get("content", ""),
                         tool_input.get("description", ""),
                         target_space_id=tool_input.get("target_space_id"),
@@ -1032,7 +1058,7 @@ class ReasoningService:
                 return "File system is not available."
             elif tool_name == "read_file":
                 if self._files:
-                    _name = tool_input.get("name", "")
+                    _name = _resolve_file_name(tool_input)
                     _result = await self._files.read_file(
                         request.instance_id,
                         request.active_space_id,
@@ -1066,7 +1092,7 @@ class ReasoningService:
                     return await self._files.delete_file(
                         request.instance_id,
                         request.active_space_id,
-                        tool_input.get("name", ""),
+                        _resolve_file_name(tool_input),
                     )
                 return "File system is not available."
             elif tool_name == "execute_code":
