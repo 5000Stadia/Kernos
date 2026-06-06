@@ -70,6 +70,10 @@ _TOOL_ALIASES: dict[str, str] = {
     # "planning." namespace before correcting to the flat name.
     "planning.manage_plan": "manage_plan",
     "planning.create_plan": "manage_plan",
+    # 2026-06-06 v1 self-test: agent reached for a bare "reminders"/"reminder"
+    # tool for scheduling before correcting to manage_schedule.
+    "reminders": "manage_schedule",
+    "reminder": "manage_schedule",
 }
 
 

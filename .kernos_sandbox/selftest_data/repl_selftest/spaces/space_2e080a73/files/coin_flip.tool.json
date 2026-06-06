@@ -1,0 +1,11 @@
+{
+  "name": "coin_flip",
+  "description": "Flip a coin and return heads or tails.",
+  "implementation": "coin_flip.py",
+  "entrypoint": "coin_flip",
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

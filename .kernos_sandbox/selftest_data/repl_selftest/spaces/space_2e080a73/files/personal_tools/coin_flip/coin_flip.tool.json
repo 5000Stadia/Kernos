@@ -1,0 +1,19 @@
+{
+  "name": "coin_flip",
+  "description": "Flip a fair coin and return either heads or tails.",
+  "entrypoint": "personal_tools/coin_flip/coin_flip.py",
+  "function": "coin_flip",
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "string",
+    "enum": [
+      "heads",
+      "tails"
+    ]
+  },
+  "scope": "user-instance-workspace"
+}

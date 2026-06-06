@@ -1,0 +1,338 @@
+2026-06-06 13:52:54,065 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/TECHNICAL-ARCHITECTURE.md baked_hash=0321936f2ef6 current_hash=bcbe91fe8636 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,177 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/diagnostics.md baked_hash=74d5a7f0a468 current_hash=aa4389a3e638 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,184 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/overview.md baked_hash=9814f813276b current_hash=911e73c55b9c — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,190 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/tool-surface.md baked_hash=e647f660ceaa current_hash=f44b13094b38 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,202 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/identity/about-kernos.md baked_hash=1f4f32d6fcec current_hash=1cc26fea234f — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,207 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/identity/who-you-are.md baked_hash=76170fa928e0 current_hash=044080ad9c5a — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,207 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/index.md baked_hash=5fe3d1653948 current_hash=060b454ee78a — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,207 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/install.md baked_hash=eef88ba2abd6 current_hash=aac0647b4172 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,207 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/kernos-introduction.md baked_hash=95003901e022 current_hash=55396e4f32b6 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,211 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/reference/architecture-notebook.md baked_hash=8dd3ae0c65a0 current_hash=8e4b6e5e0af4 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 13:52:54,306 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_HYDRATION: loaded=96 sections=775 stale=10 missing_artifact=0 artifact_invalid=0 uncatalogued=3
+2026-06-06 13:53:44,887 WARNING kernos.kernel.integration.runner: INTEGRATION_ATTEMPT_FAILED: attempt=1/3 component=briefing_validation reason=redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields. iterations=2 tools_called=['read_file:iter1']
+2026-06-06 13:55:09,391 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:55:24,393 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:55:39,395 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:55:47,415 WARNING kernos.kernel.enactment.presence_renderer: PRESENCE_TOOL_LOOP_MAX_ITERATIONS: cap=5 — surfacing iteration-cap message rather than silent drop
+2026-06-06 13:55:54,397 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:56:09,399 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:56:24,401 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:56:39,403 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:56:54,413 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:57:09,414 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:57:24,416 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:57:39,417 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:57:54,419 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:58:09,421 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:58:24,423 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:58:39,425 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:58:54,427 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:59:09,428 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:59:24,429 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:59:31,334 WARNING kernos.kernel.retrieval: Retrieval: embedding failed for query '': The request body is not valid JSON, or some arguments were not specified properly. In particular, Error for argument 'input': Value error, Input cannot contain empty strings or empty lists
+2026-06-06 13:59:39,431 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 13:59:50,819 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`reminders` failed, then `remember` succeeded for the same request — consider making the working method the default here
+2026-06-06 13:59:54,433 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:00:09,435 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:00:24,437 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:00:39,438 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:00:54,439 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:01:09,440 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:01:24,442 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:01:39,443 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:01:54,445 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:02:09,447 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:02:24,451 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:02:39,453 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:02:54,456 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:03:09,457 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:03:24,457 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:03:39,459 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:03:43,862 ERROR kernos.messages.handler: Reasoning error for sender=operator: dictionary update sequence element #0 has length 1; 2 is required
+Traceback (most recent call last):
+  File "/home/k/Kernos/kernos/messages/handler.py", line 4973, in _run_space_loop
+    await self._phase_reason(primary_ctx)
+  File "/home/k/Kernos/kernos/messages/handler.py", line 8412, in _phase_reason
+    await reason.run(ctx)
+  File "/home/k/Kernos/kernos/messages/phases/reason.py", line 59, in run
+    ctx.task = await handler.engine.execute(ctx.task, request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/engine.py", line 80, in execute
+    result = await self._reasoning.reason(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3459, in reason
+    return await self._reason_impl(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3485, in _reason_impl
+    return await self._run_via_turn_runner_provider(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3430, in _run_via_turn_runner_provider
+    outcome = await turn_runner.run_turn(inputs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 232, in run_turn
+    outcome = await self.run_enactment(briefing)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 294, in run_enactment
+    return await self._enactment_service.run(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 547, in run
+    return await self._run_full_machinery(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 669, in _run_full_machinery
+    return await self._execute_plan(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 703, in _execute_plan
+    outcome = await self._run_step_with_tiers(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 855, in _run_step_with_tiers
+    modified = await self._reasoner.emit_modified_step(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 482, in emit_modified_step
+    return _parse_step_from_payload(payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 379, in _parse_step_from_payload
+    arguments=dict(payload.get("arguments", {}) or {}),
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: dictionary update sequence element #0 has length 1; 2 is required
+2026-06-06 14:03:54,463 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:04:09,465 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:04:24,466 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:04:39,468 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:04:53,386 ERROR kernos.messages.handler: Reasoning error for sender=operator: dictionary update sequence element #0 has length 1; 2 is required
+Traceback (most recent call last):
+  File "/home/k/Kernos/kernos/messages/handler.py", line 4973, in _run_space_loop
+    await self._phase_reason(primary_ctx)
+  File "/home/k/Kernos/kernos/messages/handler.py", line 8412, in _phase_reason
+    await reason.run(ctx)
+  File "/home/k/Kernos/kernos/messages/phases/reason.py", line 59, in run
+    ctx.task = await handler.engine.execute(ctx.task, request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/engine.py", line 80, in execute
+    result = await self._reasoning.reason(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3459, in reason
+    return await self._reason_impl(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3485, in _reason_impl
+    return await self._run_via_turn_runner_provider(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3430, in _run_via_turn_runner_provider
+    outcome = await turn_runner.run_turn(inputs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 232, in run_turn
+    outcome = await self.run_enactment(briefing)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 294, in run_enactment
+    return await self._enactment_service.run(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 547, in run
+    return await self._run_full_machinery(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 669, in _run_full_machinery
+    return await self._execute_plan(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 703, in _execute_plan
+    outcome = await self._run_step_with_tiers(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 855, in _run_step_with_tiers
+    modified = await self._reasoner.emit_modified_step(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 482, in emit_modified_step
+    return _parse_step_from_payload(payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 379, in _parse_step_from_payload
+    arguments=dict(payload.get("arguments", {}) or {}),
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: dictionary update sequence element #0 has length 1; 2 is required
+2026-06-06 14:04:54,470 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:05:09,473 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:05:24,474 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:05:39,475 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:05:40,096 ERROR kernos.messages.handler: Reasoning error for sender=operator: dictionary update sequence element #0 has length 1; 2 is required
+Traceback (most recent call last):
+  File "/home/k/Kernos/kernos/messages/handler.py", line 4973, in _run_space_loop
+    await self._phase_reason(primary_ctx)
+  File "/home/k/Kernos/kernos/messages/handler.py", line 8412, in _phase_reason
+    await reason.run(ctx)
+  File "/home/k/Kernos/kernos/messages/phases/reason.py", line 59, in run
+    ctx.task = await handler.engine.execute(ctx.task, request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/engine.py", line 80, in execute
+    result = await self._reasoning.reason(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3459, in reason
+    return await self._reason_impl(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3485, in _reason_impl
+    return await self._run_via_turn_runner_provider(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3430, in _run_via_turn_runner_provider
+    outcome = await turn_runner.run_turn(inputs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 232, in run_turn
+    outcome = await self.run_enactment(briefing)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 294, in run_enactment
+    return await self._enactment_service.run(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 547, in run
+    return await self._run_full_machinery(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 669, in _run_full_machinery
+    return await self._execute_plan(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 703, in _execute_plan
+    outcome = await self._run_step_with_tiers(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 855, in _run_step_with_tiers
+    modified = await self._reasoner.emit_modified_step(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 482, in emit_modified_step
+    return _parse_step_from_payload(payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 379, in _parse_step_from_payload
+    arguments=dict(payload.get("arguments", {}) or {}),
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: dictionary update sequence element #0 has length 1; 2 is required
+2026-06-06 14:05:54,477 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:06:09,479 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:06:24,481 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:06:32,413 ERROR kernos.messages.handler: Reasoning error for sender=operator: dictionary update sequence element #0 has length 1; 2 is required
+Traceback (most recent call last):
+  File "/home/k/Kernos/kernos/messages/handler.py", line 4973, in _run_space_loop
+    await self._phase_reason(primary_ctx)
+  File "/home/k/Kernos/kernos/messages/handler.py", line 8412, in _phase_reason
+    await reason.run(ctx)
+  File "/home/k/Kernos/kernos/messages/phases/reason.py", line 59, in run
+    ctx.task = await handler.engine.execute(ctx.task, request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/engine.py", line 80, in execute
+    result = await self._reasoning.reason(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3459, in reason
+    return await self._reason_impl(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3485, in _reason_impl
+    return await self._run_via_turn_runner_provider(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3430, in _run_via_turn_runner_provider
+    outcome = await turn_runner.run_turn(inputs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 232, in run_turn
+    outcome = await self.run_enactment(briefing)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 294, in run_enactment
+    return await self._enactment_service.run(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 547, in run
+    return await self._run_full_machinery(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 669, in _run_full_machinery
+    return await self._execute_plan(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 703, in _execute_plan
+    outcome = await self._run_step_with_tiers(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 855, in _run_step_with_tiers
+    modified = await self._reasoner.emit_modified_step(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 482, in emit_modified_step
+    return _parse_step_from_payload(payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 379, in _parse_step_from_payload
+    arguments=dict(payload.get("arguments", {}) or {}),
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: dictionary update sequence element #0 has length 1; 2 is required
+2026-06-06 14:06:39,482 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:06:54,485 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:07:09,487 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:07:24,488 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:07:39,144 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`workspace_tool_registration.register_tool` failed, then `register_tool` succeeded for the same request — consider makin
+2026-06-06 14:07:39,490 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:07:54,492 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:08:09,495 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:08:24,498 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:08:39,500 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:08:54,504 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:09:09,507 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:09:24,508 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:09:39,511 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:09:54,512 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:10:09,514 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:10:24,515 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:10:39,516 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:10:54,518 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:11:09,519 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:11:24,521 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:11:27,709 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`code_execution.execute_code` failed, then `execute_code` succeeded for the same request — consider making the working m
+2026-06-06 14:11:39,522 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:11:54,525 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:12:09,527 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:12:24,528 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:12:30,384 ERROR kernos.messages.handler: Reasoning error for sender=operator: dictionary update sequence element #0 has length 1; 2 is required
+Traceback (most recent call last):
+  File "/home/k/Kernos/kernos/messages/handler.py", line 4973, in _run_space_loop
+    await self._phase_reason(primary_ctx)
+  File "/home/k/Kernos/kernos/messages/handler.py", line 8412, in _phase_reason
+    await reason.run(ctx)
+  File "/home/k/Kernos/kernos/messages/phases/reason.py", line 59, in run
+    ctx.task = await handler.engine.execute(ctx.task, request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/engine.py", line 80, in execute
+    result = await self._reasoning.reason(request)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3459, in reason
+    return await self._reason_impl(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3485, in _reason_impl
+    return await self._run_via_turn_runner_provider(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/reasoning.py", line 3430, in _run_via_turn_runner_provider
+    outcome = await turn_runner.run_turn(inputs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 232, in run_turn
+    outcome = await self.run_enactment(briefing)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/turn_runner.py", line 294, in run_enactment
+    return await self._enactment_service.run(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 547, in run
+    return await self._run_full_machinery(briefing)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 669, in _run_full_machinery
+    return await self._execute_plan(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 703, in _execute_plan
+    outcome = await self._run_step_with_tiers(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/service.py", line 855, in _run_step_with_tiers
+    modified = await self._reasoner.emit_modified_step(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 482, in emit_modified_step
+    return _parse_step_from_payload(payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/k/Kernos/kernos/kernel/enactment/divergence_reasoner.py", line 379, in _parse_step_from_payload
+    arguments=dict(payload.get("arguments", {}) or {}),
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: dictionary update sequence element #0 has length 1; 2 is required
+2026-06-06 14:12:39,531 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:12:54,533 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:13:09,535 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:13:24,537 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:13:39,538 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:13:54,540 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:14:09,541 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:14:24,542 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:14:39,544 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:14:54,546 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:15:09,548 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:15:24,550 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:15:39,551 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:15:54,552 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:16:09,554 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:16:24,556 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:16:39,557 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:16:54,559 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:17:09,560 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:17:24,563 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 14:17:39,565 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
