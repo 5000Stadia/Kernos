@@ -1,0 +1,401 @@
+[
+  {
+    "id": "evt_1780775878853646_9638",
+    "type": "tenant.provisioned",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:57:58.853660+00:00",
+    "source": "handler",
+    "payload": {
+      "platform": "repl",
+      "sender": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775887044882_661c",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:07.044918+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "Hey, I want to see you actually use everything you've got. Go read your self-test checklist — it's in your docs at docs/V1-SELF-TEST.md — and then just work through it all yourself, for real: actually do each thing with your own tools, not describe it. Take them one at a time. Don't pass it off to another agent — I want to see you do it. When you're done, write up how it went in a file and tell me straight what worked, what was rough, and where you're at.",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775896086322_464d",
+    "type": "task.created",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:16.086349+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780775896085626_88e4",
+      "task_type": "reactive_simple",
+      "priority": 1,
+      "source": "user_message",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775896088477_1335",
+    "type": "reasoning.request",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:16.088503+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.request",
+      "event_id": "f3caedb65223445c85c54a22ee523f8f",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "trigger": "turn_runner",
+      "message_count": 1,
+      "tool_count": 26
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775907816181_4f51",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:27.816205+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "tool_input": {
+        "name": "docs/V1-SELF-TEST.md"
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "aeb3973bea9e410ab5a67769e832a304"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775907817894_a209",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:27.817930+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "read_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "aeb3973bea9e410ab5a67769e832a304"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775913950917_8238",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:33.950939+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "list_files",
+      "tool_input": {},
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "5dcc583f9c64448ea9fd27de678cb083"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775913953674_f50e",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:33.953702+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "list_files",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "5dcc583f9c64448ea9fd27de678cb083"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775923097707_828d",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:43.097728+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "tool_input": {},
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "819d37c63dae4ffcb07a3549a4ca26f0"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775923099728_dea5",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:43.099756+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "inspect_tools",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "819d37c63dae4ffcb07a3549a4ca26f0"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775937299270_4238",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:57.299291+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "tool_input": {
+        "capability_name": "read_source",
+        "description": "Need to read the repository documentation file at docs/V1-SELF-TEST.md. The current surfaced read_file tool only reads context-space files and rejected the path as an invalid filename; list_files shows the file is not in the current context space. A source/repository file reader is needed to access docs/V1-SELF-TEST.md so I can follow the user's requested self-test checklist."
+      },
+      "classification": "read",
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "58caae66cfc84dc3941ebe235d497850"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775937301222_5063",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:58:57.301251+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "request_tool",
+      "is_error": false,
+      "seam": "live_integration_dispatcher",
+      "escalated": false,
+      "audit_entry_id": "58caae66cfc84dc3941ebe235d497850"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775979885378_53f6",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:59:39.885400+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_name": "execute_code",
+      "tool_input_shape": [
+        "language",
+        "code"
+      ],
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775979940376_5184",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:59:39.940412+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_name": "execute_code",
+      "is_error": false,
+      "duration_ms": 55,
+      "turn_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775995602129_357b",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:59:55.602148+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "execute_code",
+      "tool_input": {
+        "timeout_seconds": 60,
+        "code": "from pathlib import Path\nimport os\nprint('Continuing self-test setup without delegation.')\nstart = Path.cwd()\nprint(f'CWD: {start}')\n# Walk upward a few levels and search boundedly for V1-SELF-TEST.md\ncandidates=[]\nroots=[]\np=start\nfor _ in range(10):\n    roots.append(p)\n    if p.parent==p: break\n    p=p.parent\n# also try /home/k/Kernos if visible\nfor r in [Path('/home/k/Kernos'), Path('/home/k')]:\n    if r.exists() and r not in roots:\n        roots.append(r)\nseen=set()\nfor root in roots:\n    if str(root) in seen: continue\n    seen.add(str(root))\n    print(f'\\nSearching under: {root}')\n    try:\n        # bounded manual walk: skip noisy/unsafe dirs\n        count=0\n        for dirpath, dirnames, filenames in os.walk(root):\n            # prune hidden/cache/venv-ish except .kernos_sandbox since current files live there\n            dirnames[:] = [d for d in dirnames if d not in {'.git','node_modules','__pycache__','.venv','venv','env','.mypy_cache','.pytest_cache'}]\n            count += 1\n            if 'V1-SELF-TEST.md' in filenames:\n                fp=Path(dirpath)/'V1-SELF-TEST.md'\n                candidates.append(fp)\n                print(f'FOUND: {fp}')\n            if count > 5000:\n                print('Search bounded: stopped after 5000 directories in this root.')\n                break\n    except Exception as e:\n        print(f'Could not search {root}: {type(e).__name__}: {e}')\nif not candidates:\n    print('\\nNo accessible V1-SELF-TEST.md found in bounded search.')\nelse:\n    print('\\nReading first match:')\n    fp=candidates[0]\n    print('---BEGIN---')\n    print(fp.read_text(errors='replace')[:20000])\n    print('---END---')"
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "721819f38b724e579ab9abe8e2e05bb3"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780775995655845_66ff",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T19:59:55.655883+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "execute_code",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "721819f38b724e579ab9abe8e2e05bb3"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776008090210_6456",
+    "type": "tool.called",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:08.090232+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.called",
+      "instance_id": "repl:selftest",
+      "tool_id": "write_file",
+      "tool_input": {
+        "name": "v1-self-test-report.md",
+        "description": "Running report for the V1 self-test, including checklist access attempts and item-by-item outcomes as they become available",
+        "content": "# V1 Self-Test Report\n\n## Status\nBlocked before checklist execution: the V1 checklist file is not accessible from the current context or sandbox.\n\n## Access attempts\n1. `read_file(\"docs/V1-SELF-TEST.md\")`\n   - Outcome: failed.\n   - Detail: normal context-file reader rejected the repo-style path as an invalid filename.\n\n2. `list_files()`\n   - Outcome: succeeded.\n   - Detail: only `capabilities-overview.md` and `self-maintenance-review.md` are visible in this space.\n\n3. `inspect_tools()`\n   - Outcome: succeeded.\n   - Detail: it reported a `read_source`-type capability in the files/tooling surface.\n\n4. `request_tool(\"read_source\")`\n   - Outcome: rough edge / mismatch.\n   - Detail: the tool surface mentioned `read_source`, but requesting it reported no matching installed tool. I did not delegate to an external agent.\n\n5. `execute_code()` direct sandbox read of `docs/V1-SELF-TEST.md`\n   - Outcome: failed.\n   - Detail: sandbox cwd was `/home/k/Kernos/.kernos_sandbox/selftest_data/repl_selftest/spaces/space_60f7d08f/files`; `docs/` was not visible.\n\n6. `execute_code()` bounded filesystem search for `V1-SELF-TEST.md`\n   - Outcome: failed.\n   - Detail: searched upward from the current sandbox and bounded-walked visible roots including `/home/k/Kernos`, `/home/k`, `/home`, and `/`; no accessible `V1-SELF-TEST.md` was found.\n\n## Checklist item outcomes\nNo checklist items have been executed yet, because the checklist itself has not been found or read.\n\n## Next needed input\nProvide an accessible copy/path of `V1-SELF-TEST.md`, or make the repo docs visible to this context. Once available, I will proceed one checklist item at a time using only Kernos-owned tools and append each result here.\n"
+      },
+      "classification": "soft_write",
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "be9f86561717417e89142de4d4290533"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776008094440_d216",
+    "type": "tool.result",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:08.094470+00:00",
+    "source": "step_dispatcher",
+    "payload": {
+      "type": "tool.result",
+      "instance_id": "repl:selftest",
+      "tool_id": "write_file",
+      "is_error": false,
+      "seam": "live_integration_dispatcher_escalated",
+      "escalated": true,
+      "audit_entry_id": "be9f86561717417e89142de4d4290533"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776013528020_b4f7",
+    "type": "reasoning.response",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:13.528041+00:00",
+    "source": "reasoning_service.turn_runner",
+    "payload": {
+      "type": "reasoning.response",
+      "event_id": "7489fd3e0f52402e93fa1165ba6967d3",
+      "instance_id": "repl:selftest",
+      "conversation_id": "operator",
+      "model": "gpt-5.5",
+      "input_tokens": 79464,
+      "output_tokens": 4728,
+      "estimated_cost_usd": 0.0,
+      "duration_ms": 117439,
+      "tool_iterations": 1,
+      "trigger": "turn_runner",
+      "turn_completed_via": "decoupled",
+      "termination_subtype": "success_full_machinery",
+      "decided_action_kind": "execute_tool"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776013530661_0cc3",
+    "type": "task.completed",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:13.530690+00:00",
+    "source": "task_engine",
+    "payload": {
+      "task_id": "task_1780775896085626_88e4",
+      "task_type": "reactive_simple",
+      "duration_ms": 117439,
+      "input_tokens": 79464,
+      "output_tokens": 4728,
+      "estimated_cost_usd": 0.0,
+      "tool_iterations": 1,
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776013542784_cf36",
+    "type": "agent.hatched",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:13.542838+00:00",
+    "source": "handler",
+    "payload": {
+      "instance_id": "repl:selftest",
+      "member_id": "mem_a4153651",
+      "hatched_at": "2026-06-06T20:00:13.537772+00:00"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776013555355_55e4",
+    "type": "message.sent",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:13.555390+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "I tried the normal context-file reader first: it could not access `docs/V1-SELF-TEST.md` because that repo-style path is invalid from the current file context.\n\nThen I used my own sandboxed code tool, not an external agent, to look directly. That also couldn’t find the checklist:\n\n- The sandbox current directory is inside this space’s files area.\n- `docs/` is not visible there.\n- I did a bounded filesystem search upward through visible roots, including `/home/k/Kernos`, and no accessible `V1-SELF-TEST.md` appeared.\n\nI recorded the failure trail and current status in:\n\n`v1-self-test-report.md`\n\nCurrent state: blocked before executing checklist items, because the checklist itself is not accessible. Rough edge noted: `inspect_tools` reported a `read_source`-type capability, but trying to activate/request it said no matching installed tool was available.\n\nIf you provide the checklist contents or make `docs/V1-SELF-TEST.md` visible in this context, I’ll continue item-by-item using only Kernos-owned tools and append each outcome to the report.",
+      "conversation_id": "operator",
+      "platform": "repl"
+    },
+    "metadata": {}
+  },
+  {
+    "id": "evt_1780776013889490_4617",
+    "type": "message.received",
+    "instance_id": "repl:selftest",
+    "timestamp": "2026-06-06T20:00:13.889523+00:00",
+    "source": "handler",
+    "payload": {
+      "content": "/dump",
+      "sender": "operator",
+      "sender_auth_level": "owner_verified",
+      "platform": "repl",
+      "conversation_id": "operator"
+    },
+    "metadata": {}
+  }
+]

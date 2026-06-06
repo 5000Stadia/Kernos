@@ -57,6 +57,15 @@ _TOOL_ALIASES: dict[str, str] = {
     # 2026-06-05 v1 self-test: agent reached for the consult tool under a
     # dotted namespace; it isn't registered, so the dispatcher rejected it.
     "external_agent.consult": "consult",
+    # 2026-06-06 v1 self-test: the agent repeatedly reached for the file
+    # tools under a dotted "files." namespace and for a "context_space_read"
+    # variant. None are registered; all map to the flat file primitives.
+    "files.write_file": "write_file",
+    "files.read_file": "read_file",
+    "files.read": "read_file",
+    "files.list_files": "list_files",
+    "files.delete_file": "delete_file",
+    "context_space_read": "read_file",
 }
 
 

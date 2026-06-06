@@ -1,0 +1,164 @@
+[
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "user_message",
+          "summary": "User wants Kernos to read docs/V1-SELF-TEST.md and then actually work through the self-test checklist using its own tools, one item at a time, not delegating to an external agent; when finished, write a report file and tell the user what worked, what was rough, and current status.",
+          "confidence": 0.99
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "read_file:docs/V1-SELF-TEST.md",
+          "summary": "Attempted to read docs/V1-SELF-TEST.md with context-space read_file; it failed with 'Invalid filename', indicating read_file cannot access that repository path directly.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "Current context space contains only capabilities-overview.md and self-maintenance-review.md; the requested docs/V1-SELF-TEST.md is not available as a context-space file.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "inspect_tools",
+          "summary": "Tool overview indicates broader file/source capabilities exist conceptually, including read_source, execute_code, write_file, and many substrate tools, but the currently callable integration surface includes only the developer-listed read tools plus finalize; read_source is not actually callable here.",
+          "confidence": 0.9
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "request_tool:read_source",
+          "summary": "Requested activation of a repository/source reader for docs/V1-SELF-TEST.md; result said no matching read_source tool is installed/available through request_tool and suggested setup from System space. Therefore the practical next path is to use execute_code to inspect/read the repo file if accessible from the sandbox.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "cohort.restricted",
+          "source_id": "covenant_set",
+          "reason_filtered": "Only general behavioral constraints are relevant; no secret or restricted text should be surfaced in the user-facing response."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "consult / ask_coding_session",
+          "reason_filtered": "User explicitly asked not to pass this off to another agent; external agent tools should not be used for this task."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "restart_self / improve_kernos / destructive actions",
+          "reason_filtered": "Not needed for the first checklist-reading step and could have significant side effects outside the user's requested workflow."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "execute_code",
+        "arguments": {
+          "code": "from pathlib import Path\nimport os\n\ncandidates = [\n    Path('docs/V1-SELF-TEST.md'),\n    Path.cwd() / 'docs' / 'V1-SELF-TEST.md',\n]\n\nprint(f'Current working directory: {Path.cwd()}')\nfor p in candidates:\n    print(f'Checking: {p} -> exists={p.exists()} is_file={p.is_file()}')\n\nfound = next((p for p in candidates if p.is_file()), None)\nif found is None:\n    print('\\nCould not find docs/V1-SELF-TEST.md from the sandbox cwd.')\n    print('Top-level entries visible here:')\n    for child in sorted(Path.cwd().iterdir(), key=lambda x: x.name)[:100]:\n        kind = 'dir' if child.is_dir() else 'file'\n        print(f'  {kind}: {child.name}')\nelse:\n    text = found.read_text(encoding='utf-8')\n    print(f'\\n--- BEGIN {found} ---')\n    print(text)\n    print(f'--- END {found} ---')"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Proceed honestly and concretely. Tell the user you tried the normal context-file reader first and it could not access that repo path, so you are using your own sandboxed code tool to read the checklist rather than delegating. Do not use external-agent tools. After the tool result, continue the self-test one checklist item at a time using only Kernos-owned tools and record outcomes for the eventual report file. Be transparent about failures and rough edges.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1",
+          "list_files:iter2",
+          "inspect_tools:iter3",
+          "request_tool:iter4"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 59,
+            "result_sha256": "bc7d49011fb1fb241e437cb8bb71141635ac5cd9dde1eb43ee5a011e9e5883ce",
+            "result_preview": "{\"text\": \"Error: Invalid filename 'docs/V1-SELF-TEST.md'.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 322,
+            "result_sha256": "722a63d625cc76eae79326643af73d20b1b5987c53bbe762cf6abe91e9ef2d2e",
+            "result_preview": "{\"text\": \"Files in this space (2):\\n  capabilities-overview.md (984 bytes) \\u2014 What tools are connected and available \\u2014 updated on changes\\n  self-maintenance-review.md (876 bytes) \\u2014 KERN",
+            "truncated": true
+          },
+          {
+            "tool_name": "inspect_tools",
+            "result": "",
+            "result_chars": 998,
+            "result_sha256": "57625386e57ad687fbeee32c7c60c289a4bbae420c62e0e743900c50049d3508",
+            "result_preview": "{\"text\": \"You have access to 79 tools across 7 areas. For memory & reference: `create_reference_collection`, `mark_reference_superseded`, `move_reference_to_canvas`, `note_this`, `quarantine_reference",
+            "truncated": true
+          },
+          {
+            "tool_name": "request_tool",
+            "result": "",
+            "result_chars": 178,
+            "result_sha256": "4c62f8a3802feaa68396ba4bb27dbc3563d9c47deb90b7f493acb3de183dfd16",
+            "result_preview": "{\"text\": \"I don't have a tool matching 'read_source' installed. To get new tools set up, go to the System space for installation. Want me to help you find the right tool there?\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 5,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 9732,
+          "dispatch_iter_1": 1992,
+          "integrate_iter_2": 3213,
+          "dispatch_iter_2": 2922,
+          "integrate_iter_3": 6414,
+          "dispatch_iter_3": 2731,
+          "integrate_iter_4": 11986,
+          "dispatch_iter_4": 2214,
+          "integrate_iter_5": 27359
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-cfa018d032cb",
+      "action_envelope": {
+        "intended_outcome": "Read the requested self-test checklist from docs/V1-SELF-TEST.md so Kernos can begin working through it directly.",
+        "allowed_tool_classes": [
+          "substrate_controls",
+          "files"
+        ],
+        "allowed_operations": [
+          "execute_code"
+        ],
+        "constraints": [
+          "Do not delegate to consult or ask_coding_session.",
+          "This step is read-only in intent: locate and print the checklist file if accessible.",
+          "Do not modify files in this step.",
+          "Do not delete anything.",
+          "If the file is not found, report the visible directory context and ask/continue with the nearest safe next step rather than pretending success."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Using external agents",
+          "Writing or deleting files during the checklist-read step",
+          "Claiming the checklist was read unless the tool output contains it"
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  }
+]

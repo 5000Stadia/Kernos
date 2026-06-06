@@ -28,6 +28,13 @@ def test_real_name_untouched():
     assert canonicalize_tool_name("consult") == ("consult", False)
 
 
+def test_file_tool_dotted_hallucinations_repair():
+    # v1 self-test: agent reached for dotted file-tool names + context_space_read
+    assert canonicalize_tool_name("files.write_file") == ("write_file", True)
+    assert canonicalize_tool_name("files.read_file") == ("read_file", True)
+    assert canonicalize_tool_name("context_space_read") == ("read_file", True)
+
+
 # --- Issue B: long-tool timeout floor -------------------------------------
 
 def _dispatcher():

@@ -1059,26 +1059,28 @@ class ReasoningService:
             elif tool_name == "read_file":
                 if self._files:
                     _name = _resolve_file_name(tool_input)
-                    _result = await self._files.read_file(
+                    # "Read the thing" should just work. A repo-style path
+                    # (docs/… specs/… kernos/…) is NEVER a space file — space
+                    # filenames are flat, and the space reader's validator
+                    # rejects any "/" outright ("Invalid filename"). So route
+                    # repo paths straight to the source reader up front, rather
+                    # than through the space reader where they can only fail.
+                    # read_source has its own repo-root containment; it never
+                    # probes space/user data. (v1 self-test bug #2: the old
+                    # post-read fallback was dead code — it keyed on "File not
+                    # found", but a slashed path errors as "Invalid filename"
+                    # first, so the fallback never fired.)
+                    if _name.startswith(("kernos/", "specs/", "docs/")):
+                        _src = _read_source(_name)
+                        # Return the source read whether it succeeded or errored
+                        # — its error ("not under an allowed root", etc.) is more
+                        # informative than the space reader's "invalid filename".
+                        return _src
+                    return await self._files.read_file(
                         request.instance_id,
                         request.active_space_id,
                         _name,
                     )
-                    # "Read the thing" should just work. read_file is
-                    # space-scoped; if it misses and the path points at the repo
-                    # (docs/ specs/ kernos/), transparently fall through to the
-                    # source reader rather than surfacing the reader-choice as a
-                    # user-facing failure. Safe direction only: read_source has
-                    # its own repo-root containment; we never let the repo reader
-                    # probe into space/user data.
-                    if (isinstance(_result, str)
-                            and _result.startswith("Error: File")
-                            and "not found" in _result
-                            and _name.startswith(("kernos/", "specs/", "docs/"))):
-                        _src = _read_source(_name)
-                        if isinstance(_src, str) and not _src.startswith("Error:"):
-                            return _src
-                    return _result
                 return "File system is not available."
             elif tool_name == "list_files":
                 if self._files:
