@@ -246,3 +246,19 @@ class TestInternalPlatformBypass:
         # 'not registered' before falling back to manage_plan.
         from kernos.kernel.tool_aliases import canonicalize_tool_name
         assert canonicalize_tool_name("plan_management") == ("manage_plan", True)
+
+    def test_internal_bypass_resolves_real_owner_not_synthetic(self):
+        """The bypass must resolve the REAL mem_ owner via instance_db,
+        not _resolve_member's legacy synthetic member:{instance}:owner —
+        otherwise plan steps run under a phantom member and route to the
+        wrong context (Codex review)."""
+        import inspect
+        src = inspect.getsource(MessageHandler._check_early_return)
+        internal_pos = src.find('message.platform == "internal"')
+        resolve_pos = src.find('_resolve_incoming(')
+        block = src[internal_pos:resolve_pos]
+        assert "get_owner_member_id()" in block, (
+            "internal bypass must call instance_db.get_owner_member_id() "
+            "to resolve the real owner row before falling back to the "
+            "legacy synthetic id"
+        )

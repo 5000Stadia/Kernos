@@ -508,6 +508,22 @@ class InstanceDB:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def get_owner_member_id(self) -> str | None:
+        """Return the stable mem_ owner member_id, or None if no owner row.
+
+        The owner is identified by role (set by ensure_owner), not by a
+        constructed id. Use this for system-originated turns (self-directed
+        plan steps) that must run under the real owner's context rather than
+        the legacy synthetic `member:{instance}:owner` placeholder.
+        """
+        if not self._conn:
+            return None
+        async with self._conn.execute(
+            "SELECT member_id FROM members WHERE role='owner' LIMIT 1",
+        ) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else None
+
     async def list_members(self, status: str = "active") -> list[dict]:
         """List all members with the given status."""
         if not self._conn:

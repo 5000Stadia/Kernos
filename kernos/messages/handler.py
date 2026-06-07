@@ -5719,7 +5719,18 @@ class MessageHandler:
             # same remedy as the AUTO-WAKE-V1 system bypass above —
             # resolve the owner member directly, skip abuse prevention.
             if not message.member_id:
-                message.member_id = self._resolve_member(
+                _owner_id = None
+                if hasattr(self, '_instance_db') and self._instance_db:
+                    # Resolve the REAL owner row (stable mem_ id) — not the
+                    # legacy synthetic `member:{instance}:owner` placeholder.
+                    # Running plan steps under the synthetic id provisions a
+                    # phantom member/General space and routes execution away
+                    # from the owner's actual spaces (Codex review).
+                    try:
+                        _owner_id = await self._instance_db.get_owner_member_id()
+                    except Exception:
+                        _owner_id = None
+                message.member_id = _owner_id or self._resolve_member(
                     instance_id, message.platform, message.sender)
         # Resolve member via instance.db (multi-member aware)
         elif hasattr(self, '_instance_db') and self._instance_db:
