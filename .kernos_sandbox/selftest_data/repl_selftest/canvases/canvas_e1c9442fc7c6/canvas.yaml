@@ -1,0 +1,9 @@
+name: My Tools
+scope: personal
+owner: mem_e1ca043d
+created_at: '2026-06-07T03:05:39.936783+00:00'
+default_page_type: note
+default_consult_operator_at:
+- shipped
+- on_conflict
+pinned_to_spaces: []

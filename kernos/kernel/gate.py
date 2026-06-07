@@ -591,14 +591,31 @@ class DispatchGate:
         if tool_name in _KERNEL_WRITES:
             return "soft_write"
 
-        if not self._registry:
-            return "unknown"
+        if self._registry:
+            for cap in self._registry.get_all():
+                if tool_name in (cap.tool_effects or {}):
+                    return cap.tool_effects[tool_name]
+                if tool_name in (cap.tools or []) and tool_name not in (cap.tool_effects or {}):
+                    return "unknown"
 
-        for cap in self._registry.get_all():
-            if tool_name in (cap.tool_effects or {}):
-                return cap.tool_effects[tool_name]
-            if tool_name in (cap.tools or []) and tool_name not in (cap.tool_effects or {}):
-                return "unknown"
+        # Agent-built workshop tools live in the tool CATALOG
+        # (source="workspace"), not the capability registry scanned above —
+        # so they'd fall to "unknown" here, which HARD-BLOCKS dispatch
+        # ("not classified for safe dispatch") and breaks the core build→use
+        # loop: the agent registers a tool but can never run it (v1 self-test
+        # bug #7). Workshop tools are sandboxed + author-scoped, so default a
+        # registered one to its declared class, else the fail-closed
+        # soft_write (dispatchable, treated as a reversible write). This is
+        # scoped to source=="workspace": an undeclared MCP/connector tool is
+        # NOT defaulted — it stays "unknown" and blocked, since an external
+        # connector could be destructive.
+        if self._catalog is not None:
+            try:
+                entry = self._catalog.get(tool_name)
+            except Exception:
+                entry = None
+            if entry is not None and getattr(entry, "source", "") == "workspace":
+                return getattr(entry, "gate_classification", "") or "soft_write"
 
         return "unknown"
 

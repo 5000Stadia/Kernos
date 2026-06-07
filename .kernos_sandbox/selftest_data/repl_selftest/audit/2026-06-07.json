@@ -1,0 +1,1470 @@
+[
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:43:14.584945+00:00",
+    "fan_out_completed_at": "2026-06-07T02:43:14.586381+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:43:24.500146+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "ef64e7a338c24110b72952178a43e3d3",
+    "escalated": false
+  },
+  {
+    "audit_category": "integration.retry",
+    "turn_id": "operator",
+    "integration_run_id": "int-753603cbeaa5",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "attempt": 1,
+    "max_retries": 3,
+    "component": "briefing_validation",
+    "reason": "redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields.",
+    "iterations": 2,
+    "tools_called": [
+      "read_file:iter1"
+    ],
+    "phase_durations_ms": {
+      "collect": 0,
+      "integrate_iter_1": 5970,
+      "dispatch_iter_1": 3943,
+      "integrate_iter_2": 25118
+    },
+    "cohort_outputs": [
+      "operator:covenant:0"
+    ],
+    "success": false,
+    "error": "briefing_validation: redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:43:53.010648+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "cb874e4f414b4d4fa45ffefdd73169a3",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "memory.note_this",
+    "operation_name": "note_this",
+    "tool_class": "memory",
+    "completed": false,
+    "duration_ms": 0,
+    "failure_label": "tool_not_registered"
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "note_this",
+    "operation_name": "note_this",
+    "tool_class": "memory",
+    "completed": true,
+    "duration_ms": 3,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "note_this",
+    "operation_name": "note_this",
+    "tool_class": "memory",
+    "completed": true,
+    "duration_ms": 3,
+    "failure_label": ""
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:44:54.964990+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "note_this",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "soft_write",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "a6c1e89543e723c9dcd589eafe62da14ff14f3ce28f43421bc23f7c24e85dafd",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "edf40dc3b7744cee96913b24da74cf27",
+    "escalated": true
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:45:22.690144+00:00",
+    "fan_out_completed_at": "2026-06-07T02:45:22.691473+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:45:25.985851+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "4a3a860b908b4fe2afbbc31b7103f0c9",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:45:39.026118+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_state",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "3e3c36f7aba141daac2e42fb6fa08f22",
+    "escalated": false
+  },
+  {
+    "audit_category": "integration.retry",
+    "turn_id": "operator",
+    "integration_run_id": "int-8232155df71f",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "attempt": 1,
+    "max_retries": 3,
+    "component": "briefing_validation",
+    "reason": "redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields.",
+    "iterations": 3,
+    "tools_called": [
+      "read_file:iter1",
+      "inspect_state:iter2"
+    ],
+    "phase_durations_ms": {
+      "collect": 0,
+      "integrate_iter_1": 3285,
+      "dispatch_iter_1": 8,
+      "integrate_iter_2": 9222,
+      "dispatch_iter_2": 3817,
+      "integrate_iter_3": 19807
+    },
+    "cohort_outputs": [
+      "operator:covenant:0"
+    ],
+    "success": false,
+    "error": "briefing_validation: redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:46:02.983038+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "54403df3c2e0485db786c1125f0ed97f",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:46:08.642947+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_state",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "dc348a18797a4ddbb61ec2ad1d1039f8",
+    "escalated": false
+  },
+  {
+    "audit_category": "integration.retry",
+    "turn_id": "operator",
+    "integration_run_id": "int-8232155df71f",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "attempt": 2,
+    "max_retries": 3,
+    "component": "briefing_validation",
+    "reason": "redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields.",
+    "iterations": 3,
+    "tools_called": [
+      "read_file:iter1",
+      "inspect_state:iter2"
+    ],
+    "phase_durations_ms": {
+      "collect": 0,
+      "integrate_iter_1": 4137,
+      "dispatch_iter_1": 8,
+      "integrate_iter_2": 5649,
+      "dispatch_iter_2": 10,
+      "integrate_iter_3": 27181
+    },
+    "cohort_outputs": [
+      "operator:covenant:0"
+    ],
+    "success": false,
+    "error": "briefing_validation: redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:46:39.844345+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "f99aab4588a241888cce266663d9a187",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:46:49.471308+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_state",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "5a703527b5df4a74ae4a287a04c3ffd6",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:47:32.023702+00:00",
+    "fan_out_completed_at": "2026-06-07T02:47:32.025116+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:47:36.335418+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "c2bdf903b7304e63821def2e2b5b7dbc",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "write_file",
+    "operation_name": "write_file",
+    "tool_class": "files",
+    "completed": true,
+    "duration_ms": 10,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:48:16.637730+00:00",
+    "fan_out_completed_at": "2026-06-07T02:48:16.639047+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:48:20.371042+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "bf12f17a8dae8c8981751fe9aae9c6825c0331102616981afb74905408f61f6b",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "2bbab87581434f6fa735710345bf8415",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:48:24.664959+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "bf306b0736a34999aa6cc47174d30f2e",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "write_file",
+    "operation_name": "write_file",
+    "tool_class": "files",
+    "completed": true,
+    "duration_ms": 11,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:49:12.904037+00:00",
+    "fan_out_completed_at": "2026-06-07T02:49:12.905317+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:49:17.474309+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "bdd72d8b29fa438f99c89a016a5e527b",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:49:27.851798+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "89958fe406ba908b14d5ea70535ed8427a088011b29a156cfbee5e8513a8f3e2",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "d06e6ccebeb64f5aad5ee1360c17ec86",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:50:12.495956+00:00",
+    "fan_out_completed_at": "2026-06-07T02:50:12.496656+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:50:17.706401+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "8e726224bc174dfd888672b7ff03f4c5",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "reminders.manage_schedule",
+    "operation_name": "manage_schedule",
+    "tool_class": "reminders",
+    "completed": false,
+    "duration_ms": 0,
+    "failure_label": "tool_not_registered"
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "manage_schedule",
+    "operation_name": "manage_schedule",
+    "tool_class": "reminders",
+    "completed": true,
+    "duration_ms": 7,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "manage_schedule",
+    "operation_name": "manage_schedule",
+    "tool_class": "reminders",
+    "completed": true,
+    "duration_ms": 3471,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:51:34.203738+00:00",
+    "fan_out_completed_at": "2026-06-07T02:51:34.205018+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:51:38.341445+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "686aa1808dd244c6a15984aee78e8c5e",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "execute_code",
+    "operation_name": "execute_code",
+    "tool_class": "workspace_code_execution",
+    "completed": true,
+    "duration_ms": 55,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:53:08.020202+00:00",
+    "fan_out_completed_at": "2026-06-07T02:53:08.021521+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:53:11.719359+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "4021696108a64dfeb0f9ba1d86d2ada3",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:53:25.273082+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "ea0e60c7e6894aecabadfa1ffc3c6264",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registry",
+    "completed": true,
+    "duration_ms": 8,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registry",
+    "completed": true,
+    "duration_ms": 9,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registry",
+    "completed": true,
+    "duration_ms": 9,
+    "failure_label": ""
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:54:36.545143+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "register_tool",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "soft_write",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "0f72e0747503502e2a7b849c0a0e2f0ab066ca42f1f0cd175b3dbbad5e9992fa",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "d0e57cec5d124d5d85b14cdba7f30173",
+    "escalated": true
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:54:57.946217+00:00",
+    "fan_out_completed_at": "2026-06-07T02:54:57.947569+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:55:02.732378+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "0ba2278d85c046ea8608f99f9f74ed73",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "execute_code",
+    "operation_name": "execute_code",
+    "tool_class": "code_execution",
+    "completed": true,
+    "duration_ms": 60,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:56:25.044880+00:00",
+    "fan_out_completed_at": "2026-06-07T02:56:25.046229+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:56:34.557703+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "3b9036ebd1444c98ba3457a14b9a3d03",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:56:40.020012+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "e5a86015f1f348f7934dd4215c07d875",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "kernel",
+    "completed": true,
+    "duration_ms": 10,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T02:57:58.172192+00:00",
+    "fan_out_completed_at": "2026-06-07T02:57:58.173527+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "audit_category": "integration.retry",
+    "turn_id": "operator",
+    "integration_run_id": "int-7ba088573872",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "attempt": 1,
+    "max_retries": 3,
+    "component": "briefing_validation",
+    "reason": "model emitted briefing with empty presence_directive",
+    "iterations": 1,
+    "tools_called": [],
+    "phase_durations_ms": {
+      "collect": 0,
+      "integrate_iter_1": 31505
+    },
+    "cohort_outputs": [
+      "operator:covenant:0"
+    ],
+    "success": false,
+    "error": "briefing_validation: model emitted briefing with empty presence_directive"
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T02:58:33.766677+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "e0b76ffa6b144049b61fe9360ad1cba9",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "workspace_code_execution.execute_code",
+    "operation_name": "execute_code",
+    "tool_class": "workspace_code_execution",
+    "completed": false,
+    "duration_ms": 0,
+    "failure_label": "tool_not_registered"
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "execute_code",
+    "operation_name": "execute_code",
+    "tool_class": "workspace_code_execution",
+    "completed": true,
+    "duration_ms": 89,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T03:00:27.592131+00:00",
+    "fan_out_completed_at": "2026-06-07T03:00:27.593367+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "tool_registration.register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registration",
+    "completed": false,
+    "duration_ms": 0,
+    "failure_label": "tool_not_registered"
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registration",
+    "completed": true,
+    "duration_ms": 12,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registration",
+    "completed": true,
+    "duration_ms": 11,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T03:01:33.201742+00:00",
+    "fan_out_completed_at": "2026-06-07T03:01:33.202987+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:01:36.818982+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "ca7f6e8fcf1c8a6302fce5051323135a13dda7057f7d307033003dac710a7a79",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "b71952764d5345d39470b10f1bf92bdd",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registration",
+    "completed": true,
+    "duration_ms": 14,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T03:02:27.187499+00:00",
+    "fan_out_completed_at": "2026-06-07T03:02:27.188970+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:02:33.940623+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "500032c8b43e75152562c146781d855c3f983719a611edf903addb4701bb97bb",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "0b33ceaaa60f44d99d15264841cb21ee",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "flip_coin",
+    "operation_name": "flip_coin",
+    "tool_class": "workspace_tool",
+    "completed": false,
+    "duration_ms": 30,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "flip_coin",
+    "operation_name": "flip_coin",
+    "tool_class": "workspace_tool",
+    "completed": false,
+    "duration_ms": 23,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "flip_coin",
+    "operation_name": "flip_coin",
+    "tool_class": "workspace_tool",
+    "completed": false,
+    "duration_ms": 23,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T03:03:32.972053+00:00",
+    "fan_out_completed_at": "2026-06-07T03:03:32.973260+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:03:39.638745+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "a25009a9fffd40109171a960da5e1396",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:03:46.487712+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "500032c8b43e75152562c146781d855c3f983719a611edf903addb4701bb97bb",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "476f9807c86e4dfba37894861d09f29f",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:03:51.686694+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "3d32d7b3a0124138b60638c3813b5fa3",
+    "escalated": false
+  },
+  {
+    "audit_category": "integration.retry",
+    "turn_id": "operator",
+    "integration_run_id": "int-d9cc31322da3",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "attempt": 1,
+    "max_retries": 3,
+    "component": "briefing_validation",
+    "reason": "redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields.",
+    "iterations": 4,
+    "tools_called": [
+      "read_file:iter1",
+      "inspect_tools:iter2",
+      "inspect_tools:iter3"
+    ],
+    "phase_durations_ms": {
+      "collect": 0,
+      "integrate_iter_1": 6631,
+      "dispatch_iter_1": 33,
+      "integrate_iter_2": 6820,
+      "dispatch_iter_2": 29,
+      "integrate_iter_3": 5168,
+      "dispatch_iter_3": 29,
+      "integrate_iter_4": 20169
+    },
+    "cohort_outputs": [
+      "operator:covenant:0"
+    ],
+    "success": false,
+    "error": "briefing_validation: redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:04:17.166999+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "500032c8b43e75152562c146781d855c3f983719a611edf903addb4701bb97bb",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "0515449c4aa9438fb8172f9482841820",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:04:21.961484+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3a553c8dc22b255251e2683301e2c35f268f5b97e90ad531c45afee901510802",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "d1949766495e49da821aa53e2fdd19c9",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:04:25.988873+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "619d92a8b52a4f2aac0956df665de584",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "flip_coin",
+    "operation_name": "flip_coin",
+    "tool_class": "workspace_tool",
+    "completed": false,
+    "duration_ms": 25,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "flip_coin",
+    "operation_name": "flip_coin",
+    "tool_class": "workspace_tool",
+    "completed": false,
+    "duration_ms": 26,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "flip_coin",
+    "operation_name": "flip_coin",
+    "tool_class": "workspace_tool",
+    "completed": false,
+    "duration_ms": 29,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T03:06:05.552362+00:00",
+    "fan_out_completed_at": "2026-06-07T03:06:05.553676+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:06:15.490059+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "0996fbe03ef04bbdb479b35077f2d88c",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T03:06:55.751781+00:00",
+    "fan_out_completed_at": "2026-06-07T03:06:55.753226+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:07:03.870693+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "remember",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "71b04d4101c7d32b8d50b238bc62cb49f1ff51ad9543401996aebb90612b510e",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "0b5b2110bfc94fd98ea091b98d224438",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:07:11.436731+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "1b44f3f6c55f4efb854cdd3c553f5039",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:07:20.424347+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_state",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "f12a40b78669475297c5381732686f98",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T03:07:25.944269+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e1ca043d",
+    "space_id": "space_6c29713d",
+    "tool_name": "inspect_tools",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "bdf530e209e645b8b4d5a7fdb31bf75b",
+    "escalated": false
+  }
+]

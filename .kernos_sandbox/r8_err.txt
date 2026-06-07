@@ -1,0 +1,87 @@
+2026-06-06 19:42:47,622 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/TECHNICAL-ARCHITECTURE.md baked_hash=0321936f2ef6 current_hash=bcbe91fe8636 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,754 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/diagnostics.md baked_hash=74d5a7f0a468 current_hash=aa4389a3e638 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,761 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/overview.md baked_hash=9814f813276b current_hash=911e73c55b9c — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,769 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/tool-surface.md baked_hash=e647f660ceaa current_hash=f44b13094b38 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,782 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/identity/about-kernos.md baked_hash=1f4f32d6fcec current_hash=1cc26fea234f — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,787 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/identity/who-you-are.md baked_hash=76170fa928e0 current_hash=044080ad9c5a — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,787 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/index.md baked_hash=5fe3d1653948 current_hash=060b454ee78a — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,787 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/install.md baked_hash=eef88ba2abd6 current_hash=aac0647b4172 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,787 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/kernos-introduction.md baked_hash=95003901e022 current_hash=55396e4f32b6 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,791 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/reference/architecture-notebook.md baked_hash=8dd3ae0c65a0 current_hash=8e4b6e5e0af4 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-06 19:42:47,910 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_HYDRATION: loaded=96 sections=775 stale=10 missing_artifact=0 artifact_invalid=0 uncatalogued=3
+2026-06-06 19:43:49,619 WARNING kernos.kernel.integration.runner: INTEGRATION_ATTEMPT_FAILED: attempt=1/3 component=briefing_validation reason=redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields. iterations=2 tools_called=['read_file:iter1']
+2026-06-06 19:44:59,778 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`memory.note_this` failed, then `note_this` succeeded for the same request — consider making the working method the defa
+2026-06-06 19:45:58,836 WARNING kernos.kernel.integration.runner: INTEGRATION_ATTEMPT_FAILED: attempt=1/3 component=briefing_validation reason=redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields. iterations=3 tools_called=['read_file:iter1', 'inspect_state:iter2']
+2026-06-06 19:46:35,826 WARNING kernos.kernel.integration.runner: INTEGRATION_ATTEMPT_FAILED: attempt=2/3 component=briefing_validation reason=redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields. iterations=3 tools_called=['read_file:iter1', 'inspect_state:iter2']
+2026-06-06 19:51:03,057 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:51:11,917 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`reminders.manage_schedule` failed, then `manage_schedule` succeeded for the same request — consider making the working 
+2026-06-06 19:51:18,059 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:51:33,061 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:51:48,063 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:52:03,065 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:52:18,066 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:52:33,068 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:52:48,072 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:53:03,074 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:53:18,077 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:53:33,078 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:53:48,081 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:54:03,084 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:54:18,087 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:54:33,089 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:54:48,091 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:55:03,092 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:55:18,093 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:55:33,094 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:55:48,095 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:56:03,096 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:56:18,098 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:56:33,100 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:56:48,101 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:57:03,102 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:57:18,103 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:57:33,106 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:57:48,109 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:58:03,111 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:58:18,112 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:58:29,683 WARNING kernos.kernel.integration.runner: INTEGRATION_ATTEMPT_FAILED: attempt=1/3 component=briefing_validation reason=model emitted briefing with empty presence_directive iterations=1 tools_called=[]
+2026-06-06 19:58:33,113 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:58:48,116 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:59:03,117 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:59:18,118 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:59:33,119 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 19:59:48,121 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:00:02,048 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`workspace_code_execution.execute_code` failed, then `execute_code` succeeded for the same request — consider making the
+2026-06-06 20:00:03,123 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:00:18,126 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:00:33,128 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:00:48,131 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:01:03,132 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:01:18,133 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:01:19,678 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`tool_registration.register_tool` failed, then `register_tool` succeeded for the same request — consider making the work
+2026-06-06 20:01:33,135 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:01:48,136 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:02:03,137 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:02:18,139 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:02:33,142 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:02:48,145 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:03:03,146 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:03:18,150 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:03:33,152 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:03:48,153 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:04:03,154 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:04:11,861 WARNING kernos.kernel.integration.runner: INTEGRATION_ATTEMPT_FAILED: attempt=1/3 component=briefing_validation reason=redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields. iterations=4 tools_called=['read_file:iter1', 'inspect_tools:iter2', 'inspect_tools:iter3']
+2026-06-06 20:04:18,156 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:04:33,158 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:04:48,160 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:05:03,161 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:05:18,162 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:05:33,164 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:05:48,167 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:06:03,169 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:06:18,172 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:06:33,174 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:06:48,176 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:07:03,177 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:07:18,180 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-06 20:07:33,183 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
