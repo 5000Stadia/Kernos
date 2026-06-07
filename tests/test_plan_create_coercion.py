@@ -43,5 +43,8 @@ def test_nothing_to_plan_returns_empty():
 
 
 def test_invented_plan_names_alias_to_manage_plan():
-    for name in ("self_directed_plan", "self_directed_execution", "create_plan"):
+    # specific KERNOS plan-primitive names alias; bare create_plan/start_plan
+    # do NOT (they could shadow a real tool — Codex review).
+    for name in ("self_directed_plan", "self_directed_execution"):
         assert canonicalize_tool_name(name) == ("manage_plan", True)
+    assert canonicalize_tool_name("create_plan") == ("create_plan", False)

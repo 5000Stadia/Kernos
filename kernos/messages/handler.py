@@ -7640,6 +7640,38 @@ class MessageHandler:
                                 instance_id, space_id, _next_env,
                             )
                         )
+                    elif not all_done and plan.get("status") == "active":
+                        # No next step was enqueued and the plan isn't finished.
+                        # If we stalled purely because the step budget is spent
+                        # (pending work remains, nothing in flight), pause +
+                        # notify rather than leaving the plan silently active and
+                        # stuck (Codex review). The in_progress case (model is
+                        # driving) intentionally does nothing here.
+                        _steps2 = [
+                            s for p in plan.get("phases", [])
+                            for s in p.get("steps", [])
+                        ]
+                        _in_prog = any(s.get("status") == "in_progress" for s in _steps2)
+                        _has_pending = any(s.get("status") == "pending" for s in _steps2)
+                        _used2 = (plan.get("usage", {}) or {}).get("steps_used", 0)
+                        _max2 = (plan.get("budget", {}) or {}).get("max_steps", 30)
+                        if _has_pending and not _in_prog and _used2 >= _max2:
+                            plan["status"] = "paused"
+                            plan["paused_reason"] = "step_budget_reached"
+                            await save_plan(data_dir, instance_id, space_id, plan)
+                            logger.info(
+                                "PLAN_PAUSED_BUDGET: plan=%s used=%d/%d",
+                                envelope.plan_id, _used2, _max2,
+                            )
+                            try:
+                                await self.send_outbound(
+                                    instance_id, instance_id, None,
+                                    f"**{plan.get('title', 'Plan')}** paused — hit "
+                                    f"the step budget ({_max2}) with work left. "
+                                    f"Tell me to continue to resume.",
+                                )
+                            except Exception:
+                                pass
                 return  # Step succeeded — exit retry loop
 
             except Exception as exc:

@@ -32,3 +32,6 @@ config/storage_backend.yml
 # Codex (see .codex_handoff/README.md). Operational artifacts —
 # review requests + responses — never committed.
 .codex_handoff/
+
+# Headless self-test / sandbox scratch — never commit (LLM payloads, convo, DBs)
+.kernos_sandbox/

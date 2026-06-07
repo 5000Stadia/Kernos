@@ -98,3 +98,18 @@ def test_explicit_per_op_timeout_still_wins():
     res = MagicMock(operation_name="some_op")
     # an explicit classification timeout overrides even the long-tool floor
     assert d._timeout_ms_for(desc, res, "consult") == 5_000
+
+
+def test_bare_generic_plan_names_not_aliased():
+    # Codex review: bare create_plan/start_plan could shadow a real user/MCP
+    # tool, so they are NOT aliased; the specific KERNOS names still are.
+    assert canonicalize_tool_name("create_plan") == ("create_plan", False)
+    assert canonicalize_tool_name("start_plan") == ("start_plan", False)
+    assert canonicalize_tool_name("self_directed_plan") == ("manage_plan", True)
+
+
+def test_known_tool_never_aliased():
+    # a registered tool whose name happens to be a curated alias key is left
+    # alone when known_tools is supplied (real tools never get rewritten).
+    known = frozenset({"consult", "external_agent.consult"})
+    assert canonicalize_tool_name("external_agent.consult", known) == ("external_agent.consult", False)

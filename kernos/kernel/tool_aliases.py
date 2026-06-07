@@ -71,11 +71,11 @@ _TOOL_ALIASES: dict[str, str] = {
     "planning.manage_plan": "manage_plan",
     "planning.create_plan": "manage_plan",
     # 2026-06-07 live self-test: the model reaches for the plan primitive by
-    # several invented names. They all mean manage_plan.
+    # invented names. Kept SPECIFIC (not bare `create_plan`/`start_plan`, which
+    # could collide with a real user/MCP tool — Codex review) — these names are
+    # KERNOS-specific and won't shadow a connector tool.
     "self_directed_plan": "manage_plan",
     "self_directed_execution": "manage_plan",
-    "create_plan": "manage_plan",
-    "start_plan": "manage_plan",
     # 2026-06-06 v1 self-test: agent reached for a bare "reminders"/"reminder"
     # tool for scheduling before correcting to manage_schedule.
     "reminders": "manage_schedule",
@@ -114,6 +114,12 @@ def canonicalize_tool_name(
     Callers MUST log ``TOOL_ALIAS_REPAIR alias=X canonical=Y`` at INFO level when
     ``was_repaired=True`` so the agent's misuse stays auditable.
     """
+    # A genuinely registered tool is NEVER an alias target. When the caller
+    # supplies the known-tool set, a name already in it is returned as-is so a
+    # curated alias can't shadow a real user/MCP/workspace tool that shares the
+    # name (Codex review). Defense in depth alongside keeping aliases specific.
+    if known_tools is not None and name in known_tools:
+        return (name, False)
     canonical = _TOOL_ALIASES.get(name)
     if canonical is not None:
         return (canonical, True)
