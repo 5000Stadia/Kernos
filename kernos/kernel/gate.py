@@ -351,6 +351,16 @@ class DispatchGate:
                     _known_tools.update(_cap.tools or [])
             except Exception:
                 pass
+        # Include catalog (workshop) tool ids so a real tool literally named
+        # like a kernel wire form (e.g. a workshop `files__write_file`) is NOT
+        # suffix-stripped to a kernel tool during classification (SAE-V1;
+        # Codex review r3 P2).
+        if self._catalog is not None:
+            try:
+                for _e in self._catalog.get_all():
+                    _known_tools.add(_e.name)
+            except Exception:
+                pass
         _canonical_name, _was_repaired = canonicalize_tool_name(
             tool_name, _known_tools or None
         )

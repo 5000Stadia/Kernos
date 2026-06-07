@@ -230,6 +230,7 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "aliases, audit, introspection.",
         ("kernos/kernel/tool_catalog.py", "kernos/kernel/kernel_tool_registry.py",
          "kernos/kernel/tools/", "kernos/kernel/tool_aliases.py",
+         "kernos/kernel/tool_namespace.py",
          "kernos/kernel/tool_audit.py", "kernos/kernel/tool_introspection.py",
          "kernos/kernel/tool_gate_routing.py"),
     ),

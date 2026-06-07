@@ -1040,6 +1040,18 @@ class ReasoningService:
                     _known_tools.update(_cap.tools or [])
         except Exception:
             pass
+        # Include catalog (workshop) tool ids so a real tool literally named
+        # like a kernel wire form (e.g. a workshop `files__write_file`) is in
+        # the known set and is NOT suffix-stripped to a kernel tool (SAE-V1;
+        # Codex review r3 P2).
+        try:
+            _h = getattr(self, "_handler", None)
+            _cat = getattr(_h, "_tool_catalog", None) if _h is not None else None
+            if _cat is not None:
+                for _e in _cat.get_all():
+                    _known_tools.add(_e.name)
+        except Exception:
+            pass
         _canonical_name, _was_repaired = canonicalize_tool_name(
             tool_name, _known_tools
         )
