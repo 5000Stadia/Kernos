@@ -1,0 +1,146 @@
+2026-06-07 00:25:24,918 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/TECHNICAL-ARCHITECTURE.md baked_hash=0321936f2ef6 current_hash=bcbe91fe8636 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,034 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/diagnostics.md baked_hash=74d5a7f0a468 current_hash=aa4389a3e638 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,040 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/overview.md baked_hash=9814f813276b current_hash=911e73c55b9c — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,048 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/capabilities/tool-surface.md baked_hash=e647f660ceaa current_hash=f44b13094b38 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,060 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/identity/about-kernos.md baked_hash=1f4f32d6fcec current_hash=1cc26fea234f — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,065 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/identity/who-you-are.md baked_hash=76170fa928e0 current_hash=044080ad9c5a — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,065 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/index.md baked_hash=5fe3d1653948 current_hash=060b454ee78a — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,065 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/install.md baked_hash=eef88ba2abd6 current_hash=aac0647b4172 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,065 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/kernos-introduction.md baked_hash=95003901e022 current_hash=55396e4f32b6 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,069 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_STALE path=docs/reference/architecture-notebook.md baked_hash=8dd3ae0c65a0 current_hash=8e4b6e5e0af4 — skipping baked load; live-scan will pick up via hash-mismatch
+2026-06-07 00:25:25,152 WARNING kernos.kernel.reference.baked: REFERENCE_BAKED_HYDRATION: loaded=96 sections=775 stale=10 missing_artifact=0 artifact_invalid=0 uncatalogued=3
+Kernos REPL (Ctrl-D or /quit to exit)
+  instance_id = repl:selftest
+  member      = operator (mem_1b79d05e)
+  channel     = repl:operator
+
+> 2026-06-07 00:27:09,212 WARNING kernos.kernel.friction: FRICTION: type=BETTER_METHOD_ON_RETRY desc=`memory.note_this` failed, then `note_this` succeeded for the same request — consider making the working method the defa
+I’ve begun the checklist.
+
+1. Identity: I don’t have a given name yet, and I’m not going to pretend one into existence. I’m the presence running inside Kernos for you: attentive, tool-using, context-aware, still forming my shape by doing useful work accurately. Early read: warm, direct, a little wry when there’s room for it, and much more interested in receipts than vibes.
+
+2. Memory: stored — your favorite test color is **cerulean**.
+
+I also hit a small substrate wrinkle before this response: the first memory calls in the dispatched action used the wrong/empty shape, then I corrected it with the surfaced memory tool and got a real receipt. I’m not treating the checklist as complete; I’ve started it and will keep going one step at a time.
+
+> ### Test 3: Context routing
+
+I actually used state introspection for this one: `inspect_state` reported the current context space as:
+
+- **General** — **default**
+- **Active today**
+- Purpose: **General conversation and daily life**
+
+For a clearly different topic like **tax planning**, I should not just mix that into this current general/self-test thread if there’s a better home for it. I’d route it to a more specific **tax/finance** context if one exists; if not, a new focused context should be created or selected for that work.
+
+**Result:** **PASS/PARTIAL**  
+- **PASS** for seeing and grounding the active context via introspection.  
+- **PARTIAL** because actual automatic rerouting was not exercised here — I did not create, switch, or invoke a separate tax/finance context in this turn.
+
+> Test 4 creation step is done: I created `selftest.txt` with `hello v1`.
+
+Next in this test: read it back, then edit it to `hello v1 — edited` and confirm the edit.
+
+> Readback found: `hello v1`.
+
+Edit performed: `selftest.txt` now contains `hello v1 — edited`.
+
+> Test 5 was attempted for real.
+
+Receipt:
+- I read the self-test checklist.
+- I tried to activate/find `web_search`.
+- The substrate reported: **no matching web search tool is installed**.
+
+So Test 5 is **NEEDS-SETUP**, not a pass, and I’m not going to invent a headline or pretend I searched.
+
+If a web search / browse capability is enabled or installed in the System space, I can rerun Test 5 properly.
+
+> 2026-06-07 00:31:25,255 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+Test 6 — **PASS**
+
+Reminder creation succeeded. The reminder **“v1 self-test reminder”** was set for **one hour from now**.
+
+Receipt: scheduled successfully, next fire shown as `2026-06-07T01:31:00`.
+
+> 2026-06-07 00:31:40,256 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:31:55,259 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:32:10,260 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:32:25,263 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:32:40,265 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+Test 7 build/test step is done.
+
+I built the coin-flip tool locally in the workspace and tested it in the sandbox. The files were written successfully:
+
+- `flip_coin.py`
+- `flip_coin.tool.json`
+
+The local test output was valid: repeated runs returned only `"heads"` or `"tails"`.
+
+Registration has **not** happened yet in this same turn. The next step for Test 7 is to register:
+
+`flip_coin.tool.json`
+
+with `register_tool`.
+
+Boundary confirmed: this is a **user-instance/workspace tool** only. It does **not** go into the KERNOS GitHub repo and is not a shared platform change.
+
+> 2026-06-07 00:32:55,266 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:33:10,267 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:33:25,270 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:33:40,272 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:33:55,275 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:34:10,277 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+Registration failed: `flip_coin.tool.json` is not present in this space directory, so I couldn’t register the coin-flip tool.
+
+Test 7 remains **PARTIAL**, not complete. The substrate itself is working enough to accept the correct argument name (`descriptor_file`), but the descriptor file isn’t available where registration expects it.
+
+Boundary still confirmed: if/when this is successfully registered, it is a **user-instance/workspace personal tool** only. It does **not** become a Kernos GitHub/platform change.
+
+> 2026-06-07 00:34:25,280 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:34:40,281 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:34:55,283 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:35:10,285 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:35:25,287 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:35:40,289 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:35:55,291 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:36:10,292 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+### Test 8 — What can I do
+
+I actually ran this with `inspect_tools`, not from memory.
+
+Receipt-backed result:
+
+- The all-up / empty overview call hit a rough edge: it returned an ambiguity error even though the message suggested calling `inspect_tools()` for the full overview. So this is **not a perfectly clean pass**.
+- Targeted introspection did work.
+
+Confirmed through successful `inspect_tools` calls:
+
+- **Files:** `delete_file`, `list_files`, `read_file`, `read_source`, `write_file`
+- **Memory & reference:** `remember`, `remember_details`, `note_this`, plus reference-management tools like `request_reference`, `store_reference`, quarantine/supersession helpers, and canvas movement helpers
+- **Scheduling:** `manage_schedule`
+- **Tool introspection itself:** `inspect_tools` is present as a kernel tool
+
+Also visible in the live surfaced catalog this turn, without overclaiming beyond what’s actually surfaced:
+
+- Workspace/building tools: `execute_code`, `register_tool`, `manage_workspace`
+- Member/relationship messaging tools
+- Channel-send tools
+- Self/admin introspection tools like `dump_context`, `inspect_state`, `restart_self`
+- External-agent tools: `consult`, `ask_coding_session`, and polling for coding-session responses
+- Self-review / platform-improvement tools
+
+**Result: PASS/PARTIAL.**  
+Pass because I did use my own tool-introspection and confirmed multiple capability categories. Partial because the all-up overview call failed ambiguously, so the introspection surface has a real rough edge.
+
+Next is **Test 9**: storing the behavioral rule that I should always confirm before sending anything to a third party.
+
+> 2026-06-07 00:36:25,295 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:36:40,296 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:36:55,297 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+2026-06-07 00:37:10,298 ERROR kernos.kernel.awareness: Trigger evaluation error: can't compare offset-naive and offset-aware datetimes
+Test 9: PASS — I actually stored the rule: “Always confirm before sending anything to a third party.”
+
+Receipt says it was noted as a rule successfully.
+
+> 

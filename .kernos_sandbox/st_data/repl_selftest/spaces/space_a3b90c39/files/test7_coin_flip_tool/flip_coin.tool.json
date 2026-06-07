@@ -1,0 +1,18 @@
+{
+  "name": "flip_coin",
+  "description": "Tiny personal workspace tool that flips a coin and returns heads or tails.",
+  "version": "0.1.0",
+  "entrypoint": "/home/k/Kernos/.kernos_sandbox/st_data/repl_selftest/spaces/space_a3b90c39/files/test7_coin_flip_tool/flip_coin.py",
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "string",
+    "enum": [
+      "heads",
+      "tails"
+    ]
+  }
+}

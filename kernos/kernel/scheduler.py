@@ -217,9 +217,21 @@ class TriggerStore:
                 # Handle both "2026-03-22 12:03" and "2026-03-22T12:03:00" formats
                 nfa_dt = datetime.fromisoformat(nfa.replace(" ", "T"))
                 now_dt = datetime.fromisoformat(now_iso.replace(" ", "T"))
+                # Tz-normalize before comparing: an agent-supplied `when` often
+                # omits a timezone (naive), while `now` is UTC-aware. Comparing
+                # the two raised "can't compare offset-naive and offset-aware
+                # datetimes" EVERY tick, killing the whole trigger-eval pass so
+                # no scheduled reminder could fire (v1 self-test bug #8). Treat
+                # a naive datetime as UTC.
+                if nfa_dt.tzinfo is None:
+                    nfa_dt = nfa_dt.replace(tzinfo=timezone.utc)
+                if now_dt.tzinfo is None:
+                    now_dt = now_dt.replace(tzinfo=timezone.utc)
                 if nfa_dt <= now_dt:
                     results.append(Trigger(**d))
-            except ValueError:
+            except (ValueError, TypeError):
+                # A single malformed/odd trigger must never abort the whole
+                # evaluation pass for all other triggers.
                 continue
         return results
 

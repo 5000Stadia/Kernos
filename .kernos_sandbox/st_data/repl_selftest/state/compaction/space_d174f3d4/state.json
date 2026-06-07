@@ -1,0 +1,19 @@
+{
+  "space_id": "space_d174f3d4",
+  "history_tokens": 0,
+  "compaction_number": 0,
+  "global_compaction_number": 0,
+  "archive_count": 0,
+  "message_ceiling": 157973,
+  "document_budget": 188000,
+  "conversation_headroom": 8000,
+  "cumulative_new_tokens": 0,
+  "last_compaction_at": "",
+  "index_tokens": 0,
+  "compaction_threshold": 24000,
+  "_context_def_tokens": 27,
+  "_system_overhead": 4000,
+  "consecutive_failures": 0,
+  "last_compaction_failure_at": "",
+  "last_seed_depth": 10
+}
