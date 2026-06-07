@@ -371,17 +371,35 @@ def _find_tool_use(
 
 def _parse_step_from_payload(payload: dict[str, Any]) -> Step:
     expectation_raw = payload.get("expectation") or {"prose": " "}
+    # The model sometimes emits `arguments` as a non-dict (e.g. a JSON string
+    # or a bare value). dict("some.string") raises "dictionary update sequence
+    # element #0 has length 1; 2 is required", and that ValueError used to
+    # escape the PlanValidationError-only except below and KILL the whole turn
+    # (v1 self-test bug #10). Coerce defensively: a dict is used as-is; a JSON
+    # object string is parsed; anything else degrades to empty args (the step
+    # then fails gracefully downstream instead of crashing reasoning).
+    _args_raw = payload.get("arguments", {}) or {}
+    if isinstance(_args_raw, dict):
+        _arguments = dict(_args_raw)
+    elif isinstance(_args_raw, str):
+        try:
+            _parsed = json.loads(_args_raw)
+            _arguments = _parsed if isinstance(_parsed, dict) else {}
+        except (ValueError, TypeError):
+            _arguments = {}
+    else:
+        _arguments = {}
     try:
         expectation = StepExpectation.from_dict(expectation_raw)
         return Step(
             step_id=str(payload.get("step_id") or "modified"),
             tool_id=str(payload.get("tool_id", "")),
-            arguments=dict(payload.get("arguments", {}) or {}),
+            arguments=_arguments,
             tool_class=str(payload.get("tool_class", "")),
             operation_name=str(payload.get("operation_name", "")),
             expectation=expectation,
         )
-    except PlanValidationError as exc:
+    except (PlanValidationError, ValueError, TypeError) as exc:
         raise DivergenceReasonerError(
             f"step construction failed: {exc}"
         ) from exc

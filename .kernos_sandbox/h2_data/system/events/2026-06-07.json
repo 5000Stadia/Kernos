@@ -1,0 +1,11 @@
+[
+  {
+    "id": "evt_1780847517168421_6c28",
+    "type": "system.started",
+    "instance_id": "system",
+    "timestamp": "2026-06-07T15:51:57.168448+00:00",
+    "source": "repl",
+    "payload": {},
+    "metadata": {}
+  }
+]

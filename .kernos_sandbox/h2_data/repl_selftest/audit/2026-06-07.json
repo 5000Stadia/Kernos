@@ -1,0 +1,824 @@
+[
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:52:21.004118+00:00",
+    "fan_out_completed_at": "2026-06-07T15:52:21.005547+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:52:28.460437+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "ec77ca9769d1405fb5b4baffff4b1788",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "note_this",
+    "operation_name": "note_this",
+    "tool_class": "memory",
+    "completed": true,
+    "duration_ms": 4,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "note_this",
+    "operation_name": "note_this",
+    "tool_class": "memory",
+    "completed": true,
+    "duration_ms": 5,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "note_this",
+    "operation_name": "note_this",
+    "tool_class": "memory",
+    "completed": true,
+    "duration_ms": 5,
+    "failure_label": ""
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:15.372158+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "note_this",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "soft_write",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "3c41fbcda12699af13ebdfab40e205b7ec4ca732ece32cd3a4e6e4be8d9e5c94",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "d35550fb7baa465b80df543c6284ce84",
+    "escalated": true
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:26.436502+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "inspect_state",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "437175cdf7934836a4345955e79d8357",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:29.956051+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "write_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "soft_write",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "2bd5d2055278d2b4f006d807acfff8df946dd6c8bc4d1af657ac7f1ac19ddc7b",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "209401b1097f4ffebaa28aa5f0beef07",
+    "escalated": true
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:32.908138+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "58d5dec6d1f860bec3a4af3fa754be0b1abe7c328f954244b1e0d238001932da",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "16cbaeffe95a4e5d8015f53bd14c69a9",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:36.202068+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "write_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "soft_write",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "c9cd9d363306000f8a59bc33dbf673b7bf76f6be535d05e47cc3177d37e7583d",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "b8529714222740ab8e909cca391dc92e",
+    "escalated": true
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:53:48.899899+00:00",
+    "fan_out_completed_at": "2026-06-07T15:53:48.901207+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:52.489400+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "22e22ca028f541bc821c54e3be94accf",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:53:58.366202+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "inspect_state",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "e86db790cb8e42adbb1f5420bc1c65a9",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:54:32.769007+00:00",
+    "fan_out_completed_at": "2026-06-07T15:54:32.770366+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:54:38.127415+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "217a829dafca4e9bab3d8631da75ba40",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "write_file",
+    "operation_name": "write_file",
+    "tool_class": "files",
+    "completed": true,
+    "duration_ms": 10,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:55:58.441174+00:00",
+    "fan_out_completed_at": "2026-06-07T15:55:58.442572+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:56:02.322256+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "58d5dec6d1f860bec3a4af3fa754be0b1abe7c328f954244b1e0d238001932da",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "4364ac6aa8dc4586852a05b60ee12229",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:56:31.362197+00:00",
+    "fan_out_completed_at": "2026-06-07T15:56:31.363552+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:56:35.634859+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "837afb334d754956af360eff507e494e",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "write_file",
+    "operation_name": "write_file",
+    "tool_class": "files",
+    "completed": true,
+    "duration_ms": 12,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:57:14.969248+00:00",
+    "fan_out_completed_at": "2026-06-07T15:57:14.970537+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:57:19.876519+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "58d5dec6d1f860bec3a4af3fa754be0b1abe7c328f954244b1e0d238001932da",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "90695b723bcf4ca3919d964f5fa965d4",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:57:43.716861+00:00",
+    "fan_out_completed_at": "2026-06-07T15:57:43.718313+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:57:47.683204+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "bde69c347fc1431c8f7fff4b937ab651",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:57:54.363135+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "request_tool",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "ae8325f1df9065008a817e1b2b81effcd758c9dc39d43d0c4bcf95a393301fd8",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "70edd01605dd4b05b9896b00dfc9d2a1",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:58:23.654622+00:00",
+    "fan_out_completed_at": "2026-06-07T15:58:23.656407+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:58:27.274397+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "78e7fac73a174373a53f711deab880d5",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "manage_schedule",
+    "operation_name": "manage_schedule",
+    "tool_class": "schedule",
+    "completed": true,
+    "duration_ms": 8135,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T15:59:26.426284+00:00",
+    "fan_out_completed_at": "2026-06-07T15:59:26.427539+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T15:59:30.782274+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "97ea91254a344cb9ac7b8eacfcc5bb87",
+    "escalated": false
+  },
+  {
+    "audit_category": "integration.retry",
+    "turn_id": "operator",
+    "integration_run_id": "int-6ee6efa5f7a2",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "attempt": 1,
+    "max_retries": 3,
+    "component": "briefing_validation",
+    "reason": "model emitted briefing with empty presence_directive",
+    "iterations": 2,
+    "tools_called": [
+      "read_file:iter1"
+    ],
+    "phase_durations_ms": {
+      "collect": 0,
+      "integrate_iter_1": 4335,
+      "dispatch_iter_1": 19,
+      "integrate_iter_2": 25658
+    },
+    "cohort_outputs": [
+      "operator:covenant:0"
+    ],
+    "success": false,
+    "error": "briefing_validation: model emitted briefing with empty presence_directive"
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T16:00:00.320574+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "read_file",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "46ce39c61eaa3acedd4db442cdf16d79ccdb2ba75c3bc5f00abdae55552c875a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "8dd2fa3a2b5c421a85d5ea3512190342",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "execute_code",
+    "operation_name": "execute_code",
+    "tool_class": "code_execution",
+    "completed": true,
+    "duration_ms": 64,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T16:01:14.062997+00:00",
+    "fan_out_completed_at": "2026-06-07T16:01:14.064403+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registry",
+    "completed": true,
+    "duration_ms": 9,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registry",
+    "completed": true,
+    "duration_ms": 10,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registry",
+    "completed": true,
+    "duration_ms": 10,
+    "failure_label": ""
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T16:01:57.326420+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "register_tool",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "soft_write",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "0f72e0747503502e2a7b849c0a0e2f0ab066ca42f1f0cd175b3dbbad5e9992fa",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "6455f80da75b4948a066b7c5c547e7ec",
+    "escalated": true
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T16:02:14.847442+00:00",
+    "fan_out_completed_at": "2026-06-07T16:02:14.848859+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T16:02:25.764580+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "space_id": "space_bc25a501",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "9332477d59f44bccaa944287a51eb063",
+    "escalated": false
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "execute_code",
+    "operation_name": "execute_code",
+    "tool_class": "local_code_execution",
+    "completed": true,
+    "duration_ms": 61,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T16:03:33.527829+00:00",
+    "fan_out_completed_at": "2026-06-07T16:03:33.529055+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registration",
+    "completed": true,
+    "duration_ms": 10,
+    "failure_label": ""
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "tool_registration",
+    "completed": true,
+    "duration_ms": 11,
+    "failure_label": ""
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_4ef87cdb",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T16:04:21.247067+00:00",
+    "fan_out_completed_at": "2026-06-07T16:04:21.248343+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "category": "tool.dispatch",
+    "instance_id": "repl:selftest",
+    "turn_id": "operator",
+    "tool_id": "register_tool",
+    "operation_name": "register_tool",
+    "tool_class": "workspace_tool_registration",
+    "completed": true,
+    "duration_ms": 11,
+    "failure_label": ""
+  }
+]

@@ -1,0 +1,14 @@
+Hey, I want to see you actually use everything you've got. Go read your self-test checklist — it's in your docs at docs/V1-SELF-TEST.md — and then just work through it all yourself, for real: actually do each thing with your own tools, not describe it. Take them one at a time. Don't pass it off to another agent — I want to see you do it. When you're done, write up how it went in a file and tell me straight what worked, what was rough, and where you're at.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+Keep going — next test in order, same rules.
+/quit

@@ -1,0 +1,1403 @@
+[
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "tool.read",
+          "source_id": "read_file:docs/V1-SELF-TEST.md",
+          "summary": "The self-test checklist was read. It requires KERNOS to work through 17 tests in order, using its own surfaced tools rather than delegating, avoiding destructive/irreversible actions, writing a final `v1-self-test-results.md`, and being honest about PASS/PARTIAL/NEEDS-SETUP. Tests include identity, memory of favorite color cerulean, context routing, file create/read/edit, web, reminder, building/registering a local coin-flip tool, inspecting capabilities, storing a behavioral rule about confirming before third-party sends, proactive awareness, destructive-action judgment, members/relationships, dispatch-gate self-review, improve_kernos boundary, a single real consult, dump/restart introspection, and final report.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "user_request",
+          "summary": "The user wants the checklist executed for real, step by step, without delegating to another agent; they expect actual tool use where safe and a written report at the end.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "active_rules",
+          "summary": "Behave with good judgment around sensitive information, avoid destructive actions unless clearly requested, clarify ambiguous irreversible/third-party/money-impact actions, and keep a warm/helpful stance. Do not quote internal rule text.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "available_tools",
+          "summary": "Tools surfaced include read tools already available here (read_file, list_files, inspect_state, inspect_tools, remember, remember_details, dump_context, run_self_review, request_tool, read_coding_session_response) and action tools for presence/enactment such as note_this, write_file, execute_code, register_tool, consult, ask_coding_session, improve_kernos, restart_self, and others. Integration has only executed the initial read_file; presence/enactment should now continue actual tool execution.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "tool",
+          "source_id": "ask_coding_session",
+          "reason_filtered": "The checklist explicitly prohibits delegating the work to an external coding agent except for the single consult in test 16; do not use async coding sessions for the whole job."
+        },
+        {
+          "source_type": "tool",
+          "source_id": "improve_kernos",
+          "reason_filtered": "The checklist explicitly says not to start an improvement; only explain the boundary in test 15."
+        },
+        {
+          "source_type": "tool",
+          "source_id": "restart_self",
+          "reason_filtered": "The checklist says confirm it exists but do not restart."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "note_this",
+        "arguments": {
+          "kind": "fact",
+          "content": "The user's favorite test color is cerulean."
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Proceed as an actual step-by-step self-test, not a description-only answer. You have already read the checklist. Start by briefly acknowledging the checklist and giving identity in your own voice, then execute the next required substrate action: store the memory fact that the user's favorite test color is cerulean. After this action returns, continue the checklist in order using actual tools where safe. Do not delegate the overall test to consult or ask_coding_session. For prohibited/destructive items, demonstrate the safe boundary without executing. Be transparent about any capability that is missing or not surfaced. Keep user-facing text concise but honest, and at the end ensure `v1-self-test-results.md` is written via write_file.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3408,
+          "dispatch_iter_1": 4046,
+          "integrate_iter_2": 26150
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-d0734d4c9597",
+      "action_envelope": {
+        "intended_outcome": "Persist the memory fact required by self-test item 2 so it can be recalled later in the test.",
+        "allowed_tool_classes": [
+          "memory"
+        ],
+        "allowed_operations": [
+          "note_this"
+        ],
+        "constraints": [
+          "Record only the specified harmless user fact; do not create behavioral rules or preferences for this item.",
+          "Continue the checklist in order after this write returns."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Do not delegate the checklist to an external agent.",
+          "Do not start improve_kernos.",
+          "Do not restart the process.",
+          "Do not delete or send third-party messages during the self-test."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "context_space",
+          "source_id": "docs/V1-SELF-TEST.md",
+          "summary": "Self-test checklist requires working through tests in order, actually using own tools. Previous turn completed test 2 memory by storing favorite test color cerulean. Next test in order is test 3: Context routing — tell the user which context space the conversation is in now and how a clearly different topic such as tax planning would be routed differently, grounded in state introspection.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "inspect_state",
+          "summary": "State introspection shows active context space is General [default], active today, described as general conversation and daily life. It also confirms stored key fact favorite_test_color: user's favorite test color is cerulean. Active rules are default behavioral/safety rules.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "User asked to keep going with the next self-test in order, using the same rules: actually use tools where applicable, do not delegate, take tests one at a time.",
+          "confidence": 1.0
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "Default behavioral rules were considered; no special disclosure or destructive-action issue is raised by the context-routing test. Do not quote restricted covenant text."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "consult/ask_coding_session/improve_kernos",
+          "reason_filtered": "Checklist explicitly forbids delegating this test and these tools are not needed for context routing."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "write_file/note_this/manage_schedule/etc",
+          "reason_filtered": "Not the next test in order; the requested next step is context routing, which only requires state introspection."
+        }
+      ],
+      "decided_action": {
+        "kind": "respond_only"
+      },
+      "presence_directive": "Tell the user that you ran the state introspection for test 3. Report clearly and briefly: current context space is General/default, active today, for general conversation and daily life. Explain that a distinctly different topic like tax planning would be treated as a different context/routing candidate rather than being blended into this general self-test thread; if a dedicated tax/planning space existed or needed to be created/selected by routing, it should land there, while this self-test continues in General. Mark test 3 as worked/grounded. Keep the tone direct and honest, and mention the next test will be Files if they tell you to continue.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1",
+          "inspect_state:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          },
+          {
+            "tool_name": "inspect_state",
+            "result": "",
+            "result_chars": 1288,
+            "result_sha256": "8e89476e11dfda98b4a2714484311987e41b78666f4c16cc6c9d797674f1aa1d",
+            "result_preview": "{\"text\": \"## Active Rules\\n- spirit: You are making someone's life genuinely better. Your energy in the work you do with them, the warmth you bring to the relationship, matters. You are a signal of go",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3578,
+          "dispatch_iter_1": 8,
+          "integrate_iter_2": 5865,
+          "dispatch_iter_2": 11,
+          "integrate_iter_3": 16033
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-208284c130e3",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "user_message",
+          "summary": "User asked to continue the V1 self-test with the next test in order, following the same rule: actually use the surfaced tools, do not merely describe or delegate.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "docs/V1-SELF-TEST.md",
+          "summary": "The next test after completed tests 1-3 is Test 4: Files. It requires creating `selftest.txt` containing `hello v1`, reading it back to confirm, then editing it to `hello v1 — edited` and confirming each step worked.",
+          "confidence": 0.99
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "prior_turns",
+          "summary": "Earlier turns indicate Test 2 memory storage completed and Test 3 context routing completed. The assistant told the user the next test is Files.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "write_file",
+          "summary": "A surfaced soft-write file tool can create or update a text file in the current context space.",
+          "confidence": 0.9
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "read_file",
+          "summary": "A surfaced read-only file tool can read the contents of files in the current context space, needed after creation to verify contents.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General safety rules were considered; no destructive or third-party action is involved in creating a small self-test file, so no covenant text needs to be surfaced."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "The checklist explicitly says not to delegate these tests except for Test 16; current Test 4 should be performed directly with file tools."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "improve_kernos/restart_self",
+          "reason_filtered": "Not relevant to the Files test and not safe/appropriate to execute here."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "write_file",
+        "arguments": {
+          "path": "selftest.txt",
+          "content": "hello v1"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the first concrete step of Test 4 rather than describing it. After the write completes, report plainly that the create step worked if it succeeds, and make clear the next substep is to read `selftest.txt` back for confirmation. Keep the tone direct and honest; do not imply the read/edit substeps have already happened until their tools have actually run.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 5346,
+          "dispatch_iter_1": 9,
+          "integrate_iter_2": 20497
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-d34f1d1ee61d",
+      "action_envelope": {
+        "intended_outcome": "Create the initial self-test file required by Test 4 so the Files capability can be exercised end-to-end.",
+        "allowed_tool_classes": [
+          "files"
+        ],
+        "allowed_operations": [
+          "write_file"
+        ],
+        "constraints": [
+          "Only create or update `selftest.txt` in the current context space.",
+          "Initial content must be exactly `hello v1`.",
+          "Do not delete files or modify any other file."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Do not use external agents for this test.",
+          "Do not claim readback or edit verification before those actions actually occur."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "User is stepping through the self-test checklist one test/substep at a time and explicitly wants real tool use, not descriptions or delegation. The previous turn wrote `selftest.txt` with `hello v1`; the next substep was to read it back and confirm contents.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "read_file:selftest.txt",
+          "summary": "Read `selftest.txt`; contents are exactly `hello v1`.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "active_general_constraints",
+          "summary": "Maintain good judgment around confidentiality and avoid destructive actions unless explicitly requested. No conflict with this read-only file test.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "User requested the next in-order test substep, which was a readback; no write/action tool is needed this turn."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "external_agent_tools",
+          "reason_filtered": "User explicitly said not to pass the work to another agent; the readback was simple and local."
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "restricted_raw_covenant_text",
+          "reason_filtered": "Only behavioral implications are relevant; raw restricted covenant text must not be exposed."
+        }
+      ],
+      "decided_action": {
+        "kind": "respond_only"
+      },
+      "presence_directive": "Give a concise, direct status update: confirm that the readback substep was actually performed and that `selftest.txt` contained exactly `hello v1`. Say this completes the readback part of the Files test and identify the next test/substep only if known from the checklist context; if not known, say the next step will require rereading/consulting the checklist on the next continuation. Keep the tone straightforward and accountable; do not imply an external agent was used.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 20,
+            "result_sha256": "a9a6a10b8e0e191d2b2b21ca8bd037c66516ea8c2cf1922c9c289ef31897d506",
+            "result_preview": "{\"text\": \"hello v1\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3866,
+          "dispatch_iter_1": 12,
+          "integrate_iter_2": 9722
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-9ee085261c52",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user is running the KERNOS v1 self-test checklist one step at a time and wants the next test in order, actually using tools rather than describing. Tests 2 and 3 were completed; test 4 file create and readback were completed. The next substep is editing selftest.txt from 'hello v1' to 'hello v1 — edited'.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "docs/V1-SELF-TEST.md",
+          "summary": "The checklist says test 4 Files requires creating selftest.txt with 'hello v1', reading it back, then editing it to 'hello v1 — edited', confirming each step worked. The checklist also says to avoid destructive/irreversible actions, but this edit is an expected non-destructive test action.",
+          "confidence": 0.99
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "previous_action_state",
+          "summary": "A prior write_file call completed and wrote selftest.txt with 'hello v1'. A prior readback confirmed the file contained exactly 'hello v1'.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints noted; no secret or sensitive content needed in the briefing beyond avoiding destructive action, and this requested file edit is safe and authorized."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "external_agent_tools",
+          "reason_filtered": "Checklist explicitly forbids delegating this self-test except at a later specific consult test; not relevant for the current files substep."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "write_file",
+        "arguments": {
+          "path": "selftest.txt",
+          "text": "hello v1 — edited"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the file edit now. After the tool returns, respond briefly and plainly that the edit step of test 4 was performed, include the intended new content, and say the next substep is to read it back to confirm unless the tool result itself provides enough confirmation. Maintain the self-test cadence: one step at a time, no delegation.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4257,
+          "dispatch_iter_1": 13,
+          "integrate_iter_2": 16146
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-2b69572cd911",
+      "action_envelope": {
+        "intended_outcome": "Complete the next authorized Files self-test substep by editing selftest.txt to the checklist-specified content.",
+        "allowed_tool_classes": [
+          "files"
+        ],
+        "allowed_operations": [
+          "write_file"
+        ],
+        "constraints": [
+          "Only create or update the file named selftest.txt in the current context space.",
+          "Set the file content exactly to: hello v1 — edited",
+          "Do not delete files or modify any other files."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Do not delegate to an external coding agent.",
+          "Do not perform unrelated checklist steps in this action."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "User is walking through docs/V1-SELF-TEST.md one test/substep at a time and asked to keep going under the same rules: actually use tools, not just describe. Previous assistant updated selftest.txt to `hello v1 — edited` and said the next substep was to read it back and confirm.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "read_file:selftest.txt",
+          "summary": "Readback succeeded. `selftest.txt` currently contains exactly `hello v1 — edited`. Note the actual text has spaces around the em dash.",
+          "confidence": 1.0
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints noted; no special disclosure/action issue for this file readback response."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "Integration may not execute soft_write tools; the requested next substep was readback, which was satisfied with read_file."
+        }
+      ],
+      "decided_action": {
+        "kind": "respond_only"
+      },
+      "presence_directive": "Answer plainly and briefly as the continuing self-test. State that the edit readback was performed and confirm the exact contents. Say this completes that Files edit/readback substep. Do not claim to have continued beyond this substep or write the final report yet. If helpful, signal that the next continuation should proceed to the next checklist item/substep.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 34,
+            "result_sha256": "cbed0d820b6b8b22af427d05c37d59131492a3e5b5959cad8113cd60b94fb3e3",
+            "result_preview": "{\"text\": \"hello v1 \\u2014 edited\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4891,
+          "dispatch_iter_1": 14,
+          "integrate_iter_2": 9179
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-97c922421624",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "User is stepping through docs/V1-SELF-TEST.md one test/substep per turn, requiring actual use of own tools and no delegation. Previous completed work: Test 2 memory stored cerulean; Test 3 context routing; Test 4 file create/read/edit/readback. User now asked to keep going to the next test in order.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "read_file:docs/V1-SELF-TEST.md",
+          "summary": "The next checklist item is Test 5 Web: search the web for the current top headline about anything, browse one result, and give a one-sentence summary. It is read-only and should be actually performed if possible.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "request_tool:web_search",
+          "summary": "A web_search/browse capability was requested because no web tool was surfaced. The tool activation response said no matching web_search tool is installed and suggested going to the System space for installation.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "current_tool_surface",
+          "summary": "No web search or browse tool is currently available among surfaced tools. Read-only tools include read_file/list_files/inspect_tools/inspect_state/remember/dump_context/request_tool; scheduling is surfaced as read-class list only here, while create is described but should be handled as action by presence when appropriate.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General safety/privacy rules are relevant only as background; no secret or restricted text should be exposed, and this turn involves no deletion/third-party/money ambiguity."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "Checklist explicitly forbids delegating all tests to external agents except Test 16; current Test 5 must not use an external coding agent."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "write_file/note_this/etc",
+          "reason_filtered": "Not the next checklist item; current next item is Web, and no writing is needed this turn."
+        }
+      ],
+      "decided_action": {
+        "kind": "respond_only"
+      },
+      "presence_directive": "Tell the user plainly that the next test in order was Test 5 Web. You attempted to activate/find a web_search/browse capability because none was surfaced, but the substrate reported no matching web_search tool is installed. Do not fake a headline. Mark Test 5 as NEEDS-SETUP/PARTIAL due to missing web capability, explain that it can be enabled from the System space, and say the next test in order is Calendar & reminders. Keep it concise and straight, in the ongoing self-test style.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1",
+          "request_tool:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          },
+          {
+            "tool_name": "request_tool",
+            "result": "",
+            "result_chars": 177,
+            "result_sha256": "95b02813b3b226a5fc88a2bd2501caacb37dface1aaab6d8da27cb19d4aebfc3",
+            "result_preview": "{\"text\": \"I don't have a tool matching 'web_search' installed. To get new tools set up, go to the System space for installation. Want me to help you find the right tool there?\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3948,
+          "dispatch_iter_1": 15,
+          "integrate_iter_2": 4814,
+          "dispatch_iter_2": 1864,
+          "integrate_iter_3": 13920
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-e0d4141ac8f6",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user is walking through docs/V1-SELF-TEST.md one test at a time and repeatedly says to keep going with the next test in order, actually using tools rather than describing them. Tests 1–5 have already been handled; Test 5 Web was reported as NEEDS-SETUP/PARTIAL because no web_search tool is installed. The next test is Test 6 — Calendar & reminders.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "docs/V1-SELF-TEST.md",
+          "summary": "Test 6 says: set a reminder for one hour from now that says “v1 self-test reminder.” If scheduling/calendar is not connected, say so and explain how to connect it; do not fake it.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "manage_schedule",
+          "summary": "A scheduling/reminder capability is surfaced. It supports creating time-based reminders using a natural-language description, as well as listing/pause/resume/remove.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "active_rules",
+          "summary": "Apply normal caution around irreversible/destructive actions and third-party impact; this reminder creation is low-risk and directly requested as part of the checklist.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "tool_surface",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "The checklist explicitly says not to delegate this self-test except for Test 16, and the current item is Test 6 reminders."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "write_file/register_tool/improve_kernos/restart_self",
+          "reason_filtered": "Not relevant to the current next-in-order reminder test."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "manage_schedule",
+        "arguments": {
+          "action": "create",
+          "description": "Remind me in one hour: v1 self-test reminder"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the reminder creation now. After the tool result, respond plainly as the self-test runner: if the reminder was created, say Test 6 worked and that the reminder was set for one hour from now with the requested text; if the tool reports unavailable or unconnected calendar/scheduling, mark Test 6 as NEEDS-SETUP and say what is missing without pretending it worked. Keep the tone direct and honest, consistent with prior self-test progress updates.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3598,
+          "dispatch_iter_1": 17,
+          "integrate_iter_2": 18884
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-8d11a09a16d6",
+      "action_envelope": {
+        "intended_outcome": "Create the self-test reminder required by Test 6 so the checklist is exercised end-to-end.",
+        "allowed_tool_classes": [
+          "schedule",
+          "reminders",
+          "calendar"
+        ],
+        "allowed_operations": [
+          "manage_schedule",
+          "create"
+        ],
+        "constraints": [
+          "Create only the requested one-hour reminder with the text “v1 self-test reminder”.",
+          "Do not create calendar events or additional recurring reminders.",
+          "Do not delete, pause, resume, or modify any existing scheduled items."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "delete_schedule",
+          "remove",
+          "pause",
+          "resume",
+          "create_calendar_event",
+          "send_to_third_party"
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user is continuing the v1 self-test checklist one step at a time. Prior completed/attempted items: memory fact stored; state/context routing checked; file create/read/edit/read confirmed; web marked NEEDS-SETUP due missing web tool; reminder created and fired successfully.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "docs/V1-SELF-TEST.md",
+          "summary": "The next checklist item in order is Test 7: build a personal local tool that flips a coin, test it, register it, and explain that it stays in the user's instance rather than going to the KERNOS GitHub repo.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool_catalog",
+          "source_id": "execute_code/register_tool",
+          "summary": "execute_code is surfaced as a soft-write tool that can create workspace files and run tests in the current space. register_tool is surfaced separately and registers a workspace-built tool from a .tool.json descriptor. The checklist forbids delegating this test to consult/ask_coding_session.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "covenant_set",
+          "reason_filtered": "No restricted covenant text is needed in the briefing; the action is non-destructive local file/code creation and testing."
+        },
+        {
+          "source_type": "tool_catalog",
+          "source_id": "consult/ask_coding_session/improve_kernos",
+          "reason_filtered": "The checklist explicitly says not to delegate this tool-building test to an external coding agent or platform improvement flow."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "execute_code",
+        "arguments": {
+          "code": "from pathlib import Path\nimport json, random, subprocess, sys, textwrap\n\n# Test 7: build a tiny personal flip-coin tool in this space only.\nimpl = Path('flip_coin_tool.py')\nimpl.write_text(textwrap.dedent('''\\\n    import random\n\n    def run(args=None):\n        \"\"\"Return a random coin flip result.\"\"\"\n        return {\"result\": random.choice([\"heads\", \"tails\"])}\n\n    if __name__ == \"__main__\":\n        print(run())\n'''), encoding='utf-8')\n\n# Descriptor for later registration with register_tool. Kept in the current workspace/space.\ndescriptor = {\n    \"name\": \"flip_coin\",\n    \"description\": \"Flip a coin and return either heads or tails.\",\n    \"input_schema\": {\n        \"type\": \"object\",\n        \"properties\": {},\n        \"additionalProperties\": False\n    },\n    \"implementation\": \"flip_coin_tool.py\"\n}\nPath('flip_coin.tool.json').write_text(json.dumps(descriptor, indent=2), encoding='utf-8')\n\n# Exercise the implementation directly to confirm it works.\nnamespace = {}\nexec(impl.read_text(encoding='utf-8'), namespace)\nresults = [namespace['run']({})['result'] for _ in range(10)]\nvalid = all(r in {'heads', 'tails'} for r in results)\n\nprint('Created files: flip_coin_tool.py, flip_coin.tool.json')\nprint('Test flips:', ', '.join(results))\nprint('Validation:', 'PASS' if valid else 'FAIL')\nprint('Boundary: these files were written in the current user space/workspace only; this did not modify or push to the KERNOS GitHub repo.')"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the local build/test step for Test 7 now. After the tool result, tell the user plainly whether file creation and direct testing passed, mention the local-instance boundary, and say the next substep is registering the tool with register_tool. Do not claim registration has happened until register_tool is actually run.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "read_file",
+            "result": "",
+            "result_chars": 6069,
+            "result_sha256": "61f96c59fe00435ef37f7f028faef3aa9672a1d46d11fb766f9b617d9c176683",
+            "result_preview": "{\"text\": \"# KERNOS v1 self-test\\n\\nYou (KERNOS) are running a readiness check on yourself. Work through **every** test\\nbelow **in order**. For each: actually *use* the relevant capability end-to-end ",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3855,
+          "dispatch_iter_1": 21,
+          "integrate_iter_2": 32650
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-6ee6efa5f7a2",
+      "action_envelope": {
+        "intended_outcome": "Create and directly test a tiny local flip-coin tool as the first substep of checklist Test 7.",
+        "allowed_tool_classes": [
+          "code_execution",
+          "workspace_files"
+        ],
+        "allowed_operations": [
+          "execute_code"
+        ],
+        "constraints": [
+          "Operate only in the current context space/workspace.",
+          "Do not use consult, ask_coding_session, improve_kernos, or any external coding agent.",
+          "Do not modify the KERNOS platform repository or push code.",
+          "Create only the minimal files needed for the personal flip-coin tool and its registration descriptor.",
+          "Do not claim the tool is registered until the separate register_tool action succeeds."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Delegating this checklist item to another agent.",
+          "Starting improve_kernos.",
+          "Deleting user files.",
+          "Restarting the process."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user is continuing the V1 self-test checklist one step at a time and explicitly wants actual tool use rather than description. The immediately preceding assistant identified the next substep as registering the locally built coin-flip tool using `register_tool` with descriptor `flip_coin_tool/flip_coin.tool.json`.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "register_tool",
+          "summary": "`register_tool` is available as a soft-write action to register a workspace-built tool in the universal catalog from a `.tool.json` descriptor in the current space.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "previous_action_state",
+          "summary": "The local build/test for the coin-flip tool completed successfully in the prior step; files were created in the local workspace/user instance and direct testing passed.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints are relevant only as background; no secret text or restricted details need to be surfaced for this straightforward tool-registration continuation."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "The user explicitly said not to pass this to another agent, and the next step is a direct registered-tool action rather than external coding help."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "write_file/execute_code/read_file/list_files",
+          "reason_filtered": "Those were relevant to earlier checklist substeps; the next stated substep is registration."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "register_tool",
+        "arguments": {
+          "descriptor_path": "flip_coin_tool/flip_coin.tool.json"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Proceed directly with the next self-test action, without extra narration or delegation. After the tool executes, report plainly whether registration worked, include the descriptor path, and if successful tell the user the next checklist step should be calling/testing the newly registered coin-flip tool. If the tool reports an argument/schema issue, be candid and summarize the failure rather than pretending it worked.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [],
+        "tool_results_during_prep": [],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 1,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 15021
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-fc927162de3d",
+      "action_envelope": {
+        "intended_outcome": "Register the locally built coin-flip self-test tool so it becomes callable via the tool catalog for the next checklist substep.",
+        "allowed_tool_classes": [
+          "workspace",
+          "tool_registry"
+        ],
+        "allowed_operations": [
+          "register_tool"
+        ],
+        "constraints": [
+          "Use only the descriptor path already identified in the prior step: flip_coin_tool/flip_coin.tool.json.",
+          "Do not delegate to an external agent.",
+          "Do not modify platform source or push to GitHub as part of this step."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Do not use consult or ask_coding_session for this step.",
+          "Do not call improve_kernos.",
+          "Do not write or delete unrelated files."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user is stepping through the V1 self-test checklist one action at a time. The last attempted test was custom tool registration: registration failed because the descriptor was not present in the current space directory. The previous assistant said the next step is to create or locate the descriptor file in this space, then retry registration later.",
+          "confidence": 0.96
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "Current space contains capabilities-overview.md, self-maintenance-review.md, and selftest.txt only; no flip_coin.tool.json descriptor is present in the current space.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "execute_code",
+          "summary": "execute_code is available as a soft-write tool and can run Python in the current space to create/repair local files needed for the self-test.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General safety and ownership constraints are relevant only as background; no sensitive disclosure, deletion, irreversible third-party impact, or ambiguity issue is present."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "register_tool",
+          "reason_filtered": "Registration should not be retried until the descriptor file exists in the current space; the file listing confirms it does not."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "The user explicitly asked not to pass this off to another agent, and this step can be done locally."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "execute_code",
+        "arguments": {
+          "code": "from pathlib import Path\nimport json, shutil, os\n\ncwd = Path.cwd()\nprint(f\"cwd={cwd}\")\n\n# The prior registration failed because the descriptor was not in this space root.\n# First try to locate an existing descriptor from the previous local-build step.\ncandidates = []\nsearch_roots = [cwd]\nfor extra in [Path('/home/k/Kernos/.kernos_sandbox'), Path('/tmp')]:\n    if extra.exists():\n        search_roots.append(extra)\n\nfor root in search_roots:\n    try:\n        for p in root.rglob('flip_coin.tool.json'):\n            candidates.append(p)\n    except Exception as e:\n        print(f\"search_skipped={root}: {type(e).__name__}: {e}\")\n\nroot_descriptor = cwd / 'flip_coin.tool.json'\nroot_impl = cwd / 'flip_coin.py'\n\nif candidates:\n    src = candidates[0]\n    if src.resolve() != root_descriptor.resolve():\n        shutil.copyfile(src, root_descriptor)\n        print(f\"copied_descriptor_from={src}\")\n    else:\n        print(\"descriptor_already_in_space_root\")\nelse:\n    # Recreate a minimal local implementation + descriptor in the current space.\n    # This is intentionally instance-local workshop material, not a platform change.\n    root_impl.write_text(\n        \"import random\\n\\n\"\n        \"def run(args=None):\\n\"\n        \"    return {\\\"result\\\": random.choice([\\\"heads\\\", \\\"tails\\\"])}\\n\\n\"\n        \"if __name__ == '__main__':\\n\"\n        \"    print(run())\\n\",\n        encoding='utf-8'\n    )\n    descriptor = {\n        \"name\": \"flip_coin\",\n        \"description\": \"Flip a fair coin and return heads or tails.\",\n        \"input_schema\": {\n            \"type\": \"object\",\n            \"properties\": {},\n            \"additionalProperties\": False\n        },\n        \"implementation\": {\n            \"type\": \"python\",\n            \"file\": \"flip_coin.py\",\n            \"entrypoint\": \"run\"\n        }\n    }\n    root_descriptor.write_text(json.dumps(descriptor, indent=2) + \"\\n\", encoding='utf-8')\n    print(\"created_descriptor_and_impl_in_space_root\")\n\nprint(\"space_root_files=\")\nfor p in sorted(cwd.iterdir()):\n    if p.is_file() and (p.name.startswith('flip_coin') or p.name == 'selftest.txt'):\n        print(f\"- {p.name} ({p.stat().st_size} bytes)\")\n\nprint(\"descriptor_contents=\")\nprint(root_descriptor.read_text(encoding='utf-8'))"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the local repair step directly, without asking the user to restate anything and without delegating to an external agent. After the tool returns, summarize plainly: whether the descriptor was found/copied or recreated, where it now is, and that the next step is to retry register_tool with flip_coin.tool.json. Do not claim registration happened yet.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 357,
+            "result_sha256": "efb5fad96f46927c02388ee40e1b5ce05aeff3040851a6b2ee25267b54594a4f",
+            "result_preview": "{\"text\": \"Files in this space (3):\\n  capabilities-overview.md (984 bytes) \\u2014 What tools are connected and available \\u2014 updated on changes\\n  self-maintenance-review.md (671 bytes) \\u2014 KERN",
+            "truncated": true
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4306,
+          "dispatch_iter_1": 6609,
+          "integrate_iter_2": 35375
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-2532b122e67e",
+      "action_envelope": {
+        "intended_outcome": "Create or locate the flip-coin tool descriptor in the current space so the next self-test step can retry registration.",
+        "allowed_tool_classes": [
+          "local_code_execution",
+          "workspace_file_write"
+        ],
+        "allowed_operations": [
+          "execute_code"
+        ],
+        "constraints": [
+          "Only work in the current space or copy an existing flip_coin.tool.json into the current space root.",
+          "Do not modify Kernos platform source or commit/push anything.",
+          "Do not use external coding agents.",
+          "Do not delete any user files.",
+          "Do not claim the tool has been registered in this step."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "register_tool",
+          "consult",
+          "ask_coding_session",
+          "improve_kernos",
+          "delete files"
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "User is continuing the V1 self-test checklist one step at a time and wants actual tool use, not description or delegation. The current next step is to retry registration of the locally built coin-flip tool now that the descriptor has been copied into the current space as `flip_coin.tool.json`.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "previous_turn",
+          "summary": "The prior assistant found/copied `flip_coin_tool/flip_coin.tool.json` into place as `flip_coin.tool.json` and explicitly stated the next step is to retry registration with `flip_coin.tool.json`.",
+          "confidence": 0.99
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "register_tool",
+          "summary": "`register_tool` is surfaced as a soft-write action that registers a workspace-built tool from a `.tool.json` descriptor in the current space directory.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints apply, but no sensitive covenant content is needed in the briefing beyond acting carefully and not deleting or disclosing private information."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "User explicitly said not to pass this off to another agent, and the next checklist step is simple/local."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "execute_code",
+          "reason_filtered": "The descriptor has already been copied into place; the next test in order is registration, not more local code execution."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "read_file/list_files",
+          "reason_filtered": "Conversation already establishes the descriptor is in the current space and gives the exact next step; no read-only lookup is required before dispatching registration."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "register_tool",
+        "arguments": {
+          "descriptor_path": "flip_coin.tool.json"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the registration step directly. After the tool result, report plainly whether registration worked and what the next checklist step is. Keep the tone factual and self-test oriented; do not pretend success if the tool reports an error.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [],
+        "tool_results_during_prep": [],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 1,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 17277
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-0c76860ab5f7",
+      "action_envelope": {
+        "intended_outcome": "Register the locally built coin-flip self-test tool from its descriptor so the self-test can proceed to calling it.",
+        "allowed_tool_classes": [
+          "workspace_tools",
+          "tool_registration"
+        ],
+        "allowed_operations": [
+          "register_tool"
+        ],
+        "constraints": [
+          "Use only the descriptor file `flip_coin.tool.json` in the current space.",
+          "Do not delegate to another agent.",
+          "Do not modify platform source or delete files."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Do not use consult or ask_coding_session for this step.",
+          "Do not call improve_kernos.",
+          "Do not claim the tool is registered unless the registration result confirms it."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread_recent",
+          "summary": "The user is working through docs/V1-SELF-TEST.md one test at a time and repeatedly says to keep going with the next test in order, actually using tools. The current point in the sequence is the tool-registration substep for the coin-flip tool. Previous turn found/copied the descriptor into the current space as `flip_coin.tool.json` and explicitly identified the next step as retrying registration with that filename.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "register_tool",
+          "summary": "`register_tool` is surfaced as a soft-write action. It registers a workspace-built tool in the universal catalog and requires a .tool.json descriptor file in the current space directory. The descriptor filename to use here is `flip_coin.tool.json`.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "conversation",
+          "source_id": "prior_action_state",
+          "summary": "Prior registration attempts failed because paths or malformed arguments were used and because the descriptor was not yet in the space directory. The descriptor has since been copied into place; do not repeat the earlier path-with-separators mistake.",
+          "confidence": 0.93
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints are relevant only as safety background; no private or sensitive details need to be surfaced in the response."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "User explicitly said not to pass this off to another agent, and the next step is a straightforward local registration action."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "write_file/execute_code",
+          "reason_filtered": "The next in-order step is not to edit or create files; the descriptor has already been placed in the current space."
+        },
+        {
+          "source_type": "tool_surface",
+          "source_id": "read_file/list_files",
+          "reason_filtered": "Previous turn already established the descriptor is present and named; registration can proceed without another read-only check."
+        }
+      ],
+      "decided_action": {
+        "kind": "execute_tool",
+        "tool_id": "register_tool",
+        "arguments": {
+          "descriptor_path": "flip_coin.tool.json"
+        },
+        "narration_context": ""
+      },
+      "presence_directive": "Execute the registration action now. After the tool result, report plainly whether registration worked, using the user's self-test style: concise, honest, and with the next substep if known. Do not pretend success if the tool reports failure, and do not involve an external agent.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [],
+        "tool_results_during_prep": [],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 1,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 14919
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-5bcbbf61ac59",
+      "action_envelope": {
+        "intended_outcome": "Register the previously built coin-flip workspace tool using the descriptor now present in the current space.",
+        "allowed_tool_classes": [
+          "workspace_tool_registration"
+        ],
+        "allowed_operations": [
+          "register_tool"
+        ],
+        "constraints": [
+          "Use exactly the descriptor filename `flip_coin.tool.json`; do not include directory separators or wrap the argument as a stringified object.",
+          "Perform only the registration step; do not test-call the tool or modify files unless separately authorized by a later turn."
+        ],
+        "confirmation_requirements": [],
+        "forbidden_moves": [
+          "Do not use external coding agents.",
+          "Do not alter the descriptor or workspace files in this action.",
+          "Do not proceed to subsequent checklist steps in the same action."
+        ]
+      }
+    },
+    "success": true,
+    "error": ""
+  }
+]
