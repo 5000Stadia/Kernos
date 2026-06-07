@@ -46,7 +46,11 @@ MANAGE_PLAN_TOOL = {
     "description": (
         "Create, execute, and manage self-directed plans. Use 'create' to start "
         "a new plan, 'continue' to execute the next step, 'status' to check "
-        "progress, 'pause' to stop execution."
+        "progress, 'pause' to stop execution. "
+        "For 'create' the EASIEST way is to pass `steps` as a flat list of "
+        "short descriptions, e.g. steps=[\"read the file\", \"summarize it\", "
+        "\"write the result\"] — the rest of the structure is filled in for you. "
+        "A full `phases` structure is also accepted if you want sub-grouping."
     ),
     "input_schema": {
         "type": "object",
@@ -63,11 +67,20 @@ MANAGE_PLAN_TOOL = {
             },
             "title": {
                 "type": "string",
-                "description": "Plan title (required for 'create')",
+                "description": "Plan title (optional for 'create').",
+            },
+            "steps": {
+                "type": "array",
+                "description": (
+                    "Simplest way to create a plan: a flat list of step "
+                    "descriptions (strings). ids/structure are auto-built. "
+                    "Provide EITHER `steps` OR `phases`, not both."
+                ),
+                "items": {"type": "string"},
             },
             "phases": {
                 "type": "array",
-                "description": "Plan phases (required for 'create'). Each phase has id, title, and steps.",
+                "description": "Advanced alternative to `steps`: explicit phases, each with id, title, and steps.",
                 "items": {
                     "type": "object",
                     "properties": {

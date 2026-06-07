@@ -315,6 +315,67 @@ def _safe_instance_name(instance_id: str) -> str:
     return re.sub(r"[^\w.-]", "_", instance_id)
 
 
+def _coerce_plan_phases(tool_input: dict) -> list:
+    """Build a valid plan ``phases`` structure from whatever shape the model
+    emitted for ``manage_plan(action="create")``.
+
+    The canonical schema wants ``phases: [{id, title, steps: [{id, title}]}]`` —
+    a lot of nesting the model rarely gets right in one call, so plan creation
+    fails with "'phases' is required". This coerces the simpler shapes the
+    model naturally reaches for so the orchestration tool actually delivers:
+
+    - canonical ``phases`` (normalized: missing phase/step ids + status filled);
+    - a flat ``steps`` / ``tasks`` / ``plan`` / ``items`` list whose entries are
+      plain strings or ``{title|description|step}`` dicts → wrapped into one
+      phase.
+
+    Returns ``[]`` only when there's genuinely nothing to plan.
+
+    Generalized capability fix (2026-06-07): meet the model's natural shape for
+    the load-bearing multi-step primitive; benefits every plan, not the
+    self-test.
+    """
+    def _norm_step(raw, sid: str) -> dict:
+        if isinstance(raw, str):
+            step = {"title": raw}
+        elif isinstance(raw, dict):
+            step = dict(raw)
+            step["title"] = (
+                step.get("title") or step.get("description")
+                or step.get("step") or step.get("name") or "step"
+            )
+        else:
+            step = {"title": str(raw)}
+        step.setdefault("id", sid)
+        step.setdefault("status", "pending")
+        return step
+
+    phases = tool_input.get("phases")
+    if isinstance(phases, list) and phases:
+        out = []
+        for i, ph in enumerate(phases, 1):
+            ph = ph if isinstance(ph, dict) else {"title": str(ph)}
+            steps = ph.get("steps") or []
+            if not isinstance(steps, list):
+                steps = [steps]
+            out.append({
+                "id": ph.get("id") or f"p{i}",
+                "title": ph.get("title") or f"Phase {i}",
+                "steps": [_norm_step(s, f"s{i}_{j}") for j, s in enumerate(steps, 1)],
+            })
+        return out
+
+    for key in ("steps", "tasks", "plan", "items"):
+        flat = tool_input.get(key)
+        if isinstance(flat, list) and flat:
+            return [{
+                "id": "p1",
+                "title": tool_input.get("title") or "Plan",
+                "steps": [_norm_step(s, f"s{j}") for j, s in enumerate(flat, 1)],
+            }]
+    return []
+
+
 def resolve_mcp_credentials(
     server_config: dict,
     instance_id: str,
@@ -7120,9 +7181,20 @@ class MessageHandler:
 
         if action == "create":
             title = tool_input.get("title", "Untitled Plan")
-            phases = tool_input.get("phases", [])
+            # GENERALIZED PLAN-CREATE (2026-06-07): the model rarely constructs
+            # the full nested phases→steps→id/title shape correctly. Meet the
+            # shape it actually emits — a flat list of step descriptions — and
+            # auto-build the scaffolding. Helps EVERY multi-step task, not just
+            # the self-test. Accepts: canonical `phases`; a flat `steps`/`tasks`/
+            # `plan`/`items` list of strings or {title|description} dicts; and
+            # auto-assigns any missing phase/step ids + status.
+            phases = _coerce_plan_phases(tool_input)
             if not phases:
-                return "Error: 'phases' is required for create. Each phase needs id, title, and steps."
+                return (
+                    "To create a plan, give me its steps — easiest is a flat "
+                    "list, e.g. steps=[\"read the file\", \"summarize it\", "
+                    "\"write the result\"]. (A full phases structure also works.)"
+                )
             budget_override = tool_input.get("budget_override")
             plan_id = generate_plan_id()
             # Build plan structure

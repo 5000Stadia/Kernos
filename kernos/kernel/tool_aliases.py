@@ -70,6 +70,12 @@ _TOOL_ALIASES: dict[str, str] = {
     # "planning." namespace before correcting to the flat name.
     "planning.manage_plan": "manage_plan",
     "planning.create_plan": "manage_plan",
+    # 2026-06-07 live self-test: the model reaches for the plan primitive by
+    # several invented names. They all mean manage_plan.
+    "self_directed_plan": "manage_plan",
+    "self_directed_execution": "manage_plan",
+    "create_plan": "manage_plan",
+    "start_plan": "manage_plan",
     # 2026-06-06 v1 self-test: agent reached for a bare "reminders"/"reminder"
     # tool for scheduling before correcting to manage_schedule.
     "reminders": "manage_schedule",
