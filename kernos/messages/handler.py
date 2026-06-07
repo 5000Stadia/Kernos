@@ -5755,7 +5755,13 @@ class MessageHandler:
         if message.platform == "telegram":
             self._channel_registry.update_target("telegram", message.conversation_id)
 
-        if instance_id in self._secure_input_state:
+        # Secure-input capture is keyed only by instance_id, so a self-directed
+        # plan step (platform="internal") firing while the user has a credential
+        # session open would otherwise be swallowed here: its "[PLAN STEP ...]"
+        # content stored as the credential, the pending session deleted, and the
+        # step aborted before it runs (Codex review). Secure input only ever
+        # comes from a real user platform — never intercept internal turns.
+        if instance_id in self._secure_input_state and message.platform != "internal":
             state = self._secure_input_state[instance_id]
             if datetime.now(timezone.utc) > state.expires_at:
                 del self._secure_input_state[instance_id]
@@ -7536,6 +7542,20 @@ class MessageHandler:
                         envelope.plan_id, envelope.step_id)
                     return
 
+        # Derive the turn's auth level from the plan creator (Codex review):
+        # a non-owner member's plan must not run with "verified owner"
+        # authority. Owner — and legacy plans with no recorded creator, which
+        # fall back to the owner — keep owner_verified; a known non-owner
+        # member runs as trusted_contact (a verified member, but not the owner).
+        _auth = AuthLevel.owner_verified
+        if envelope.member_id and getattr(self, "_instance_db", None):
+            try:
+                _owner_mid = await self._instance_db.get_owner_member_id()
+                if _owner_mid and envelope.member_id != _owner_mid:
+                    _auth = AuthLevel.trusted_contact
+            except Exception:
+                pass
+
         # Build a self-directed message. Carry the plan creator's member_id so
         # the step runs under the plan owner's context, not the global instance
         # owner (Codex review — a non-owner's plan must not execute with the
@@ -7543,7 +7563,7 @@ class MessageHandler:
         msg = NormalizedMessage(
             content=f"[PLAN STEP {envelope.step_id}] {envelope.step_description}",
             sender="self_directed",
-            sender_auth_level=AuthLevel.owner_verified,
+            sender_auth_level=_auth,
             platform="internal",
             platform_capabilities=["text"],
             conversation_id=f"plan_{envelope.plan_id}",

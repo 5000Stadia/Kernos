@@ -60,3 +60,34 @@ def test_internal_bypass_prefers_existing_member_id_over_owner():
     assert "if not message.member_id" in block, (
         "owner resolution must only run when member_id is absent"
     )
+
+
+def test_secure_input_excludes_internal_turns():
+    """Codex review: secure-input capture is keyed only by instance_id, so a
+    self-directed step firing while a credential session is open would store
+    its '[PLAN STEP ...]' content as the credential and abort the step. The
+    interception must exclude platform=internal turns."""
+    src = inspect.getsource(MessageHandler._check_early_return)
+    assert 'message.platform != "internal"' in src, (
+        "secure-input interception must exclude internal/self-directed turns"
+    )
+    # Pin that the exclusion is on the secure_input_state guard specifically.
+    guard_pos = src.find("instance_id in self._secure_input_state")
+    assert guard_pos != -1
+    line_end = src.find("\n", guard_pos)
+    assert 'message.platform != "internal"' in src[guard_pos:line_end], (
+        "the != 'internal' exclusion must be on the secure_input_state guard"
+    )
+
+
+def test_self_directed_auth_derived_not_hardcoded_owner():
+    """Codex review: a non-owner's plan step must not hardcode owner_verified.
+    The auth level is derived from the creator vs the owner."""
+    src = inspect.getsource(MessageHandler._execute_self_directed_step)
+    assert "sender_auth_level=_auth" in src, (
+        "the step message auth level must be derived (_auth), not hardcoded "
+        "to owner_verified"
+    )
+    assert "AuthLevel.trusted_contact" in src, (
+        "a known non-owner creator must run as trusted_contact"
+    )
