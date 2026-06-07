@@ -76,6 +76,10 @@ _TOOL_ALIASES: dict[str, str] = {
     # KERNOS-specific and won't shadow a connector tool.
     "self_directed_plan": "manage_plan",
     "self_directed_execution": "manage_plan",
+    # 2026-06-07 live self-test dump: model emitted `plan_management`
+    # ("tool 'plan_management' not registered") before falling back to
+    # manage_plan. KERNOS-specific compound, won't shadow a connector tool.
+    "plan_management": "manage_plan",
     # 2026-06-06 v1 self-test: agent reached for a bare "reminders"/"reminder"
     # tool for scheduling before correcting to manage_schedule.
     "reminders": "manage_schedule",

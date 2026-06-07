@@ -208,3 +208,41 @@ class TestSystemPlatformBypass:
             "platform=system bypass must come BEFORE _resolve_incoming "
             "or it has no effect"
         )
+
+
+class TestInternalPlatformBypass:
+    """Pins the self-directed bypass for platform=internal.
+
+    Self-directed plan steps (_execute_self_directed_step) send a
+    synthetic NormalizedMessage with platform="internal",
+    sender="self_directed". Without this bypass, _resolve_incoming
+    treats it as an unknown external sender: it isn't a known member,
+    so record_sender_failure escalates it into a self-block, and every
+    subsequent plan step short-circuits via check_sender_blocked with
+    the 'private Kernos' static response (the uniform response_len=22
+    stub observed on a live 17-step self-test run where the spine
+    auto-advanced but no step actually executed). Same failure mode and
+    remedy as the platform=system wake bypass above.
+    """
+
+    def test_check_early_return_recognizes_platform_internal(self):
+        import inspect
+        src = inspect.getsource(MessageHandler._check_early_return)
+        assert 'message.platform == "internal"' in src, (
+            "_check_early_return must short-circuit _resolve_incoming "
+            "for platform=internal messages — without this, self-directed "
+            "plan steps get blocked by the unknown-sender abuse path and "
+            "every step returns the 'private Kernos' stub"
+        )
+        bypass_pos = src.find('message.platform == "internal"')
+        resolve_pos = src.find('_resolve_incoming(')
+        assert 0 < bypass_pos < resolve_pos, (
+            "platform=internal bypass must come BEFORE _resolve_incoming "
+            "or it has no effect"
+        )
+
+    def test_plan_management_hallucination_aliases(self):
+        # 2026-06-07 live dump: model emitted `plan_management` which was
+        # 'not registered' before falling back to manage_plan.
+        from kernos.kernel.tool_aliases import canonicalize_tool_name
+        assert canonicalize_tool_name("plan_management") == ("manage_plan", True)

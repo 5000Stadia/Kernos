@@ -5704,6 +5704,23 @@ class MessageHandler:
                 return ""
             # member_id already set by the injector; ctx propagation
             # below picks it up.
+        elif message.platform == "internal":
+            # SELF-DIRECTED bypass — `internal` platform messages are
+            # system-originated turns (self-directed plan steps via
+            # _execute_self_directed_step, sender="self_directed",
+            # already AuthLevel.owner_verified). Running them through
+            # _resolve_incoming's unknown-sender abuse-prevention path
+            # treats the synthetic "self_directed" sender as an external
+            # invader: it isn't a known member, so record_sender_failure
+            # escalates it into a self-block, and every subsequent plan
+            # step short-circuits via check_sender_blocked with the
+            # "private Kernos" static response (the uniform response_len=22
+            # stub seen on a 17-step self-test run). Same failure mode and
+            # same remedy as the AUTO-WAKE-V1 system bypass above —
+            # resolve the owner member directly, skip abuse prevention.
+            if not message.member_id:
+                message.member_id = self._resolve_member(
+                    instance_id, message.platform, message.sender)
         # Resolve member via instance.db (multi-member aware)
         elif hasattr(self, '_instance_db') and self._instance_db:
             _member_id, _static = await self._resolve_incoming(
