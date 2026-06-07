@@ -100,6 +100,9 @@ def build_skin_maps(
     Per SEMANTIC-ACTION-ENVELOPE-V1 (Codex review, option A): the skin lives at
     the provider boundary only; every internal surface stays flat.
     """
+    all_names = {
+        t.get("name", "") for t in tools if isinstance(t, dict) and t.get("name")
+    }
     skin: dict[str, str] = {}
     unskin: dict[str, str] = {}
     for t in tools:
@@ -107,6 +110,13 @@ def build_skin_maps(
         if not flat:
             continue
         wire = to_namespaced(flat)
+        # Collision guard (Codex review P2): never present two tools under the
+        # same wire name. If a real tool in this request is literally named
+        # like a generated kernel wire name (e.g. a workshop tool
+        # `files__write_file` alongside kernel `write_file`), present the
+        # kernel tool FLAT instead — both stay distinct and callable.
+        if wire != flat and wire in all_names:
+            wire = flat
         skin[flat] = wire
         if wire != flat:
             unskin[wire] = flat

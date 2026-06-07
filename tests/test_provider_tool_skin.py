@@ -59,3 +59,16 @@ def test_no_skin_map_is_identity():
     # defensive: no maps → names unchanged (back-comp)
     out = {t["name"] for t in P._translate_tools(_TOOLS, None)}
     assert out == {"write_file", "manage_plan", "brave_web_search"}
+
+
+def test_wire_name_collision_keeps_kernel_flat():
+    # a workshop tool literally named like a kernel wire name must not collide
+    tools = [
+        {"name": "write_file"},                  # kernel → would skin to files__write_file
+        {"name": "files__write_file"},           # real workshop tool with that exact name
+    ]
+    skin, unskin = build_skin_maps(tools)
+    # kernel write_file stays flat to avoid a duplicate provider function name
+    assert skin["write_file"] == "write_file"
+    # the real files__write_file is left as-is and unskin never rewrites it
+    assert "files__write_file" not in unskin or unskin.get("files__write_file") != "write_file"

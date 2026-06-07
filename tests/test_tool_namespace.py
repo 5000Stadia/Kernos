@@ -43,3 +43,31 @@ def test_unmapped_tool_returned_unchanged():
     # MCP/workshop tools aren't in the map → presented as-is
     assert to_namespaced("brave_web_search") == "brave_web_search"
     assert to_namespaced("flip_coin") == "flip_coin"
+
+
+def test_compose_focus_prefers_exact_non_kernel_name():
+    # a real non-kernel tool named like area__x resolves exactly (not flattened)
+    from kernos.kernel.tool_introspection import compose_focus
+
+    class _Cat:
+        def get_metadata(self, name):
+            if name == "files__summarize_csv":
+                return {"source": "workspace", "description": "summarize a csv"}
+            return None  # flattened "summarize_csv" must NOT resolve
+
+    out = compose_focus(_Cat(), "files__summarize_csv")
+    assert "summarize a csv" in out
+    assert "isn't in the catalog" not in out
+
+
+def test_compose_focus_flattens_kernel_namespaced_name():
+    from kernos.kernel.tool_introspection import compose_focus
+
+    class _Cat:
+        def get_metadata(self, name):
+            if name == "write_file":
+                return {"source": "kernel", "description": "write a file"}
+            return None  # the namespaced form is not a catalog key
+
+    out = compose_focus(_Cat(), "files__write_file")
+    assert "write a file" in out

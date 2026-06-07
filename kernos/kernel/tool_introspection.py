@@ -159,21 +159,34 @@ def _flatten_focus(tool_name: str) -> str:
     return tool_name
 
 
+def _get_meta(catalog: Any, name: str) -> Any:
+    try:
+        get_meta = getattr(catalog, "get_metadata", None)
+        if callable(get_meta):
+            return get_meta(name)
+    except Exception:
+        return None
+    return None
+
+
 def compose_focus(catalog: Any, tool_name: str) -> str:
     """Focused prose for ``inspect_tools(focus="X")``."""
-    tool_name = _flatten_focus(tool_name)
     if catalog is None:
         return (
             f"No catalog wired into the substrate, so `{tool_name}` "
             f"can't be checked here."
         )
-    meta = None
-    try:
-        get_meta = getattr(catalog, "get_metadata", None)
-        if callable(get_meta):
-            meta = get_meta(tool_name)
-    except Exception:
-        meta = None
+    # Try the EXACT name first so a real non-kernel tool whose catalog name
+    # happens to start with a namespace prefix (e.g. a workshop tool named
+    # `files__summarize_csv`) still resolves. Only flatten an area__tool
+    # presentation name on a miss (SAE-V1; Codex review P3).
+    meta = _get_meta(catalog, tool_name)
+    if meta is None:
+        _flat = _flatten_focus(tool_name)
+        if _flat != tool_name:
+            _flat_meta = _get_meta(catalog, _flat)
+            if _flat_meta is not None:
+                tool_name, meta = _flat, _flat_meta
 
     if meta is None:
         return (
@@ -347,7 +360,10 @@ def render_operator_listing(
             extra_text = (
                 " (" + ", ".join(extras) + ")" if extras else ""
             )
-            lines.append(f"- `{to_namespaced(e.name)}`{extra_text}")
+            # Operator surface stays FLAT — /tools detail is flat-keyed, and
+            # the namespace skin is an agent-/model-facing concern only
+            # (SAE-V1; Codex review P2). Operators see catalog reality.
+            lines.append(f"- `{e.name}`{extra_text}")
             if e.description:
                 lines.append(f"  _{e.description[:120]}_")
         lines.append("")
