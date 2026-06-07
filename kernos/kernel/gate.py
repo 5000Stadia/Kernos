@@ -334,7 +334,26 @@ class DispatchGate:
         # dispatcher refuses before reasoning ever sees the call.
         # See kernos/kernel/tool_aliases.py.
         from kernos.kernel.tool_aliases import canonicalize_tool_name
-        _canonical_name, _was_repaired = canonicalize_tool_name(tool_name)
+        # SEMANTIC-ACTION-ENVELOPE-V1 Phase 1 step 2: canonicalize EARLY (the
+        # gate classifies before execute_tool, so the registry-aware dotted/__
+        # suffix repair must run here too, not only at dispatch — otherwise a
+        # novel domain.verb name returns "unknown" and the live dispatcher
+        # refuses it before reasoning ever sees the call). Build the known-tool
+        # set (kernel ∪ connected MCP) so the suffix repair stays safe: a real
+        # dotted/__ tool is in this set and is never split.
+        _known_tools: set[str] = set()
+        _rsvc = getattr(self, "_reasoning", None)
+        if _rsvc is not None:
+            _known_tools |= set(getattr(_rsvc, "_KERNEL_TOOLS", ()) or ())
+        if self._registry is not None:
+            try:
+                for _cap in self._registry.get_all():
+                    _known_tools.update(_cap.tools or [])
+            except Exception:
+                pass
+        _canonical_name, _was_repaired = canonicalize_tool_name(
+            tool_name, _known_tools or None
+        )
         if _was_repaired:
             # TOOL-ALIAS-RECEIPT-V1 (2026-05-23): log here for trace
             # parity. The first-class TOOL_ALIAS_REPAIRED event is
