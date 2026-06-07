@@ -83,22 +83,43 @@ _TOOL_ALIASES: dict[str, str] = {
 }
 
 
-def canonicalize_tool_name(name: str) -> tuple[str, bool]:
+def canonicalize_tool_name(
+    name: str, known_tools: "frozenset[str] | set[str] | None" = None
+) -> tuple[str, bool]:
     """Return ``(canonical_name, was_repaired)``.
 
-    Curated exact-match only. A general "strip any dotted namespace off a known
-    canonical" rule was considered and rejected (Codex review): this canonicalizer
-    is registry-blind, so it could misroute a legitimate dotted/MCP tool whose
-    final segment happens to match a curated name. New hallucinated shapes get a
-    curated entry above as they're observed.
+    Two repair stages:
+
+    1. **Curated exact-match** — the ``_TOOL_ALIASES`` dict above (specific
+       observed hallucinations, including non-suffix ones like
+       ``repository_inspection.report`` → ``ask_coding_session``).
+
+    2. **Registry-aware dotted-suffix** (only when ``known_tools`` is supplied) —
+       the model habitually namespaces tools as ``domain.verb``
+       (``files.write_file``, ``planning.manage_plan``). When a dotted name is
+       NOT itself a real tool but its final segment IS, repair to that segment.
+       This is the safe form of the rule Codex flagged earlier: a *legitimate*
+       dotted/MCP tool is present in ``known_tools``, so the ``name not in
+       known_tools`` guard means it's never rewritten — only genuine
+       hallucinations (whose full dotted name resolves to nothing) are. Without
+       ``known_tools`` this stage is skipped, so the function stays pure for
+       callers that can't supply the dispatch set.
 
     Callers MUST log ``TOOL_ALIAS_REPAIR alias=X canonical=Y`` at INFO level when
     ``was_repaired=True`` so the agent's misuse stays auditable.
     """
     canonical = _TOOL_ALIASES.get(name)
-    if canonical is None:
-        return (name, False)
-    return (canonical, True)
+    if canonical is not None:
+        return (canonical, True)
+    if (
+        known_tools is not None
+        and "." in name
+        and name not in known_tools
+    ):
+        suffix = name.rsplit(".", 1)[-1]
+        if suffix and suffix in known_tools:
+            return (suffix, True)
+    return (name, False)
 
 
 async def emit_alias_repair_receipt(

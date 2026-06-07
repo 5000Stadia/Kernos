@@ -1030,7 +1030,19 @@ class ReasoningService:
             canonicalize_tool_name,
             emit_alias_repair_receipt,
         )
-        _canonical_name, _was_repaired = canonicalize_tool_name(tool_name)
+        # Build the known-tool set so canonicalize can do its registry-aware
+        # dotted-suffix repair (e.g. files.write_file → write_file) safely: a
+        # legitimate dotted/MCP tool is IN this set, so it's never rewritten.
+        _known_tools: set[str] = set(self._KERNEL_TOOLS)
+        try:
+            if self._registry is not None:
+                for _cap in self._registry.get_all():
+                    _known_tools.update(_cap.tools or [])
+        except Exception:
+            pass
+        _canonical_name, _was_repaired = canonicalize_tool_name(
+            tool_name, _known_tools
+        )
         if _was_repaired:
             logger.info(
                 "TOOL_ALIAS_REPAIR alias=%s canonical=%s context=dispatch",

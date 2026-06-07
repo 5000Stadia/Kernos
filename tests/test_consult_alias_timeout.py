@@ -35,6 +35,31 @@ def test_file_tool_dotted_hallucinations_repair():
     assert canonicalize_tool_name("context_space_read") == ("read_file", True)
 
 
+# --- registry-aware dotted-suffix repair (the durable fix) ---------------
+
+_KNOWN = frozenset({"write_file", "manage_plan", "consult", "google_cal.create_event"})
+
+
+def test_suffix_repair_fires_for_unknown_dotted_with_known_suffix():
+    # novel hallucination, not curated: domain.verb where verb is a real tool
+    assert canonicalize_tool_name("workspace.write_file", _KNOWN) == ("write_file", True)
+    assert canonicalize_tool_name("anything.manage_plan", _KNOWN) == ("manage_plan", True)
+
+
+def test_suffix_repair_never_rewrites_a_real_dotted_tool():
+    # a legitimate dotted/MCP tool is IN known_tools → left untouched
+    assert canonicalize_tool_name("google_cal.create_event", _KNOWN) == ("google_cal.create_event", False)
+
+
+def test_suffix_repair_skipped_when_suffix_not_a_known_tool():
+    assert canonicalize_tool_name("foo.bar_baz", _KNOWN) == ("foo.bar_baz", False)
+
+
+def test_suffix_repair_inert_without_known_tools():
+    # no known set supplied → pure exact-match only, no suffix guessing
+    assert canonicalize_tool_name("workspace.write_file") == ("workspace.write_file", False)
+
+
 # --- Issue B: long-tool timeout floor -------------------------------------
 
 def _dispatcher():
