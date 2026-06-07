@@ -91,3 +91,20 @@ def test_self_directed_auth_derived_not_hardcoded_owner():
     assert "AuthLevel.trusted_contact" in src, (
         "a known non-owner creator must run as trusted_contact"
     )
+
+
+def test_auth_fails_safe_to_trusted_contact_when_owner_unproven():
+    """Codex review: owner_verified must require a POSITIVE owner match. A
+    non-empty creator id defaults to trusted_contact and is only upgraded to
+    owner_verified after get_owner_member_id() confirms the match — so a
+    failed/empty lookup never silently grants owner authority."""
+    src = inspect.getsource(MessageHandler._execute_self_directed_step)
+    # The set-to-trusted-contact must precede the conditional owner upgrade.
+    default_pos = src.find("_auth = AuthLevel.trusted_contact")
+    upgrade_pos = src.find("_auth = AuthLevel.owner_verified", default_pos)
+    match_pos = src.find("envelope.member_id == _owner_mid")
+    assert default_pos != -1 and upgrade_pos != -1 and match_pos != -1
+    assert default_pos < match_pos < upgrade_pos, (
+        "must default to trusted_contact, then upgrade to owner_verified only "
+        "inside the positive owner-match branch"
+    )

@@ -7544,17 +7544,22 @@ class MessageHandler:
 
         # Derive the turn's auth level from the plan creator (Codex review):
         # a non-owner member's plan must not run with "verified owner"
-        # authority. Owner — and legacy plans with no recorded creator, which
-        # fall back to the owner — keep owner_verified; a known non-owner
-        # member runs as trusted_contact (a verified member, but not the owner).
+        # authority. Fail SAFE — a recorded creator must POSITIVELY match the
+        # owner row to earn owner_verified; if we can't prove it (no instance
+        # DB, missing/non-matching owner row, or a transient DB error) the step
+        # runs as trusted_contact, never owner authority by default. Legacy
+        # plans with no recorded creator fall back to the owner (consistent
+        # with the member_id bypass above) and keep owner_verified.
         _auth = AuthLevel.owner_verified
-        if envelope.member_id and getattr(self, "_instance_db", None):
-            try:
-                _owner_mid = await self._instance_db.get_owner_member_id()
-                if _owner_mid and envelope.member_id != _owner_mid:
-                    _auth = AuthLevel.trusted_contact
-            except Exception:
-                pass
+        if envelope.member_id:
+            _auth = AuthLevel.trusted_contact  # assume non-owner until proven
+            if getattr(self, "_instance_db", None):
+                try:
+                    _owner_mid = await self._instance_db.get_owner_member_id()
+                    if _owner_mid and envelope.member_id == _owner_mid:
+                        _auth = AuthLevel.owner_verified
+                except Exception:
+                    pass
 
         # Build a self-directed message. Carry the plan creator's member_id so
         # the step runs under the plan owner's context, not the global instance
