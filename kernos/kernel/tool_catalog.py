@@ -37,7 +37,16 @@ class CatalogEntry:
 
 
 # Token budget for tool schemas per reasoning call
-TOOL_TOKEN_BUDGET = int(os.environ.get("KERNOS_TOOL_TOKEN_BUDGET", "8000"))
+# Tool-schema token budget. The ALWAYS_PINNED set alone was measured at ~8.3k
+# tokens live (25 tools), which EXCEEDED the old 8000 default — leaving a
+# NEGATIVE active budget, so every dynamically-selected tool (web search,
+# calendar, read_source, run_self_test_suite, ...) was evicted on every turn
+# and the active-surfacing layer was effectively dead. Raised to 14000 so the
+# pinned set fits with real headroom (~5k) for the common MCP tools + the
+# analyzer's per-turn picks. Env-overridable. Follow-up: several pinned schemas
+# are verbose (consult alone is ~1.5k tokens) — a schema diet would reclaim
+# budget, but raising it is the lower-risk unblock. (v1 self-test, 2026-06-07.)
+TOOL_TOKEN_BUDGET = int(os.environ.get("KERNOS_TOOL_TOKEN_BUDGET", "14000"))
 
 # Pinned tools: always loaded, never evicted (~25% of budget)
 # These are the tools the agent needs on almost every turn.
@@ -59,7 +68,16 @@ ALWAYS_PINNED: set[str] = {
     # self-test bug #4, 2026-06-06.)
     "note_this",          # memory + rule capture (write side)
     "write_file",         # file creation
-    "read_file",          # file reading
+    "read_file",          # file reading (current-space files)
+    # read_source is the REPO-side reader (specs/, docs/, kernos/ source) —
+    # peer to read_file, which is current-space only and correctly rejects
+    # repo paths. Pinned because every repo-introspection task depends on it:
+    # the plain-English V1 self-test couldn't even read docs/V1-SELF-TEST.md
+    # (blocked at step zero — 0/17), and self-improvement/debugging all need
+    # to read source. It was being evicted under tool-budget pressure every
+    # turn despite appearing in the catalog — the "reached for but not
+    # delivered" failure mode. (v1 self-test, 2026-06-07.)
+    "read_source",        # repo source reading (specs/docs/kernos)
     "list_files",         # file listing
     "execute_code",       # workspace engine
     "register_tool",      # tool registration

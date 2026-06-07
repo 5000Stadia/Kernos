@@ -91,7 +91,10 @@ class TestConstants:
         assert "inspect_state" in ALWAYS_PINNED
 
     def test_token_budget_default(self):
-        assert TOOL_TOKEN_BUDGET == 8000
+        # Raised 8000 -> 14000 (v1 self-test, 2026-06-07): the pinned set alone
+        # was ~8.3k tokens, exceeding the old budget so no active tool surfaced.
+        # See test_pinned_tool_budget.py for the fit-with-headroom invariant.
+        assert TOOL_TOKEN_BUDGET == 14000
 
     def test_surfacer_schema_valid(self):
         assert "tools" in SURFACER_SCHEMA["properties"]
