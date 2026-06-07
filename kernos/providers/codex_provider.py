@@ -302,8 +302,7 @@ class OpenAICodexProvider(Provider):
             return "pi (python)"
 
     @staticmethod
-    @staticmethod
-    def _translate_tools(tools: list[dict]) -> list[dict]:
+    def _translate_tools(tools: list[dict], skin: dict | None = None) -> list[dict]:
         """Convert Anthropic-format tool defs to OpenAI Responses API function format.
 
         ``strict: None`` is set explicitly on every tool because the Codex
@@ -319,13 +318,17 @@ class OpenAICodexProvider(Provider):
         result = []
         for t in tools:
             schema = t.get("input_schema", {"type": "object", "properties": {}})
+            # SEMANTIC-ACTION-ENVELOPE-V1: present kernel tools to the model
+            # under their area__tool wire name (skin map); MCP/workshop names
+            # pass through unchanged. Internal surfaces stay flat.
+            _wire_name = (skin or {}).get(t["name"], t["name"])
             result.append({
                 # Tool envelope. The consumer backend expects exactly these
                 # five keys per tool — type, name, description, parameters,
                 # strict. Adding extra keys is silently ignored; missing
                 # `strict` is the production failure trigger.
                 "type": "function",
-                "name": t["name"],
+                "name": _wire_name,
                 "description": t.get("description", ""),
                 "parameters": schema,
                 # CRITICAL: `strict` MUST be present, MUST be exactly None
@@ -341,7 +344,7 @@ class OpenAICodexProvider(Provider):
         return result
 
     @staticmethod
-    def _translate_input(messages: list[dict]) -> list[dict]:
+    def _translate_input(messages: list[dict], skin: dict | None = None) -> list[dict]:
         """Convert Anthropic-format messages to OpenAI Responses API input items."""
         items: list[dict] = []
 
@@ -389,10 +392,15 @@ class OpenAICodexProvider(Provider):
                             "content": [{"type": "output_text", "text": text}],
                         })
                     for tc in tool_calls:
+                        # Re-skin prior tool_use names so the function-call
+                        # history the model sees matches the namespaced tool
+                        # list it was offered (SEMANTIC-ACTION-ENVELOPE-V1).
+                        _tc_name = tc.get("name", "")
+                        _tc_name = (skin or {}).get(_tc_name, _tc_name)
                         items.append({
                             "type": "function_call",
                             "call_id": tc.get("id", ""),
-                            "name": tc.get("name", ""),
+                            "name": _tc_name,
                             "arguments": json.dumps(tc.get("input", {})),
                         })
                 elif tool_results:
@@ -412,8 +420,9 @@ class OpenAICodexProvider(Provider):
         return items
 
     @staticmethod
-    def _parse_response(data: dict) -> ProviderResponse:
+    def _parse_response(data: dict, unskin: dict | None = None) -> ProviderResponse:
         """Parse OpenAI Responses API response into Kernos-native format."""
+        _unskin = unskin or {}
         status = data.get("status", "completed")
         output_items = data.get("output", [])
 
@@ -459,10 +468,15 @@ class OpenAICodexProvider(Provider):
                                 sub_args = json.loads(sub_args)
                             except json.JSONDecodeError:
                                 sub_args = {}
+                        # Unskin the namespaced wire name back to the flat tool
+                        # id before it enters substrate (SEMANTIC-ACTION-
+                        # ENVELOPE-V1: internal surfaces are always flat).
+                        _rname = sub_call.get("recipient_name", "")
+                        _rname = _unskin.get(_rname, _rname)
                         content_blocks.append(ContentBlock(
                             type="tool_use",
-                            id=sub_call.get("recipient_name", "") + "_" + item.get("call_id", ""),
-                            name=sub_call.get("recipient_name", ""),
+                            id=_rname + "_" + item.get("call_id", ""),
+                            name=_rname,
                             input=sub_args,
                         ))
                     logger.info("CODEX_PARALLEL_UNPACK: unpacked %d tool calls from multi_tool_use.parallel",
@@ -471,7 +485,7 @@ class OpenAICodexProvider(Provider):
                     content_blocks.append(ContentBlock(
                         type="tool_use",
                         id=item.get("call_id", item.get("id", "")),
-                        name=call_name,
+                        name=_unskin.get(call_name, call_name),
                         input=args,
                     ))
 
@@ -509,6 +523,13 @@ class OpenAICodexProvider(Provider):
         await self._ensure_valid_token()
         http = await self._ensure_http()
 
+        # SEMANTIC-ACTION-ENVELOPE-V1 (option A): build the request-local
+        # tool-name skin maps once from the flat `tools` list. Outbound,
+        # kernel tools are presented as area__tool; inbound function calls are
+        # unskinned back to flat before they enter substrate.
+        from kernos.kernel.tool_namespace import build_skin_maps
+        _skin, _unskin = build_skin_maps(tools)
+
         # Codex API has a ~32KB limit on the instructions field.
         # Strategy: use the static/dynamic split from Anthropic's cache boundary.
         # Static (RULES + ACTIONS) → instructions field (stable, fits in 30KB).
@@ -543,7 +564,7 @@ class OpenAICodexProvider(Provider):
             dynamic_str = instructions_str[cut:]
             instructions_str = instructions_str[:cut]
 
-        translated_input = self._translate_input(messages)
+        translated_input = self._translate_input(messages, _skin)
         if dynamic_str:
             translated_input.insert(0, {"role": "developer", "content": dynamic_str})
             logger.info("CODEX_SPLIT: instructions=%dKB developer_msg=%dKB input_items=%d",
@@ -610,7 +631,7 @@ class OpenAICodexProvider(Provider):
         # for the >40KB tool-heavy failure mode confirmed 2026-05-02. See
         # _translate_tools docstring for the full story. Do NOT bypass.
         if tools:
-            body["tools"] = self._translate_tools(tools)
+            body["tools"] = self._translate_tools(tools, _skin)
         # text — REQUIRED. Either {format: ...} for schema-constrained
         # output, or {verbosity: ...} for free-form. The field cannot be
         # missing; the consumer backend treats absent text as a malformed
@@ -740,7 +761,7 @@ class OpenAICodexProvider(Provider):
                             f"Codex API error ({resp.status_code}): {resp.text[:300]}"
                         )
                     data = await self._collect_sse_response(resp)
-                return self._parse_response(data)
+                return self._parse_response(data, _unskin)
             except (ReasoningRateLimitError, ReasoningProviderError):
                 raise  # 4xx / known errors — don't retry
             except ReasoningTransientError as exc:

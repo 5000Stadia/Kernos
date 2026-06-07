@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kernos.kernel.tool_namespace import to_namespaced
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,7 +132,7 @@ def compose_overview(catalog: Any) -> str:
         if not names:
             continue
         # Sample up to 5 names per area to keep prose terse.
-        sample = ", ".join(f"`{n}`" for n in names[:5])
+        sample = ", ".join(f"`{to_namespaced(n)}`" for n in names[:5])
         extra = (
             f" plus {len(names) - 5} more"
             if len(names) > 5 else ""
@@ -145,8 +147,21 @@ def compose_overview(catalog: Any) -> str:
     return " ".join(parts)
 
 
+def _flatten_focus(tool_name: str) -> str:
+    """Strip a presented ``area__tool`` namespace back to the flat catalog id
+    so a model that copied a namespaced name from the surfaced list still
+    resolves (SEMANTIC-ACTION-ENVELOPE-V1)."""
+    from kernos.kernel.tool_namespace import NAMESPACES, SEPARATOR
+    if SEPARATOR in tool_name:
+        head, _, tail = tool_name.partition(SEPARATOR)
+        if head in NAMESPACES and tail:
+            return tail
+    return tool_name
+
+
 def compose_focus(catalog: Any, tool_name: str) -> str:
     """Focused prose for ``inspect_tools(focus="X")``."""
+    tool_name = _flatten_focus(tool_name)
     if catalog is None:
         return (
             f"No catalog wired into the substrate, so `{tool_name}` "
@@ -212,7 +227,7 @@ def compose_capability(catalog: Any, capability: str) -> str:
             f"Try `inspect_tools()` for the full overview."
         )
     names = sorted(e.name for e in groups[area])
-    listing = ", ".join(f"`{n}`" for n in names)
+    listing = ", ".join(f"`{to_namespaced(n)}`" for n in names)
     return (
         f"For {_AREA_LABELS.get(area, area)}: {listing}. "
         f"Pass `focus=\"tool_name\"` for details on a specific one."
@@ -332,7 +347,7 @@ def render_operator_listing(
             extra_text = (
                 " (" + ", ".join(extras) + ")" if extras else ""
             )
-            lines.append(f"- `{e.name}`{extra_text}")
+            lines.append(f"- `{to_namespaced(e.name)}`{extra_text}")
             if e.description:
                 lines.append(f"  _{e.description[:120]}_")
         lines.append("")

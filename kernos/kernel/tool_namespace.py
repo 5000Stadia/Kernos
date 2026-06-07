@@ -85,4 +85,35 @@ def to_namespaced(flat_name: str) -> str:
     return f"{ns}{SEPARATOR}{flat_name}" if ns else flat_name
 
 
-__all__ = ["NAMESPACE_FOR", "NAMESPACES", "SEPARATOR", "to_namespaced"]
+def build_skin_maps(
+    tools: "list[dict] | tuple[dict, ...]",
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build request-local (skin, unskin) maps from a flat tools list.
+
+    ``skin``   : flat tool id  -> provider wire name (``area__tool`` for kernel
+                 tools, identity for MCP/workshop tools).
+    ``unskin`` : provider wire name -> flat tool id, ONLY for names that were
+                 actually namespaced. Used for EXACT reverse lookup on inbound
+                 tool calls (more reliable than suffix-stripping, which is
+                 ambiguous for shapes like ``area__mcp__tool``).
+
+    Per SEMANTIC-ACTION-ENVELOPE-V1 (Codex review, option A): the skin lives at
+    the provider boundary only; every internal surface stays flat.
+    """
+    skin: dict[str, str] = {}
+    unskin: dict[str, str] = {}
+    for t in tools:
+        flat = t.get("name", "") if isinstance(t, dict) else ""
+        if not flat:
+            continue
+        wire = to_namespaced(flat)
+        skin[flat] = wire
+        if wire != flat:
+            unskin[wire] = flat
+    return skin, unskin
+
+
+__all__ = [
+    "NAMESPACE_FOR", "NAMESPACES", "SEPARATOR",
+    "to_namespaced", "build_skin_maps",
+]
