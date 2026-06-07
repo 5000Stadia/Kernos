@@ -683,9 +683,13 @@ class DispatchGate:
         if tool_name == "delete-email":
             return f"Delete email: {tool_input.get('id', 'a message')}"
         if tool_name == "delete_file":
-            return f"Delete file: {tool_input.get('name', 'a file')}"
+            # `path` is the canonical file arg (SAE-V1); `name` is the legacy
+            # alias. Read both so confirmation text names the real target.
+            _f = tool_input.get("path") or tool_input.get("name") or "a file"
+            return f"Delete file: {_f}"
         if tool_name == "write_file":
-            return f"Write/update file: {tool_input.get('name', 'a file')}"
+            _f = tool_input.get("path") or tool_input.get("name") or "a file"
+            return f"Write/update file: {_f}"
         return f"Execute {tool_name} with {json.dumps(tool_input)[:200]}"
 
     async def evaluate(

@@ -949,5 +949,1208 @@
     },
     "success": true,
     "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [],
+      "filtered_context": [],
+      "decided_action": {
+        "kind": "respond_only"
+      },
+      "presence_directive": "INTEGRATION SYNTHESIS FAILED. This is an internal system error, not a content limitation. Synthesis was retried 3 times and the final attempt failed at component=briefing_validation. Surface this transparently to the user. Do NOT attempt to answer their original question; do NOT apologize for 'limited context'. Tell the user plainly that an internal synthesis error occurred, name the component if useful ('integration_timeout', 'max_iterations', 'no_tool_use', 'read_only_violation', 'briefing_validation', 'unexpected_error'), and offer that they can retry or that the operator can investigate the integration runner. Keep it short and direct.\n\n### Tool receipts (this attempt's actual dispatch trace)\n  - read_file:iter1\n\nRECEIPT DISCIPLINE. The block above lists the tools that ACTUALLY ran in this attempt. When the user re-asks or follows up next turn, treat that block as the canonical receipt of what happened. Do NOT claim a write/update/save succeeded unless its tool call is present in the receipt. If a prior turn's conversational language implied an action that isn't in the receipt, name the gap explicitly rather than inventing continuity.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "read_file:iter1"
+        ],
+        "tool_results_during_prep": [],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 2,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": true,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4110,
+          "dispatch_iter_1": 27,
+          "integrate_iter_2": 26894
+        },
+        "notes": "system-error after 3 attempts; final-component=briefing_validation; reason=redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-613cc4a3a71c",
+      "action_envelope": null
+    },
+    "success": false,
+    "error": "system-error after 3 attempts; briefing_validation: redaction invariant violated: briefing text contains content from a Restricted CohortOutput. Integration must translate restricted material into behavioral instruction before populating briefing fields."
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "User wants the assistant to continue a sequential test run under previously established rules, then write a results file and report completion when all tests are done. The immediately visible thread only includes a prior internal synthesis error and this continuation request; it does not include the test list, ordering, rules, or target results-file path/name.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "Current context space contains no files, so there is no local test plan or prior results file available to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search found no relevant information about the referenced tests, rules, order, or results file.",
+          "confidence": 1.0
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints were considered; no secret or turn-specific content should be surfaced. They do not resolve the missing test parameters."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "The user’s requested continuation likely requires executing tests and writing a file, but the specific tests/rules/filename are missing, so a bounded action envelope cannot be constructed safely."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "I don’t have the test list, order, rules, or results filename in this turn—can you paste them or tell me where to read them?",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be concise and transparent. Explain that the prior attempt failed before leaving usable context beyond the mention of read_file:iter1, and that local files and memory do not contain the missing test plan. Ask for the minimum needed information to continue; do not imply any tests have been run or any file written.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 21589,
+          "dispatch_iter_1": 2820,
+          "integrate_iter_2": 6777,
+          "dispatch_iter_2": 3243,
+          "integrate_iter_3": 21637
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-7cdd0cfee33c",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user asks to continue with the next test in order under the same rules, then write a results file and report completion. The prior assistant already said the prior attempt failed and that it lacked the test list, order, rules, and results filename.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "The current context space contains no files, so there is no local test plan or results file to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search found no relevant information about a test plan, next test, rules, or results filename for this conversation.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "summary": "Act clearly when requests are clear; clarify when ambiguity blocks action. Do not invent missing details or imply actions occurred without evidence.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "The user requests execution and file writing, but the required plan/rules/filename are missing; issuing write or execution would be unconstrained."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "No substantive task spec or repository/test plan is available to send to an external agent; using it would not resolve the missing user-specific instructions."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "dump_context",
+          "reason_filtered": "The relevant context is already present in the conversation and read-tool results; dumping internal context would not provide the missing test plan."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list/rules and the results filename, or tell me where to read them from.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and transparent. The user wants continuation, but there is no available test plan, ordering, rules, or filename in files or memory. Do not claim to continue tests or write results. Ask for the missing source/details in one concise sentence, mentioning that local files and memory do not contain them.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3511,
+          "dispatch_iter_1": 30,
+          "integrate_iter_2": 5222,
+          "dispatch_iter_2": 152,
+          "integrate_iter_3": 10754
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-d8275fb10ecc",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user repeatedly asks to continue with the next test in order, follow the same rules, and write a results file when all tests are complete. Prior assistant turns reported an internal synthesis error and lack of usable context beyond a read_file receipt, then asked for the missing test list/rules/results filename.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "files__list_files",
+          "summary": "Current context space contains no files, so there is no local test plan or results file to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "memory__remember",
+          "summary": "Memory search for the test plan, order, rules, and results filename found no relevant information.",
+          "confidence": 1.0
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General behavioral constraints only; no task-specific test plan information and no need to quote restricted covenant content."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "User requests continuing tests and writing results eventually, but the required test list/order/rules/results filename are unavailable, so no bounded write or execution action can be dispatched safely."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules, and results filename, or tell me a readable source where I can find them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and transparent: despite retrying, the needed test plan context is still absent from local files and memory. Avoid claiming any tests were run. Ask for the minimal missing inputs so work can continue.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 5558,
+          "dispatch_iter_1": 36,
+          "integrate_iter_2": 3759,
+          "dispatch_iter_2": 160,
+          "integrate_iter_3": 10921
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-0f535bdb08b0",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user repeatedly asks to continue the next test in order, using the same rules, then write a results file and report completion. Prior assistant turns already said the necessary test list/rules/results filename were unavailable and asked the user to paste or point to them.",
+          "confidence": 0.95
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "files__list_files",
+          "summary": "The current context space contains no files, so there is no local test plan or results artifact to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "memory__remember",
+          "summary": "Memory search for a relevant test plan, order, rules, or results file found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "summary": "No constraint prevents asking for clarification; avoid fabricating missing information or taking ambiguous potentially file-writing action without enough specification.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "write_file",
+          "reason_filtered": "The user ultimately wants a results file written, but there are no test results, rules, filename, or test plan available, so an action envelope cannot be bounded safely."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "execute_code",
+          "reason_filtered": "Could run tests if the test plan and files existed, but the space has no files and no instructions identify what to execute."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "External coding assistance would not recover missing user-supplied test plan context; it could write or alter files and is not justified."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "dump_context",
+          "reason_filtered": "The missing information is not in the assembled turn context beyond the repeated request and prior failed attempt note; dumping context would not provide a test plan."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to the source where I should read them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be concise and direct. The user is repeating the same instruction, but available context still lacks the test plan, order, rules, and filename. Do not claim tests were run. State that the space has no files and memory has no relevant plan, then ask for the missing source or details in one clear sentence.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3896,
+          "dispatch_iter_1": 33,
+          "integrate_iter_2": 6822,
+          "dispatch_iter_2": 169,
+          "integrate_iter_3": 11538
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-2c01d6614fda",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user repeatedly asks to continue the next test in order, follow the same rules, then write the results file and report finished. Prior assistant turns already stated that the needed test list, rules/criteria, and results filename are unavailable.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "The current context space contains no files, so there is no local test plan or results file to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search found no relevant information about a test plan, ordering, rules, or results filename.",
+          "confidence": 1.0
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General safety/ownership rules only; no specific bearing except avoid fabricating or taking underspecified irreversible actions."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "soft_write_action_tools",
+          "reason_filtered": "Integration cannot invoke write/test execution tools directly; additionally the action is underspecified because the test plan and filename are missing."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to a readable source for them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and avoid pretending progress is possible. The user is repeating the same instruction, but we still lack the test plan, ordering, rules, and target results filename after checking local files and memory. State that no tests have been run in this turn and ask for the missing source succinctly.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3540,
+          "dispatch_iter_1": 39,
+          "integrate_iter_2": 3786,
+          "dispatch_iter_2": 289,
+          "integrate_iter_3": 12992
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-bafd0d69e9fd",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user repeatedly asks to continue a sequence of tests and write a results file when complete, but the prior assistant turns state that the test plan, rules, ordering, and results filename are unavailable. The user has not provided new details in this turn.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "The current context space has no files, so there is no local test plan or results target to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search for the test plan / next test / rules / results file found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "operator:covenant:0",
+          "summary": "Proceed helpfully, but clarify before acting when required information is missing and the action cannot be safely bounded.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "consult/ask_coding_session/execute_code/write_file",
+          "reason_filtered": "Potentially useful only if a test plan existed; without the test list, rules, and results filename, executing tests or writing a file would be fabricated/underspecified."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "dump_context",
+          "reason_filtered": "Could inspect internal context but the conversation plus file/memory checks already establish the missing plan; dumping would not recover absent external test details."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to the readable source that contains them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be concise and firm: the user is repeating an instruction that cannot be fulfilled because the required test plan context is absent. Do not claim tests were run. Mention that local files and memory were checked again and nothing relevant was found. Ask for the missing plan/source in one sentence or short paragraph.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 3998,
+          "dispatch_iter_1": 38,
+          "integrate_iter_2": 3621,
+          "dispatch_iter_2": 230,
+          "integrate_iter_3": 9812
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-dc9e3fe66173",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user repeatedly asks to continue the next test in order under same rules, write a results file when all tests are done, and report finished. Prior assistant turns repeatedly stated the test plan, order, rules/criteria, and results filename are unavailable.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "Current context space contains no files, so there is no local test plan or results artifact to inspect.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search for the test plan / next test / rules / results file found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "global_behavioral_constraints",
+          "summary": "Act when clear; clarify before acting only when ambiguity blocks bounded action. Do not claim work was done without evidence.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "User asks to continue tests and write a file, but the test plan and target filename are absent; cannot bound an execute_tool/write_file or external execution action safely."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "request_tool",
+          "reason_filtered": "No missing tool capability is the blocker; missing task context is."
+        },
+        {
+          "source_type": "covenant",
+          "source_id": "restricted_covenant_text",
+          "reason_filtered": "Behavioral constraints were applied, but restricted text must not be quoted in the presence briefing."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to a readable source that contains them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and avoid sounding like progress was made. The user is repeating an instruction, but available context still lacks the essential plan, order, rules, and filename. Mention that local files and memory were checked again and found nothing. Ask for the missing source in one concise sentence; do not propose running tools or invent tests.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4356,
+          "dispatch_iter_1": 37,
+          "integrate_iter_2": 3851,
+          "dispatch_iter_2": 342,
+          "integrate_iter_3": 11458
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-c759735df411",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user repeatedly asks to continue the next test in order under prior rules and then write a results file. Multiple prior assistant replies stated that the current context lacks the test list, ordering, rules/criteria, and target results filename, and asked the user to paste them or provide a readable source.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "The current space contains no files, so there is no local test plan or results file to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search for the test plan/order/rules/results filename found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tools.available",
+          "source_id": "write_file",
+          "summary": "A file-writing capability exists, but writing results cannot be bounded because the test plan, test results, and target filename are unknown.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "reason_filtered": "General safety and ownership constraints are not directly determinative except to avoid inventing missing information or acting ambiguously; no secret text should be surfaced."
+        },
+        {
+          "source_type": "tools.available",
+          "source_id": "consult/ask_coding_session/execute_code",
+          "reason_filtered": "These action tools could potentially investigate or run tests, but without a test plan or repository/files in the space there is no bounded task to execute."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to the readable source that contains them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and avoid another long repetitive apology. State that the system checked the available local files and memory this turn and still has no test plan or filename, so it cannot honestly continue or write results. Ask for the missing source in one concise sentence. Do not claim any tests were run.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4914,
+          "dispatch_iter_1": 39,
+          "integrate_iter_2": 4377,
+          "dispatch_iter_2": 192,
+          "integrate_iter_3": 10319
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-1780939968aa",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user repeatedly asks to continue the next test in order, follow same rules, write results file when all tests are done, and say finished. Prior assistant turns repeatedly stated that no test plan, rules/criteria, ordering, or results filename are available.",
+          "confidence": 0.99
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "The current context space contains no files.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search for the test plan / next test / rules / results filename found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "summary": "General behavioral constraints apply: avoid disclosure of sensitive information, do not delete without request, clarify when ambiguity has meaningful consequences, and stay helpful/warm.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "The user's requested action would require knowing what tests to run and what file to write; without the missing plan, executing write_file/execute_code/manage_plan would be unconstrained or fabricated."
+        },
+        {
+          "source_type": "surfaced_tool",
+          "source_id": "external_consult_tools",
+          "reason_filtered": "No repository/test context or task description exists to hand to an external coding agent; using it would not resolve the missing user-provided test plan."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to a readable source that contains them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and do not imply any tests have been run. Acknowledge the repeated request and the fact that we checked again: there are no local files and memory has no relevant test plan. Ask for the missing test list/rules/results filename or a readable source. Keep the tone calm and helpful; avoid looping into new tool proposals.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 4716,
+          "dispatch_iter_1": 37,
+          "integrate_iter_2": 4078,
+          "dispatch_iter_2": 164,
+          "integrate_iter_3": 10150
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-57e2e7a9b6c7",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "thread",
+          "summary": "The user repeatedly asks to continue the next test in order, using prior rules, then write a results file and report completion. Multiple prior assistant turns already stated that the test plan, rules/criteria, ordering, and results filename are unavailable.",
+          "confidence": 0.98
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "Current context space contains no files, so there is no local test plan or results file to read.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search for the test plan/order/rules/criteria/results filename found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "summary": "Act helpfully and honestly; clarify before ambiguous actions with consequences. Do not claim tests were run or files written without actual basis.",
+          "confidence": 0.95
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "consult/ask_coding_session/execute_code/write_file",
+          "reason_filtered": "These are action/effect tools and integration cannot call them directly; more importantly, the test plan and results filename are missing, so any execution or file write would be unbounded or fabricated."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "inspect_state/manage_schedule/etc.",
+          "reason_filtered": "Not relevant to recovering the missing test plan or executing tests."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or point me to a readable source that contains them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and avoid looping excessively. Say that you checked again: there are no local files and memory has no relevant plan. Do not claim any tests were run. Ask for the missing plan/rules/filename or a readable source. Keep it brief and calm.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 5129,
+          "dispatch_iter_1": 43,
+          "integrate_iter_2": 3201,
+          "dispatch_iter_2": 337,
+          "integrate_iter_3": 10735
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-da11f22c1796",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "audit_category": "integration.briefing",
+    "briefing": {
+      "relevant_context": [
+        {
+          "source_type": "conversation",
+          "source_id": "current_thread",
+          "summary": "The user repeatedly asks to continue the next test in order under prior rules and write a results file when done. Prior assistant turns repeatedly stated that the test list, rules/criteria, order, and results filename are unavailable and asked the user to paste them or point to a source.",
+          "confidence": 0.99
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "list_files",
+          "summary": "The current context space contains no files, so there is no local test plan or results file to inspect.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "tool.read",
+          "source_id": "remember",
+          "summary": "Memory search for the test plan / next test / rules / results file found no relevant information.",
+          "confidence": 1.0
+        },
+        {
+          "source_type": "cohort.covenant",
+          "source_id": "operator:covenant:0",
+          "summary": "General safety constraints apply: do not invent unavailable information; clarify before acting when a consequential or underspecified action cannot be bounded.",
+          "confidence": 0.9
+        }
+      ],
+      "filtered_context": [
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "soft_write_tools",
+          "reason_filtered": "User's request would ultimately require executing tests and writing a file, but the test plan/rules/results filename are missing, so a bounded action envelope cannot be constructed."
+        },
+        {
+          "source_type": "surfaced_tools",
+          "source_id": "consult/ask_coding_session",
+          "reason_filtered": "External coding agents could investigate only if there were a repository or source to inspect; current space has no files and no target paths or test plan."
+        }
+      ],
+      "decided_action": {
+        "kind": "clarification_needed",
+        "question": "Please paste the test list, rules/criteria, and results filename, or tell me the readable source that contains them.",
+        "ambiguity_type": "parameter",
+        "partial_state": null
+      },
+      "presence_directive": "Be direct and calm. Do not claim to continue tests or write results. State that another check found no local files and no relevant memory, so the next required step is for the user to provide or identify the missing test plan. Avoid repeating excessive history; keep it concise.",
+      "audit_trace": {
+        "cohort_outputs": [
+          "operator:covenant:0"
+        ],
+        "tools_called_during_prep": [
+          "list_files:iter1",
+          "remember:iter2"
+        ],
+        "tool_results_during_prep": [
+          {
+            "tool_name": "list_files",
+            "result": "",
+            "result_chars": 39,
+            "result_sha256": "4a9721edcab373e547b7185688f3daaa28e521f55577b80128beb12b3e56a616",
+            "result_preview": "{\"text\": \"No files in this space yet.\"}",
+            "truncated": false
+          },
+          {
+            "tool_name": "remember",
+            "result": "",
+            "result_chars": 52,
+            "result_sha256": "86b020c29b1c47fad60b94280e53e2b64c7fd3bd761c6555b3bb9f5127ef8e51",
+            "result_preview": "{\"text\": \"No relevant information found in memory.\"}",
+            "truncated": false
+          }
+        ],
+        "tool_results_during_enactment": [],
+        "action_state_records": [],
+        "iterations_used": 3,
+        "budget_state": {
+          "iterations_hit_limit": false,
+          "timeout_hit_limit": false,
+          "cohort_entries_hit_limit": false,
+          "filtered_entries_hit_limit": false,
+          "tokens_hit_limit": false,
+          "required_cohort_failed": false,
+          "required_safety_cohort_failed": false,
+          "cohort_fan_out_global_timeout": false
+        },
+        "fail_soft_engaged": false,
+        "phase_durations_ms": {
+          "collect": 0,
+          "integrate_iter_1": 5554,
+          "dispatch_iter_1": 33,
+          "integrate_iter_2": 4624,
+          "dispatch_iter_2": 145,
+          "integrate_iter_3": 10020
+        },
+        "notes": ""
+      },
+      "turn_id": "operator",
+      "integration_run_id": "int-04a05c316d1d",
+      "action_envelope": null
+    },
+    "success": true,
+    "error": ""
   }
 ]
