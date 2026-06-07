@@ -410,3 +410,28 @@ async def test_service_bound_dispatch_refuses_disabled_service_with_dedicated_au
     assert entry["audit_category"] == "install.dispatch_refused_disabled_service"
     assert entry["service_id"] == "notion"
     assert entry["tool_name"] == "reader"
+
+
+@pytest.mark.asyncio
+async def test_register_tool_finds_and_normalizes_nested_descriptor(workspace):
+    """v1 self-test: the model sometimes builds the tool inside a subdir
+    (flip_coin_tool/flip_coin.tool.json) instead of the files root.
+    register_tool must find it by basename, register it, and copy the
+    descriptor + impl up to the root so the runtime loaders (which read the
+    root by basename) can load the tool on first call."""
+    ws, catalog, _services, _audit, tmp_path = workspace
+    files_root = tmp_path / "discord_owner" / "spaces" / "space_a" / "files"
+    nested = files_root / "flip_coin_pkg"
+    _write_descriptor_and_impl(
+        nested,
+        name="flip_coin",
+        descriptor_extras={},
+        impl_src="def execute(input_data): return {'result': 'heads'}\n",
+    )
+    # only the bare basename is passed (path separators are rejected)
+    msg = await ws.register_tool("discord:owner", "space_a", "flip_coin.tool.json")
+    assert "Registered" in msg, msg
+    assert catalog.get("flip_coin") is not None
+    # normalized to the files root so runtime loading works
+    assert (files_root / "flip_coin.tool.json").is_file()
+    assert (files_root / "flip_coin.py").is_file()

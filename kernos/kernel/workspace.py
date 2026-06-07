@@ -422,10 +422,23 @@ class WorkspaceManager:
         if "/" in descriptor_file or "\\" in descriptor_file or ".." in descriptor_file:
             return "Descriptor filename must not contain path separators or '..'."
 
-        # 2. Load descriptor
+        # 2. Load descriptor. The model sometimes builds the tool inside a
+        # subdirectory (e.g. flip_coin_tool/flip_coin.tool.json) instead of the
+        # files root. Be forgiving: find it by basename anywhere under the space
+        # dir. Bounded to space_dir — path separators in descriptor_file are
+        # rejected above, so this never escapes the space. (v1 self-test:
+        # register_tool descriptor placement.)
         desc_path = space_dir / descriptor_file
         if not desc_path.exists():
-            return f"Descriptor file '{descriptor_file}' not found in space directory."
+            _matches = sorted(space_dir.rglob(descriptor_file))
+            if _matches:
+                desc_path = _matches[0]
+                logger.info(
+                    "TOOL_REGISTER_DESC_NESTED: found %s at %s",
+                    descriptor_file, desc_path,
+                )
+            else:
+                return f"Descriptor file '{descriptor_file}' not found in space directory."
 
         try:
             descriptor = json.loads(desc_path.read_text(encoding="utf-8"))
@@ -461,10 +474,39 @@ class WorkspaceManager:
         if not impl.endswith(".py"):
             return f"Implementation '{impl}' must be a .py file."
 
-        # 6. Check implementation exists and is a file
-        impl_path = space_dir / impl
+        # 6. Check implementation exists and is a file. Resolve it co-located
+        # with the descriptor first (the model usually keeps both together),
+        # then the files root, then anywhere under the space dir.
+        impl_path = desc_path.parent / impl
+        if not impl_path.is_file():
+            _root_impl = space_dir / impl
+            if _root_impl.is_file():
+                impl_path = _root_impl
+            else:
+                _impl_matches = sorted(space_dir.rglob(impl))
+                impl_path = _impl_matches[0] if _impl_matches else (space_dir / impl)
         if not impl_path.is_file():
             return f"Implementation file '{impl}' not found."
+
+        # 6b. Normalize to the files ROOT. The catalog stores only basenames and
+        # the runtime schema/impl loaders read from the root, so a descriptor/
+        # impl the model built in a subdirectory must be copied up or the tool
+        # would register but fail to load on first call. (v1 self-test.)
+        import shutil as _shutil
+        if desc_path.parent != space_dir:
+            _root_desc = space_dir / descriptor_file
+            try:
+                _shutil.copyfile(desc_path, _root_desc)
+                desc_path = _root_desc
+            except OSError as _exc:
+                return f"Could not place descriptor '{descriptor_file}' at the space root: {_exc}"
+        if impl_path.parent != space_dir:
+            _root_impl2 = space_dir / impl
+            try:
+                _shutil.copyfile(impl_path, _root_impl2)
+                impl_path = _root_impl2
+            except OSError as _exc:
+                return f"Could not place implementation '{impl}' at the space root: {_exc}"
 
         # 7. Check name uniqueness in catalog
         existing = self._catalog.get(name) if self._catalog else None
