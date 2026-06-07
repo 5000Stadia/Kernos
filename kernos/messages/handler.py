@@ -5716,16 +5716,19 @@ class MessageHandler:
             # step short-circuits via check_sender_blocked with the
             # "private Kernos" static response (the uniform response_len=22
             # stub seen on a 17-step self-test run). Same failure mode and
-            # same remedy as the AUTO-WAKE-V1 system bypass above —
-            # resolve the owner member directly, skip abuse prevention.
+            # same remedy as the AUTO-WAKE-V1 system bypass above — skip abuse
+            # prevention. The plan creator's member_id is normally already set
+            # on the message (threaded from the envelope, so the step runs
+            # under the plan owner's context, not the global owner). Only when
+            # it's absent — legacy plans created before created_by_member_id —
+            # do we fall back to resolving the real owner row.
             if not message.member_id:
                 _owner_id = None
                 if hasattr(self, '_instance_db') and self._instance_db:
                     # Resolve the REAL owner row (stable mem_ id) — not the
-                    # legacy synthetic `member:{instance}:owner` placeholder.
-                    # Running plan steps under the synthetic id provisions a
-                    # phantom member/General space and routes execution away
-                    # from the owner's actual spaces (Codex review).
+                    # legacy synthetic `member:{instance}:owner` placeholder,
+                    # which would provision a phantom member/General space and
+                    # route execution away from the owner's actual spaces.
                     try:
                         _owner_id = await self._instance_db.get_owner_member_id()
                     except Exception:
@@ -7221,8 +7224,15 @@ class MessageHandler:
 
     async def _handle_manage_plan(
         self, instance_id: str, space_id: str, tool_input: dict,
+        creator_member_id: str = "",
     ) -> str:
-        """Handle manage_plan tool call — create, continue, status, pause."""
+        """Handle manage_plan tool call — create, continue, status, pause.
+
+        creator_member_id records who created the plan so self-directed steps
+        execute under the plan owner's context (profile/spaces), not the
+        global instance owner — a non-owner member's plan must not run with the
+        owner's identity (Codex review).
+        """
         from kernos.kernel.execution import (
             load_plan, save_plan, check_budget, build_envelope_from_plan,
             generate_plan_id, ExecutionEnvelope,
@@ -7277,6 +7287,7 @@ class MessageHandler:
                 "discoveries": [],
                 "show_progress": _show_progress_override if _show_progress_override is not None else True,
                 "created_at": utc_now(),
+                "created_by_member_id": creator_member_id or "",
             }
             await save_plan(data_dir, instance_id, space_id, plan)
             # Find the first step and kick it off
@@ -7525,7 +7536,10 @@ class MessageHandler:
                         envelope.plan_id, envelope.step_id)
                     return
 
-        # Build a self-directed message
+        # Build a self-directed message. Carry the plan creator's member_id so
+        # the step runs under the plan owner's context, not the global instance
+        # owner (Codex review — a non-owner's plan must not execute with the
+        # owner's profile/spaces/credentials).
         msg = NormalizedMessage(
             content=f"[PLAN STEP {envelope.step_id}] {envelope.step_description}",
             sender="self_directed",
@@ -7534,6 +7548,7 @@ class MessageHandler:
             platform_capabilities=["text"],
             conversation_id=f"plan_{envelope.plan_id}",
             timestamp=datetime.now(timezone.utc),
+            member_id=envelope.member_id or "",
             instance_id=instance_id,
             context={"execution_envelope": {
                 "plan_id": envelope.plan_id,
@@ -7745,6 +7760,7 @@ class MessageHandler:
                         platform_capabilities=["text"],
                         conversation_id=msg.conversation_id,
                         timestamp=datetime.now(timezone.utc),
+                        member_id=msg.member_id or "",
                         instance_id=instance_id,
                         context=msg.context,
                     )
@@ -7785,6 +7801,7 @@ class MessageHandler:
                             platform_capabilities=["text"],
                             conversation_id=msg.conversation_id,
                             timestamp=datetime.now(timezone.utc),
+                            member_id=msg.member_id or "",
                             instance_id=instance_id,
                             context=msg.context,
                         )

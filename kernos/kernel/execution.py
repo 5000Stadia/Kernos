@@ -39,6 +39,7 @@ class ExecutionEnvelope:
     interruptible: bool = True
     source: str = "self_directed"
     is_final_step: bool = False
+    member_id: str = ""  # the member who owns/created the plan (routing context)
 
 
 MANAGE_PLAN_TOOL = {
@@ -274,4 +275,5 @@ def build_envelope_from_plan(plan: dict, step_id: str, step_description: str) ->
         steps_used=usage.get("steps_used", 0),
         tokens_used=usage.get("tokens_used", 0),
         elapsed_s=usage.get("elapsed_s", 0),
+        member_id=plan.get("created_by_member_id", ""),
     )

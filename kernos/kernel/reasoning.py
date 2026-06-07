@@ -1221,7 +1221,8 @@ class ReasoningService:
             elif tool_name == "manage_plan":
                 if hasattr(self, '_handler') and self._handler:
                     return await self._handler._handle_manage_plan(
-                        request.instance_id, request.active_space_id, tool_input)
+                        request.instance_id, request.active_space_id, tool_input,
+                        creator_member_id=request.member_id or "")
                 return "Self-directed execution is not available."
             elif tool_name == "read_runtime_trace":
                 if hasattr(self, '_handler') and self._handler:
