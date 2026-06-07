@@ -60,6 +60,18 @@ def test_suffix_repair_inert_without_known_tools():
     assert canonicalize_tool_name("workspace.write_file") == ("workspace.write_file", False)
 
 
+def test_double_underscore_namespace_repairs():
+    # SEMANTIC-ACTION-ENVELOPE area__tool presentation form resolves to flat
+    assert canonicalize_tool_name("files__write_file", _KNOWN) == ("write_file", True)
+    assert canonicalize_tool_name("planning__manage_plan", _KNOWN) == ("manage_plan", True)
+
+
+def test_double_underscore_real_tool_untouched():
+    # a registered __-named tool (e.g. MCP) is never split apart
+    known = _KNOWN | {"mcp__svc__do_thing"}
+    assert canonicalize_tool_name("mcp__svc__do_thing", known) == ("mcp__svc__do_thing", False)
+
+
 # --- Issue B: long-tool timeout floor -------------------------------------
 
 def _dispatcher():

@@ -1,0 +1,43 @@
+[
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e8228b3c",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T01:59:38.744260+00:00",
+    "fan_out_completed_at": "2026-06-07T01:59:38.745637+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T01:59:52.847801+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_e8228b3c",
+    "space_id": "space_d23d647a",
+    "tool_name": "dump_context",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "81542c0538f0556ecb84fd59eed4bf8eb4c26229bfd3bc5d7aa8c89f466138ed",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "27e9c192d14c4906b7f977fa608023ee",
+    "escalated": false
+  }
+]

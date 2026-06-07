@@ -111,14 +111,18 @@ def canonicalize_tool_name(
     canonical = _TOOL_ALIASES.get(name)
     if canonical is not None:
         return (canonical, True)
-    if (
-        known_tools is not None
-        and "." in name
-        and name not in known_tools
-    ):
-        suffix = name.rsplit(".", 1)[-1]
-        if suffix and suffix in known_tools:
-            return (suffix, True)
+    if known_tools is not None and name not in known_tools:
+        # Try each namespace separator the model reaches for: dot (its raw
+        # reflex, provider-invalid so only ever seen as a hallucination) and
+        # double-underscore (the SEMANTIC-ACTION-ENVELOPE `area__tool`
+        # presentation form + the MCP convention). A legitimate dotted/__ tool
+        # is in known_tools (caught by the guard above), so only genuine
+        # hallucinations whose full name resolves to nothing are repaired.
+        for _sep in (".", "__"):
+            if _sep in name:
+                suffix = name.rsplit(_sep, 1)[-1]
+                if suffix and suffix in known_tools:
+                    return (suffix, True)
     return (name, False)
 
 

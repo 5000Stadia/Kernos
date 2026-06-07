@@ -1,0 +1,2 @@
+{"turn_id": "turn_a6218c23", "timestamp": "2026-06-07T01:59:34.788733+00:00", "level": "info", "source": "handler", "event": "COVENANT_INJECT", "detail": "pinned=4 relevant=0 skipped=0", "phase": "assemble", "duration_ms": null}
+{"turn_id": "turn_a6218c23", "timestamp": "2026-06-07T02:00:34.859211+00:00", "level": "info", "source": "handler", "event": "TURN_TIMING", "detail": "total=64356ms phases={\"provision\": 61, \"route\": 8858, \"assemble\": 8237, \"reason\": 56094, \"consequence\": 13, \"persist\": 10}", "phase": "", "duration_ms": 64356}
