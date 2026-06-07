@@ -376,6 +376,34 @@ def _coerce_plan_phases(tool_input: dict) -> list:
     return []
 
 
+def _next_plan_step_to_run(plan: dict) -> dict | None:
+    """Return the next pending step the substrate should AUTO-run, or None.
+
+    Returns None when: the plan isn't active, every step is already
+    complete/skipped, the step budget is spent, or a step is already
+    in_progress (the model already advanced this turn — don't double-advance).
+
+    The self-directed SPINE uses this to keep a plan moving on its own instead
+    of relying on the model to call manage_plan(continue) at the end of every
+    step (which it does unreliably, so plans silently stalled). (2026-06-07.)
+    """
+    if not plan or plan.get("status") != "active":
+        return None
+    steps = [s for p in plan.get("phases", []) for s in p.get("steps", [])]
+    if not steps:
+        return None
+    if any(s.get("status") == "in_progress" for s in steps):
+        return None
+    budget = plan.get("budget", {}) or {}
+    used = (plan.get("usage", {}) or {}).get("steps_used", 0)
+    if used >= budget.get("max_steps", 30):
+        return None
+    for s in steps:
+        if s.get("status") == "pending":
+            return s
+    return None
+
+
 def resolve_mcp_credentials(
     server_config: dict,
     instance_id: str,
@@ -7572,6 +7600,46 @@ class MessageHandler:
                         except Exception:
                             pass
                     await save_plan(data_dir, instance_id, space_id, plan)
+
+                    # SELF-DIRECTED SPINE (2026-06-07): auto-advance to the next
+                    # pending step IN THE SUBSTRATE. Previously the plan only
+                    # advanced if the model called manage_plan(continue) at the
+                    # end of every step — which it does unreliably (empty action,
+                    # or just forgets), so a "self-directed" plan silently
+                    # stalled after step 1. The model can still drive/pause; this
+                    # just keeps the loop moving when it doesn't.
+                    _next = None if all_done else _next_plan_step_to_run(plan)
+                    if _next is not None:
+                        from kernos.kernel.execution import (
+                            build_envelope_from_plan,
+                        )
+                        _all_steps = [
+                            s for p in plan.get("phases", [])
+                            for s in p.get("steps", [])
+                        ]
+                        _done_n = sum(
+                            1 for s in _all_steps
+                            if s.get("status") in ("complete", "skipped")
+                        )
+                        _next_env = build_envelope_from_plan(
+                            plan, _next["id"], _next.get("title", ""),
+                        )
+                        _next_env.is_final_step = (_done_n + 1) >= len(_all_steps)
+                        _next["status"] = "in_progress"
+                        plan["current_step"] = _next["id"]
+                        plan["usage"]["steps_used"] = (
+                            (plan.get("usage", {}) or {}).get("steps_used", 0) + 1
+                        )
+                        await save_plan(data_dir, instance_id, space_id, plan)
+                        logger.info(
+                            "PLAN_AUTO_ADVANCE: plan=%s -> step=%s",
+                            envelope.plan_id, _next["id"],
+                        )
+                        asyncio.create_task(
+                            self._execute_self_directed_step(
+                                instance_id, space_id, _next_env,
+                            )
+                        )
                 return  # Step succeeded — exit retry loop
 
             except Exception as exc:
