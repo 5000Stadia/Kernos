@@ -60,7 +60,7 @@ from kernos.kernel.tools import (
 # "Invalid filename ''", breaking ALL file I/O in a live turn (caught by the
 # v1 self-test, 2026-06-06). Resolving any of these synonyms makes file
 # read/write robust to natural argument phrasing. Order = preference.
-_FILE_NAME_ARG_KEYS = ("name", "filename", "file_name", "path", "filepath", "file")
+_FILE_NAME_ARG_KEYS = ("path", "name", "filename", "file_name", "filepath", "file")
 
 
 def _resolve_file_name(tool_input: dict) -> str:

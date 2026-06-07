@@ -25,9 +25,9 @@ def test_file_and_filepath_synonyms_resolve():
     assert _resolve_file_name({"file_name": "d.md"}) == "d.md"
 
 
-def test_canonical_preferred_over_synonym():
-    # if both present, the schema-canonical field wins
-    assert _resolve_file_name({"name": "canon.md", "path": "other.md"}) == "canon.md"
+def test_path_is_canonical_over_name():
+    # path is now the canonical schema field (SAE-V1 adopt-the-shape); it wins
+    assert _resolve_file_name({"name": "old.md", "path": "canon.md"}) == "canon.md"
 
 
 def test_empty_or_whitespace_is_skipped():

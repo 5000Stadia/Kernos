@@ -36,9 +36,9 @@ FILE_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {
+                "path": {
                     "type": "string",
-                    "description": "Filename including extension (e.g. 'henderson-sow.md', 'session-notes.txt')",
+                    "description": "File path/name including extension (e.g. 'henderson-sow.md', 'session-notes.txt')",
                 },
                 "content": {
                     "type": "string",
@@ -53,7 +53,7 @@ FILE_TOOLS = [
                     "description": "Optional: write to a parent space instead of the current space (for universal updates). Must be an ancestor in the scope chain.",
                 },
             },
-            "required": ["name", "content", "description"],
+            "required": ["path", "content", "description"],
         },
     },
     {
@@ -65,12 +65,12 @@ FILE_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {
+                "path": {
                     "type": "string",
-                    "description": "Filename to read",
+                    "description": "File path/name to read",
                 }
             },
-            "required": ["name"],
+            "required": ["path"],
         },
     },
     {
@@ -90,12 +90,12 @@ FILE_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {
+                "path": {
                     "type": "string",
-                    "description": "Filename to delete",
+                    "description": "File path/name to delete",
                 }
             },
-            "required": ["name"],
+            "required": ["path"],
         },
     },
 ]
