@@ -21,23 +21,18 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kernos.kernel.tool_namespace import to_namespaced
 
 logger = logging.getLogger(__name__)
 
 
-def _display_name(name: str, taken: set[str]) -> str:
-    """Collision-aware presentation name for a kernel tool listing.
-
-    Mirrors build_skin_maps: present the namespaced ``area__tool`` form UNLESS
-    that wire name already exists as a real catalog entry (e.g. a workspace tool
-    literally named ``files__write_file``), in which case keep the kernel name
-    flat so the listing never shows two identical entries (SAE-V1; Codex r4).
-    """
-    wire = to_namespaced(name)
-    if wire != name and wire in taken:
-        return name
-    return wire
+# NOTE: inspect_tools renders FLAT names (canonical catalog ids), NOT the
+# area__tool wire form. The namespace skin is a Codex-provider wire concern
+# only; rendering namespaced here would advertise names absent from a flat-list
+# provider's (Anthropic/Ollama) tool set, and on Codex the model already calls
+# from its namespaced function LIST — this prose is guidance, and flat names
+# dispatch on every provider. (SAE-V1; Codex review r5.) The focus path still
+# accepts a namespaced arg via _flatten_focus, so a model copying a namespaced
+# name from its Codex list still resolves.
 
 
 # ---------------------------------------------------------------------
@@ -134,7 +129,6 @@ def compose_overview(catalog: Any) -> str:
             "`register_tool` once you've built it."
         )
 
-    _taken = {e.name for v in groups.values() for e in v}
     parts: list[str] = []
     parts.append(
         f"You have access to {total} tools across "
@@ -146,8 +140,8 @@ def compose_overview(catalog: Any) -> str:
         names = sorted(e.name for e in groups[area])
         if not names:
             continue
-        # Sample up to 5 names per area to keep prose terse.
-        sample = ", ".join(f"`{_display_name(n, _taken)}`" for n in names[:5])
+        # Sample up to 5 names per area to keep prose terse. Flat names.
+        sample = ", ".join(f"`{n}`" for n in names[:5])
         extra = (
             f" plus {len(names) - 5} more"
             if len(names) > 5 else ""
@@ -254,9 +248,8 @@ def compose_capability(catalog: Any, capability: str) -> str:
             f"No tools tagged under `{capability}` right now. "
             f"Try `inspect_tools()` for the full overview."
         )
-    _taken = {e.name for v in groups.values() for e in v}
     names = sorted(e.name for e in groups[area])
-    listing = ", ".join(f"`{_display_name(n, _taken)}`" for n in names)
+    listing = ", ".join(f"`{n}`" for n in names)
     return (
         f"For {_AREA_LABELS.get(area, area)}: {listing}. "
         f"Pass `focus=\"tool_name\"` for details on a specific one."

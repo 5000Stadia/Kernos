@@ -1880,5 +1880,300 @@
     "error": "",
     "audit_entry_id": "20d327d48db046bd80a2b5b5f82d6420",
     "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T05:03:28.190905+00:00",
+    "fan_out_completed_at": "2026-06-07T05:03:28.192240+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:03:33.636513+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "ca56b0d0ab67454ebd901ab9f81ffc57",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:03:38.636561+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "remember",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "74b37bf2f6bd541ea3e1ffa4676fb3737bb5c3b6e287159982b2dc514a2b725a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "8cfa571b7d2040aeb285c102b61c79c7",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T05:04:04.924472+00:00",
+    "fan_out_completed_at": "2026-06-07T05:04:04.925917+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:04:09.665573+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "d4b4537ac6314012a2d1e038ce329b70",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:04:17.255689+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "remember",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "841816d19f5fb189c7a57e2f6fa0f7822d36808d1c847a4e00322cfc11ca5f4c",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "d84efdc15fbe4da1a1c083cef0001438",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T05:04:44.397605+00:00",
+    "fan_out_completed_at": "2026-06-07T05:04:44.398703+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 0,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:04:47.651496+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "3ad16849dd694dde82a746497a845296",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:04:51.601850+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "remember",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "c80d2c2c692808b2983b96d074f4da84b03ba9c15047e4c78c7e52432b05bd9a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "7c065247abb04b5e8a29be5ad9bb5b44",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T05:05:27.964502+00:00",
+    "fan_out_completed_at": "2026-06-07T05:05:27.965877+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:05:35.677892+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "5581cb1d156c45f8ac1ca0f692d6b1de",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:05:40.584070+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "remember",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "99085c0885e9a5a0d2514db60b281a89c7a48a9e3fee8fb1c7ca9a27f39ae1a8",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "529e9862548645a7a815c13f3a9f19fa",
+    "escalated": false
+  },
+  {
+    "audit_category": "cohort.fan_out",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "turn_id": "operator",
+    "fan_out_started_at": "2026-06-07T05:06:03.857066+00:00",
+    "fan_out_completed_at": "2026-06-07T05:06:03.858292+00:00",
+    "global_timeout_engaged": false,
+    "registered_cohort_ids": [
+      "covenant"
+    ],
+    "outcomes": [
+      {
+        "cohort_id": "covenant",
+        "cohort_run_id": "operator:covenant:0",
+        "outcome": "success",
+        "duration_ms": 1,
+        "error_summary": ""
+      }
+    ],
+    "required_cohort_failures": [],
+    "required_safety_cohort_failures": []
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:06:09.833207+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "list_files",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "e06db222955d4ef9b3f404302ef91e12",
+    "escalated": false
+  },
+  {
+    "type": "tool_call",
+    "timestamp": "2026-06-07T05:06:14.516880+00:00",
+    "instance_id": "repl:selftest",
+    "member_id": "mem_c1316361",
+    "space_id": "space_76f2f954",
+    "tool_name": "remember",
+    "operation": "",
+    "service_id": "",
+    "authority": [],
+    "audit_category": "read",
+    "normalized_category": "tool.invocation.internal",
+    "payload_digest": "11c2e841505fee42a469beae362be1326a5f23859ba8c9ebfbb6d6cc2d5d93cd",
+    "success": true,
+    "error": "",
+    "audit_entry_id": "bb23612d731842bda9732ec35664686d",
+    "escalated": false
   }
 ]
