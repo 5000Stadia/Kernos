@@ -116,6 +116,45 @@ signals from the alias-repair corpus.
 6. **Is presentation-skin the right depth,** or does single-owner namespacing
    want to be the real catalog identity (deeper but cleaner)?
 
+## 6b. Codex review — GREEN (2026-06-06, session 019e9fd7)
+
+Verdict: **GREEN, build Phase 1 as a strict presentation skin** (don't keep
+flat+repair as the end state — repair is a safety net, not a good model
+contract). Answers + implementation map:
+
+- **Separator** `area__tool` confirmed (dots provider-invalid). **Token cost**
+  immaterial (~180 tokens worst-case vs 8000 budget).
+- **Apply the skin LATE, canonicalize EARLY** — the load-bearing constraint.
+  Flat-name assumptions to respect:
+  - `assemble.py:575` — flat-keyed `_added`, pinned membership, affordances,
+    catalog scan, budget sort. `assemble.py:975` — cognitive partition reads
+    flat `ALWAYS_PINNED`; **do not mutate `ctx.tools` before this point.**
+  - `gate.py:323`, `live_wiring.py:357` classify **before** execution →
+    `area__tool` must canonicalize before gate/classification, not only in
+    `execute_tool`.
+  - `surfaced_tools.py:77`, `runner.py:936` compare tool IDs directly →
+    normalize before comparison (esp. action-dependent `manage_plan`).
+  - `inspect_tools` (`tool_introspection.py:111`) must ALSO present namespaced
+    names or it reintroduces the conflict.
+  - `workspace.py:454`, `tool_descriptor.py:226` validate snake_case → confirms
+    flat stays the real identity (skin only).
+  - Tool-choice forcing: not a blocker (auto/required, not named).
+- **MCP: leave exactly as registered** — repo does NOT uniformly use `mcp__…`
+  (`COMMON_MCP_NAMES` has `get-current-time`, `create-event`,
+  `brave_web_search`); discovery stores upstream `tool.name` verbatim. Do not
+  wrap/rename.
+- **De-dot:** secondary; only change model-facing rationale strings
+  (`cognitive_context.tool_surface` → prose / `tool_surface`) when touching that
+  path. Leave internal event/type labels.
+- **`path` adopt is real work:** `_resolve_file_name` currently prefers `name`;
+  making `path` canonical = update schema + helper precedence + tests.
+
+Phase-1 build order (derived): (1) canonicalizer handles `__` and `.` with
+known_tools; (2) wire canonicalize-with-known-tools at gate + live-wiring +
+integration comparisons (early); (3) late presentation skin in assemble (after
+partition); (4) inspect_tools namespaced; (5) `path` canonical; (6) template
+guidance → `area__tool`; (7) self-test loop confirms first-try landing.
+
 ## 7. Acceptance (Phase 1)
 - Model-facing tool list shows `area__tool` names; descriptions intact.
 - Dispatch accepts namespaced, flat, and dotted forms → same handler.
