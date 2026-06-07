@@ -334,8 +334,21 @@ class StepDispatcher:
         # trail) sees the canonical name uniformly. The receipt event
         # preserves the model's original name for telemetry corpus.
         from kernos.kernel.tool_aliases import canonicalize_tool_name
+        # SAE-V1 / bug #9: pass the known-tool-id set so the registry-aware
+        # dotted/__ suffix repair fires on THIS surface too (e.g. a namespaced
+        # `memory.note_this` → `note_this`). Without it the enactment path only
+        # did curated exact-match, so novel namespaced names failed here even
+        # though they self-heal on the conversational + gate paths. The lookup
+        # already exposes known_tool_ids() (used for the did-you-mean hint).
+        _known_ids: "set[str] | None" = None
+        try:
+            _kfn = getattr(self._lookup, "known_tool_ids", None)
+            if callable(_kfn):
+                _known_ids = set(_kfn() or ())
+        except Exception:
+            _known_ids = None
         _canonical_name, _was_repaired = canonicalize_tool_name(
-            step.tool_id,
+            step.tool_id, _known_ids,
         )
         if _was_repaired:
             logger.info(

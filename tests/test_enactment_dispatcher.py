@@ -974,3 +974,43 @@ async def test_unknown_non_alias_tool_still_returns_not_registered():
     assert result.completed is False
     assert result.failure_kind is FailureKind.NON_TRANSIENT
     assert "not registered" in result.error_summary
+
+
+@pytest.mark.asyncio
+async def test_namespaced_name_suffix_repaired_via_known_tool_ids():
+    """SAE-V1 bug #9: a namespaced/dotted tool name the model emits on the
+    enactment path (e.g. `memory__note_this` / `memory.note_this`) must
+    suffix-repair to the flat tool when known_tool_ids() contains it — the
+    enactment dispatcher passes that set into canonicalize_tool_name."""
+    canonical = "note_this"
+    lookup = _StubLookupWithKnown(
+        descriptors={canonical: _descriptor(
+            name=canonical,
+            operations=(
+                OperationClassification(
+                    operation="note_this",
+                    classification=GateClassification.SOFT_WRITE,
+                ),
+            ),
+        )},
+        known={canonical, "write_file", "manage_plan"},
+    )
+    executor = _StubExecutor(ToolExecutionResult(output={"ok": True}))
+    dispatcher = StepDispatcher(executor=executor, descriptor_lookup=lookup)
+    briefing = dataclasses.replace(
+        _briefing(),
+        action_envelope=ActionEnvelope(
+            intended_outcome="capture a fact",
+            allowed_tool_classes=("note_this",),
+            allowed_operations=("note_this",),
+        ),
+    )
+    for emitted in ("memory__note_this", "memory.note_this"):
+        executor.calls.clear()
+        result = await dispatcher.dispatch(StepDispatchInputs(
+            step=_step(tool_id=emitted, tool_class="note_this",
+                       operation_name="note_this", arguments={}),
+            briefing=briefing,
+        ))
+        assert result.completed is True, f"{emitted} did not dispatch"
+        assert executor.calls[0].tool_id == canonical
