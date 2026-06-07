@@ -1,0 +1,6 @@
+{
+  "capabilities-overview.md": "What tools are connected and available \u2014 updated on changes",
+  "self-review-coverage-gap.md": "Modules not yet in the self-review functional map \u2014 slot them into an element (passive; reflection to consider)",
+  "selftest.txt": "",
+  "self-maintenance-review.md": "KERNOS's latest daily self-review \u2014 a reflection to consider (passive; any change still goes through the approval gate)"
+}

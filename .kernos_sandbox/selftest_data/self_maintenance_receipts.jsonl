@@ -1,1 +1,2 @@
-{"ts":"2026-06-07T02:42:47.989478+00:00","slice":"message-pipeline","outcome":"reviewed_surfaced","overall_health":"minor_concerns","n_findings":2,"has_evolution_idea":true,"constitutional":false}
+{"ts":"2026-06-07T03:58:49.421783+00:00","slice":"message-pipeline","outcome":"reviewed_quiet","overall_health":"healthy","n_findings":0,"has_evolution_idea":false,"constitutional":false}
+{"ts":"2026-06-07T04:00:53.670047+00:00","slice":"dispatch-gate","outcome":"reviewed_surfaced","overall_health":"minor_concerns","n_findings":2,"has_evolution_idea":true,"constitutional":false}

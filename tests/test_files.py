@@ -314,11 +314,12 @@ class TestFileToolsConstant:
     def test_write_file_required_fields(self):
         write_tool = next(t for t in FILE_TOOLS if t["name"] == "write_file")
         required = write_tool["input_schema"]["required"]
-        assert set(required) == {"name", "content", "description"}
+        # SAE-V1: `path` is the canonical file arg (was `name`)
+        assert set(required) == {"path", "content", "description"}
 
     def test_delete_file_schema(self):
         delete_tool = next(t for t in FILE_TOOLS if t["name"] == "delete_file")
-        assert "name" in delete_tool["input_schema"]["required"]
+        assert "path" in delete_tool["input_schema"]["required"]
 
     def test_list_files_no_required_fields(self):
         list_tool = next(t for t in FILE_TOOLS if t["name"] == "list_files")
