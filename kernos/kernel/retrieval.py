@@ -526,23 +526,24 @@ class RetrievalService:
         candidates = []
         for entry in entries:
             entry_embedding = await self.embedding_store.get(instance_id, entry.id)
-            matched = False
             if entry_embedding is not None:
+                # Embedded entry: the semantic threshold is the precision
+                # filter. A sub-threshold cosine is an INTENTIONAL "not relevant
+                # enough" decision — do NOT lexically override it, or short
+                # queries bypass the threshold entirely (Codex review). New
+                # facts get real embeddings via embed-on-write (②), so they're
+                # found here without needing the lexical path.
                 similarity = cosine_similarity(query_embedding, entry_embedding)
                 if similarity >= SIMILARITY_THRESHOLD:
                     candidates.append(
                         ScoredKnowledge(entry=entry, similarity=similarity)
                     )
-                    matched = True
-            # Lexical-overlap fallback — a backstop for ANY entry that didn't
-            # match semantically: entries with no stored embedding AND embedded
-            # entries whose cosine score fell below SIMILARITY_THRESHOLD on a
-            # noisy/short query. Originally only the no-embedding case fired,
-            # but once note_this embeds on write (②) those facts take the vector
-            # branch, so without checking lexical on a sub-threshold semantic
-            # miss, embed-on-write would REGRESS the exact recall the lexical
-            # path was added to fix (cerulean knowledge=0). (Codex review.)
-            if not matched:
+            else:
+                # No stored embedding — can't be semantically scored at all, so
+                # pure vector search would skip it entirely. This is the only
+                # legitimate lexical-fallback case: legacy entries written
+                # before embed-on-write (e.g. the live cerulean fact that
+                # returned knowledge=0). (v1 self-test.)
                 lex = lexical_overlap_score(
                     query, entry.content, getattr(entry, "subject", "")
                 )

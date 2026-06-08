@@ -450,26 +450,36 @@ async def test_normal_path_uses_source_normal():
 
 
 # ---------------------------------------------------------------------------
-# ② embed-on-write must NOT regress recall: lexical fallback is a backstop for
-# embedded entries that miss the semantic threshold (Codex review).
+# ② lexical fallback is scoped to NO-EMBEDDING entries only — it must NOT
+# override the semantic threshold for embedded entries (Codex review).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_embedded_entry_below_threshold_still_lexically_rescued():
+async def test_unembedded_rescued_but_embedded_respects_threshold():
     from unittest.mock import AsyncMock
-    entry = _knowledge(
-        id="know_cer", content="Kabe's favorite test color is cerulean."
+    # Legacy entry with NO embedding → lexical fallback is the only signal,
+    # so it rescues a freshly-/legacy-noted fact (the live cerulean case).
+    legacy = _knowledge(
+        id="know_legacy", content="Kabe's favorite test color is cerulean."
     )
-    entry.subject = "favorite_test_color"
-    svc = _service(knowledge_entries=[entry])
-    # Entry HAS an embedding now (embed-on-write), but it's orthogonal to the
-    # query vector → cosine 0, a semantic MISS. The query lexically matches.
+    legacy.subject = "favorite_test_color"
+    svc = _service(knowledge_entries=[legacy])
     svc.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
-    svc.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])
+    svc.embedding_store.get = AsyncMock(return_value=None)  # not embedded
     results = await svc._search_knowledge(
         "i-1", "what is my favorite test color", [1.0, 0.0, 0.0], "default",
     )
-    assert any(r.entry.id == "know_cer" for r in results), (
-        "embedded-but-low-similarity fact must still be rescued lexically"
+    assert any(r.entry.id == "know_legacy" for r in results)
+
+    # Embedded entry with a sub-threshold cosine → the semantic filter stands;
+    # lexical does NOT override it (that would bypass the threshold).
+    embedded = _knowledge(id="know_emb", content="payment terms net-30")
+    embedded.subject = "payment"
+    svc2 = _service(knowledge_entries=[embedded])
+    svc2.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+    svc2.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])  # cosine 0
+    results2 = await svc2._search_knowledge(
+        "i-1", "payment", [1.0, 0.0, 0.0], "default",
     )
+    assert not any(r.entry.id == "know_emb" for r in results2)
