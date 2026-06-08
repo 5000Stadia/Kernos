@@ -46,3 +46,17 @@ def test_reminder_tool_name_hallucinations_alias():
     for name in ("reminder.create", "create_reminder", "set_reminder",
                  "add_reminder", "schedule.create", "reminders.create"):
         assert canonicalize_tool_name(name) == ("manage_schedule", True), name
+
+
+def test_no_action_with_text_infers_create():
+    # create_reminder tool alias rewrites name to manage_schedule but carries
+    # no action — text present means create-intent, not list (Codex review).
+    action, desc = normalize_schedule_input({"description": "remind me in 1h"})
+    assert action == "create" and desc == "remind me in 1h"
+    action2, _ = normalize_schedule_input({"message": "stretch in 2h"})
+    assert action2 == "create"
+
+
+def test_no_action_no_text_defaults_list():
+    assert normalize_schedule_input({})[0] == "list"
+    assert normalize_schedule_input({"action": ""})[0] == "list"

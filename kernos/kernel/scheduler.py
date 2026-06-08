@@ -301,14 +301,21 @@ def normalize_schedule_input(tool_input: dict) -> tuple[str, str]:
     field the model naturally emits. Helps EVERY scheduling call.
     """
     si = tool_input or {}
-    action = str(si.get("action") or "list").strip().lower()
-    action = _SCHEDULE_ACTION_SYNONYMS.get(action, action)
+    raw_action = str(si.get("action") or "").strip().lower()
+    action = _SCHEDULE_ACTION_SYNONYMS.get(raw_action, raw_action)
     desc = ""
     for f in _SCHEDULE_TEXT_FIELDS:
         v = si.get(f)
         if v:
             desc = str(v)
             break
+    if not action:
+        # No action supplied. The create_reminder/reminder.create tool aliases
+        # rewrite the NAME to manage_schedule but carry no action, so without
+        # this a "remind me…" with reminder text would default to 'list' and be
+        # ignored (Codex review). Infer create-intent when there's schedule
+        # text; otherwise list.
+        action = "create" if desc.strip() else "list"
     return action, desc
 
 
