@@ -30,6 +30,12 @@ class SMSPoller:
         self._processed_sids: set[str] = set()
         self._last_check = datetime.now(timezone.utc)
         self._task: asyncio.Task | None = None
+        # CONNECTION_POOL_LEAK fix (2026-06-08): own ONE Twilio client and
+        # reuse it. Constructing a new TwilioClient every poll (every few
+        # seconds) created a fresh internal requests.Session that was never
+        # closed — its keepalive connections piled up in CLOSE_WAIT (the
+        # week-long GatewayHealthObserver alert; live sockets confirmed Twilio).
+        self._twilio_client = None
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._poll_loop())
@@ -46,6 +52,24 @@ class SMSPoller:
             except asyncio.CancelledError:
                 pass
             self._task = None
+        self._close_twilio_client()
+
+    def _get_twilio_client(self):
+        """Lazily create + reuse ONE Twilio client (its internal
+        requests.Session is pooled and kept alive across polls)."""
+        if self._twilio_client is None:
+            from twilio.rest import Client as TwilioClient
+            self._twilio_client = TwilioClient(self._account_sid, self._auth_token)
+        return self._twilio_client
+
+    def _close_twilio_client(self) -> None:
+        c = self._twilio_client
+        self._twilio_client = None
+        if c is not None:
+            try:
+                c.http_client.session.close()
+            except Exception:
+                pass
 
     async def _poll_loop(self) -> None:
         while True:
@@ -58,8 +82,6 @@ class SMSPoller:
             await asyncio.sleep(self._interval)
 
     async def _check_messages(self) -> None:
-        from twilio.rest import Client as TwilioClient
-
         # Silence Twilio/HTTP library noise during routine polling
         _noisy_loggers = ["twilio", "urllib3", "httpx"]
         _saved = {n: logging.getLogger(n).level for n in _noisy_loggers}
@@ -67,7 +89,7 @@ class SMSPoller:
             logging.getLogger(n).setLevel(logging.ERROR)
 
         try:
-            twilio_client = TwilioClient(self._account_sid, self._auth_token)
+            twilio_client = self._get_twilio_client()
 
             # Fetch recent inbound messages (sync — run in thread)
             messages = await asyncio.to_thread(

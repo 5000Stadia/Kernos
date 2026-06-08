@@ -38,6 +38,9 @@ class TwilioSMSAdapter(BaseAdapter):
         self._account_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
         self._auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
         self._from_number = os.getenv("TWILIO_PHONE_NUMBER", "")
+        # CONNECTION_POOL_LEAK fix (2026-06-08): reuse ONE Twilio client so we
+        # don't open a fresh, never-closed requests.Session per outbound send.
+        self._twilio_client = None
 
         # Authorized numbers — comma-separated list. Replaces single OWNER_PHONE_NUMBER for auth.
         authorized_raw = os.getenv("AUTHORIZED_NUMBERS", "")
@@ -115,8 +118,10 @@ class TwilioSMSAdapter(BaseAdapter):
             return False
         try:
             import asyncio
-            from twilio.rest import Client
-            twilio_client = Client(self._account_sid, self._auth_token)
+            if self._twilio_client is None:
+                from twilio.rest import Client
+                self._twilio_client = Client(self._account_sid, self._auth_token)
+            twilio_client = self._twilio_client
             # Twilio client is sync — run in thread to avoid blocking
             await asyncio.to_thread(
                 twilio_client.messages.create,
