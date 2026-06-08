@@ -43,3 +43,35 @@ def test_no_advance_when_budget_spent():
 def test_advances_within_budget():
     nxt = _next_plan_step_to_run(_plan(["complete", "pending"], used=5, max_steps=30))
     assert nxt is not None and nxt["id"] == "s2"
+
+
+# --- ⑥ plan results ledger (2026-06-08) ---------------------------------------
+from kernos.messages.handler import _plan_ledger_block
+
+
+def test_ledger_block_empty_when_no_results():
+    assert _plan_ledger_block({}) == ""
+    assert _plan_ledger_block({"step_results": []}) == ""
+
+
+def test_ledger_block_renders_prior_step_results():
+    plan = {"step_results": [
+        {"step_id": "s1", "title": "Identity", "summary": "PASS — name is set"},
+        {"step_id": "s2", "title": "Memory", "summary": "PASS — cerulean stored"},
+    ]}
+    block = _plan_ledger_block(plan)
+    assert "PRIOR COMPLETED STEPS" in block
+    assert "[s1] Identity: PASS — name is set" in block
+    assert "[s2] Memory: PASS — cerulean stored" in block
+
+
+def test_ledger_block_caps_and_truncates():
+    plan = {"step_results": [
+        {"step_id": f"s{i}", "title": "t", "summary": "x" * 500}
+        for i in range(40)
+    ]}
+    block = _plan_ledger_block(plan)
+    # only the last 25 are shown
+    assert block.count("\n- ") <= 25
+    # each summary truncated to 300 chars
+    assert "x" * 301 not in block

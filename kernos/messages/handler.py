@@ -404,6 +404,32 @@ def _next_plan_step_to_run(plan: dict) -> dict | None:
     return None
 
 
+def _plan_ledger_block(plan: dict) -> str:
+    """Render the plan's accumulated per-step results as a context block.
+
+    PLAN RESULTS LEDGER (⑥): each self-directed step runs as its own turn, so a
+    later step's curated context can't see earlier steps' receipts — the
+    final-report step under-credited completed work as PARTIAL. Threading this
+    block into every step's content lets the model rely on what prior steps
+    actually did instead of re-deriving (or guessing). Returns "" when empty.
+    """
+    ledger = (plan or {}).get("step_results", []) if isinstance(plan, dict) else []
+    if not ledger:
+        return ""
+    lines = [
+        "",
+        "PRIOR COMPLETED STEPS IN THIS PLAN (recorded results — earlier steps' "
+        "work is captured here so you don't lose it; rely on these instead of "
+        "re-deriving):",
+    ]
+    for r in ledger[-25:]:
+        lines.append(
+            f"- [{r.get('step_id', '?')}] {r.get('title', '')}: "
+            f"{(r.get('summary', '') or '')[:300]}"
+        )
+    return "\n".join(lines)
+
+
 def resolve_mcp_credentials(
     server_config: dict,
     instance_id: str,
@@ -7628,12 +7654,23 @@ class MessageHandler:
                 except Exception:
                     pass
 
+        # PLAN RESULTS LEDGER (⑥, 2026-06-08): each self-directed step runs as
+        # its own turn, and a later step's curated context can't see earlier
+        # steps' receipts — so the final-report step under-credited completed
+        # work as PARTIAL. Thread the accumulated per-step results into every
+        # step's content so the model (especially the report step) can read
+        # what prior steps actually did.
+        _ledger_block = _plan_ledger_block(plan)
+
         # Build a self-directed message. Carry the plan creator's member_id so
         # the step runs under the plan owner's context, not the global instance
         # owner (Codex review — a non-owner's plan must not execute with the
         # owner's profile/spaces/credentials).
         msg = NormalizedMessage(
-            content=f"[PLAN STEP {envelope.step_id}] {envelope.step_description}",
+            content=(
+                f"[PLAN STEP {envelope.step_id}] "
+                f"{envelope.step_description}{_ledger_block}"
+            ),
             sender="self_directed",
             sender_auth_level=_auth,
             platform="internal",
@@ -7708,11 +7745,26 @@ class MessageHandler:
                 data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
                 plan = await load_plan(data_dir, instance_id, space_id)
                 if plan:
+                    _step_title = envelope.step_description or ""
                     for phase in plan.get("phases", []):
                         for step in phase.get("steps", []):
                             if step["id"] == envelope.step_id:
                                 step["status"] = "complete"
+                                _step_title = step.get("title", "") or _step_title
                                 break
+
+                    # PLAN RESULTS LEDGER (⑥): record this step's outcome so
+                    # later steps (esp. the final report) can read it — they
+                    # otherwise can't see earlier steps' receipts and
+                    # under-credit completed work.
+                    _results = plan.setdefault("step_results", [])
+                    _results.append({
+                        "step_id": envelope.step_id,
+                        "title": _step_title[:120],
+                        "summary": (response or "").strip()[:500],
+                    })
+                    if len(_results) > 50:
+                        plan["step_results"] = _results[-50:]
 
                     # Check if all steps are complete (plan finished)
                     all_done = all(
