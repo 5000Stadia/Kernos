@@ -299,8 +299,12 @@ _SCHEDULE_TEXT_FIELDS = (
 _SCHEDULE_TIME_FIELDS = (
     "natural_language_request", "when", "scheduled_time", "schedule_time",
     "time", "datetime", "date", "time_offset", "offset", "schedule",
-    "recurrence", "cron", "timezone", "tz",
+    "recurrence", "cron",
 )
+# Supplemental only — a timezone alone is ambient metadata, NOT a reason to
+# schedule. Folded into the description only when real text/time content exists,
+# so a call carrying just a timezone still defaults to `list` (Codex P2).
+_SCHEDULE_TZ_FIELDS = ("timezone", "tz")
 
 
 def normalize_schedule_input(tool_input: dict) -> tuple[str, str]:
@@ -343,6 +347,16 @@ def normalize_schedule_input(tool_input: dict) -> tuple[str, str]:
         sv = str(v).strip()
         if sv and sv.lower() not in desc.lower():
             hints.append(sv)
+    # Timezone is supplemental — attach it only when we already have substance
+    # (real text or a real time hint), never let it alone imply a schedule.
+    if desc or hints:
+        for f in _SCHEDULE_TZ_FIELDS:
+            v = si.get(f)
+            if v is None:
+                continue
+            sv = str(v).strip()
+            if sv and sv.lower() not in desc.lower():
+                hints.append(sv)
     if hints:
         joined = " ".join(hints)
         desc = f"{desc} ({joined})".strip() if desc else joined

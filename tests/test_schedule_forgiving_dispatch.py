@@ -85,6 +85,19 @@ def test_list_action_preserved_despite_stray_time_field():
     )[0] == "list"
 
 
+def test_timezone_only_metadata_defaults_to_list():
+    # Ambient timezone with no action/text/real-time hint must NOT infer create
+    # (Codex P2) — it defaults to list and carries no fabricated description.
+    action, desc = normalize_schedule_input({"timezone": "America/Los_Angeles"})
+    assert action == "list"
+    assert desc == ""
+    # But timezone DOES attach when there's real content to schedule.
+    _, desc2 = normalize_schedule_input(
+        {"text": "standup", "when": "in 1h", "timezone": "America/Los_Angeles"}
+    )
+    assert "standup" in desc2 and "in 1h" in desc2 and "America/Los_Angeles" in desc2
+
+
 def test_missing_action_defaults_list():
     assert normalize_schedule_input({})[0] == "list"
 
