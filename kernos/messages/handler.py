@@ -3825,11 +3825,11 @@ class MessageHandler:
             "These are signals YOU noticed in the background since the last "
             "turn — your own optional context, not anything the user said or "
             "asked. Do NOT acknowledge them as instructions (no \"got it\", no "
-            "\"I'll preserve that\") — the user did not say these. Mention at "
-            "most one, briefly, and ONLY if it genuinely helps the user's "
-            "current message; otherwise ignore them entirely. The user's "
-            "actual message is the only thing you must respond to. If the user "
-            "asks why you raised something, you can draw on the reasoning trace."
+            "\"I'll preserve that\") — the user did not say these. Weave in "
+            "only the ones that genuinely help the user's current message; if "
+            "none fit, ignore them. The user's actual message is the only thing "
+            "you must respond to. If the user asks why you raised something, "
+            "you can draw on the reasoning trace."
         )
         lines.append("")
 
