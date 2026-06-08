@@ -440,7 +440,7 @@ async def _extract_schedule_params(
 
     Returns a dict on success, or an error string on failure.
     """
-    from kernos.utils import utc_now_dt, to_user_local, format_user_datetime
+    from kernos.utils import utc_now_dt, to_user_local, format_user_datetime, interpret_local_iso_as_utc
     now_utc = utc_now_dt()
     now_local = to_user_local(now_utc, user_timezone)
     tz_display = user_timezone or "system local"
@@ -499,11 +499,21 @@ async def _extract_schedule_params(
         # Normalize 'when' to ISO 8601 with T separator — Haiku sometimes produces
         # "2026-03-22 12:03" (space separator) which breaks string comparison with
         # utc_now() output that uses T separator.
+        #
+        # CRITICAL: the extraction prompt asks for `when` in LOCAL time with no
+        # offset (a naive wall-clock string like "2026-06-08T11:58:00"). But the
+        # trigger evaluator (`get_due`) treats a naive `next_fire_at` as UTC. So a
+        # reminder for "11:58 AM Pacific" (~1h out) was stored naive, re-read as
+        # 11:58 UTC (~7h in the PAST), and fired+completed instantly — vanishing
+        # from `list` the moment it was created (v1 self-test Test 6). Convert the
+        # local wall-clock to UTC here, at the single extraction seam, so the
+        # whole downstream pipeline stores and compares one consistent zone.
         raw_when = parsed.get("when", "")
         if raw_when:
             try:
                 when_dt = datetime.fromisoformat(raw_when.replace(" ", "T"))
-                parsed["when"] = when_dt.isoformat()  # Always produces T separator with seconds
+                when_utc = interpret_local_iso_as_utc(when_dt.isoformat(), user_timezone)
+                parsed["when"] = when_utc.isoformat()  # UTC-aware ISO, T separator
             except ValueError:
                 if not is_event:
                     return "I couldn't parse that time. Can you be more specific?"
@@ -573,6 +583,7 @@ async def handle_manage_schedule(
             event_source=extracted.get("event_source", ""),
             event_filter=extracted.get("event_filter", ""),
             event_lead_minutes=int(extracted.get("event_lead_minutes", 30) or 30),
+            user_timezone=user_timezone,
         )
 
     if action == "pause":
@@ -595,7 +606,7 @@ async def handle_manage_schedule(
             return "Error: 'description' is required for update."
         if not reasoning_service:
             return "Error: Reasoning service not available for schedule extraction."
-        extracted = await _extract_schedule_params(reasoning_service, description)
+        extracted = await _extract_schedule_params(reasoning_service, description, user_timezone)
         if isinstance(extracted, str):
             return extracted
         return await _update_trigger(
@@ -646,6 +657,22 @@ async def _list_triggers(store: TriggerStore, instance_id: str, include_inactive
     return "\n".join(lines)
 
 
+def _format_fire_local(fire_iso: str, user_timezone: str) -> str:
+    """Render a stored (UTC) next_fire_at as the user's local wall-clock.
+
+    Defensive: an unparseable or naive value falls back to the raw string
+    truncated to seconds, so a receipt is never blocked on formatting.
+    """
+    from kernos.utils import to_user_local
+    try:
+        dt = datetime.fromisoformat(fire_iso.replace(" ", "T"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return to_user_local(dt, user_timezone).strftime("%Y-%m-%d %H:%M %Z").strip()
+    except (ValueError, TypeError):
+        return fire_iso[:19]
+
+
 async def _create_trigger(
     store: TriggerStore,
     instance_id: str, member_id: str, space_id: str,
@@ -657,6 +684,7 @@ async def _create_trigger(
     event_source: str = "",
     event_filter: str = "",
     event_lead_minutes: int = 30,
+    user_timezone: str = "",
 ) -> str:
     if not when and condition_type != "event":
         return "Error: 'when' is required — provide an ISO datetime or cron expression."
@@ -753,9 +781,13 @@ async def _create_trigger(
             f"ID: {tid}{recur_note}{replaced_note}"
         )
     recur_note = f" Recurring: {recurrence}." if recurrence else ""
+    # Display the next fire in the user's local zone — `next_fire` is stored UTC
+    # (extraction now converts local→UTC), so a raw print would show UTC and the
+    # agent would echo the wrong wall-clock back to the user.
+    next_fire_display = _format_fire_local(next_fire, user_timezone) if next_fire else when
     return (
         f"Scheduled: {description}\n"
-        f"Next fire: {next_fire[:19] if next_fire else when}\n"
+        f"Next fire: {next_fire_display}\n"
         f"Type: {action_type} | ID: {tid}{recur_note}"
     )
 
