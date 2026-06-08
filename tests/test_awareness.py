@@ -690,7 +690,11 @@ class TestHandlerWhisperInjection:
         await state.save_whisper("test_tenant", w)
 
         result = await handler._get_pending_awareness("test_tenant", "space_daily")
-        assert "Proactive awareness" in result
+        # Source-clear framing: whispers are labeled as the agent's OWN
+        # background observations, not the user's message, so the model doesn't
+        # acknowledge them as instructions ("got it, I'll preserve that").
+        assert "SURFACED FROM YOUR OWN AWARENESS" in result
+        assert "NOT the user's message" in result
         assert "[STAGE]" in result
         assert w.whisper_id in result
         assert "Dentist appointment" in result

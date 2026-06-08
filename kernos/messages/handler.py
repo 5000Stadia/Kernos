@@ -3816,13 +3816,20 @@ class MessageHandler:
         # Sort: stage before ambient
         relevant.sort(key=lambda w: 0 if w.delivery_class == "stage" else 1)
 
-        lines = ["## Proactive awareness (surface naturally — do not dump as a list)"]
+        lines = [
+            "## SURFACED FROM YOUR OWN AWARENESS "
+            "— background observations, NOT the user's message"
+        ]
         lines.append("")
         lines.append(
-            "The following signals were detected since the last conversation. "
-            "Weave relevant ones into your response naturally. "
-            "If the user asks why you're mentioning something, you can draw "
-            "on the reasoning trace."
+            "These are signals YOU noticed in the background since the last "
+            "turn — your own optional context, not anything the user said or "
+            "asked. Do NOT acknowledge them as instructions (no \"got it\", no "
+            "\"I'll preserve that\") — the user did not say these. Mention at "
+            "most one, briefly, and ONLY if it genuinely helps the user's "
+            "current message; otherwise ignore them entirely. The user's "
+            "actual message is the only thing you must respond to. If the user "
+            "asks why you raised something, you can draw on the reasoning trace."
         )
         lines.append("")
 
