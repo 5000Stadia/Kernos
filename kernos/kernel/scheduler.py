@@ -550,7 +550,7 @@ async def handle_manage_schedule(
     """
     if action == "list":
         include_inactive = "retired" in description.lower() or "inactive" in description.lower() or "all" in description.lower()
-        return await _list_triggers(trigger_store, instance_id, include_inactive=include_inactive)
+        return await _list_triggers(trigger_store, instance_id, include_inactive=include_inactive, user_timezone=user_timezone)
 
     if action == "create":
         if not description:
@@ -620,7 +620,10 @@ async def handle_manage_schedule(
     return f"Error: Unknown action '{action}'. Use list, create, update, pause, resume, or remove."
 
 
-async def _list_triggers(store: TriggerStore, instance_id: str, include_inactive: bool = False) -> str:
+async def _list_triggers(
+    store: TriggerStore, instance_id: str, include_inactive: bool = False,
+    user_timezone: str = "",
+) -> str:
     all_triggers = await store.list_all(instance_id)
     if include_inactive:
         triggers = all_triggers
@@ -629,6 +632,8 @@ async def _list_triggers(store: TriggerStore, instance_id: str, include_inactive
     if not triggers:
         return "No scheduled actions."
 
+    # next_fire_at / last_fired_at are stored UTC — render in the user's zone so
+    # the listed wall-clock matches the create receipt (and what they asked for).
     lines = ["**Scheduled Actions:**\n"]
     for t in triggers:
         status_icon = {"active": "▶", "paused": "⏸", "completed": "✓", "failed": "✗", "retired": "⊘", "replaced": "↻"}.get(t.status, "?")
@@ -639,7 +644,7 @@ async def _list_triggers(store: TriggerStore, instance_id: str, include_inactive
             lead_info = f" lead: {t.event_lead_minutes}min"
             fired_info = f"fires: {t.fire_count}"
             if t.last_fired_at:
-                fired_info += f" | last_fired: {t.last_fired_at[:19]}"
+                fired_info += f" | last_fired: {_format_fire_local(t.last_fired_at, user_timezone)}"
             lines.append(
                 f"  {status_icon} [{t.trigger_id}] {t.action_description}\n"
                 f"    event trigger | {source_info}{filter_info}{lead_info} | "
@@ -648,10 +653,11 @@ async def _list_triggers(store: TriggerStore, instance_id: str, include_inactive
         else:
             fired_info = f"fires: {t.fire_count}"
             if t.last_fired_at:
-                fired_info += f" | last_fired: {t.last_fired_at[:19]}"
+                fired_info += f" | last_fired: {_format_fire_local(t.last_fired_at, user_timezone)}"
+            next_display = _format_fire_local(t.next_fire_at, user_timezone) if t.next_fire_at else "N/A"
             lines.append(
                 f"  {status_icon} [{t.trigger_id}] {t.action_description}\n"
-                f"    next: {t.next_fire_at[:19] if t.next_fire_at else 'N/A'} | "
+                f"    next: {next_display} | "
                 f"type: {t.action_type} | {fired_info}{recur}"
             )
     return "\n".join(lines)

@@ -60,6 +60,15 @@ async def test_local_when_is_stored_utc_and_not_instantly_due(tmp_path):
     # Receipt echoes the LOCAL wall-clock the user asked for, not raw UTC.
     assert "11:58" in res
 
+    # `list` must render the SAME local wall-clock as the create receipt — not
+    # the raw UTC it's stored as (Codex P2).
+    listing = await handle_manage_schedule(
+        store, "inst", "mem", "space", "list",
+        reasoning_service=_FakeReasoning(""), user_timezone="America/Los_Angeles",
+    )
+    assert "11:58" in listing
+    assert "18:58" not in listing
+
 
 async def test_no_timezone_falls_back_to_utc_naive(tmp_path):
     # No user_timezone → can't localize; store the wall-clock as-is (UTC).
