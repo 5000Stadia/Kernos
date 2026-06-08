@@ -3816,22 +3816,29 @@ class MessageHandler:
         # Sort: stage before ambient
         relevant.sort(key=lambda w: 0 if w.delivery_class == "stage" else 1)
 
+        # AUXILIARY CONTEXT, source-labeled (prompt-IA design, Codex + founder
+        # 2026-06-08): whispers are the agent's OWN background observations, not
+        # the user's message. Living unlabeled inside the ## RESULTS evidence
+        # stream made the model treat one as a user instruction ("Got it, I'll
+        # preserve that"). The header + Source/User-said-this/Response-obligation
+        # line draw the boundary explicitly; the user's actual message is the
+        # sole response target. Founder call: deliver ALL eligible whispers
+        # (each is surfaced-then-suppressed below, so deliver-once, no drops).
         lines = [
-            "## SURFACED FROM YOUR OWN AWARENESS "
-            "— background observations, NOT the user's message"
+            "## AGENT AWARENESS — background observations (NOT the user's message)",
+            "",
+            "Source: your own awareness system  ·  User said this: NO  ·  "
+            "Response obligation: none",
+            "",
+            "These are signals YOU noticed in the background — optional context, "
+            "not anything the user said or asked. Never acknowledge them as "
+            "instructions (no \"got it\", no \"I'll preserve that\"). Surface "
+            "all of them briefly, as clearly-labeled background notes kept "
+            "separate from your reply to the user's actual message — which is "
+            "the only thing you must respond to. If the user asks why you raised "
+            "one, you can draw on the reasoning trace.",
+            "",
         ]
-        lines.append("")
-        lines.append(
-            "These are signals YOU noticed in the background since the last "
-            "turn — your own optional context, not anything the user said or "
-            "asked. Do NOT acknowledge them as instructions (no \"got it\", no "
-            "\"I'll preserve that\") — the user did not say these. Weave in "
-            "only the ones that genuinely help the user's current message; if "
-            "none fit, ignore them. The user's actual message is the only thing "
-            "you must respond to. If the user asks why you raised something, "
-            "you can draw on the reasoning trace."
-        )
-        lines.append("")
 
         for w in relevant:
             lines.append(f"- [{w.delivery_class.upper()}] (id: {w.whisper_id}) {w.insight_text}")
