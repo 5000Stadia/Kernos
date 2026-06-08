@@ -251,6 +251,29 @@ class TestFlushDroppedDeliveriesOnce:
         assert server_mod._dropped_deliveries[99][0][1] == "the actual reply"
 
     @pytest.mark.asyncio
+    async def test_flush_near_limit_first_chunk_sends_note_separately(
+        self, server_mod,
+    ):
+        """If prefixing the resume note would push the first chunk over
+        Discord's 2000-char limit, the note is sent as its own message and the
+        bare chunk follows — so the send never overflows + HTTPExceptions into a
+        re-queue loop (Codex P2)."""
+        ch = _make_channel(channel_id=55)
+        big = "x" * (server_mod.DISCORD_MAX_LENGTH - 10)  # leaves no room for a prefix
+        server_mod._register_dropped_delivery(ch, big)
+        server_mod._discord_pause_until = 0.0
+        delivered = await server_mod._flush_dropped_deliveries_once()
+        assert delivered == 1
+        # Two sends: standalone note, then the bare (unmodified) chunk.
+        assert ch.send.await_count == 2
+        assert "Cool-off ended" in ch.send.await_args_list[0].args[0]
+        assert ch.send.await_args_list[1].args[0] == big
+        # Every sent body is within Discord's limit.
+        for call in ch.send.await_args_list:
+            assert len(call.args[0]) <= server_mod.DISCORD_MAX_LENGTH
+        assert not server_mod._dropped_deliveries
+
+    @pytest.mark.asyncio
     async def test_flush_ages_out_stuck_queue(self, server_mod):
         """A queue stuck past the max age gets one terminal note, then dropped —
         not retried forever."""

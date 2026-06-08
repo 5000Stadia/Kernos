@@ -2182,11 +2182,33 @@ async def _flush_dropped_deliveries_once() -> int:
                 await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
             body = chunk
             if idx == 0:
-                body = (
+                note = (
                     f"↩️ Cool-off ended after ~{age}s — delivering "
                     f"{len(entries)} message(s) I had queued during the Discord "
-                    f"rate-limit pause:\n\n{chunk}"
+                    f"rate-limit pause:"
                 )
+                prefixed = f"{note}\n\n{chunk}"
+                if len(prefixed) <= DISCORD_MAX_LENGTH:
+                    body = prefixed
+                else:
+                    # First chunk is already near the 2000-char limit; prefixing
+                    # would overflow and raise a (non-429) HTTPException that
+                    # would re-queue forever. Send the note as its own short
+                    # message, then the bare chunk. The note send does NOT call
+                    # _register_discord_call_succeeded — only a CONTENT send
+                    # resets the 429 streak, preserving the loop fix (a notice
+                    # landing must never reset the backoff while payload fails).
+                    try:
+                        await channel.send(note)
+                    except (discord.RateLimited, discord.HTTPException) as exc:
+                        status = getattr(exc, "status", None)
+                        if status == 429 or isinstance(exc, discord.RateLimited):
+                            _register_discord_429("flush note 429")
+                        _dropped_deliveries.setdefault(cid, []).extend(entries[idx:])
+                        break
+                    if DISCORD_INTERCHUNK_DELAY_SEC > 0:
+                        await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
+                    body = chunk
             try:
                 await channel.send(body)
                 _register_discord_call_succeeded()
