@@ -1033,6 +1033,7 @@ class IntegrationRunner:
             filtered=filtered,
             directive=directive,
             cohort_outputs=inputs.cohort_outputs,
+            requesting_member_id=inputs.member_id,
         )
 
         # COHORT-ADAPT-COVENANT safety policy: when one or more
@@ -1111,6 +1112,7 @@ class IntegrationRunner:
         filtered: tuple[FilteredItem, ...],
         directive: str,
         cohort_outputs: tuple[CohortOutput, ...],
+        requesting_member_id: str = "",
     ) -> None:
         """Refuse a briefing whose text quotes Restricted output content.
 
@@ -1132,6 +1134,20 @@ class IntegrationRunner:
         restricted_payloads: list[str] = []
         for co in cohort_outputs:
             if not isinstance(co.visibility, Restricted):
+                continue
+            # OWNERSHIP EXEMPTION (③, 2026-06-08): you always have full
+            # permission to your OWN information. A Restricted output whose
+            # owner is the recipient is not a cross-member leak — surfacing a
+            # member's own covenant rules back to that member is fine. Without
+            # this, the covenant cohort (which member-filters to the recipient)
+            # had its self-scoped content blanket-redacted, bricking turns when
+            # the model quoted the user's own rules. Empty owner = unowned =
+            # still redacted (safe default).
+            if (
+                requesting_member_id
+                and co.owner_member_id
+                and co.owner_member_id == requesting_member_id
+            ):
                 continue
             for value in _flatten_strings(co.output):
                 stripped = value.strip()

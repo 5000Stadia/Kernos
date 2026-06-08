@@ -226,6 +226,14 @@ class CohortOutput:
     produced_at: str = ""  # ISO 8601 UTC; runner fills if blank
     outcome: Outcome = Outcome.SUCCESS
     error_summary: str = ""  # populated for outcome != SUCCESS; redacted
+    # OWNERSHIP-AWARE REDACTION (③, 2026-06-08): the member this output's
+    # restricted content BELONGS TO. When a cohort surfaces a member's OWN
+    # data (e.g. the covenant cohort, which member-filters to the requesting
+    # member), it stamps owner_member_id = that member. The redaction
+    # invariant then exempts content whose owner == the recipient: you always
+    # have full permission to your own information. Empty = no owner asserted
+    # (treated as cross-member content → still redacted, the safe default).
+    owner_member_id: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.cohort_id, str) or not self.cohort_id.strip():
@@ -261,6 +269,10 @@ class CohortOutput:
         if not isinstance(self.error_summary, str):
             raise BriefingValidationError(
                 "CohortOutput.error_summary must be a string"
+            )
+        if not isinstance(self.owner_member_id, str):
+            raise BriefingValidationError(
+                "CohortOutput.owner_member_id must be a string"
             )
 
     @property

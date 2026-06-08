@@ -252,6 +252,10 @@ def make_covenant_cohort_run(
                 output=payload,
                 visibility=Restricted(reason=RESTRICTED_REASON),
                 produced_at=now_iso(),
+                # Self-scoped: _filter_member_scoped keeps only this member's
+                # own + instance-level rules, never another member's — so the
+                # recipient owns this content and redaction exempts it for them.
+                owner_member_id=ctx.member_id,
             )
 
         # Safety-priority ranking + count cap.
@@ -290,6 +294,9 @@ def make_covenant_cohort_run(
             output=payload,
             visibility=Restricted(reason=RESTRICTED_REASON),
             produced_at=now_iso(),
+            # Self-scoped (see _filter_member_scoped): the recipient owns this
+            # content, so the redaction invariant exempts it for them.
+            owner_member_id=ctx.member_id,
         )
 
     return covenant_cohort_run
