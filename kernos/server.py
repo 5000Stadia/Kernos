@@ -2192,15 +2192,21 @@ async def _flush_dropped_deliveries_once() -> int:
             f"rate-limit pause:"
         )
         prefix = f"{note}\n\n"
-        chunks = [e[1] for e in entries]
-        first = chunks[0]
-        if len(prefix) + len(first) <= DISCORD_MAX_LENGTH:
-            bodies = [prefix + first] + chunks[1:]
+        first_chunk, first_ts = entries[0][1], entries[0][2]
+        # (body, original_ts) pairs — each retained chunk keeps ITS OWN queue
+        # time so age-out is per-chunk; split pieces of the first chunk share
+        # the first chunk's timestamp (Codex P2).
+        if len(prefix) + len(first_chunk) <= DISCORD_MAX_LENGTH:
+            bodies = [(prefix + first_chunk, first_ts)]
         else:
             room = max(1, DISCORD_MAX_LENGTH - len(prefix))
-            bodies = [prefix + first[:room], first[room:]] + chunks[1:]
+            bodies = [
+                (prefix + first_chunk[:room], first_ts),
+                (first_chunk[room:], first_ts),
+            ]
+        bodies += [(e[1], e[2]) for e in entries[1:]]
 
-        for idx, body in enumerate(bodies):
+        for idx, (body, _body_ts) in enumerate(bodies):
             if idx > 0 and DISCORD_INTERCHUNK_DELAY_SEC > 0:
                 await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
             try:
@@ -2212,10 +2218,11 @@ async def _flush_dropped_deliveries_once() -> int:
                 if status == 429 or isinstance(exc, discord.RateLimited):
                     _register_discord_429("flush chunk 429")
                 # Re-queue the unsent bodies (note already baked into body[0], so
-                # a retry's first send still carries content). Preserve the oldest
-                # timestamp so age-out keeps counting from the original queue time.
+                # a retry's first send still carries content). Each keeps its own
+                # original queue time so a recently-queued later chunk isn't aged
+                # out against the oldest chunk's timestamp.
                 _dropped_deliveries.setdefault(cid, []).extend(
-                    (channel, b, oldest) for b in bodies[idx:]
+                    (channel, b, ts) for b, ts in bodies[idx:]
                 )
                 break
     if delivered:
