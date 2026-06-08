@@ -84,6 +84,15 @@ _TOOL_ALIASES: dict[str, str] = {
     # tool for scheduling before correcting to manage_schedule.
     "reminders": "manage_schedule",
     "reminder": "manage_schedule",
+    # 2026-06-08 v1 self-test Test 6: agent reached for a dotted/compound
+    # reminder-create tool name before falling back. KERNOS-specific scheduling
+    # names; won't shadow a connector tool.
+    "reminder.create": "manage_schedule",
+    "create_reminder": "manage_schedule",
+    "set_reminder": "manage_schedule",
+    "add_reminder": "manage_schedule",
+    "schedule.create": "manage_schedule",
+    "reminders.create": "manage_schedule",
     # 2026-06-06 v1 self-test: agent reached for manage_members under a dotted
     # "member_management." namespace; the rejection triggered a malformed
     # retry (empty action). Aliasing the dotted name lets the well-formed

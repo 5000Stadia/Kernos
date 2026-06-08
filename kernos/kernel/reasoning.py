@@ -1499,16 +1499,22 @@ class ReasoningService:
                 except Exception as exc:
                     return f"Failed to send to {resolved}: {exc}"
             elif tool_name == "manage_schedule":
-                from kernos.kernel.scheduler import handle_manage_schedule
+                from kernos.kernel.scheduler import (
+                    handle_manage_schedule, normalize_schedule_input,
+                )
                 if self._trigger_store:
+                    # FORGIVING SCHEDULE DISPATCH (v1 self-test Test 6): map
+                    # action synonyms to the canonical enum + resolve the
+                    # reminder text from whatever field the model used.
+                    _action, _desc = normalize_schedule_input(tool_input or {})
                     return await handle_manage_schedule(
                         self._trigger_store,
                         request.instance_id,
                         member_id=request.active_space_id,
                         space_id=request.active_space_id,
-                        action=tool_input.get("action", "list"),
-                        trigger_id=tool_input.get("trigger_id", ""),
-                        description=tool_input.get("description", ""),
+                        action=_action,
+                        trigger_id=(tool_input or {}).get("trigger_id", ""),
+                        description=_desc,
                         reasoning_service=self,
                         conversation_id=request.conversation_id,
                         user_timezone=request.user_timezone,

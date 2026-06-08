@@ -278,6 +278,40 @@ def compute_next_fire(recurrence: str, after_iso: str) -> str:
 # manage_schedule tool definition
 # ---------------------------------------------------------------------------
 
+_SCHEDULE_ACTION_SYNONYMS = {
+    "create_reminder": "create", "add_reminder": "create",
+    "set_reminder": "create", "add": "create", "new": "create",
+    "set": "create", "schedule": "create", "remind": "create",
+    "reminder": "create",
+    "delete": "remove", "cancel": "remove", "clear": "remove",
+    "show": "list", "get": "list", "ls": "list",
+}
+_SCHEDULE_TEXT_FIELDS = (
+    "description", "message", "text", "reminder", "content", "what", "task",
+)
+
+
+def normalize_schedule_input(tool_input: dict) -> tuple[str, str]:
+    """Return (canonical_action, description) for a manage_schedule call.
+
+    Forgiving dispatch (v1 self-test Test 6, 2026-06-08): the model reached for
+    invalid actions ('create_reminder') and put the reminder text in fields
+    other than 'description', so a legitimate "remind me…" bounced. Map common
+    action synonyms to the canonical enum and resolve the schedule text from any
+    field the model naturally emits. Helps EVERY scheduling call.
+    """
+    si = tool_input or {}
+    action = str(si.get("action") or "list").strip().lower()
+    action = _SCHEDULE_ACTION_SYNONYMS.get(action, action)
+    desc = ""
+    for f in _SCHEDULE_TEXT_FIELDS:
+        v = si.get(f)
+        if v:
+            desc = str(v)
+            break
+    return action, desc
+
+
 MANAGE_SCHEDULE_TOOL = {
     "name": "manage_schedule",
     "description": (
