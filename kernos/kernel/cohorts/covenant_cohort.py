@@ -294,8 +294,20 @@ def make_covenant_cohort_run(
             output=payload,
             visibility=Restricted(reason=RESTRICTED_REASON),
             produced_at=now_iso(),
-            # Self-scoped (see _filter_member_scoped): the recipient owns this
-            # content, so the redaction invariant exempts it for them.
+            # Owner = recipient, so the redaction invariant exempts this output
+            # for them (③). Why this is sound — and NOT a cross-member leak
+            # (Codex review): the kept set is exclusively content the recipient
+            # is authorized to see. Two upstream guarantees enforce that:
+            #   1. query_covenant_rules is called with context_space_scope =
+            #      active_spaces + [None], so raw_rules is limited to the
+            #      member's ACTIVE spaces + instance-global — never a space the
+            #      member isn't in.
+            #   2. _filter_member_scoped drops every OTHER member's
+            #      member-specific rules.
+            # → kept = {own rules, instance-global, their active-space rules},
+            # all of which the recipient already lives under. If either
+            # guarantee is ever loosened, this ownership assertion must be
+            # revisited (see test_covenant_cohort scope invariants).
             owner_member_id=ctx.member_id,
         )
 

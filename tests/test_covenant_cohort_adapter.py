@@ -161,6 +161,21 @@ async def test_scenario_3_member_specific_rule():
     assert out.output["rules"][0]["scope"] == "member:m-active"
 
 
+@pytest.mark.asyncio
+async def test_output_stamps_recipient_as_owner_for_redaction_exemption():
+    # ③ ownership-aware redaction: the output is stamped with the recipient as
+    # owner so _check_redaction_invariant exempts it (the kept set is content
+    # the recipient is authorized to see — own + global + active-space). Both
+    # the populated and the empty paths stamp it.
+    out_full = await make_covenant_cohort_run(
+        _state([_rule(id="r-mine", member_id="m-active")])
+    )(_ctx(member_id="m-active"))
+    assert out_full.owner_member_id == "m-active"
+
+    out_empty = await make_covenant_cohort_run(_state([]))(_ctx(member_id="m-active"))
+    assert out_empty.owner_member_id == "m-active"
+
+
 # ---------------------------------------------------------------------------
 # 4. Other member's rule excluded
 # ---------------------------------------------------------------------------
