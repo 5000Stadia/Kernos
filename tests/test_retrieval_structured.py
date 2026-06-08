@@ -456,10 +456,10 @@ async def test_normal_path_uses_source_normal():
 
 
 @pytest.mark.asyncio
-async def test_unembedded_rescued_but_embedded_respects_threshold():
+async def test_no_embedding_full_lexical_rescue():
     from unittest.mock import AsyncMock
-    # Legacy entry with NO embedding → lexical fallback is the only signal,
-    # so it rescues a freshly-/legacy-noted fact (the live cerulean case).
+    # Legacy entry with NO embedding → full lexical fallback (content + key)
+    # is the only signal (the live cerulean case).
     legacy = _knowledge(
         id="know_legacy", content="Kabe's favorite test color is cerulean."
     )
@@ -472,14 +472,31 @@ async def test_unembedded_rescued_but_embedded_respects_threshold():
     )
     assert any(r.entry.id == "know_legacy" for r in results)
 
-    # Embedded entry with a sub-threshold cosine → the semantic filter stands;
-    # lexical does NOT override it (that would bypass the threshold).
-    embedded = _knowledge(id="know_emb", content="payment terms net-30")
-    embedded.subject = "payment"
-    svc2 = _service(knowledge_entries=[embedded])
+
+@pytest.mark.asyncio
+async def test_embedded_subthreshold_rescued_by_subject_key_not_content():
+    from unittest.mock import AsyncMock
+    # Embedded entry whose CONTENT embedding misses semantically, but the query
+    # names its SUBJECT key → rescued (the embedding is on content only).
+    keyed = _knowledge(id="know_keyed", content="cerulean")
+    keyed.subject = "favorite_test_color"
+    svc = _service(knowledge_entries=[keyed])
+    svc.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+    svc.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])  # cosine 0
+    res = await svc._search_knowledge(
+        "i-1", "what is my favorite test color", [1.0, 0.0, 0.0], "default",
+    )
+    assert any(r.entry.id == "know_keyed" for r in res)
+
+    # Embedded entry whose SUBJECT is unrelated but whose CONTENT shares a token
+    # with the query → NOT rescued (content overlap must not bypass the
+    # semantic threshold).
+    noisy = _knowledge(id="know_noisy", content="the payment was late")
+    noisy.subject = "topic"
+    svc2 = _service(knowledge_entries=[noisy])
     svc2.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
     svc2.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])  # cosine 0
-    results2 = await svc2._search_knowledge(
+    res2 = await svc2._search_knowledge(
         "i-1", "payment", [1.0, 0.0, 0.0], "default",
     )
-    assert not any(r.entry.id == "know_emb" for r in results2)
+    assert not any(r.entry.id == "know_noisy" for r in res2)

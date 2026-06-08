@@ -527,17 +527,30 @@ class RetrievalService:
         for entry in entries:
             entry_embedding = await self.embedding_store.get(instance_id, entry.id)
             if entry_embedding is not None:
-                # Embedded entry: the semantic threshold is the precision
-                # filter. A sub-threshold cosine is an INTENTIONAL "not relevant
-                # enough" decision — do NOT lexically override it, or short
-                # queries bypass the threshold entirely (Codex review). New
-                # facts get real embeddings via embed-on-write (②), so they're
-                # found here without needing the lexical path.
                 similarity = cosine_similarity(query_embedding, entry_embedding)
                 if similarity >= SIMILARITY_THRESHOLD:
                     candidates.append(
                         ScoredKnowledge(entry=entry, similarity=similarity)
                     )
+                else:
+                    # Embedded but sub-threshold. The embedding is computed on
+                    # CONTENT only, so a query that names the fact's SUBJECT/key
+                    # can miss semantically — note_this(subject=
+                    # "favorite_test_color", content="cerulean") embeds
+                    # "cerulean", but "what is my favorite test color" is
+                    # semantically distant. Rescue ONLY on a strong subject-KEY
+                    # match (the canonical identifier the content embedding
+                    # doesn't capture), NOT content overlap — content-overlap
+                    # rescue would bypass the precision threshold on short/noisy
+                    # queries. Passing text="" isolates the subject-key signal.
+                    # (Codex review, both directions.)
+                    key_score = lexical_overlap_score(
+                        query, "", getattr(entry, "subject", "")
+                    )
+                    if key_score >= LEXICAL_FALLBACK_THRESHOLD:
+                        candidates.append(
+                            ScoredKnowledge(entry=entry, similarity=key_score)
+                        )
             else:
                 # No stored embedding — can't be semantically scored at all, so
                 # pure vector search would skip it entirely. This is the only
