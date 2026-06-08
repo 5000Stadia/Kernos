@@ -24,6 +24,53 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SIMILARITY_THRESHOLD = 0.65  # Tunable — live test validates this cutoff
+# Lexical fallback (v1 self-test, 2026-06-08): pure vector search skips any
+# KnowledgeEntry that has no stored embedding (note_this writes without
+# embed-on-write), so a freshly-noted fact like "favorite test color =
+# cerulean" returned knowledge=0 on recall. When an entry has no embedding we
+# fall back to token containment against the entry text AND its key. The bar is
+# lower than the semantic cutoff because recall queries are often verbose/noisy
+# ("favorite test color cerulean v1 self-test tests 1 2 3 …"), which dilutes a
+# raw content-overlap fraction; the key-token path keeps precision (a fact
+# keyed `favorite_test_color` recalled via "…favorite test color…" scores 1.0).
+LEXICAL_FALLBACK_THRESHOLD = 0.5
+_LEXICAL_STOPWORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "of", "to", "in", "on",
+    "for", "and", "or", "my", "your", "you", "me", "it", "this", "that",
+    "what", "whats", "do", "does", "can", "could", "with", "about", "tell",
+})
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Lowercased content tokens (len>2, minus function words) for lexical match."""
+    import re
+    return {
+        t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if len(t) > 2 and t not in _LEXICAL_STOPWORDS
+    }
+
+
+def lexical_overlap_score(query: str, text: str, key: str = "") -> float:
+    """Token-containment score in [0, 1] for the no-embedding fallback.
+
+    max of (fraction of query content tokens present in the entry text/key,
+    fraction of the entry KEY's tokens present in the query). The key path is
+    what rescues canonical facts from verbose recall queries.
+    """
+    q = _content_tokens(query)
+    if not q:
+        return 0.0
+    hay = (text or "").lower() + " " + (key or "").lower().replace("_", " ")
+    frac_q = sum(1 for t in q if t in hay) / len(q)
+    score = frac_q
+    if key:
+        ktoks = _content_tokens(key.replace("_", " "))
+        if ktoks:
+            key_in_q = sum(1 for t in ktoks if t in q) / len(ktoks)
+            score = max(score, key_in_q)
+    return score
+
+
 RETRIEVAL_RESULT_TOKEN_BUDGET = 1500
 FORESIGHT_BOOST = 1.5  # Multiplier for active foresight signals matching the query
 SPACE_RELEVANCE_BOOST = 1.2  # Multiplier for entries extracted in the active space
@@ -474,13 +521,24 @@ class RetrievalService:
         candidates = []
         for entry in entries:
             entry_embedding = await self.embedding_store.get(instance_id, entry.id)
-            if entry_embedding is None:
-                continue
-            similarity = cosine_similarity(query_embedding, entry_embedding)
-            if similarity >= SIMILARITY_THRESHOLD:
-                candidates.append(
-                    ScoredKnowledge(entry=entry, similarity=similarity)
+            if entry_embedding is not None:
+                similarity = cosine_similarity(query_embedding, entry_embedding)
+                if similarity >= SIMILARITY_THRESHOLD:
+                    candidates.append(
+                        ScoredKnowledge(entry=entry, similarity=similarity)
+                    )
+            else:
+                # No stored embedding — pure vector search would skip this
+                # entry entirely (note_this writes without embed-on-write), so
+                # a freshly-noted fact like cerulean returned knowledge=0.
+                # Lexical-overlap fallback keeps it recallable. (v1 self-test.)
+                lex = lexical_overlap_score(
+                    query, entry.content, getattr(entry, "subject", "")
                 )
+                if lex >= LEXICAL_FALLBACK_THRESHOLD:
+                    candidates.append(
+                        ScoredKnowledge(entry=entry, similarity=lex)
+                    )
 
         return candidates
 

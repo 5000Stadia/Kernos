@@ -100,6 +100,23 @@ async def build_user_truth_view(
     except Exception as exc:
         logger.warning("Introspection: knowledge query failed: %s", exc)
 
+    # --- Pending Whispers (proactive insights awaiting surfacing) ---
+    # The awareness evaluator produces/queues whispers, but there was no
+    # read-side surface, so the proactive-awareness self-test could only say
+    # "I have no way to check pending whispers." Expose the pending queue here
+    # (read-only) so inspect_state can honestly report what's waiting.
+    # (v1 self-test, 2026-06-08.)
+    try:
+        pending = await state.get_pending_whispers(instance_id)
+        if pending:
+            lines = ["## Pending Whispers"]
+            for w in pending[:10]:
+                _cls = getattr(w, "delivery_class", "") or "ambient"
+                lines.append(f'- [{_cls}] {getattr(w, "insight_text", "")[:160]}')
+            sections.append("\n".join(lines))
+    except Exception as exc:
+        logger.warning("Introspection: pending-whisper query failed: %s", exc)
+
     # --- Context Spaces ---
     try:
         spaces = await state.list_context_spaces(instance_id)

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -752,6 +753,17 @@ def _extract_text_from_response(response: ProviderResponse) -> str:
 
 DEFAULT_PRESENCE_MAX_TOKENS = 2048
 
+# Tool-loop iteration cap for the presence renderer's bounded tool-use loop.
+# Raised 5 -> 12 (v1 self-test, 2026-06-08): a legitimate multi-step flow —
+# the "build a personal tool" test does execute_code (write) + execute_code
+# (test) + register_tool plus a read or two — blows past 5 and the step dies
+# mid-build with PRESENCE_TOOL_LOOP_MAX_ITERATIONS. 12 leaves headroom for
+# build/test/register sequences while still bounding runaway loops.
+# Env-overridable.
+DEFAULT_PRESENCE_MAX_TOOL_ITERATIONS = int(
+    os.getenv("KERNOS_PRESENCE_MAX_TOOL_ITERATIONS", "12")
+)
+
 
 class PresenceRenderer:
     """Concrete PresenceRenderer conforming to PDI's
@@ -781,7 +793,7 @@ class PresenceRenderer:
         chain_caller: ChainCaller,
         max_tokens: int = DEFAULT_PRESENCE_MAX_TOKENS,
         tool_dispatcher: "ToolDispatcher | None" = None,
-        max_tool_iterations: int = 5,
+        max_tool_iterations: int = DEFAULT_PRESENCE_MAX_TOOL_ITERATIONS,
     ) -> None:
         """
         INTEGRATION-CAPABILITY-FIRST-V1 (Batch 1, piece C):
