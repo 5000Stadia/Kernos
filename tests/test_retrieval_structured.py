@@ -447,3 +447,29 @@ async def test_normal_path_uses_source_normal():
         active_space_id="default",
     )
     assert snap.source == "normal"
+
+
+# ---------------------------------------------------------------------------
+# ② embed-on-write must NOT regress recall: lexical fallback is a backstop for
+# embedded entries that miss the semantic threshold (Codex review).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_embedded_entry_below_threshold_still_lexically_rescued():
+    from unittest.mock import AsyncMock
+    entry = _knowledge(
+        id="know_cer", content="Kabe's favorite test color is cerulean."
+    )
+    entry.subject = "favorite_test_color"
+    svc = _service(knowledge_entries=[entry])
+    # Entry HAS an embedding now (embed-on-write), but it's orthogonal to the
+    # query vector → cosine 0, a semantic MISS. The query lexically matches.
+    svc.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+    svc.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])
+    results = await svc._search_knowledge(
+        "i-1", "what is my favorite test color", [1.0, 0.0, 0.0], "default",
+    )
+    assert any(r.entry.id == "know_cer" for r in results), (
+        "embedded-but-low-similarity fact must still be rescued lexically"
+    )

@@ -526,17 +526,23 @@ class RetrievalService:
         candidates = []
         for entry in entries:
             entry_embedding = await self.embedding_store.get(instance_id, entry.id)
+            matched = False
             if entry_embedding is not None:
                 similarity = cosine_similarity(query_embedding, entry_embedding)
                 if similarity >= SIMILARITY_THRESHOLD:
                     candidates.append(
                         ScoredKnowledge(entry=entry, similarity=similarity)
                     )
-            else:
-                # No stored embedding — pure vector search would skip this
-                # entry entirely (note_this writes without embed-on-write), so
-                # a freshly-noted fact like cerulean returned knowledge=0.
-                # Lexical-overlap fallback keeps it recallable. (v1 self-test.)
+                    matched = True
+            # Lexical-overlap fallback — a backstop for ANY entry that didn't
+            # match semantically: entries with no stored embedding AND embedded
+            # entries whose cosine score fell below SIMILARITY_THRESHOLD on a
+            # noisy/short query. Originally only the no-embedding case fired,
+            # but once note_this embeds on write (②) those facts take the vector
+            # branch, so without checking lexical on a sub-threshold semantic
+            # miss, embed-on-write would REGRESS the exact recall the lexical
+            # path was added to fix (cerulean knowledge=0). (Codex review.)
+            if not matched:
                 lex = lexical_overlap_score(
                     query, entry.content, getattr(entry, "subject", "")
                 )
