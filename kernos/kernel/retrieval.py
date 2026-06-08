@@ -34,6 +34,27 @@ SIMILARITY_THRESHOLD = 0.65  # Tunable — live test validates this cutoff
 # raw content-overlap fraction; the key-token path keeps precision (a fact
 # keyed `favorite_test_color` recalled via "…favorite test color…" scores 1.0).
 LEXICAL_FALLBACK_THRESHOLD = 0.5
+# Generic subject keys carry no specificity, so a subject-KEY match against them
+# is meaningless and would flood results — fact-harvest keys general facts as
+# subject="user", which "user timezone" would match across every general fact.
+# When a subject is generic we drop the KEY signal entirely (content matching
+# still applies). Token count is NOT a reliable proxy: it both over-suppresses
+# specific one-word keys (pets, timezone) and under-protects multi-word generic
+# phrasings, so use an explicit denylist applied to BOTH fallback paths.
+# (Codex review.)
+_GENERIC_SUBJECTS = frozenset({
+    "user", "general", "fact", "facts", "note", "notes", "misc",
+    "info", "context", "topic", "memory", "thing", "stuff",
+})
+
+
+def _key_for(subject: str) -> str:
+    """The subject as a usable canonical key, or '' if it's a generic value
+    that shouldn't drive a key match. Specific one-word keys (pets, timezone)
+    are kept; generic catch-alls (user, general, ...) are dropped."""
+    return "" if (subject or "").strip().lower() in _GENERIC_SUBJECTS else subject
+
+
 _LEXICAL_STOPWORDS = frozenset({
     "the", "a", "an", "is", "are", "was", "were", "of", "to", "in", "on",
     "for", "and", "or", "my", "your", "you", "me", "it", "this", "that",
@@ -545,16 +566,13 @@ class RetrievalService:
                     # queries. Passing text="" isolates the subject-key signal.
                     # (Codex review, both directions.)
                     #
-                    # Guard against GENERIC keys (Codex review): the fact-harvest
-                    # path keys general facts as subject="user", a one-token
-                    # value that "user timezone" would match — rescuing every
-                    # general fact and flooding results. Require a SPECIFIC,
-                    # multi-token canonical key (e.g. favorite_test_color) so
-                    # only a precise key match rescues; generic single-word
-                    # subjects fall back to the semantic threshold.
-                    _subj = getattr(entry, "subject", "")
-                    if len(_content_tokens(_subj.replace("_", " "))) >= 2:
-                        key_score = lexical_overlap_score(query, "", _subj)
+                    # Rescue only on a non-generic canonical key (_key_for
+                    # drops generic subjects like "user"); content-overlap is
+                    # NOT used here so it can't bypass the threshold. A specific
+                    # one-word key (pets, timezone) is kept. (Codex review.)
+                    _key = _key_for(getattr(entry, "subject", ""))
+                    if _key:
+                        key_score = lexical_overlap_score(query, "", _key)
                         if key_score >= LEXICAL_FALLBACK_THRESHOLD:
                             candidates.append(
                                 ScoredKnowledge(entry=entry, similarity=key_score)
@@ -564,9 +582,11 @@ class RetrievalService:
                 # pure vector search would skip it entirely. This is the only
                 # legitimate lexical-fallback case: legacy entries written
                 # before embed-on-write (e.g. the live cerulean fact that
-                # returned knowledge=0). (v1 self-test.)
+                # returned knowledge=0). (v1 self-test.) Generic subjects drop
+                # the key signal here too (consistency — Codex review), so
+                # matching is content-based for them.
                 lex = lexical_overlap_score(
-                    query, entry.content, getattr(entry, "subject", "")
+                    query, entry.content, _key_for(getattr(entry, "subject", ""))
                 )
                 if lex >= LEXICAL_FALLBACK_THRESHOLD:
                     candidates.append(

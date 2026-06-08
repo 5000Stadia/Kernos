@@ -513,3 +513,16 @@ async def test_embedded_subthreshold_rescued_by_subject_key_not_content():
         "i-1", "user timezone", [1.0, 0.0, 0.0], "default",
     )
     assert not any(r.entry.id == "know_generic" for r in res3)
+
+    # A SPECIFIC one-word subject (e.g. "pets") IS a valid canonical key — it
+    # must still be rescued; the guard is a generic-subject denylist, not a
+    # token count (Codex review).
+    pets = _knowledge(id="know_pets", content="Luna")
+    pets.subject = "pets"
+    svc4 = _service(knowledge_entries=[pets])
+    svc4.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+    svc4.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])  # cosine 0
+    res4 = await svc4._search_knowledge(
+        "i-1", "what are my pets", [1.0, 0.0, 0.0], "default",
+    )
+    assert any(r.entry.id == "know_pets" for r in res4)
