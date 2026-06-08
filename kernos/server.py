@@ -1968,6 +1968,13 @@ _dropped_deliveries: dict[int, list[tuple[Any, str, float]]] = {}
 _flusher_task: Any = None
 _FLUSHER_POLL_SEC: float = 5.0
 
+# Stop re-attempting a stuck deferred-delivery queue after this long. A
+# persistently throttled channel would otherwise retry every cool-off cycle
+# indefinitely. Default 30 min ≈ the 3rd pause tier; tunable.
+_DEFERRED_DELIVERY_MAX_AGE_SEC: float = float(
+    os.getenv("KERNOS_DEFERRED_DELIVERY_MAX_AGE_SEC", "1800")
+)
+
 
 def _is_discord_paused() -> bool:
     """True when the bot should skip all Discord API calls."""
@@ -2139,40 +2146,56 @@ async def _flush_dropped_deliveries_once() -> int:
         if not entries:
             continue
         channel = entries[0][0]
-        # One short header per channel before the queued chunks.
         oldest = entries[0][2]
-        wait_s = max(0, int(_time_module.time() - oldest))
-        header = (
-            f"↩️ Cool-off ended after ~{wait_s}s. "
-            f"Delivering {len(entries)} message(s) I had queued for you "
-            f"during the Discord rate-limit pause."
-        )
-        try:
-            await channel.send(header)
-            _register_discord_call_succeeded()
-        except discord.HTTPException as exc:
-            if exc.status == 429:
-                _register_discord_429("flush header 429")
-            # Re-queue everything; retry next pass.
-            _dropped_deliveries.setdefault(cid, []).extend(entries)
+        age = max(0, int(_time_module.time() - oldest))
+
+        # AGE-OUT: if the queue has been stuck past the longest pause tier,
+        # stop re-attempting it every cool-off cycle. A persistently throttled
+        # channel would otherwise retry forever. One honest terminal note (the
+        # content is on disk), then drop. If even the note 429s, keep the queue
+        # for one more pass rather than losing it silently.
+        if age > _DEFERRED_DELIVERY_MAX_AGE_SEC:
+            try:
+                await channel.send(
+                    f"⚠️ I had {len(entries)} repl(y/ies) queued from a rate-limit "
+                    f"pause ~{age // 60}m ago, but Discord kept throttling delivery. "
+                    f"They're saved in the conv-log — ask me to resend if you still "
+                    f"want them."
+                )
+                _register_discord_call_succeeded()
+            except (discord.RateLimited, discord.HTTPException):
+                _dropped_deliveries.setdefault(cid, []).extend(entries)
             continue
-        except discord.RateLimited:
-            _register_discord_429("flush header 429")
-            _dropped_deliveries.setdefault(cid, []).extend(entries)
-            continue
-        # Drain the queued chunks. Inter-chunk delay re-used.
+
+        # Drain the queued chunks. CRITICAL: the resume note rides on the FIRST
+        # chunk as a single send — it is NOT a separate message. The old shape
+        # sent a standalone "cool-off ended" header and THEN the first chunk
+        # back-to-back with no delay; a pause refills ~one rate-limit token, so
+        # the header consumed it + succeeded while the chunk immediately 429'd,
+        # re-arming the cool-off. Worse, the header's success reset the 429
+        # streak, pinning the backoff at the shortest tier — an infinite
+        # "cool-off ended" loop where the user never saw the actual reply
+        # (live-observed 2026-06-08). One send per chunk: a failure escalates
+        # the backoff properly; nothing is announced unless real content lands.
         for idx, (_channel, chunk, _ts) in enumerate(entries):
             if idx > 0 and DISCORD_INTERCHUNK_DELAY_SEC > 0:
                 await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
+            body = chunk
+            if idx == 0:
+                body = (
+                    f"↩️ Cool-off ended after ~{age}s — delivering "
+                    f"{len(entries)} message(s) I had queued during the Discord "
+                    f"rate-limit pause:\n\n{chunk}"
+                )
             try:
-                await channel.send(chunk)
+                await channel.send(body)
                 _register_discord_call_succeeded()
                 delivered += 1
             except (discord.RateLimited, discord.HTTPException) as exc:
                 status = getattr(exc, "status", None)
                 if status == 429 or isinstance(exc, discord.RateLimited):
                     _register_discord_429("flush chunk 429")
-                # Re-queue remaining chunks for the next pass.
+                # Re-queue remaining chunks (originals, sans note) for next pass.
                 _dropped_deliveries.setdefault(cid, []).extend(
                     entries[idx:],
                 )

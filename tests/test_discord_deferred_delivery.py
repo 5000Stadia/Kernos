@@ -157,15 +157,15 @@ class TestFlushDroppedDeliveriesOnce:
         # (the actual constant might add a sleep otherwise).
         delivered = await server_mod._flush_dropped_deliveries_once()
         assert delivered == 2
-        # ch.send was called 3 times: 1 header + 2 chunks
-        assert ch.send.await_count == 3
-        # First call is the header
-        header_arg = ch.send.await_args_list[0].args[0]
-        assert "Cool-off ended" in header_arg
-        assert "2 message(s)" in header_arg
-        # Subsequent calls are the chunks
-        assert ch.send.await_args_list[1].args[0] == "first"
-        assert ch.send.await_args_list[2].args[0] == "second"
+        # The resume note rides on the FIRST chunk (one send), so there are
+        # exactly N sends, NOT N+1. No standalone header that could succeed
+        # while the payload 429s (the live-observed infinite-loop bug).
+        assert ch.send.await_count == 2
+        first_send = ch.send.await_args_list[0].args[0]
+        assert "Cool-off ended" in first_send
+        assert "2 message(s)" in first_send
+        assert "first" in first_send                  # content carried in the same send
+        assert ch.send.await_args_list[1].args[0] == "second"
         # Queue is empty now
         assert not server_mod._dropped_deliveries
 
@@ -179,9 +179,9 @@ class TestFlushDroppedDeliveriesOnce:
         server_mod._discord_pause_until = 0.0
         delivered = await server_mod._flush_dropped_deliveries_once()
         assert delivered == 3
-        # Each channel got its own header + chunks
-        assert a.send.await_count == 2  # 1 header + 1 chunk
-        assert b.send.await_count == 3  # 1 header + 2 chunks
+        # Resume note rides on each channel's first chunk → one send per chunk.
+        assert a.send.await_count == 1  # note+chunk in one send
+        assert b.send.await_count == 2  # note+chunk1, then chunk2
 
     @pytest.mark.asyncio
     async def test_flush_requeues_on_persistent_429(
@@ -214,6 +214,56 @@ class TestFlushDroppedDeliveriesOnce:
         ]
         server_mod._discord_pause_until = 0.0
         await server_mod._flush_dropped_deliveries_once()
-        header = ch.send.await_args_list[0].args[0]
-        # Wait duration appears in the header
-        assert "~42s" in header or "~41s" in header or "~43s" in header
+        first_send = ch.send.await_args_list[0].args[0]
+        # Wait duration appears in the note (now riding on the first chunk).
+        assert "~42s" in first_send or "~41s" in first_send or "~43s" in first_send
+        assert "x" in first_send  # content delivered in the same send
+
+    @pytest.mark.asyncio
+    async def test_flush_does_not_spam_header_when_payload_429s(
+        self, server_mod, monkeypatch,
+    ):
+        """The infinite-loop regression (live-observed 2026-06-08).
+
+        Old shape: a standalone 'Cool-off ended' header was sent, succeeded,
+        reset the 429 streak — then the back-to-back payload chunk 429'd and
+        re-armed the cool-off. The user got the header every cycle and never
+        the content. With the note merged into the payload, a 429 means NOTHING
+        was sent (no header spam) and the streak escalates instead of resetting.
+        """
+        import discord
+        ch = _make_channel(channel_id=99)
+        ch.send = AsyncMock(side_effect=discord.RateLimited(retry_after=5))
+        server_mod._register_dropped_delivery(ch, "the actual reply")
+        server_mod._discord_pause_until = 0.0
+        server_mod._discord_429_streak = 0
+
+        delivered = await server_mod._flush_dropped_deliveries_once()
+
+        assert delivered == 0
+        # Exactly one send attempt (the merged note+chunk) — no separate header
+        # that could land on its own.
+        assert ch.send.await_count == 1
+        # The failed send escalated the backoff rather than resetting it, so a
+        # persistently throttled channel backs off instead of looping at 5 min.
+        assert server_mod._discord_429_streak == 1
+        # Content re-queued, not lost.
+        assert server_mod._dropped_deliveries[99][0][1] == "the actual reply"
+
+    @pytest.mark.asyncio
+    async def test_flush_ages_out_stuck_queue(self, server_mod):
+        """A queue stuck past the max age gets one terminal note, then dropped —
+        not retried forever."""
+        ch = _make_channel(channel_id=77)
+        old_ts = time.time() - (server_mod._DEFERRED_DELIVERY_MAX_AGE_SEC + 60)
+        server_mod._dropped_deliveries[77] = [
+            (ch, "stale reply", old_ts),
+        ]
+        server_mod._discord_pause_until = 0.0
+        delivered = await server_mod._flush_dropped_deliveries_once()
+        assert delivered == 0
+        assert ch.send.await_count == 1
+        note = ch.send.await_args_list[0].args[0]
+        assert "conv-log" in note
+        # Dropped — no longer retried.
+        assert not server_mod._dropped_deliveries
