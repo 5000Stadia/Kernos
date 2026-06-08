@@ -124,6 +124,47 @@ async def test_fact_path_writes_knowledge_entry():
 
 
 @pytest.mark.asyncio
+async def test_fact_embed_on_write_stores_embedding():
+    # ② embed-on-write: note_this honors the "computed on write" contract so
+    # the fact is vector-recallable, not only via the lexical fallback.
+    state = _FakeStateStore()
+
+    class _Embed:
+        async def embed(self, text):
+            return [0.1, 0.2, 0.3]
+
+    class _Store:
+        def __init__(self):
+            self.saved = {}
+        async def save(self, instance_id, entry_id, vec):
+            self.saved[(instance_id, entry_id)] = vec
+
+    store = _Store()
+    _, record = await handle_note_this(
+        state=state, instance_id="inst-1", member_id="mem-1",
+        active_space_id="space-1", turn_id="turn-1", kind="fact",
+        content="My favorite test color is cerulean.", subject="favorite_color",
+        embedding_service=_Embed(), embedding_store=store,
+    )
+    entry_id = record.affected_objects[0]
+    assert ("inst-1", entry_id) in store.saved
+    assert store.saved[("inst-1", entry_id)] == [0.1, 0.2, 0.3]
+
+
+@pytest.mark.asyncio
+async def test_fact_write_succeeds_without_embedder():
+    # Best-effort: no embedder wired (VOYAGE_API_KEY unset) → write still
+    # succeeds; the lexical fallback covers recall.
+    state = _FakeStateStore()
+    _, record = await handle_note_this(
+        state=state, instance_id="inst-1", member_id="mem-1",
+        active_space_id="space-1", turn_id="turn-1", kind="fact",
+        content="A fact with no embedder.", subject="topic",
+    )
+    assert record.execution_state == "completed"
+
+
+@pytest.mark.asyncio
 async def test_fact_no_op_detection_on_identical_content():
     """Same (instance_id, subject, content) → no second write; record
     reflects no-op + points at existing entry."""

@@ -1290,6 +1290,11 @@ class ReasoningService:
                     content=str(tool_input.get("content", "")),
                     subject=str(tool_input.get("subject", "")),
                     category=str(tool_input.get("category", "")),
+                    # EMBED-ON-WRITE (②): let note_this embed the new fact so
+                    # it's vector-recallable. The retrieval service owns the
+                    # embedder + store; pass them through when wired.
+                    embedding_service=getattr(self._retrieval, "embeddings", None),
+                    embedding_store=getattr(self._retrieval, "embedding_store", None),
                 )
                 self._turn_action_records.append(record)
                 # Codex review fold (2026-05-08): when kind=rule and the

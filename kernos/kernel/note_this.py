@@ -150,6 +150,8 @@ async def handle_note_this(
     content: str,
     subject: str = "",
     category: str = "",
+    embedding_service: Any = None,
+    embedding_store: Any = None,
 ) -> tuple[str, ActionStateRecord]:
     """Dispatch note_this. Returns (user_visible_summary,
     ActionStateRecord). The summary string goes back to the agent as
@@ -201,6 +203,8 @@ async def handle_note_this(
             subject=subject.strip(),
             category=(category or "fact").strip(),
             active_space_id=active_space_id,
+            embedding_service=embedding_service,
+            embedding_store=embedding_store,
         )
     if kind == "preference":
         return await _write_preference(
@@ -255,6 +259,8 @@ async def _write_fact(
     subject: str,
     category: str,
     active_space_id: str,
+    embedding_service: Any = None,
+    embedding_store: Any = None,
 ) -> tuple[str, ActionStateRecord]:
     chash = _content_hash(instance_id, subject, content)
     existing = await state.get_knowledge_by_hash(instance_id, chash)
@@ -318,6 +324,25 @@ async def _write_fact(
                 risk_level="low",
             ),
         )
+
+    # EMBED-ON-WRITE (②, 2026-06-08): the "embeddings computed on write"
+    # contract (embeddings.py) is honored by the projector path, but note_this
+    # writes KnowledgeEntries directly via add_knowledge, so noted facts had NO
+    # embedding and were invisible to vector recall ("cerulean" returned
+    # knowledge=0). Compute + store the embedding now so a freshly-noted fact is
+    # semantically recallable — not only via the lexical fallback. Best-effort:
+    # if no embedder is wired (e.g. VOYAGE_API_KEY unset) or it errors, the
+    # lexical fallback still covers recall, so we never fail the write.
+    if embedding_service is not None and embedding_store is not None:
+        try:
+            vec = await embedding_service.embed(content)
+            if vec:
+                await embedding_store.save(instance_id, entry_id, vec)
+        except Exception as exc:  # pragma: no cover - best-effort
+            logger.debug(
+                "note_this embed-on-write failed for %s: %s", entry_id, exc
+            )
+
     record = ActionStateRecord(
         action_id=action_id,
         surface="memory",
