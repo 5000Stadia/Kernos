@@ -47,6 +47,16 @@ def test_lexical_overlap_empty_query_is_zero():
     assert lexical_overlap_score("", "anything", "k") == 0.0
 
 
+def test_lexical_overlap_no_substring_false_positives():
+    # Codex review: token equality, not substring — "dog" must not match
+    # "dogma", "son" must not match "reasoning", "art" not "cartography".
+    assert lexical_overlap_score("dog", "the dogma of the church", "") == 0.0
+    assert lexical_overlap_score("son", "a chain of reasoning", "") == 0.0
+    assert lexical_overlap_score("art", "a study of cartography", "") == 0.0
+    # but a real whole-token match still scores
+    assert lexical_overlap_score("dog", "my dog is named Sasha", "") == 1.0
+
+
 # --- ④ presence renderer cap ----------------------------------------------
 
 def test_presence_max_tool_iterations_default_raised():

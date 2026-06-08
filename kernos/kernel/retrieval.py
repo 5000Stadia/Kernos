@@ -60,13 +60,18 @@ def lexical_overlap_score(query: str, text: str, key: str = "") -> float:
     q = _content_tokens(query)
     if not q:
         return 0.0
-    hay = (text or "").lower() + " " + (key or "").lower().replace("_", " ")
-    frac_q = sum(1 for t in q if t in hay) / len(q)
+    # Token-equality, NOT substring: a substring check would let "dog" match
+    # "dogma" or "son" match "reasoning" and admit unrelated memories (Codex
+    # review). Tokenize the haystack and compare by set membership.
+    hay = _content_tokens(
+        (text or "") + " " + (key or "").replace("_", " ")
+    )
+    frac_q = len(q & hay) / len(q)
     score = frac_q
     if key:
         ktoks = _content_tokens(key.replace("_", " "))
         if ktoks:
-            key_in_q = sum(1 for t in ktoks if t in q) / len(ktoks)
+            key_in_q = len(ktoks & q) / len(ktoks)
             score = max(score, key_in_q)
     return score
 
