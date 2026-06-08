@@ -500,3 +500,16 @@ async def test_embedded_subthreshold_rescued_by_subject_key_not_content():
         "i-1", "payment", [1.0, 0.0, 0.0], "default",
     )
     assert not any(r.entry.id == "know_noisy" for r in res2)
+
+    # Generic one-token subject (fact-harvest uses subject="user") must NOT be
+    # rescued just because the query contains that word — it would flood every
+    # general fact and reintroduce the bypass (Codex review).
+    generic = _knowledge(id="know_generic", content="something unrelated")
+    generic.subject = "user"
+    svc3 = _service(knowledge_entries=[generic])
+    svc3.embeddings.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
+    svc3.embedding_store.get = AsyncMock(return_value=[0.0, 1.0, 0.0])  # cosine 0
+    res3 = await svc3._search_knowledge(
+        "i-1", "user timezone", [1.0, 0.0, 0.0], "default",
+    )
+    assert not any(r.entry.id == "know_generic" for r in res3)

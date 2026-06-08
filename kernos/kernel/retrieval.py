@@ -544,13 +544,21 @@ class RetrievalService:
                     # rescue would bypass the precision threshold on short/noisy
                     # queries. Passing text="" isolates the subject-key signal.
                     # (Codex review, both directions.)
-                    key_score = lexical_overlap_score(
-                        query, "", getattr(entry, "subject", "")
-                    )
-                    if key_score >= LEXICAL_FALLBACK_THRESHOLD:
-                        candidates.append(
-                            ScoredKnowledge(entry=entry, similarity=key_score)
-                        )
+                    #
+                    # Guard against GENERIC keys (Codex review): the fact-harvest
+                    # path keys general facts as subject="user", a one-token
+                    # value that "user timezone" would match — rescuing every
+                    # general fact and flooding results. Require a SPECIFIC,
+                    # multi-token canonical key (e.g. favorite_test_color) so
+                    # only a precise key match rescues; generic single-word
+                    # subjects fall back to the semantic threshold.
+                    _subj = getattr(entry, "subject", "")
+                    if len(_content_tokens(_subj.replace("_", " "))) >= 2:
+                        key_score = lexical_overlap_score(query, "", _subj)
+                        if key_score >= LEXICAL_FALLBACK_THRESHOLD:
+                            candidates.append(
+                                ScoredKnowledge(entry=entry, similarity=key_score)
+                            )
             else:
                 # No stored embedding — can't be semantically scored at all, so
                 # pure vector search would skip it entirely. This is the only
