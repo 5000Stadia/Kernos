@@ -3232,8 +3232,42 @@ class ReasoningService:
                 except Exception as exc:
                     logger.debug("BEHAVIORAL_PATTERN: decline handling failed: %s", exc)
 
+            self._drop_offered_whisper(instance_id, whisper_id)
+            return f"Dismissed whisper {whisper_id}. Won't bring this up again."
+
+        # DELIVER-ON-DELIVERY (2026-06-08): whispers are no longer suppressed at
+        # offer time, so a same-turn dismiss finds no SuppressionEntry yet. The
+        # whisper is still PENDING/offered, though — dismiss it directly so it
+        # neither re-surfaces nor gets appended by the delivery hook.
+        from kernos.kernel.awareness import SuppressionEntry
+        pending = await self._state.get_pending_whispers(instance_id)
+        w = next((x for x in pending if x.whisper_id == whisper_id), None)
+        if w is not None:
+            await self._state.mark_whisper_surfaced(instance_id, whisper_id)
+            sup = SuppressionEntry(
+                whisper_id=whisper_id,
+                knowledge_entry_id=w.knowledge_entry_id,
+                foresight_signal=w.foresight_signal,
+                created_at=w.created_at,
+                resolution_state="dismissed",
+            )
+            sup.resolved_by = reason
+            sup.resolved_at = datetime.now(timezone.utc).isoformat()
+            await self._state.save_suppression(instance_id, sup)
+            self._drop_offered_whisper(instance_id, whisper_id)
             return f"Dismissed whisper {whisper_id}. Won't bring this up again."
         return f"Whisper {whisper_id} not found in suppression registry."
+
+    def _drop_offered_whisper(self, instance_id: str, whisper_id: str) -> None:
+        """Remove a whisper from the handler's per-turn offered stash so the
+        deliver-on-delivery hook does not append it after a same-turn dismiss."""
+        h = getattr(self, "_handler", None)
+        store = getattr(h, "_whispers_offered", None) if h is not None else None
+        if not store:
+            return
+        for k, lst in list(store.items()):
+            if any(getattr(x, "whisper_id", "") == whisper_id for x in lst):
+                store[k] = [x for x in lst if getattr(x, "whisper_id", "") != whisper_id]
 
     async def _handle_remember_details(
         self, instance_id: str, space_id: str, input_data: dict,

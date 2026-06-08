@@ -810,6 +810,38 @@ class TestDismissWhisper:
         assert updated[0].resolution_state == "dismissed"
         assert updated[0].resolved_by == "user_dismissed"
 
+    async def test_dismiss_offered_whisper_same_turn(self, tmp_path):
+        # DELIVER-ON-DELIVERY: whispers are no longer suppressed at offer time,
+        # so a same-turn dismiss finds no SuppressionEntry yet. It must still
+        # work off the pending whisper + drop it from the offered stash so the
+        # delivery hook doesn't append it (Codex review).
+        from kernos.kernel.reasoning import ReasoningService
+
+        state = JsonStateStore(tmp_path)
+        events = JsonEventStream(tmp_path)
+        w = _make_whisper()  # pending, no suppression yet
+        await state.save_whisper("test_tenant", w)
+
+        provider = MagicMock()
+        mcp = MagicMock()
+        audit = AsyncMock()
+        reasoning = ReasoningService(provider, events, mcp, audit)
+        reasoning.set_state(state)
+        handler = MagicMock()
+        handler._whispers_offered = {("test_tenant", "space_daily"): [w]}
+        reasoning._handler = handler
+
+        result = await reasoning._handle_dismiss_whisper("test_tenant", w.whisper_id)
+        assert "Dismissed" in result
+        assert len(await state.get_pending_whispers("test_tenant")) == 0
+        sup = await state.get_suppressions("test_tenant", whisper_id=w.whisper_id)
+        assert len(sup) == 1 and sup[0].resolution_state == "dismissed"
+        # dropped from the offered stash → delivery hook won't append it
+        assert all(
+            x.whisper_id != w.whisper_id
+            for lst in handler._whispers_offered.values() for x in lst
+        )
+
     async def test_dismiss_not_found(self, tmp_path):
         from kernos.kernel.reasoning import ReasoningService
 
