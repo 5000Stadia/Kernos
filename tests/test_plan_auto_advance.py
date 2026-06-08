@@ -75,3 +75,20 @@ def test_ledger_block_caps_and_truncates():
     assert block.count("\n- ") <= 25
     # each summary truncated to 300 chars
     assert "x" * 301 not in block
+
+
+def test_record_plan_step_result_appends_and_caps():
+    from kernos.messages.handler import _record_plan_step_result, _plan_ledger_block
+    plan = {}
+    _record_plan_step_result(plan, "s1", "Identity", "PASS")
+    assert plan["step_results"][-1] == {"step_id": "s1", "title": "Identity", "summary": "PASS"}
+    # truncation
+    _record_plan_step_result(plan, "s2", "t" * 200, "y" * 900)
+    assert len(plan["step_results"][-1]["title"]) == 120
+    assert len(plan["step_results"][-1]["summary"]) == 500
+    # cap at 50
+    for i in range(60):
+        _record_plan_step_result(plan, f"x{i}", "t", "s")
+    assert len(plan["step_results"]) == 50
+    # and the ledger reads what was recorded
+    assert "PRIOR COMPLETED STEPS" in _plan_ledger_block(plan)

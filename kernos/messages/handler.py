@@ -430,6 +430,27 @@ def _plan_ledger_block(plan: dict) -> str:
     return "\n".join(lines)
 
 
+def _record_plan_step_result(
+    plan: dict, step_id: str, title: str, response: str,
+) -> None:
+    """Append a completed step's outcome to the plan's results ledger (⑥).
+
+    Used by BOTH completion paths — fast success and the slow-poll recovery
+    after an API outage — so no step's receipt is dropped (Codex review).
+    Summary capped at 500 chars, ledger capped at 50 entries.
+    """
+    if not isinstance(plan, dict):
+        return
+    results = plan.setdefault("step_results", [])
+    results.append({
+        "step_id": step_id,
+        "title": (title or "")[:120],
+        "summary": (response or "").strip()[:500],
+    })
+    if len(results) > 50:
+        plan["step_results"] = results[-50:]
+
+
 def resolve_mcp_credentials(
     server_config: dict,
     instance_id: str,
@@ -7754,17 +7775,10 @@ class MessageHandler:
                                 break
 
                     # PLAN RESULTS LEDGER (⑥): record this step's outcome so
-                    # later steps (esp. the final report) can read it — they
-                    # otherwise can't see earlier steps' receipts and
-                    # under-credit completed work.
-                    _results = plan.setdefault("step_results", [])
-                    _results.append({
-                        "step_id": envelope.step_id,
-                        "title": _step_title[:120],
-                        "summary": (response or "").strip()[:500],
-                    })
-                    if len(_results) > 50:
-                        plan["step_results"] = _results[-50:]
+                    # later steps (esp. the final report) can read it.
+                    _record_plan_step_result(
+                        plan, envelope.step_id, _step_title, response,
+                    )
 
                     # Check if all steps are complete (plan finished)
                     all_done = all(
@@ -7964,11 +7978,19 @@ class MessageHandler:
                         data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
                         plan = await load_plan(data_dir, instance_id, space_id)
                         if plan:
+                            _rec_title = envelope.step_description or ""
                             for phase in plan.get("phases", []):
                                 for step in phase.get("steps", []):
                                     if step["id"] == envelope.step_id:
                                         step["status"] = "complete"
+                                        _rec_title = step.get("title", "") or _rec_title
                                         break
+                            # PLAN RESULTS LEDGER (⑥): record on the slow-poll
+                            # path too, so a step that only succeeds after an
+                            # API outage still leaves its receipt (Codex review).
+                            _record_plan_step_result(
+                                plan, envelope.step_id, _rec_title, response,
+                            )
                             all_done = all(
                                 step.get("status") in ("complete", "skipped")
                                 for phase in plan.get("phases", [])
