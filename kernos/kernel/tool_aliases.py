@@ -93,6 +93,9 @@ _TOOL_ALIASES: dict[str, str] = {
     "add_reminder": "manage_schedule",
     "schedule.create": "manage_schedule",
     "reminders.create": "manage_schedule",
+    # 2026-06-08: agent reached for a bare "scheduling"/"schedule" tool name.
+    "scheduling": "manage_schedule",
+    "schedule": "manage_schedule",
     # 2026-06-06 v1 self-test: agent reached for manage_members under a dotted
     # "member_management." namespace; the rejection triggered a malformed
     # retry (empty action). Aliasing the dotted name lets the well-formed

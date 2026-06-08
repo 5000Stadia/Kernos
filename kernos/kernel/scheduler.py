@@ -287,7 +287,19 @@ _SCHEDULE_ACTION_SYNONYMS = {
     "show": "list", "get": "list", "ls": "list",
 }
 _SCHEDULE_TEXT_FIELDS = (
-    "description", "message", "text", "reminder", "content", "what", "task",
+    "description", "message", "text", "reminder", "reminder_text", "content",
+    "what", "task", "title", "note", "body", "summary", "label",
+)
+# The model frequently splits the WHEN into its own field while putting only the
+# message in a text field above (live-observed shapes: ["text","scheduled_time",
+# "timezone","when"], ["reminder_text","time_offset"], ...). The extraction model
+# needs the time IN the description, so we fold any of these back in — otherwise a
+# "remind me in 2 hours" lands as a time-less description and extraction returns
+# empty `when` ("I couldn't determine when to schedule that").
+_SCHEDULE_TIME_FIELDS = (
+    "natural_language_request", "when", "scheduled_time", "schedule_time",
+    "time", "datetime", "date", "time_offset", "offset", "schedule",
+    "recurrence", "cron", "timezone", "tz",
 )
 
 
@@ -301,14 +313,39 @@ def normalize_schedule_input(tool_input: dict) -> tuple[str, str]:
     field the model naturally emits. Helps EVERY scheduling call.
     """
     si = tool_input or {}
+    _VALID_ACTIONS = {"list", "create", "update", "pause", "resume", "remove"}
     raw_action = str(si.get("action") or "").strip().lower()
     action = _SCHEDULE_ACTION_SYNONYMS.get(raw_action, raw_action)
+    if action not in _VALID_ACTIONS:
+        # The model sometimes uses `type` for the action ("type":"reminder"),
+        # but more often for the trigger KIND ("notify"/"time"). Only honor it
+        # when it resolves to a real action; otherwise fall through to inference.
+        raw_type = str(si.get("type") or "").strip().lower()
+        mapped_type = _SCHEDULE_ACTION_SYNONYMS.get(raw_type, raw_type)
+        if mapped_type in _VALID_ACTIONS:
+            action = mapped_type
+        else:
+            action = ""
     desc = ""
     for f in _SCHEDULE_TEXT_FIELDS:
         v = si.get(f)
         if v:
             desc = str(v)
             break
+    # Fold any time/schedule hint the model parked in a separate field back into
+    # the description (skip ones already echoed in the text). Without this the
+    # extraction model never sees the WHEN and bounces the create.
+    hints = []
+    for f in _SCHEDULE_TIME_FIELDS:
+        v = si.get(f)
+        if v is None:
+            continue
+        sv = str(v).strip()
+        if sv and sv.lower() not in desc.lower():
+            hints.append(sv)
+    if hints:
+        joined = " ".join(hints)
+        desc = f"{desc} ({joined})".strip() if desc else joined
     if not action:
         # No action supplied. The create_reminder/reminder.create tool aliases
         # rewrite the NAME to manage_schedule but carry no action, so without
