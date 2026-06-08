@@ -59,15 +59,21 @@ class BindingFailureDiagnostic:
     extra: dict[str, Any] = field(default_factory=dict)  # tool-specific extras
 
     def to_payload(self) -> dict[str, Any]:
-        """JSON-serializable dict for event emission + friction reports."""
+        """JSON-serializable dict for event emission + friction reports.
+
+        ``extra`` is spread FIRST so the canonical fields below always win a key
+        collision — a tool-specific extra must never clobber tool_id/status/etc.
+        (v1 self-test Test 14: the dispatch-gate self-review flagged that
+        flattening extra last let it overwrite the canonical attribution.)
+        """
         return {
+            **(self.extra or {}),
             "tool_id": self.tool_id,
             "status": self.status,
             "expected_source": self.expected_source,
             "gate_class": self.gate_class,
             "last_registration_hash": self.last_registration_hash,
             "reason_omitted": self.reason_omitted,
-            **(self.extra or {}),
         }
 
 

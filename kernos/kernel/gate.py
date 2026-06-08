@@ -610,7 +610,12 @@ class DispatchGate:
             # = soft_write (reversible — pause/resume/remove can
             # be undone via list-then-create-or-resume; create can
             # be remove'd; update produces a soft history).
-            action = (tool_input or {}).get("action", "list")
+            # Use the SAME normalization the dispatch applies, or an inferred
+            # create (create_reminder alias / text-but-no-action) would be
+            # classified on the raw 'list' default and gated as a read despite
+            # mutating trigger state (Codex review).
+            from kernos.kernel.scheduler import normalize_schedule_input
+            action, _ = normalize_schedule_input(tool_input or {})
             return "read" if action == "list" else "soft_write"
         if tool_name == "manage_workspace":
             action = (tool_input or {}).get("action", "list")

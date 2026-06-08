@@ -60,3 +60,18 @@ def test_no_action_with_text_infers_create():
 def test_no_action_no_text_defaults_list():
     assert normalize_schedule_input({})[0] == "list"
     assert normalize_schedule_input({"action": ""})[0] == "list"
+
+
+def test_binding_diagnostic_extra_cannot_clobber_canonical():
+    # v1 self-test Test 14: the dispatch-gate self-review flagged that
+    # to_payload() spread `extra` last, letting a tool-specific extra overwrite
+    # canonical attribution. Canonical fields must win a key collision.
+    from kernos.kernel.dispatch_diagnostics import BindingFailureDiagnostic
+    d = BindingFailureDiagnostic(
+        tool_id="real_tool", status="not_registered",
+        extra={"tool_id": "EVIL", "status": "FAKE", "note": "kept"},
+    )
+    p = d.to_payload()
+    assert p["tool_id"] == "real_tool"   # canonical wins
+    assert p["status"] == "not_registered"
+    assert p["note"] == "kept"           # non-colliding extra preserved

@@ -127,6 +127,18 @@ class TestClassifyToolEffect:
         for tool in ["write_file", "delete_file"]:
             assert svc._classify_tool_effect(tool, None) == "soft_write"
 
+    def test_manage_schedule_inferred_create_is_soft_write(self):
+        # v1 self-test Test 6 fold: the gate must use the same normalization as
+        # the dispatch, or an inferred-create (alias / text-but-no-action) would
+        # be gated as a read despite mutating trigger state.
+        svc = _make_service()
+        cls = lambda ti: svc._classify_tool_effect("manage_schedule", None, ti)
+        assert cls({"action": "list"}) == "read"
+        assert cls({}) == "read"                                  # no action/text
+        assert cls({"action": "create", "description": "x"}) == "soft_write"
+        assert cls({"action": "create_reminder", "description": "x"}) == "soft_write"
+        assert cls({"description": "remind me in 1h"}) == "soft_write"  # inferred
+
     def test_mcp_read_tool(self):
         svc = _make_service({"list-events": "read", "create-event": "soft_write"})
         assert svc._classify_tool_effect("list-events", None) == "read"
