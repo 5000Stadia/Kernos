@@ -199,11 +199,10 @@ class TestFlushDroppedDeliveriesOnce:
         server_mod._discord_pause_until = 0.0
         delivered = await server_mod._flush_dropped_deliveries_once()
         assert delivered == 0
-        # Re-queued
+        # Re-queued (note rides baked into the body now, so a retry's first send
+        # still carries content).
         assert 88 in server_mod._dropped_deliveries
-        assert (
-            server_mod._dropped_deliveries[88][0][1] == "chunk-1"
-        )
+        assert "chunk-1" in server_mod._dropped_deliveries[88][0][1]
 
     @pytest.mark.asyncio
     async def test_flush_header_includes_wait_duration(self, server_mod):
@@ -247,30 +246,37 @@ class TestFlushDroppedDeliveriesOnce:
         # The failed send escalated the backoff rather than resetting it, so a
         # persistently throttled channel backs off instead of looping at 5 min.
         assert server_mod._discord_429_streak == 1
-        # Content re-queued, not lost.
-        assert server_mod._dropped_deliveries[99][0][1] == "the actual reply"
+        # Content re-queued, not lost (note now rides baked into the body, so a
+        # retry's first send still carries payload).
+        requeued = server_mod._dropped_deliveries[99][0][1]
+        assert "the actual reply" in requeued
 
     @pytest.mark.asyncio
-    async def test_flush_near_limit_first_chunk_sends_note_separately(
+    async def test_flush_near_limit_first_chunk_splits_note_rides_with_payload(
         self, server_mod,
     ):
         """If prefixing the resume note would push the first chunk over
-        Discord's 2000-char limit, the note is sent as its own message and the
-        bare chunk follows — so the send never overflows + HTTPExceptions into a
-        re-queue loop (Codex P2)."""
+        Discord's 2000-char limit, the chunk is SPLIT — note + head in the first
+        send, tail after. The note never travels alone, so the first successful
+        send always carries content and can't loop emitting a contentless notice
+        (Codex P2). No body exceeds the limit; all content is preserved."""
         ch = _make_channel(channel_id=55)
-        big = "x" * (server_mod.DISCORD_MAX_LENGTH - 10)  # leaves no room for a prefix
+        big = "x" * (server_mod.DISCORD_MAX_LENGTH - 10)  # too big to also fit a prefix
         server_mod._register_dropped_delivery(ch, big)
         server_mod._discord_pause_until = 0.0
         delivered = await server_mod._flush_dropped_deliveries_once()
-        assert delivered == 1
-        # Two sends: standalone note, then the bare (unmodified) chunk.
+        assert delivered == 2
         assert ch.send.await_count == 2
-        assert "Cool-off ended" in ch.send.await_args_list[0].args[0]
-        assert ch.send.await_args_list[1].args[0] == big
-        # Every sent body is within Discord's limit.
-        for call in ch.send.await_args_list:
-            assert len(call.args[0]) <= server_mod.DISCORD_MAX_LENGTH
+        first = ch.send.await_args_list[0].args[0]
+        second = ch.send.await_args_list[1].args[0]
+        # Note rides with payload in the first send (not standalone).
+        assert "Cool-off ended" in first
+        assert "x" in first
+        # No body exceeds Discord's limit.
+        assert len(first) <= server_mod.DISCORD_MAX_LENGTH
+        assert len(second) <= server_mod.DISCORD_MAX_LENGTH
+        # All content preserved across the split.
+        assert first.split("\n\n", 1)[1] + second == big
         assert not server_mod._dropped_deliveries
 
     @pytest.mark.asyncio

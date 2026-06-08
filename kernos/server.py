@@ -2177,38 +2177,32 @@ async def _flush_dropped_deliveries_once() -> int:
         # "cool-off ended" loop where the user never saw the actual reply
         # (live-observed 2026-06-08). One send per chunk: a failure escalates
         # the backoff properly; nothing is announced unless real content lands.
-        for idx, (_channel, chunk, _ts) in enumerate(entries):
+        # Build the ordered list of message bodies to send. The resume note ALWAYS
+        # rides with payload in the FIRST send — never as a standalone message.
+        # If the first queued chunk is too big to fit alongside the note, split
+        # it: the note + head go in the first send, the tail follows as its own
+        # chunk. This guarantees the first SUCCESSFUL send carries content, so a
+        # persistently throttled channel can't loop re-emitting a contentless
+        # notice (Codex P2) — and a 429 escalates the backoff (5→10→30→120→
+        # age-out) instead of resetting it, since only content sends reset the
+        # streak.
+        note = (
+            f"↩️ Cool-off ended after ~{age}s — delivering "
+            f"{len(entries)} message(s) I had queued during the Discord "
+            f"rate-limit pause:"
+        )
+        prefix = f"{note}\n\n"
+        chunks = [e[1] for e in entries]
+        first = chunks[0]
+        if len(prefix) + len(first) <= DISCORD_MAX_LENGTH:
+            bodies = [prefix + first] + chunks[1:]
+        else:
+            room = max(1, DISCORD_MAX_LENGTH - len(prefix))
+            bodies = [prefix + first[:room], first[room:]] + chunks[1:]
+
+        for idx, body in enumerate(bodies):
             if idx > 0 and DISCORD_INTERCHUNK_DELAY_SEC > 0:
                 await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
-            body = chunk
-            if idx == 0:
-                note = (
-                    f"↩️ Cool-off ended after ~{age}s — delivering "
-                    f"{len(entries)} message(s) I had queued during the Discord "
-                    f"rate-limit pause:"
-                )
-                prefixed = f"{note}\n\n{chunk}"
-                if len(prefixed) <= DISCORD_MAX_LENGTH:
-                    body = prefixed
-                else:
-                    # First chunk is already near the 2000-char limit; prefixing
-                    # would overflow and raise a (non-429) HTTPException that
-                    # would re-queue forever. Send the note as its own short
-                    # message, then the bare chunk. The note send does NOT call
-                    # _register_discord_call_succeeded — only a CONTENT send
-                    # resets the 429 streak, preserving the loop fix (a notice
-                    # landing must never reset the backoff while payload fails).
-                    try:
-                        await channel.send(note)
-                    except (discord.RateLimited, discord.HTTPException) as exc:
-                        status = getattr(exc, "status", None)
-                        if status == 429 or isinstance(exc, discord.RateLimited):
-                            _register_discord_429("flush note 429")
-                        _dropped_deliveries.setdefault(cid, []).extend(entries[idx:])
-                        break
-                    if DISCORD_INTERCHUNK_DELAY_SEC > 0:
-                        await _flush_asyncio.sleep(DISCORD_INTERCHUNK_DELAY_SEC)
-                    body = chunk
             try:
                 await channel.send(body)
                 _register_discord_call_succeeded()
@@ -2217,9 +2211,11 @@ async def _flush_dropped_deliveries_once() -> int:
                 status = getattr(exc, "status", None)
                 if status == 429 or isinstance(exc, discord.RateLimited):
                     _register_discord_429("flush chunk 429")
-                # Re-queue remaining chunks (originals, sans note) for next pass.
+                # Re-queue the unsent bodies (note already baked into body[0], so
+                # a retry's first send still carries content). Preserve the oldest
+                # timestamp so age-out keeps counting from the original queue time.
                 _dropped_deliveries.setdefault(cid, []).extend(
-                    entries[idx:],
+                    (channel, b, oldest) for b in bodies[idx:]
                 )
                 break
     if delivered:
