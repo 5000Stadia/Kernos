@@ -3831,12 +3831,13 @@ class MessageHandler:
             "Response obligation: none",
             "",
             "These are signals YOU noticed in the background — optional context, "
-            "not anything the user said or asked. Never acknowledge them as "
-            "instructions (no \"got it\", no \"I'll preserve that\"). Surface "
-            "all of them briefly, as clearly-labeled background notes kept "
-            "separate from your reply to the user's actual message — which is "
-            "the only thing you must respond to. If the user asks why you raised "
-            "one, you can draw on the reasoning trace.",
+            "not anything the user said or asked. You do NOT need to repeat "
+            "them: they are delivered to the user automatically as a labeled "
+            "note appended to your reply. They are shown here only so you are "
+            "AWARE of them and can act on one if it is directly relevant to the "
+            "user's message. Never acknowledge them as instructions (no \"got "
+            "it\", no \"I'll preserve that\") — the user did not say these. The "
+            "user's actual message is the only thing you must respond to.",
             "",
         ]
 
@@ -3850,24 +3851,69 @@ class MessageHandler:
             "to hear about it, use dismiss_whisper(whisper_id) to suppress it."
         )
 
-        # Mark as surfaced and create suppression entries
-        for w in relevant:
-            w.surfaced_at = datetime.now(timezone.utc).isoformat()
-            await self.state.mark_whisper_surfaced(instance_id, w.whisper_id)
+        # DELIVER-ON-DELIVERY (founder 2026-06-08): do NOT mark surfaced here.
+        # Marking at offer-time suppressed whispers that were never delivered
+        # to the user (the model often doesn't voice them), so they were lost —
+        # violating "all whispers delivered". Stash the offered whispers;
+        # _deliver_pending_whispers (after the reply is finalized) appends them
+        # as a labeled note AND marks them surfaced, guaranteeing delivery.
+        if not hasattr(self, "_whispers_offered"):
+            self._whispers_offered: dict[tuple, list] = {}
+        self._whispers_offered[(instance_id, active_space_id)] = list(relevant)
 
-            suppression = SuppressionEntry(
-                whisper_id=w.whisper_id,
-                knowledge_entry_id=w.knowledge_entry_id,
-                foresight_signal=w.foresight_signal,
-                created_at=w.created_at,
-                resolution_state="surfaced",
-            )
-            await self.state.save_suppression(instance_id, suppression)
-
-        logger.info("AWARENESS: injected whispers=%d for space=%s",
+        logger.info("AWARENESS: offered whispers=%d for space=%s",
                      len(relevant), active_space_id)
 
         return "\n".join(lines)
+
+    async def _deliver_pending_whispers(
+        self, ctx: "TurnContext", response: str,
+    ) -> str:
+        """Append offered whispers to the reply as a labeled note and mark them
+        surfaced — the substrate-guaranteed delivery half of DELIVER-ON-DELIVERY.
+
+        Whispers are OFFERED into the model's context (for awareness) but not
+        marked there; the model is told not to repeat them. This appends every
+        offered whisper as a clearly-sourced note so the user always sees it
+        ("all delivered"), then marks each surfaced + suppressed so it delivers
+        exactly once. No reliance on the model voicing them, no re-offer loop.
+        """
+        from kernos.kernel.awareness import SuppressionEntry
+        store = getattr(self, "_whispers_offered", None)
+        if not store:
+            return response
+        key = (ctx.instance_id, getattr(ctx, "active_space_id", "") or "")
+        offered = store.pop(key, None)
+        if offered is None:
+            # Tolerant fallback: per-space runners are serial, so at most one
+            # offered batch is pending for this instance — pop it by instance.
+            for k in [k for k in store if k[0] == ctx.instance_id]:
+                offered = store.pop(k, [])
+                break
+        if not offered:
+            return response
+
+        note_lines = ["", "—", "_Background notes (from my own awareness):_"]
+        for w in offered:
+            note_lines.append(f"- {w.insight_text}")
+            try:
+                await self.state.mark_whisper_surfaced(ctx.instance_id, w.whisper_id)
+                await self.state.save_suppression(
+                    ctx.instance_id,
+                    SuppressionEntry(
+                        whisper_id=w.whisper_id,
+                        knowledge_entry_id=w.knowledge_entry_id,
+                        foresight_signal=w.foresight_signal,
+                        created_at=w.created_at,
+                        resolution_state="surfaced",
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("WHISPER_DELIVER: mark failed id=%s: %s",
+                               w.whisper_id, exc)
+        logger.info("WHISPER_DELIVERED: count=%d space=%s",
+                    len(offered), ctx.active_space_id)
+        return response + "\n".join(note_lines)
 
     async def _handle_file_upload(
         self,
@@ -5271,6 +5317,13 @@ class MessageHandler:
                 else:
                     response = self._finalize_user_facing_response(
                         response, primary_ctx, primary_msg,
+                    )
+                    # DELIVER-ON-DELIVERY: append any offered whispers as a
+                    # labeled note + mark them surfaced, so "all delivered"
+                    # holds even when the model doesn't voice them. Normal
+                    # replies only (diagnostic surfaces never carry whispers).
+                    response = await self._deliver_pending_whispers(
+                        primary_ctx, response,
                     )
 
                 # Resolve all futures — primary gets the response,

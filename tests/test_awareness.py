@@ -672,9 +672,11 @@ class TestHandlerWhisperInjection:
 
         handler = MagicMock()
         handler.state = state
-        # Bind the real method
+        handler._whispers_offered = {}  # real dict (MagicMock hasattr is always True)
+        # Bind the real methods
         from kernos.messages.handler import MessageHandler
         handler._get_pending_awareness = MessageHandler._get_pending_awareness.__get__(handler)
+        handler._deliver_pending_whispers = MessageHandler._deliver_pending_whispers.__get__(handler)
 
         return handler, state
 
@@ -701,26 +703,37 @@ class TestHandlerWhisperInjection:
         assert "Dentist appointment" in result
         assert "dismiss_whisper" in result
 
-    async def test_whispers_marked_surfaced_after_injection(self, tmp_path):
+    async def test_offer_does_not_suppress_until_delivered(self, tmp_path):
+        # DELIVER-ON-DELIVERY: offering a whisper into context must NOT mark it
+        # surfaced (that lost un-voiced whispers). It stays pending until the
+        # reply actually delivers it.
         handler, state = await self._make_handler_and_state(tmp_path)
-
         w = _make_whisper()
         await state.save_whisper("test_tenant", w)
 
-        await handler._get_pending_awareness("test_tenant", "space_daily")
-
-        # Whisper should now be surfaced
+        block = await handler._get_pending_awareness("test_tenant", "space_daily")
+        assert block  # offered into context
         pending = await state.get_pending_whispers("test_tenant")
-        assert len(pending) == 0
+        assert len(pending) == 1  # still pending — not yet delivered
+        assert len(await state.get_suppressions("test_tenant")) == 0
 
-    async def test_suppression_created_on_injection(self, tmp_path):
+    async def test_deliver_appends_note_and_marks_surfaced(self, tmp_path):
+        import types
         handler, state = await self._make_handler_and_state(tmp_path)
-
         w = _make_whisper()
         await state.save_whisper("test_tenant", w)
 
         await handler._get_pending_awareness("test_tenant", "space_daily")
+        ctx = types.SimpleNamespace(
+            instance_id="test_tenant", active_space_id="space_daily",
+        )
+        reply = await handler._deliver_pending_whispers(ctx, "Here is my answer.")
 
+        # The whisper is delivered as a labeled note appended to the reply...
+        assert "Background notes" in reply
+        assert "Dentist appointment" in reply
+        # ...and only NOW marked surfaced + suppressed (delivered exactly once).
+        assert len(await state.get_pending_whispers("test_tenant")) == 0
         suppressions = await state.get_suppressions("test_tenant")
         assert len(suppressions) == 1
         assert suppressions[0].resolution_state == "surfaced"
