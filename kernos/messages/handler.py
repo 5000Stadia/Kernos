@@ -8858,10 +8858,17 @@ class MessageHandler:
             if desc_path.exists():
                 async with aiofiles.open(desc_path, "r", encoding="utf-8") as f:
                     descriptor = json.loads(await f.read())
+                # Coerce the on-disk schema before handing it to the provider:
+                # a tool registered (or hand-edited) with a present-but-invalid
+                # input_schema (e.g. "none", or a dict without "type") would
+                # otherwise surface an invalid tool-parameters schema and break
+                # the next model request (Codex P2). _validate_input_schema
+                # returns a valid object schema for any input.
+                from kernos.kernel.tool_descriptor import _validate_input_schema
                 return {
                     "name": descriptor.get("name", tool_name),
                     "description": descriptor.get("description", ""),
-                    "input_schema": descriptor.get("input_schema", {"type": "object", "properties": {}}),
+                    "input_schema": _validate_input_schema(descriptor.get("input_schema")),
                 }
         except Exception as exc:
             logger.warning("WORKSPACE_SCHEMA_LOAD: failed for %s: %s", tool_name, exc)

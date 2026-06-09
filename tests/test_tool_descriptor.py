@@ -379,3 +379,16 @@ def test_object_shaped_implementation_with_no_py_rejects():
     raw["implementation"] = {"language": "python", "code": "def execute(x): ..."}
     with pytest.raises(ToolDescriptorError):
         parse_tool_descriptor(raw)
+
+
+def test_validate_input_schema_coerces_any_garbage():
+    # The workspace schema loader relies on this returning a valid object schema
+    # for ANY on-disk value (present-but-invalid included), so a bad descriptor
+    # can't surface a broken tool-parameters schema to the provider (Codex P2).
+    from kernos.kernel.tool_descriptor import _validate_input_schema
+    assert _validate_input_schema(None) == {"type": "object"}
+    assert _validate_input_schema("none") == {"type": "object"}
+    assert _validate_input_schema(["x"]) == {"type": "object"}
+    coerced = _validate_input_schema({"properties": {"a": {"type": "string"}}})
+    assert coerced["type"] == "object" and "properties" in coerced
+    assert _validate_input_schema({"type": "string"}) == {"type": "string"}
