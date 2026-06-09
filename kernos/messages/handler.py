@@ -2908,10 +2908,15 @@ class MessageHandler:
             await self.state.save_soul(soul, source="soul_init", trigger="new_instance")
             logger.info("Initialized new soul for instance: %s", instance_id)
 
-        # Timezone discovery: infer from system local if not yet set
+        # Timezone discovery: infer from system local if not yet set.
+        # NOTE: str(datetime.now().astimezone().tzinfo) only yields an
+        # abbreviation like "PDT", which never passes the IANA "/" check — so
+        # discovery silently failed forever and soul.timezone stayed empty.
+        # resolve_system_iana_tz() reads the real zone from the OS.
         if not soul.timezone:
             try:
-                _sys_tz = str(datetime.now().astimezone().tzinfo)
+                from kernos.utils import resolve_system_iana_tz
+                _sys_tz = resolve_system_iana_tz()
                 if _sys_tz and "/" in _sys_tz:  # IANA format check
                     soul.timezone = _sys_tz
                     await self.state.save_soul(

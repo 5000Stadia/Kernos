@@ -7,6 +7,40 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def resolve_system_iana_tz() -> str:
+    """Best-effort IANA name for the host's local timezone (e.g.
+    "America/Los_Angeles"), or "" if it can't be determined.
+
+    ``str(datetime.now().astimezone().tzinfo)`` only yields an abbreviation
+    like "PDT", which ZoneInfo rejects and IANA-format checks discard — so
+    timezone discovery silently failed. Resolve the real zone from the OS:
+    the TZ env var, /etc/timezone (Debian/Ubuntu), then the /etc/localtime
+    symlink target. Only returns IANA-shaped values (contain "/").
+    """
+    import os
+
+    tz = os.environ.get("TZ", "").strip()
+    if "/" in tz:
+        return tz
+
+    try:
+        with open("/etc/timezone", "r", encoding="utf-8") as f:
+            tz = f.read().strip()
+        if "/" in tz:
+            return tz
+    except OSError:
+        pass
+
+    try:
+        link = os.readlink("/etc/localtime")
+        if "zoneinfo/" in link:
+            return link.split("zoneinfo/", 1)[1]
+    except OSError:
+        pass
+
+    return ""
+
+
 def utc_now_dt() -> datetime:
     """UTC datetime object for arithmetic."""
     return datetime.now(timezone.utc)

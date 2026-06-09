@@ -131,3 +131,26 @@ class TestNoNowIsoRemains:
                     with open(path) as f:
                         content = f.read()
                     assert "def _now_iso(" not in content, f"_now_iso still defined in {path}"
+
+
+class TestResolveSystemIanaTz:
+    def test_tz_env_var_iana_wins(self, monkeypatch):
+        from kernos.utils import resolve_system_iana_tz
+        monkeypatch.setenv("TZ", "America/New_York")
+        assert resolve_system_iana_tz() == "America/New_York"
+
+    def test_bare_abbreviation_in_tz_is_ignored(self, monkeypatch):
+        # A non-IANA TZ like "PDT" must NOT be returned (it falls through to the
+        # OS files). Whatever comes back must be IANA-shaped or empty — never the
+        # abbreviation that broke discovery in the first place.
+        from kernos.utils import resolve_system_iana_tz
+        monkeypatch.setenv("TZ", "PDT")
+        result = resolve_system_iana_tz()
+        assert result != "PDT"
+        assert result == "" or "/" in result
+
+    def test_returns_iana_or_empty(self, monkeypatch):
+        from kernos.utils import resolve_system_iana_tz
+        monkeypatch.delenv("TZ", raising=False)
+        result = resolve_system_iana_tz()
+        assert result == "" or "/" in result
