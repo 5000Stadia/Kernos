@@ -44,6 +44,27 @@ SUPPORTED_CONSULT_HARNESSES: tuple[str, ...] = (
     "claude_code", "codex", "gemini",
 )
 
+# Forgiving harness resolution (v1 self-test Test 16): the model reaches for
+# near-miss names and sometimes parks the prompt in `harness`. Map common
+# aliases to the canonical enum; an unrecognized harness with a real question
+# falls back to the default rather than hard-rejecting the whole consult.
+_DEFAULT_CONSULT_HARNESS = "codex"
+_CONSULT_HARNESS_ALIASES: dict[str, str] = {
+    "claude": "claude_code", "claude-code": "claude_code", "claudecode": "claude_code",
+    "cc": "claude_code", "anthropic": "claude_code",
+    "openai": "codex", "gpt": "codex", "gpt-5": "codex", "gpt5": "codex",
+    "chatgpt": "codex", "oai": "codex", "cdx": "codex",
+    "google": "gemini", "bard": "gemini", "gemini-pro": "gemini",
+}
+
+
+def _canonical_harness(value: str) -> str:
+    """Resolve a harness name to its canonical enum value, or "" if unknown."""
+    v = (value or "").strip().lower()
+    if v in SUPPORTED_CONSULT_HARNESSES:
+        return v
+    return _CONSULT_HARNESS_ALIASES.get(v, "")
+
 
 CONSULT_TOOL = {
     "name": "consult",
@@ -221,6 +242,25 @@ def validate_consult_input(
         }
     if not _question:
         _question = _prompt
+
+    # --- Forgiving harness recovery (v1 self-test Test 16) ----------------
+    # Two recoveries, both requiring CLEAR signal (a genuinely empty / short
+    # typo'd harness still surfaces the clean error below — that's intentional):
+    #   1. near-miss names (claude→claude_code, gpt→codex, CODEX→codex, …)
+    #   2. the model parked the PROMPT in `harness` (long text / has spaces) —
+    #      recover it as the question (swap when the name is in `question`,
+    #      else default the harness).
+    _canon = _canonical_harness(_harness)
+    if not _canon and _harness:
+        _looks_like_prompt = len(_harness) > 40 or " " in _harness
+        _swapped = _canonical_harness(_question)
+        if _looks_like_prompt and _swapped:
+            _question, _canon = _harness, _swapped          # fields swapped
+        elif _looks_like_prompt and not _question:
+            _question, _canon = _harness, _DEFAULT_CONSULT_HARNESS  # prompt-in-harness
+        # else: short unrecognized harness → leave _canon empty → clean error
+    if _canon:
+        _harness = _canon
 
     if not _harness:
         return {

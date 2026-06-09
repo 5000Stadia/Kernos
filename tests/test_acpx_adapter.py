@@ -406,31 +406,43 @@ class TestValidateConsultInput:
         assert result == ("codex", "What is 2+2?")
 
     def test_empty_harness_returns_error(self):
-        from kernos.kernel.external_agents.tool import (
-            validate_consult_input,
-        )
+        # A genuinely empty harness still surfaces the clean error (no blind
+        # default) — only a clear prompt-in-harness or alias is recovered.
+        from kernos.kernel.external_agents.tool import validate_consult_input
         result = validate_consult_input({"harness": "", "question": "x"})
-        assert isinstance(result, dict)
-        assert result["error"] == "InvalidConsultCall"
-        assert "harness" in result["message"]
+        assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
 
     def test_missing_harness_returns_error(self):
-        from kernos.kernel.external_agents.tool import (
-            validate_consult_input,
-        )
+        from kernos.kernel.external_agents.tool import validate_consult_input
         result = validate_consult_input({"question": "x"})
-        assert isinstance(result, dict)
-        assert result["error"] == "InvalidConsultCall"
+        assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
 
-    def test_invalid_harness_value_returns_error(self):
-        from kernos.kernel.external_agents.tool import (
-            validate_consult_input,
-        )
-        result = validate_consult_input(
-            {"harness": "cc", "question": "x"},
-        )
-        assert isinstance(result, dict)
-        assert "cc" in result["message"]
+    def test_short_unrecognized_harness_still_errors(self):
+        # A short typo'd harness ("xyz") is NOT a prompt and NOT an alias →
+        # clean error, not a silent default.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        result = validate_consult_input({"harness": "xyz", "question": "x"})
+        assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
+
+    def test_near_miss_harness_aliases_map_to_canonical(self):
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        assert validate_consult_input({"harness": "cc", "question": "x"}) == ("claude_code", "x")
+        assert validate_consult_input({"harness": "claude", "question": "x"}) == ("claude_code", "x")
+        assert validate_consult_input({"harness": "gpt", "question": "x"}) == ("codex", "x")
+        assert validate_consult_input({"harness": "CODEX", "question": "x"}) == ("codex", "x")
+
+    def test_prompt_in_harness_no_question_recovered(self):
+        # The exact Test 16 fumble: the prompt was passed as `harness`, no
+        # valid harness anywhere → use the text as the question, default codex.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        prompt = "Summarize the intent of daily mode in self_update.py"
+        assert validate_consult_input({"harness": prompt}) == ("codex", prompt)
+
+    def test_swapped_harness_and_question_recovered(self):
+        # harness holds the prompt, question holds the harness name → unswap.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        prompt = "Explain the dispatch gate in two sentences."
+        assert validate_consult_input({"harness": prompt, "question": "codex"}) == ("codex", prompt)
 
     def test_empty_question_returns_error(self):
         from kernos.kernel.external_agents.tool import (
