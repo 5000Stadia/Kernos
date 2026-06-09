@@ -1,9 +1,25 @@
 # TOOL-ARG-REPAIR-V1
 
-**Date:** 2026-06-09 (v2 — folded Codex spec-review r1)
-**Status:** 🟡 YELLOW→folding — author + Codex deep-dive (session
-  `019ead1e`) + Codex spec-review r1 (session `019ead8f`, YELLOW, 4 BLOCKING).
-  v2 folds all four blocking issues into spec text; awaiting r2 confirm-GREEN.
+**Date:** 2026-06-09 (v2 — Codex r2 GREEN)
+**Status:** ✅ GREEN (Codex spec-review r2, session `019ead99`) —
+  implementation-ready. r1 YELLOW (4 BLOCKING) → v2 folds → r2 GREEN, no residual
+  blockers. Deep-dive `019ead1e`; r1 `019ead8f`. Non-blocking implementer notes
+  pinned below.
+
+## Implementation notes (Codex r2 GREEN — non-blocking, pinned)
+
+1. **Phase 3: actually RENDER `input_schema` in the planner prompt.** Resolving
+   schemas into the catalog isn't enough — `_build_planner_user_message`
+   currently prints only id/class/operation/description; it must also render the
+   schema (or a compact arg summary) for the model to benefit.
+2. **Preserve direct `classify_tool_effect` alias behavior for non-dispatch
+   callers.** Some callers invoke the gate's name-canonicalization outside the
+   four dispatch ingress points; folding name-repair into `repair_tool_call()`
+   must not regress those direct callers — keep the alias path working for them.
+3. **Give `ToolError` a plain-text fallback for legacy direct `execute_tool`
+   consumers.** Callers that consume the tool's return as a string must still get
+   a sensible message (e.g. `str(ToolError)` → its `message`), so the typed
+   result degrades gracefully on the non-live paths.
 **Origin:** Live v1 self-test kept failing Tests 6/7/16 across reruns with a
   DIFFERENT malformed tool-arg shape each run, despite a long arc of
   forgiving-dispatch patches. Root-cause confer with Codex (2026-06-09)
