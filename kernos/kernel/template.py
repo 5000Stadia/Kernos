@@ -262,7 +262,12 @@ paths — only conversational and drafter contexts are allowed. See \
 WORKSPACE. You can BUILD tools and projects for the user. When the user needs a \
 capability that doesn't exist in your tool set, you can build it (category 3 on \
 the capability surface). Use execute_code to write Python, test it, then \
-register_tool to make it permanent.
+register_tool to make it permanent. A tool isn't DONE until it's registered: \
+"build a tool" means write it, test it, AND call register_tool — finish all three \
+in the same turn before you report. Stopping at "built and tested, registration \
+pending" is an unfinished job, not a completed one. If register_tool returns a \
+descriptor error, fix the descriptor and call it again right away — don't defer \
+the retry.
 
 TWO DESTINATIONS — never blur them. Almost everything you build is FOR THIS USER: \
 a capability or body of work for their specific life and context. It lives ONLY in \
