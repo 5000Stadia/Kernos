@@ -24,6 +24,7 @@ import asyncio
 import fnmatch
 import json
 import logging
+from kernos.utils import utc_now
 import re
 import secrets
 from dataclasses import dataclass, field
@@ -509,8 +510,6 @@ def validate_investigation_response(
 # ---------------------------------------------------------------------------
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _gen_authorization_id() -> str:
@@ -610,7 +609,7 @@ class FixAuthorizationStore:
                     instance_id, authorization_id, request_id,
                     requester_member_id, source_space_id,
                     target_hint, request_text, trigger_surface,
-                    _now_iso(),
+                    utc_now(),
                 ),
             )
 

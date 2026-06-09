@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from kernos.utils import utc_now
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -222,8 +223,6 @@ CREATE INDEX IF NOT EXISTS idx_closure_attempt_pattern
 # ---------------------------------------------------------------------------
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _gen_closure_id() -> str:
@@ -301,7 +300,7 @@ class ClosureStore:
                 f"invalid invariant status {status!r}; "
                 f"must be one of {sorted(VALID_INVARIANT_STATUSES)}"
             )
-        now = _now_iso()
+        now = utc_now()
         async with self._write_lock:
             await self._db.execute(
                 """
@@ -338,7 +337,7 @@ class ClosureStore:
                 status=status,
             )
             return True
-        now = _now_iso()
+        now = utc_now()
         async with self._write_lock:
             await self._db.execute(
                 """
@@ -377,7 +376,7 @@ class ClosureStore:
         """Link a friction pattern to an invariant. FK-enforced —
         raises IntegrityError if either side doesn't exist."""
         assert self._db is not None, "ClosureStore not started"
-        now = _now_iso()
+        now = utc_now()
         async with self._write_lock:
             await self._db.execute(
                 """
@@ -446,7 +445,7 @@ class ClosureStore:
     ) -> None:
         """Insert a new ClosureAttempt row with outcome='pending'."""
         assert self._db is not None, "ClosureStore not started"
-        now = _now_iso()
+        now = utc_now()
         async with self._write_lock:
             await self._db.execute(
                 """
@@ -524,7 +523,7 @@ class ClosureStore:
                 f"update_closure_outcome requires terminal outcome; "
                 f"got {outcome!r}"
             )
-        now = _now_iso()
+        now = utc_now()
         async with self._write_lock:
             await self._db.execute(
                 """

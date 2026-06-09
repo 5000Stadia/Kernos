@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+from kernos.utils import utc_now
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -78,8 +79,6 @@ _INDEX_DDL = [
 ]
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _instance_db_path(data_dir: str | Path) -> Path:
@@ -137,7 +136,7 @@ async def request_approval(
             "together — the engine's gate binding check requires both"
         )
     approval_id = uuid.uuid4().hex
-    requested_at = _now_iso()
+    requested_at = utc_now()
     expires_at = (
         datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
     ).isoformat()
@@ -421,7 +420,7 @@ async def _emit_decision_with_flush_and_marker(
         "gate_nonce": receipt.get("gate_nonce"),
         "kind": receipt["kind"],
         "operator_actor_id": receipt["operator_actor_id"],
-        "decided_at": receipt.get("decided_at") or _now_iso(),
+        "decided_at": receipt.get("decided_at") or utc_now(),
         "reason": reason or "",
     }
     if event_stream is None:
@@ -491,7 +490,7 @@ async def _mark_decision_emitted(
         await db.execute(
             "UPDATE approval_receipts SET decision_emitted_at = ? "
             "WHERE approval_id = ?",
-            (_now_iso(), approval_id),
+            (utc_now(), approval_id),
         )
         await db.commit()
 
@@ -523,8 +522,8 @@ async def approve(
     if receipt["state"] != "pending":
         return (False, f"Approval {approval_id} is {receipt['state']}, not pending.")
 
-    decided_at = _now_iso()
-    now_iso = _now_iso()
+    decided_at = utc_now()
+    now_iso = utc_now()
     async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
         cur = await db.execute(
             "UPDATE approval_receipts SET state='approved', decided_at=? "
@@ -572,8 +571,8 @@ async def reject(
     if receipt["state"] != "pending":
         return (False, f"Approval {approval_id} is {receipt['state']}, not pending.")
 
-    decided_at = _now_iso()
-    now_iso = _now_iso()
+    decided_at = utc_now()
+    now_iso = utc_now()
     async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
         cur = await db.execute(
             "UPDATE approval_receipts SET state='rejected', decided_at=?, "
@@ -616,7 +615,7 @@ async def consume_approval(
     If ``outcome_payload`` is supplied, write it to
     ``outcome_payload_json`` in the same UPDATE.
     """
-    now_iso = _now_iso()
+    now_iso = utc_now()
     outcome_json = (
         json.dumps(outcome_payload, separators=(",", ":"))
         if outcome_payload is not None else None
@@ -649,7 +648,7 @@ async def expire_pass(
     """Background sweep: any pending receipts with expires_at <= now()
     transition to expired. Same emit + flush + mark discipline as
     /approve and /reject. Returns the number of receipts expired."""
-    now_iso = _now_iso()
+    now_iso = utc_now()
     async with aiosqlite.connect(str(_instance_db_path(data_dir))) as db:
         db.row_factory = aiosqlite.Row
         # Find all pending+expired rows first so we can emit per-row events

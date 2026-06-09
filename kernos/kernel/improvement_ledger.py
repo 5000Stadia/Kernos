@@ -18,6 +18,7 @@ operator-observer.
 from __future__ import annotations
 
 import logging
+from kernos.utils import utc_now
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,8 +27,6 @@ import aiosqlite
 logger = logging.getLogger(__name__)
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 # ---------------------------------------------------------------------
@@ -48,7 +47,7 @@ async def create_attempt(
 ) -> None:
     """Insert a new attempt row. Defaults: iterations=0,
     state=null (set on completion)."""
-    started_at = started_at or _now_iso()
+    started_at = started_at or utc_now()
     await conn.execute(
         "INSERT INTO improvement_attempts ("
         "  attempt_id, instance_id, started_at, spec_requirement, "
@@ -135,7 +134,7 @@ async def append_event(
     """Append an event. Sequence is computed atomically inside a
     transaction so concurrent writers don't collide. Returns the
     assigned sequence."""
-    timestamp = timestamp or _now_iso()
+    timestamp = timestamp or utc_now()
     async with conn.execute(
         "SELECT COALESCE(MAX(sequence), 0) + 1 "
         "FROM improvement_attempt_events WHERE attempt_id=?",
@@ -181,7 +180,7 @@ async def record_commit(
 ) -> int:
     """Insert a commit row + bump `improvement_attempts.final_commit_sha`
     to the latest. Returns the assigned commit_sequence."""
-    pushed_at = pushed_at or _now_iso()
+    pushed_at = pushed_at or utc_now()
     async with conn.execute(
         "SELECT COALESCE(MAX(commit_sequence), 0) + 1 "
         "FROM improvement_attempt_commits WHERE attempt_id=?",
