@@ -484,14 +484,44 @@ def _validate_description(value: Any) -> str:
 
 
 def _validate_input_schema(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or "type" not in value:
-        raise ToolDescriptorError(
-            "input_schema must be a JSON Schema object with a 'type' field"
-        )
-    return dict(value)
+    # Forgiving: models routinely omit input_schema or send a dict without a
+    # top-level "type". A tool that takes no params is perfectly valid — default
+    # to a permissive object schema rather than failing the whole registration
+    # over a missing field (v1 self-test Test 7: agent-built tools bounced here).
+    if isinstance(value, dict) and "type" in value:
+        return dict(value)
+    if isinstance(value, dict):
+        coerced = {"type": "object"}
+        coerced.update(value)  # preserve any properties/required the model did send
+        return coerced
+    return {"type": "object"}
+
+
+def _extract_impl_filename_from_dict(d: dict[str, Any]) -> str:
+    """Pull a *.py filename out of an object-shaped implementation field.
+
+    The model sometimes wraps the implementation as
+    ``{"file": "tool.py", "language": "python"}`` instead of a bare string.
+    Prefer common filename keys, then any string value ending in .py. The
+    extracted value still goes through the strict checks in
+    ``_validate_implementation`` (so path traversal / non-.py are rejected).
+    """
+    for key in ("file", "filename", "path", "module", "name", "entrypoint", "entry"):
+        v = d.get(key)
+        if isinstance(v, str) and v.strip().endswith(".py"):
+            return v.strip()
+    for v in d.values():
+        if isinstance(v, str) and v.strip().endswith(".py"):
+            return v.strip()
+    return ""
 
 
 def _validate_implementation(value: Any) -> str:
+    # Forgiving: accept an object-shaped implementation by extracting the .py
+    # filename from it, then apply the SAME strict checks below (a dict carrying
+    # "../escape.py" or a non-.py name is still rejected).
+    if isinstance(value, dict):
+        value = _extract_impl_filename_from_dict(value)
     if not isinstance(value, str) or not value.strip():
         raise ToolDescriptorError(
             "implementation must be a string filename (e.g. \"my_tool.py\")"

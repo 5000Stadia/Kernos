@@ -332,3 +332,50 @@ def test_audit_category_explicit_preserved():
     raw["audit_category"] = "billing.invoices"
     desc = parse_tool_descriptor(raw)
     assert desc.audit_category == "billing.invoices"
+
+
+# v1 self-test Test 7: forgiving descriptor coercion for agent-built tools.
+
+def test_missing_input_schema_defaults_to_object():
+    raw = _valid_minimal()
+    del raw["input_schema"]
+    desc = parse_tool_descriptor(raw)
+    assert desc.input_schema == {"type": "object"}
+
+
+def test_input_schema_without_type_is_coerced():
+    raw = _valid_minimal()
+    raw["input_schema"] = {"properties": {"x": {"type": "string"}}}
+    desc = parse_tool_descriptor(raw)
+    assert desc.input_schema["type"] == "object"
+    assert "properties" in desc.input_schema
+
+
+def test_object_shaped_implementation_extracts_filename():
+    raw = _valid_minimal()
+    raw["implementation"] = {"file": "coin_flip_tool.py", "language": "python"}
+    desc = parse_tool_descriptor(raw)
+    assert desc.implementation == "coin_flip_tool.py"
+
+
+def test_object_shaped_implementation_any_py_value():
+    raw = _valid_minimal()
+    raw["implementation"] = {"entrypoint": "execute", "module": "my_tool.py"}
+    desc = parse_tool_descriptor(raw)
+    assert desc.implementation == "my_tool.py"
+
+
+def test_object_shaped_implementation_still_rejects_traversal():
+    import pytest
+    raw = _valid_minimal()
+    raw["implementation"] = {"file": "../escape.py"}
+    with pytest.raises(ToolDescriptorError):
+        parse_tool_descriptor(raw)
+
+
+def test_object_shaped_implementation_with_no_py_rejects():
+    import pytest
+    raw = _valid_minimal()
+    raw["implementation"] = {"language": "python", "code": "def execute(x): ..."}
+    with pytest.raises(ToolDescriptorError):
+        parse_tool_descriptor(raw)
