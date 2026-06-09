@@ -16,6 +16,7 @@ instance via the ``data_dir`` it was constructed with.
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import os
 from pathlib import Path
@@ -58,12 +59,30 @@ _CONSULT_HARNESS_ALIASES: dict[str, str] = {
 }
 
 
+# Squashed lookup (separators removed) so spaced/hyphenated near-misses like
+# "claude code", "gpt 5", "gemini-pro" resolve to a real harness instead of being
+# mistaken for a prompt.
+_HARNESS_SQUASHED: dict[str, str] = {
+    re.sub(r"[\s\-_]+", "", k): v
+    for k, v in {
+        **{h: h for h in SUPPORTED_CONSULT_HARNESSES},
+        **_CONSULT_HARNESS_ALIASES,
+    }.items()
+}
+
+
 def _canonical_harness(value: str) -> str:
-    """Resolve a harness name to its canonical enum value, or "" if unknown."""
+    """Resolve a harness name to its canonical enum value, or "" if unknown.
+
+    Tolerates separators (space/hyphen/underscore) so "claude code", "gpt 5",
+    "gemini-pro" all map before the prompt-in-harness recovery can misfire.
+    """
     v = (value or "").strip().lower()
     if v in SUPPORTED_CONSULT_HARNESSES:
         return v
-    return _CONSULT_HARNESS_ALIASES.get(v, "")
+    if v in _CONSULT_HARNESS_ALIASES:
+        return _CONSULT_HARNESS_ALIASES[v]
+    return _HARNESS_SQUASHED.get(re.sub(r"[\s\-_]+", "", v), "")
 
 
 CONSULT_TOOL = {

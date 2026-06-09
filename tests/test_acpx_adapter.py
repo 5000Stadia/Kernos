@@ -928,3 +928,16 @@ class TestReadLinesUnbounded:
         reader.feed_eof()
         lines = [line async for line in _read_lines_unbounded(reader)]
         assert lines == [small, giant, small, small]
+
+    def test_spaced_harness_names_map_not_treated_as_prompt(self):
+        # Codex P2: "claude code"/"gpt 5"/"gemini pro" have a space but ARE
+        # harness names — squash separators and map them, don't spend a consult
+        # on the text as a prompt.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        assert validate_consult_input({"harness": "claude code", "question": "x"}) == ("claude_code", "x")
+        assert validate_consult_input({"harness": "gpt 5", "question": "x"}) == ("codex", "x")
+        assert validate_consult_input({"harness": "gemini-pro", "question": "x"}) == ("gemini", "x")
+        # ...and with no question they still resolve the harness, then surface the
+        # clean missing-question error (not a junk prompt).
+        r = validate_consult_input({"harness": "claude code"})
+        assert isinstance(r, dict) and "question" in r["message"]
