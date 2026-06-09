@@ -1660,11 +1660,20 @@ async def _dispatch_once(
                 for msg, count in err_counter.most_common()
             ]
             stdout_err_text = " | ".join(err_parts)[:500]
+        # Surface the TAIL of what the agent produced before it died. When the
+        # CLI exits rc!=0 with empty stderr AND no JSON-RPC error envelope
+        # (live-observed: codex rc=1, "Accumulated 287 chars", stderr empty), the
+        # only clue to WHY is the partial output — discarding it left the failure
+        # blind. Capped + repr'd so it stays one readable line in logs/receipts.
+        output_tail = ""
+        if response_text.strip():
+            output_tail = f" | last_output_tail: ...{response_text.strip()[-240:]!r}"
         failure_message = (
             f"ACPX dispatch to {target!r} exited rc={proc.returncode}. "
             f"Accumulated {len(response_text)} chars before failure. "
             f"stderr: {stderr_text} | "
             f"stdout_errors: {stdout_err_text or '(none)'}"
+            f"{output_tail}"
         )
         if _stdout_errors_are_transient(stdout_errors):
             raise _TransientAcpxFailure(
