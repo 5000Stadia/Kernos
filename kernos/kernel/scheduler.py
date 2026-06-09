@@ -571,18 +571,23 @@ async def _extract_schedule_params(
                     # rejects). Without a working fallback the time stays naive and
                     # get_due misreads it as UTC → the reminder fires instantly
                     # (live-observed 2026-06-08: stored 17:01 'local' read as 17:01
-                    # UTC, ~7h in the past). A fixed-offset system tzinfo still
-                    # converts correctly.
-                    tzinfo = None
+                    # UTC, ~7h in the past).
+                    zone = None
                     if user_timezone:
                         try:
                             from zoneinfo import ZoneInfo
-                            tzinfo = ZoneInfo(user_timezone)
+                            zone = ZoneInfo(user_timezone)
                         except Exception:
-                            tzinfo = None
-                    if tzinfo is None:
-                        tzinfo = datetime.now().astimezone().tzinfo  # server local
-                    when_dt = when_dt.replace(tzinfo=tzinfo)
+                            zone = None
+                    if zone is not None:
+                        # ZoneInfo applies the correct DST offset for the target date.
+                        when_dt = when_dt.replace(tzinfo=zone)
+                    else:
+                        # System local, DST-aware for the TARGET date: astimezone()
+                        # on a naive datetime treats it as local and uses that date's
+                        # offset (a fixed current-offset tzinfo would mis-convert a
+                        # reminder scheduled across a DST boundary — Codex P2).
+                        when_dt = when_dt.astimezone()
                 parsed["when"] = when_dt.astimezone(timezone.utc).isoformat()
             except ValueError:
                 if not is_event:
