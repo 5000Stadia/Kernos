@@ -488,11 +488,15 @@ def _validate_input_schema(value: Any) -> dict[str, Any]:
     # top-level "type". A tool that takes no params is perfectly valid — default
     # to a permissive object schema rather than failing the whole registration
     # over a missing field (v1 self-test Test 7: agent-built tools bounced here).
-    if isinstance(value, dict) and "type" in value:
-        return dict(value)
     if isinstance(value, dict):
-        coerced = {"type": "object"}
-        coerced.update(value)  # preserve any properties/required the model did send
+        if value.get("type") == "object":
+            return dict(value)
+        # A tool's parameter schema is ALWAYS an object wrapper. Coerce a missing
+        # OR non-object top-level type (e.g. {"type": "string"}) to object,
+        # preserving any properties/required — otherwise the provider gets an
+        # invalid tool-parameters schema and the next model request fails.
+        coerced = dict(value)
+        coerced["type"] = "object"
         return coerced
     return {"type": "object"}
 

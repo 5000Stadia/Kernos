@@ -391,4 +391,4 @@ def test_validate_input_schema_coerces_any_garbage():
     assert _validate_input_schema(["x"]) == {"type": "object"}
     coerced = _validate_input_schema({"properties": {"a": {"type": "string"}}})
     assert coerced["type"] == "object" and "properties" in coerced
-    assert _validate_input_schema({"type": "string"}) == {"type": "string"}
+    assert _validate_input_schema({"type": "string"}) == {"type": "object"}  # tool params are always object
