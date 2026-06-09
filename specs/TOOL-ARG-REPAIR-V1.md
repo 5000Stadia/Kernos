@@ -1,8 +1,9 @@
 # TOOL-ARG-REPAIR-V1
 
-**Date:** 2026-06-09 (v1 draft — pre-Codex-review)
-**Status:** 🟡 DRAFT — author + Codex deep-dive done (session
-  `019ead1e-90d0-7a21-bc5d-703c7e41d565`); not yet Codex-spec-reviewed.
+**Date:** 2026-06-09 (v2 — folded Codex spec-review r1)
+**Status:** 🟡 YELLOW→folding — author + Codex deep-dive (session
+  `019ead1e`) + Codex spec-review r1 (session `019ead8f`, YELLOW, 4 BLOCKING).
+  v2 folds all four blocking issues into spec text; awaiting r2 confirm-GREEN.
 **Origin:** Live v1 self-test kept failing Tests 6/7/16 across reruns with a
   DIFFERENT malformed tool-arg shape each run, despite a long arc of
   forgiving-dispatch patches. Root-cause confer with Codex (2026-06-09)
@@ -22,13 +23,15 @@ forgiving-dispatch patch fixed one observed shape; the next live run produced a
 new one. The failures are not three missing cases — they are four structural
 gaps:
 
-1. **Arg-repair is explicitly out of scope.** `kernos/kernel/tool_aliases.py`
+1. **No CENTRAL arg-repair; only ad-hoc per-tool repair.** `tool_aliases.py`
    (~line 21): *"V1 only repairs the tool NAME. Argument-shape repair is out of
-   scope."* Tool NAMES get one central repair (`tool.alias_repaired`); tool ARGS
-   are repaired ad-hoc inside each tool with hand-enumerated field-name lists
-   (`_SCHEDULE_TIME_FIELDS` in `scheduler.py`; the harness logic in
-   `external_agents/tool.py`). Enumeration can't keep up — e.g. the model sent
-   the reminder time in a `due_at` field that no list named.
+   scope."* Tool NAMES get one central repair (`tool.alias_repaired`). Arg repair
+   is NOT absent — each tool has its own ad-hoc repair (the
+   `_SCHEDULE_TIME_FIELDS` fold in `scheduler.py`; the harness recovery in
+   `external_agents/tool.py`; the descriptor coercion in `tool_descriptor.py`) —
+   but it's hand-enumerated **field-name allow-lists**, duplicated per tool, with
+   no shared seam. Enumeration can't keep up: the model put the reminder time in a
+   `due_at` field no list named.
 
 2. **Schemas don't bind the model.** The Codex provider sends every tool with
    `strict: null` (`kernos/providers/codex_provider.py` ~line 149, load-bearing
@@ -41,14 +44,22 @@ gaps:
    exactly the path the self-test uses, the model has zero arg-shape guidance →
    maximal fumbling.
 
-4. **Returned error strings are recorded as success.** `LiveExecutor`
-   (`live_wiring.py` ~line 459): a tool that RAISES → `is_error=True`, but a tool
-   that RETURNS an error string — how every forgiving-dispatch tool surfaces
-   failure ("I couldn't determine when", "InvalidConsultCall", "missing
-   implementation") — is wrapped `is_error=False`, `corrective_signal=""`. So
-   **semantic failures are invisible to the orchestration layer**: the plan
-   marks the step complete and advances, nothing retries. This is why patches
-   never compound into reliability and why the agent "didn't retry" register_tool.
+4. **Returned semantic failures are recorded as success.** A tool that RAISES →
+   `is_error=True`, but a tool that RETURNS its failure (rather than raising) is
+   wrapped `is_error=False`, `corrective_signal=""`. This happens in BOTH live
+   dispatch boundaries — `LiveExecutor` (`live_wiring.py` ~459) and
+   `LiveIntegrationDispatcher` (~676/684, which also emits
+   `tool.result is_error=False`). Failures are surfaced in mixed shapes — bare
+   error strings ("I couldn't determine when", "missing implementation"), **JSON
+   strings** (consult returns `json.dumps(InvalidConsultCall...)` at
+   `reasoning.py:1152`), and `{"ok": False, "error": ...}` dicts — and ALL are
+   treated as success. JSON-string errors are especially invisible. So **semantic
+   failures are invisible to the orchestration layer**: the plan marks the step
+   complete and advances, nothing retries. This is why patches never compound
+   into reliability and why the agent "didn't retry" register_tool. (A naive
+   `dict-has-"error"` detector is therefore wrong on two counts: it misses the
+   JSON-string failures, and it would mis-flag legitimately-successful outputs
+   that happen to carry an `error` key — see §2.3.)
 
 ### The three live shapes this must make robust (regression corpus)
 
@@ -83,14 +94,21 @@ normalize_tool_call(tool_name, args, ctx) ->
   `tool.alias_repaired`, so operators can audit new repairs and we can measure
   how often each fires (telemetry feeds future schema-tightening).
 
-**Ingress coverage.** Name-repair is currently copy-pasted across multiple
-dispatch paths (`ReasoningService.execute_tool`, `LiveExecutor`,
-`LiveIntegrationDispatcher`, the plan `StepDispatcher`). To avoid the same smell,
-`normalize_tool_call` MUST be invoked at the same single choke point as name
-canonicalization. **Open implementation question for Codex:** is there one shared
-helper both repairs can live in, or do the four paths need the call added
-individually? Prefer unifying name + arg repair into one `repair_tool_call()`
-entry the four paths already (or should) call.
+**Ingress coverage (RESOLVED — Codex r1).** There is NO single choke point
+today: name-repair is independently duplicated in `ReasoningService.execute_tool`
+(`reasoning.py:1055`), `DispatchGate.classify_tool_effect` (`gate.py:364`), and
+`StepDispatcher.dispatch` (`dispatcher.py:350`); the live paths classify before
+executing (`live_wiring.py:360`, `:525`). Therefore: create ONE shared
+`repair_tool_call(tool_name, args, ctx)` helper that does name-canonicalization
++ arg-normalization together, and CALL it at each ingress before classification /
+descriptor lookup / operation resolution:
+- `LiveExecutor.execute` (before gate classification),
+- `LiveIntegrationDispatcher.__call__` (before classification),
+- `StepDispatcher.dispatch` (before descriptor lookup / operation resolution),
+- `ReasoningService.execute_tool` (the direct-call fallback path).
+Migrate the existing scattered name-repair calls into this one helper so we don't
+deepen the copy-paste smell. (Unifying name+arg repair is the point — they share
+the same context and the same four ingress points.)
 
 ### 2.2 Per-tool normalizers (value/role based)
 
@@ -102,10 +120,12 @@ tool-input JSON** and:
   (relative time "in N hours", ISO/date/time, weekday/month, am/pm, cron,
   "tomorrow", etc.) and includes matched values,
 - keeps timezone supplemental (only attached when real content exists).
-- Preferred: pass the raw input to the Haiku extractor so it sees `due_at`
-  without any key being named. The current failure is that the extractor only
-  sees the folded description and returns "couldn't determine when"
-  (`scheduler.py` ~line 572).
+- Preferred (Codex r1): pass the RAW tool-input JSON to the extractor (which today
+  only sees `Description: {description}` at `scheduler.py:560`) PLUS the
+  deterministically-selected message text + time candidates, so it sees `due_at`
+  without any key being named. Do not rely on fold-only. The current failure is
+  the extractor sees only the folded description and returns "couldn't determine
+  when" (`scheduler.py:572`).
 - **Hard-fail (clean ask), don't guess**, when there is action text but NO
   schedule signal anywhere (so a "June roadmap" note doesn't become a reminder).
 
@@ -135,26 +155,52 @@ traversal, non-.py, authoring-pattern scan) all still run on the inferred file.
 
 ### 2.3 Orchestration-visibility fixes (higher leverage than any single tool)
 
-**(V) Make semantic failures visible.** Tools that return an error-shaped result
-must surface as `is_error=True` so the orchestration layer SEES them. Options for
-Codex to weigh:
-- (a) Detect error-shaped returns at the `LiveExecutor` boundary
-  (`{"error": ...}` dict, or a sentinel the tools already emit) and set
-  `is_error=True` + a `corrective_signal`.
-- (b) Standardize forgiving-dispatch tools to return a typed
-  `ToolError`/structured result the executor maps to `is_error=True`.
-  Preferred long-term; (a) is the smaller first slice.
-This unblocks: the plan-spine no longer completes a step over a failed tool, and
-a **single bounded auto-retry** becomes possible for typed,
-known-pre-side-effect validation errors (the call hasn't mutated anything yet, so
-re-dispatch with the repaired args is safe). Auto-retry is a FALLBACK, not the
-contract — the seam should make the first call succeed.
+**(V) Make semantic failures visible (RESOLVED — Codex r1; do NOT use
+`{"error":...}` detection).** A naive "dict has an `error` key" detector is wrong:
+it misses consult's JSON-string failures (`reasoning.py:1152`) AND would mis-flag
+a legitimately-successful tool output that carries an `error` field. Instead,
+introduce a typed failure result the tools EMIT and the dispatch boundaries MAP:
+- A structured `ToolError` (or `ToolFailure`) carrying `is_error=True`, `code`
+  (e.g. `invalid_consult_call`, `schedule_underspecified`, `descriptor_invalid`),
+  `message`, and `pre_side_effect: bool`.
+- The forgiving-dispatch tools that today `return`/`json.dumps` an error
+  (consult, manage_schedule, register_tool) return this typed result.
+- BOTH dispatch boundaries map it: `LiveExecutor` (`live_wiring.py:453/459`) and
+  `LiveIntegrationDispatcher` (`:676/684`) set `is_error=True` (+ a
+  `corrective_signal`) and the `tool.result` event reflects it.
+- `StepDispatcher` must then yield `StepDispatchResult.completed=False`
+  (`dispatcher.py:590`) so the plan does NOT advance over a failed tool. (Today it
+  advances whenever `is_error` is false; `EnactmentService` proceeds on
+  `TierRouting.PROCEED` at `service.py:830`.)
+- Transitional allow-lists mapping the existing string/JSON failures to typed
+  results are acceptable as a bridge, but the END state is the typed result.
+This unblocks the plan-spine NOT completing over a failure, and enables a single
+bounded auto-retry (see auto-retry note below). Auto-retry is a FALLBACK — the
+seam should make the first call succeed.
 
-**(S) Feed real schemas to the planner.** Resolve each tool's real `input_schema`
-into `LivePlannerCatalog` (`live_wiring.py` ~line 874) from the handler's
-`_tool_descriptors` registry instead of `{}`, so the model has arg-shape framing
-during plan execution. Pure improvement to first-call success; tightening schemas
-is a *reducer* of fumbles, never the safety boundary (because of `strict:null`).
+**Auto-retry safety (RESOLVED — Codex r1).** Retry ONLY errors explicitly tagged
+`pre_side_effect=True`. Provably pre-side-effect (safe to re-dispatch with
+repaired args): consult `InvalidConsultCall` raised BEFORE `orchestrator.consult`
+(`reasoning.py:1152`), register-tool early validation BEFORE the file copy /
+activation (`workspace.py:453`), and schedule extraction failure BEFORE
+`_create_trigger` (`scheduler.py:660`). UNSAFE by default — never auto-retry:
+anything after subprocess/external-agent/workspace/service execution, e.g.
+`code_exec` may have run arbitrary code before `success=False`
+(`code_exec.py:304`), project tools may partially write canvas/knowledge
+(`projects.py:454`), workspace tools may have executed before `{"error":...}`
+(`workspace.py:1107/1379`). Errors are unsafe unless explicitly tagged otherwise.
+
+**(S) Feed real schemas to the planner (RESOLVED — Codex r1; source corrected).**
+There is no handler `_tool_descriptors` registry. `LivePlannerCatalog` only gets
+`tool_catalog` and hardcodes `input_schema={}` (`live_wiring.py:881/907`); and
+`CatalogEntry` does not store `input_schema` (`tool_catalog.py:13`). Resolve
+schemas at planner-catalog build time from the real sources: kernel tools via
+`kernel_tool_schema_map()` (`kernel_tool_registry.py:416`); workspace tools from
+their descriptor files; MCP tools from their capability schema. (Either thread a
+resolver into `LivePlannerCatalog`, or extend `CatalogEntry` to carry
+`input_schema` — implementer's call; the spec requires the planner sees real
+schemas, not `{}`.) Pure first-call-success improvement; schema-tightening is a
+*reducer*, never the safety boundary (because of `strict:null`).
 
 ---
 
@@ -203,24 +249,39 @@ with a clean error, not guess:
 
 ## 6. Sequencing (phased; front-load the highest-leverage slice)
 
-- **Phase 0 — visibility (smallest, biggest payoff):** §2.3 (V) — make returned
-  error-shaped results `is_error=True` + stop the plan-spine completing over
-  them. This alone restores the agent's own correction loop.
-- **Phase 1 — the seam:** `normalize_tool_call` + telemetry + ingress wiring.
-- **Phase 2 — the three normalizers** (schedule raw-input, register_tool infer,
-  consult role-based), each behind the seam.
-- **Phase 3 — planner schemas** (§2.3 S) + one bounded auto-retry.
+- **Phase 0 — visibility (smallest correct slice, biggest payoff; Codex r1):**
+  add the typed `ToolError` failure result; map it in BOTH live dispatch
+  boundaries (`LiveExecutor` + `LiveIntegrationDispatcher`) to `is_error=True`;
+  ensure `StepDispatcher` yields `completed=False` on it; tests proving the plan
+  does NOT advance over a schedule / consult / register_tool validation failure.
+  (Transitional allow-list mapping the existing string/JSON failures is fine
+  here.) This alone restores the agent's own correction loop. NO auto-retry yet.
+- **Phase 1 — the seam:** shared `repair_tool_call()` (name+arg) + `tool.args_repaired`
+  telemetry + wiring at the four ingress points (§2.1).
+- **Phase 2 — the three normalizers** (schedule raw-input+prefilter, register_tool
+  infer-impl, consult role-based), each behind the seam, each returning typed
+  `ToolError` (with `pre_side_effect=True`) on a clean hard-fail.
+- **Phase 3 — planner schemas** (§2.3 S — low-risk reducer, can split earlier) +
+  ONE bounded auto-retry gated on `pre_side_effect=True`.
 
-## 7. Open questions for Codex spec review
+## 7. Open questions — RESOLVED in Codex spec-review r1 (session 019ead8f)
 
-1. Unify name + arg repair into one `repair_tool_call()` ingress, or keep two
-   functions called at the same choke point? Where is the single choke point that
-   covers all four dispatch paths without re-copy-pasting?
-2. Best mechanism to mark returned error-shaped results as failures without
-   misclassifying legitimate `{"error": ...}`-shaped *successful* tool outputs
-   (e.g. a tool that legitimately returns an `error` key in its data)? Sentinel
-   type vs. dispatcher convention.
-3. Should the schedule normalizer fold-and-pass, or fully delegate to passing raw
-   input into `_extract_schedule_params`? Which is more robust to novel shapes?
-4. Auto-retry: confirm which validation errors are provably pre-side-effect
-   (safe to re-dispatch) vs. which tools may have partially acted before raising.
+1. **Single choke point?** None exists today; name-repair is duplicated across
+   `reasoning.py:1055` / `gate.py:364` / `dispatcher.py:350` (live paths classify
+   at `live_wiring.py:360/525`). → One shared `repair_tool_call()` called at the
+   four ingress points in §2.1. (Folded.)
+2. **Mark returned failures without misclassifying `{"error":...}` successes?**
+   Do NOT detect `{"error":...}`; consult returns failures as JSON strings
+   (`reasoning.py:1152`) a dict-detector misses, and success can carry `error`.
+   → Typed `ToolError` (`is_error`/`code`/`message`/`pre_side_effect`), §2.3 (V).
+   (Folded.)
+3. **Schedule fold-and-pass vs raw-to-extractor?** Raw-input-to-extractor +
+   deterministic prefilter (the extractor only sees the folded description today,
+   `scheduler.py:560`). (Folded into §2.2.)
+4. **Which errors are safe to auto-retry?** Only `pre_side_effect=True`: consult
+   pre-`orchestrator.consult`, register-tool pre-file-copy, schedule pre-
+   `_create_trigger`. Unsafe after any subprocess/external/workspace/service
+   execution. (Folded into §2.3 auto-retry note.)
+
+**Remaining for r2 confirm-GREEN:** verify the v2 folds are faithful; flag any
+residual blocking issue.
