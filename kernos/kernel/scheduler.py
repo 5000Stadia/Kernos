@@ -491,7 +491,7 @@ async def _extract_schedule_params(
 
     Returns a dict on success, or an error string on failure.
     """
-    from kernos.utils import utc_now_dt, to_user_local, format_user_datetime, interpret_local_iso_as_utc
+    from kernos.utils import utc_now_dt, to_user_local, format_user_datetime
     now_utc = utc_now_dt()
     now_local = to_user_local(now_utc, user_timezone)
     tz_display = user_timezone or "system local"
@@ -563,8 +563,27 @@ async def _extract_schedule_params(
         if raw_when:
             try:
                 when_dt = datetime.fromisoformat(raw_when.replace(" ", "T"))
-                when_utc = interpret_local_iso_as_utc(when_dt.isoformat(), user_timezone)
-                parsed["when"] = when_utc.isoformat()  # UTC-aware ISO, T separator
+                if when_dt.tzinfo is None:
+                    # Localize the naive local wall-clock → UTC. Prefer the user's
+                    # IANA zone, but FALL BACK to the server's local zone when the
+                    # profile timezone is missing OR invalid (the lazy tz-discovery
+                    # can store a non-IANA abbreviation like "PDT", which ZoneInfo
+                    # rejects). Without a working fallback the time stays naive and
+                    # get_due misreads it as UTC → the reminder fires instantly
+                    # (live-observed 2026-06-08: stored 17:01 'local' read as 17:01
+                    # UTC, ~7h in the past). A fixed-offset system tzinfo still
+                    # converts correctly.
+                    tzinfo = None
+                    if user_timezone:
+                        try:
+                            from zoneinfo import ZoneInfo
+                            tzinfo = ZoneInfo(user_timezone)
+                        except Exception:
+                            tzinfo = None
+                    if tzinfo is None:
+                        tzinfo = datetime.now().astimezone().tzinfo  # server local
+                    when_dt = when_dt.replace(tzinfo=tzinfo)
+                parsed["when"] = when_dt.astimezone(timezone.utc).isoformat()
             except ValueError:
                 if not is_event:
                     return "I couldn't parse that time. Can you be more specific?"
@@ -720,12 +739,24 @@ def _format_fire_local(fire_iso: str, user_timezone: str) -> str:
     Defensive: an unparseable or naive value falls back to the raw string
     truncated to seconds, so a receipt is never blocked on formatting.
     """
-    from kernos.utils import to_user_local
     try:
         dt = datetime.fromisoformat(fire_iso.replace(" ", "T"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return to_user_local(dt, user_timezone).strftime("%Y-%m-%d %H:%M %Z").strip()
+        # Resolve to the user's zone; fall back to the server's local zone when
+        # the profile timezone is missing OR a non-IANA string (e.g. "PDT").
+        # This mirrors the extraction-side fallback so the displayed wall-clock
+        # matches when the reminder actually fires.
+        local = None
+        if user_timezone:
+            try:
+                from zoneinfo import ZoneInfo
+                local = dt.astimezone(ZoneInfo(user_timezone))
+            except Exception:
+                local = None
+        if local is None:
+            local = dt.astimezone()  # server local
+        return local.strftime("%Y-%m-%d %H:%M %Z").strip()
     except (ValueError, TypeError):
         return fire_iso[:19]
 

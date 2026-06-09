@@ -70,17 +70,28 @@ async def test_local_when_is_stored_utc_and_not_instantly_due(tmp_path):
     assert "18:58" not in listing
 
 
-async def test_no_timezone_falls_back_to_utc_naive(tmp_path):
-    # No user_timezone → can't localize; store the wall-clock as-is (UTC).
+async def test_invalid_or_missing_tz_falls_back_to_server_local(tmp_path, monkeypatch):
+    # The profile timezone can be empty OR a non-IANA abbreviation like "PDT"
+    # (ZoneInfo rejects it). Either must fall back to the SERVER's local zone so
+    # the naive wall-clock is converted to UTC — never left naive (which get_due
+    # would misread as UTC → instant fire). Pin server local to a fixed +00:00
+    # so the assertion is deterministic regardless of CI's TZ.
+    import os, time as _time
+    monkeypatch.setenv("TZ", "UTC")
+    if hasattr(_time, "tzset"):
+        _time.tzset()
     store = TriggerStore(str(tmp_path))
-    await handle_manage_schedule(
-        store, "inst", "mem", "space", "create",
-        description="remind me",
-        reasoning_service=_FakeReasoning("2026-06-08T18:58:00"),
-        user_timezone="",
-    )
-    nfa = (await store.list_all("inst"))[0].next_fire_at
-    dt = datetime.fromisoformat(nfa.replace(" ", "T"))
-    # 18:58 treated as UTC either way → due after 19:00, not before.
-    assert await store.get_due("inst", "2026-06-08T18:00:00+00:00") == []
-    assert len(await store.get_due("inst", "2026-06-08T19:00:00+00:00")) == 1
+    for bad_tz in ("", "PDT"):
+        st = TriggerStore(str(tmp_path / bad_tz.replace("", "empty") or "x"))
+        await handle_manage_schedule(
+            st, "inst", "mem", "space", "create",
+            description="remind me",
+            reasoning_service=_FakeReasoning("2026-06-08T18:58:00"),
+            user_timezone=bad_tz,
+        )
+        nfa = (await st.list_all("inst"))[0].next_fire_at
+        dt = datetime.fromisoformat(nfa)
+        assert dt.tzinfo is not None                    # always tz-aware, never naive
+        # Server local pinned to UTC → 18:58 local == 18:58 UTC.
+        assert await st.get_due("inst", "2026-06-08T18:00:00+00:00") == []
+        assert len(await st.get_due("inst", "2026-06-08T19:00:00+00:00")) == 1
