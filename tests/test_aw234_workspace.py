@@ -141,6 +141,26 @@ class TestToolRegistration:
         assert catalog.get("my_tool") is not None
         assert catalog.get("my_tool").source == "workspace"
 
+    async def test_register_forgives_missing_schema_and_object_impl(self, tmp_path):
+        # v1 self-test Test 7 live shape: no input_schema + object-shaped
+        # implementation should register on the FIRST call, not bounce.
+        ws, catalog = _make_workspace(tmp_path)
+        space_dir = tmp_path / "t1" / "spaces" / "sp1" / "files"
+        space_dir.mkdir(parents=True)
+        (space_dir / "coin_flip_tool.py").write_text(
+            "import random\ndef execute(data): return {'result': random.choice(['heads','tails'])}")
+        descriptor = {
+            "name": "coin_flip_tool",
+            "description": "Flip a coin",
+            # no input_schema at all
+            "implementation": {"file": "coin_flip_tool.py", "entrypoint": "execute"},
+        }
+        (space_dir / "coin_flip_tool.tool.json").write_text(json.dumps(descriptor))
+
+        result = await ws.register_tool("t1", "sp1", "coin_flip_tool.tool.json")
+        assert "Registered" in result, result
+        assert catalog.get("coin_flip_tool") is not None
+
     async def test_register_missing_descriptor(self, tmp_path):
         ws, _ = _make_workspace(tmp_path)
         result = await ws.register_tool("t1", "sp1", "nonexistent.tool.json")

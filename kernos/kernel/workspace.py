@@ -25,6 +25,7 @@ from kernos.kernel.tool_descriptor import (
     ToolDescriptor,
     ToolDescriptorError,
     parse_tool_descriptor,
+    _extract_impl_filename_from_dict,
 )
 from kernos.kernel.tool_runtime import build_runtime_context
 from kernos.kernel.tool_runtime_enforcement import (
@@ -445,8 +446,11 @@ class WorkspaceManager:
         except json.JSONDecodeError as exc:
             return f"Invalid JSON in descriptor: {exc}"
 
-        # 3. Validate required fields
-        required = ["name", "description", "input_schema", "implementation"]
+        # 3. Validate required fields. input_schema is NOT required — a no-param
+        # tool is valid; parse_tool_descriptor() defaults a missing/typeless
+        # schema to a permissive {"type": "object"}. Requiring it here would
+        # reject before that coercion runs (v1 self-test Test 7).
+        required = ["name", "description", "implementation"]
         missing = [f for f in required if f not in descriptor]
         if missing:
             return f"Descriptor missing required fields: {', '.join(missing)}"
@@ -454,11 +458,13 @@ class WorkspaceManager:
         name = descriptor["name"]
         impl = descriptor["implementation"]
 
-        # 3b. Implementation must be a string filename, not an object
+        # 3b. Implementation may be object-shaped — extract the .py filename via
+        # the same shared helper parse_tool_descriptor uses, so this pre-check
+        # and the parser agree (the model puts the filename under varied keys:
+        # file/path/module/entrypoint/...). Strict checks below still apply.
         if isinstance(impl, dict):
-            # Common mistake: agent sends {"type": "python", "entrypoint": "file.py"}
-            impl = impl.get("entrypoint", impl.get("file", impl.get("name", "")))
-            if not impl or not isinstance(impl, str):
+            impl = _extract_impl_filename_from_dict(impl)
+            if not impl:
                 return (
                     "The 'implementation' field must be a string filename (e.g. \"my_tool.py\"), "
                     "not an object. The Python file must export execute(input_data) → dict."
@@ -513,10 +519,16 @@ class WorkspaceManager:
         if existing and existing.source != "workspace":
             return f"Name '{name}' conflicts with an existing {existing.source} tool."
 
-        # 6. Validate input_schema
-        schema = descriptor.get("input_schema", {})
+        # 6. input_schema: coerce a missing / typeless schema to a permissive
+        # object (matches parse_tool_descriptor) rather than rejecting — a
+        # no-param tool is valid. Normalize the descriptor dict in place so any
+        # downstream use sees a valid schema (v1 self-test Test 7).
+        schema = descriptor.get("input_schema")
         if not isinstance(schema, dict) or "type" not in schema:
-            return "input_schema must be a valid JSON Schema object with a 'type' field."
+            coerced = {"type": "object"}
+            if isinstance(schema, dict):
+                coerced.update(schema)
+            descriptor["input_schema"] = coerced
 
         # 6b. Parse the extended descriptor (workshop external-service
         # primitive). Pre-existing tools without extension fields parse
