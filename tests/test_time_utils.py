@@ -154,3 +154,15 @@ class TestResolveSystemIanaTz:
         monkeypatch.delenv("TZ", raising=False)
         result = resolve_system_iana_tz()
         assert result == "" or "/" in result
+
+    def test_posix_colon_prefix_is_stripped_and_validated(self, monkeypatch):
+        from kernos.utils import resolve_system_iana_tz
+        monkeypatch.setenv("TZ", ":America/New_York")
+        assert resolve_system_iana_tz() == "America/New_York"
+
+    def test_nonexistent_iana_name_is_rejected(self, monkeypatch):
+        from kernos.utils import resolve_system_iana_tz
+        monkeypatch.setenv("TZ", "Mars/Olympus_Mons")  # has "/", but not loadable
+        result = resolve_system_iana_tz()
+        assert result != "Mars/Olympus_Mons"
+        assert result == "" or "/" in result

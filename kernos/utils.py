@@ -19,22 +19,37 @@ def resolve_system_iana_tz() -> str:
     """
     import os
 
-    tz = os.environ.get("TZ", "").strip()
-    if "/" in tz:
-        return tz
+    def _valid(name: str) -> str:
+        # POSIX TZ may carry a leading ":" (e.g. ":America/New_York"); strip it,
+        # then accept only IANA-shaped names that ZoneInfo can actually load.
+        name = (name or "").strip().lstrip(":").strip()
+        if "/" not in name:
+            return ""
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(name)
+            return name
+        except Exception:
+            return ""
+
+    cand = _valid(os.environ.get("TZ", ""))
+    if cand:
+        return cand
 
     try:
         with open("/etc/timezone", "r", encoding="utf-8") as f:
-            tz = f.read().strip()
-        if "/" in tz:
-            return tz
+            cand = _valid(f.read())
+        if cand:
+            return cand
     except OSError:
         pass
 
     try:
         link = os.readlink("/etc/localtime")
         if "zoneinfo/" in link:
-            return link.split("zoneinfo/", 1)[1]
+            cand = _valid(link.split("zoneinfo/", 1)[1])
+            if cand:
+                return cand
     except OSError:
         pass
 
