@@ -21,6 +21,7 @@ from kernos.utils import utc_now, _safe_name
 from kernos.kernel.credentials_member import MemberCredentialStore
 from kernos.kernel.services import ServiceRegistry
 from kernos.kernel.tool_audit import build_audit_entry
+from kernos.kernel.tool_failure import ToolFailure
 from kernos.kernel.tool_descriptor import (
     ToolDescriptor,
     ToolDescriptorError,
@@ -439,12 +440,12 @@ class WorkspaceManager:
                     descriptor_file, desc_path,
                 )
             else:
-                return f"Descriptor file '{descriptor_file}' not found in space directory."
+                return ToolFailure(f"Descriptor file '{descriptor_file}' not found in space directory.", code="descriptor_invalid", pre_side_effect=True)
 
         try:
             descriptor = json.loads(desc_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            return f"Invalid JSON in descriptor: {exc}"
+            return ToolFailure(f"Invalid JSON in descriptor: {exc}", code="descriptor_invalid", pre_side_effect=True)
 
         # 3. Validate required fields. input_schema is NOT required — a no-param
         # tool is valid; parse_tool_descriptor() defaults a missing/typeless
@@ -453,7 +454,7 @@ class WorkspaceManager:
         required = ["name", "description", "implementation"]
         missing = [f for f in required if f not in descriptor]
         if missing:
-            return f"Descriptor missing required fields: {', '.join(missing)}"
+            return ToolFailure(f"Descriptor missing required fields: {', '.join(missing)}", code="descriptor_invalid", pre_side_effect=True)
 
         name = descriptor["name"]
         impl = descriptor["implementation"]
@@ -465,20 +466,21 @@ class WorkspaceManager:
         if isinstance(impl, dict):
             impl = _extract_impl_filename_from_dict(impl)
             if not impl:
-                return (
+                return ToolFailure(
                     "The 'implementation' field must be a string filename (e.g. \"my_tool.py\"), "
-                    "not an object. The Python file must export execute(input_data) → dict."
+                    "not an object. The Python file must export execute(input_data) → dict.",
+                    code="descriptor_invalid", pre_side_effect=True,
                 )
 
         # 4. Validate name (snake_case, no special chars)
         if not name or not re.match(r'^[a-z][a-z0-9_]*$', name):
-            return f"Tool name '{name}' must be snake_case (lowercase letters, digits, underscores)."
+            return ToolFailure(f"Tool name '{name}' must be snake_case (lowercase letters, digits, underscores).", code="descriptor_invalid", pre_side_effect=True)
 
         # 5. Validate implementation filename (no traversal, must be .py)
         if "/" in impl or "\\" in impl or ".." in impl:
-            return "Implementation filename must not contain path separators or '..'."
+            return ToolFailure("Implementation filename must not contain path separators or '..'.", code="descriptor_invalid", pre_side_effect=True)
         if not impl.endswith(".py"):
-            return f"Implementation '{impl}' must be a .py file."
+            return ToolFailure(f"Implementation '{impl}' must be a .py file.", code="descriptor_invalid", pre_side_effect=True)
 
         # 6. Check implementation exists and is a file. Resolve it co-located
         # with the descriptor first (the model usually keeps both together),
@@ -492,7 +494,7 @@ class WorkspaceManager:
                 _impl_matches = sorted(space_dir.rglob(impl))
                 impl_path = _impl_matches[0] if _impl_matches else (space_dir / impl)
         if not impl_path.is_file():
-            return f"Implementation file '{impl}' not found."
+            return ToolFailure(f"Implementation file '{impl}' not found.", code="descriptor_invalid", pre_side_effect=True)
 
         # 6b. Normalize to the files ROOT. The catalog stores only basenames and
         # the runtime schema/impl loaders read from the root, so a descriptor/
@@ -517,7 +519,7 @@ class WorkspaceManager:
         # 7. Check name uniqueness in catalog
         existing = self._catalog.get(name) if self._catalog else None
         if existing and existing.source != "workspace":
-            return f"Name '{name}' conflicts with an existing {existing.source} tool."
+            return ToolFailure(f"Name '{name}' conflicts with an existing {existing.source} tool.", code="descriptor_invalid", pre_side_effect=False)
 
         # 6. input_schema: coerce a missing / typeless schema to a permissive
         # object (matches parse_tool_descriptor) rather than rejecting — a
@@ -541,7 +543,7 @@ class WorkspaceManager:
                 descriptor, service_lookup=service_lookup,
             )
         except ToolDescriptorError as exc:
-            return f"Tool descriptor validation failed: {exc}"
+            return ToolFailure(f"Tool descriptor validation failed: {exc}", code="descriptor_invalid", pre_side_effect=False)
 
         # 6c. Authoring-pattern validation. Heuristic regex pass over
         # the implementation source; findings reject registration unless
@@ -549,11 +551,12 @@ class WorkspaceManager:
         # at invocation time; runtime enforcement still applies to them.
         validation = validate_tool_file(impl_path)
         if not validation.is_clean and not force:
-            return (
+            return ToolFailure(
                 "Authoring-pattern validation rejected the tool. "
                 "Either fix the findings or pass force=True (which "
                 "limits the tool's surfacing to its author). "
-                f"Findings:\n{validation.render()}"
+                f"Findings:\n{validation.render()}",
+                code="tool_authoring_rejected", pre_side_effect=False,
             )
         if force and not validation.is_clean:
             logger.warning(

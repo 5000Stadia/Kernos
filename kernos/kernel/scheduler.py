@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kernos.kernel.state import StateStore
+from kernos.kernel.tool_failure import ToolFailure
 from kernos.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -652,14 +653,26 @@ async def handle_manage_schedule(
         include_inactive = "retired" in description.lower() or "inactive" in description.lower() or "all" in description.lower()
         return await _list_triggers(trigger_store, instance_id, include_inactive=include_inactive, user_timezone=user_timezone)
 
+    # TOOL-ARG-REPAIR-V1 Phase 0: validation rejections return a typed
+    # ToolFailure (still the same string the agent sees) so the dispatch
+    # boundaries record is_error=True and the plan-spine does not advance
+    # over them. All of these fire BEFORE any trigger is written →
+    # pre_side_effect=True (safe for a future bounded auto-retry).
+    from kernos.kernel.tool_failure import ToolFailure
+
+    def _invalid(msg: str) -> ToolFailure:
+        return ToolFailure(
+            msg, code="schedule_underspecified", pre_side_effect=True,
+        )
+
     if action == "create":
         if not description:
-            return "Error: 'description' is required — describe what to schedule and when."
+            return _invalid("Error: 'description' is required — describe what to schedule and when.")
         if not reasoning_service:
-            return "Error: Reasoning service not available for schedule extraction."
+            return _invalid("Error: Reasoning service not available for schedule extraction.")
         extracted = await _extract_schedule_params(reasoning_service, description, user_timezone)
         if isinstance(extracted, str):
-            return extracted  # Error message
+            return _invalid(extracted)  # Extraction error message
         logger.info("EXTRACTION_RESULT: %s", json.dumps(extracted, default=str))
 
         # Normalize: event triggers are always notify actions
@@ -694,7 +707,7 @@ async def handle_manage_schedule(
 
     if action == "remove":
         if not trigger_id:
-            return "Error: trigger_id is required for remove."
+            return _invalid("Error: trigger_id is required for remove.")
         removed = await trigger_store.remove(instance_id, trigger_id)
         if removed:
             logger.info("TRIGGER_REMOVE: id=%s instance=%s", trigger_id, instance_id)
@@ -703,12 +716,12 @@ async def handle_manage_schedule(
 
     if action == "update":
         if not description:
-            return "Error: 'description' is required for update."
+            return _invalid("Error: 'description' is required for update.")
         if not reasoning_service:
-            return "Error: Reasoning service not available for schedule extraction."
+            return _invalid("Error: Reasoning service not available for schedule extraction.")
         extracted = await _extract_schedule_params(reasoning_service, description, user_timezone)
         if isinstance(extracted, str):
-            return extracted
+            return _invalid(extracted)
         return await _update_trigger(
             trigger_store, instance_id, trigger_id,
             description,
@@ -717,7 +730,9 @@ async def handle_manage_schedule(
             extracted.get("recurrence", ""),
         )
 
-    return f"Error: Unknown action '{action}'. Use list, create, update, pause, resume, or remove."
+    return _invalid(
+        f"Error: Unknown action '{action}'. Use list, create, update, pause, resume, or remove."
+    )
 
 
 async def _list_triggers(
@@ -807,9 +822,9 @@ async def _create_trigger(
     if not when and condition_type != "event" and not recurrence:
         # Recurring triggers derive next_fire from the cron, not `when`, so a
         # bare recurrence ("every morning at 8am") is valid without a `when`.
-        return "Error: 'when' is required — provide an ISO datetime or cron expression."
+        return ToolFailure("Error: 'when' is required — provide an ISO datetime or cron expression.", code="schedule_underspecified", pre_side_effect=True)
     if not description:
-        return "Error: 'description' is required — what should this trigger do?"
+        return ToolFailure("Error: 'description' is required — what should this trigger do?", code="schedule_underspecified", pre_side_effect=True)
 
     now = utc_now()
     tid = _trigger_id()
@@ -821,7 +836,7 @@ async def _create_trigger(
     elif recurrence:
         next_fire = compute_next_fire(recurrence, now, tz_name=user_timezone)
         if not next_fire:
-            return f"Error: Could not parse recurrence '{recurrence}' as a cron expression."
+            return ToolFailure(f"Error: Could not parse recurrence '{recurrence}' as a cron expression.", code="schedule_underspecified", pre_side_effect=True)
     else:
         next_fire = when  # Agent provides ISO datetime
 
@@ -830,7 +845,7 @@ async def _create_trigger(
         params["message"] = message or description
     elif action_type == "tool_call":
         if not tool_name:
-            return "Error: 'tool_name' is required for tool_call action type."
+            return ToolFailure("Error: 'tool_name' is required for tool_call action type.", code="schedule_underspecified", pre_side_effect=True)
         params["tool_name"] = tool_name
         params["tool_args"] = tool_args
 

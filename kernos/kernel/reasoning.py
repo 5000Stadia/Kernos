@@ -1151,7 +1151,17 @@ class ReasoningService:
                 # logic, testable without the full handler.
                 _validated = _validate_consult_input(tool_input)
                 if isinstance(_validated, dict):
-                    return _json.dumps(_validated)
+                    # TOOL-ARG-REPAIR-V1 Phase 0: typed failure (same text the
+                    # agent always saw — ToolFailure IS the string) so dispatch
+                    # boundaries record is_error=True instead of success.
+                    # Validation happens BEFORE orchestrator.consult → no side
+                    # effects yet → safe for a future bounded auto-retry.
+                    from kernos.kernel.tool_failure import ToolFailure
+                    return ToolFailure(
+                        _json.dumps(_validated),
+                        code="invalid_consult_call",
+                        pre_side_effect=True,
+                    )
                 _harness, _question = _validated
                 try:
                     _svc = await _ext_get_service()
@@ -1174,10 +1184,18 @@ class ReasoningService:
                         "metadata": _consult_result.metadata,
                     })
                 except _ExtError as exc:
-                    return _json.dumps({
-                        "error": type(exc).__name__,
-                        "message": str(exc),
-                    })
+                    # Post-dispatch failure: the external agent RAN (and may
+                    # have had filesystem effects) — visible as an error, but
+                    # NOT safe to auto-retry (pre_side_effect=False).
+                    from kernos.kernel.tool_failure import ToolFailure
+                    return ToolFailure(
+                        _json.dumps({
+                            "error": type(exc).__name__,
+                            "message": str(exc),
+                        }),
+                        code="consultation_failed",
+                        pre_side_effect=False,
+                    )
             elif tool_name == "request_space_action":
                 return await self._dispatch_cross_space_request(
                     tool_input, request,

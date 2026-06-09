@@ -71,6 +71,7 @@ from kernos.kernel.enactment.dispatcher import (
     ToolExecutionResult,
 )
 from kernos.kernel.enactment.planner import ToolCatalogEntry
+from kernos.kernel.tool_failure import ToolFailure
 
 logger = logging.getLogger(__name__)
 
@@ -450,6 +451,22 @@ class LiveExecutor:
                 is_error=True,
                 corrective_signal="",
             )
+        # TOOL-ARG-REPAIR-V1 Phase 0: a tool that RETURNS its failure (typed
+        # ToolFailure — a str subclass) must be recorded as a failure, not
+        # wrapped as success. Without this, semantic failures were invisible
+        # to the orchestration layer and StepDispatcher marked the step
+        # completed over them (spec §1.4). Check BEFORE the isinstance(str)
+        # success wrap — ToolFailure IS a str.
+        if isinstance(result_text, ToolFailure):
+            logger.info(
+                "EXECUTOR_TOOL_FAILURE: tool=%s code=%s pre_side_effect=%s",
+                inputs.tool_id, result_text.code, result_text.pre_side_effect,
+            )
+            return ToolExecutionResult(
+                output={"error": str(result_text)},
+                is_error=True,
+                corrective_signal=str(result_text),
+            )
         if isinstance(result_text, str):
             output: dict[str, Any] = {"text": result_text}
         elif isinstance(result_text, dict):
@@ -672,6 +689,41 @@ class LiveIntegrationDispatcher:
                 escalated=is_escalated,
             )
             return {"error": str(exc), "is_error": True}
+
+        # TOOL-ARG-REPAIR-V1 Phase 0: typed returned failure → record as a
+        # failure (event + canonical audit), mirroring the exception path.
+        # Checked BEFORE the isinstance(str) success wrap — ToolFailure IS
+        # a str (spec §1.4: returned semantic failures were invisible here).
+        if isinstance(result_text, ToolFailure):
+            logger.info(
+                "DISPATCHER_TOOL_FAILURE: tool=%s code=%s pre_side_effect=%s",
+                tool_id, result_text.code, result_text.pre_side_effect,
+            )
+            await self._emit_event({
+                "type": "tool.result",
+                "instance_id": instance_id,
+                "tool_id": tool_id,
+                "is_error": True,
+                "error": str(result_text)[:300],
+                "failure_code": result_text.code,
+                "pre_side_effect": result_text.pre_side_effect,
+                "seam": seam_label,
+                "escalated": is_escalated,
+                "audit_entry_id": audit_entry_id,
+            })
+            await self._emit_canonical_audit(
+                entry_id=audit_entry_id,
+                instance_id=instance_id,
+                member_id=getattr(inputs, "member_id", "") or "",
+                space_id=getattr(inputs, "space_id", "") or "",
+                tool_id=tool_id,
+                tool_input=args or {},
+                classification=classification,
+                success=False,
+                error=str(result_text)[:300],
+                escalated=is_escalated,
+            )
+            return {"error": str(result_text), "is_error": True}
 
         if isinstance(result_text, str):
             result_dict = {"text": result_text}
