@@ -95,3 +95,45 @@ async def test_invalid_or_missing_tz_falls_back_to_server_local(tmp_path, monkey
         # Server local pinned to UTC → 18:58 local == 18:58 UTC.
         assert await st.get_due("inst", "2026-06-08T18:00:00+00:00") == []
         assert len(await st.get_due("inst", "2026-06-08T19:00:00+00:00")) == 1
+
+
+def test_recurring_cron_honors_local_timezone():
+    # "every morning at 8am" = 0 8 * * * is LOCAL intent. Anchored in
+    # America/Los_Angeles (PDT, UTC-7), 8am local → 15:00 UTC — NOT 8am UTC.
+    from kernos.kernel.scheduler import compute_next_fire
+    after = "2026-06-09T00:00:00+00:00"  # = 2026-06-08 17:00 PDT
+    local = compute_next_fire("0 8 * * *", after, tz_name="America/Los_Angeles")
+    dt = datetime.fromisoformat(local)
+    assert dt.astimezone(__import__("datetime").timezone.utc).hour == 15  # 8am PDT
+    # No tz → evaluated in UTC (unchanged legacy behavior) → 8am UTC.
+    utc = compute_next_fire("0 8 * * *", after)
+    assert datetime.fromisoformat(utc).hour == 8
+
+
+async def test_recurring_trigger_stores_tz_and_reschedules_local(tmp_path):
+    # A recurring create captures the tz on the Trigger and the stored next_fire
+    # is the LOCAL 8am, in UTC. (Uses the real handle_manage_schedule create.)
+    import json as _json
+    from kernos.kernel.scheduler import TriggerStore, handle_manage_schedule
+
+    class _Recur:
+        async def complete_simple(self, **kw):
+            return _json.dumps({
+                "action_type": "notify", "when": "", "message": "standup",
+                "recurrence": "0 8 * * *", "delivery_class": "stage",
+                "notify_via": "", "tool_name": "", "tool_args": "",
+                "condition_type": "time", "event_source": "", "event_filter": "",
+                "event_lead_minutes": 0,
+            })
+
+    store = TriggerStore(str(tmp_path))
+    await handle_manage_schedule(
+        store, "inst", "mem", "space", "create",
+        description="every morning at 8am tell me standup",
+        reasoning_service=_Recur(), user_timezone="America/Los_Angeles",
+    )
+    t = (await store.list_all("inst"))[0]
+    assert t.timezone == "America/Los_Angeles"
+    assert t.recurrence == "0 8 * * *"
+    nfa = datetime.fromisoformat(t.next_fire_at)
+    assert nfa.astimezone(__import__("datetime").timezone.utc).hour == 15  # 8am PDT in UTC

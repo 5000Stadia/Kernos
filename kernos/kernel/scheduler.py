@@ -88,6 +88,10 @@ class Trigger:
     # Audit
     created_by_tool_call: str = ""
 
+    # IANA timezone captured at creation — recurring cron is local-time intent
+    # ("every morning at 8am"), so reschedules evaluate the cron in this zone.
+    timezone: str = ""
+
 
 def _trigger_id() -> str:
     return f"trig_{uuid.uuid4().hex[:8]}"
@@ -259,16 +263,35 @@ class TriggerStore:
 # ---------------------------------------------------------------------------
 
 
-def compute_next_fire(recurrence: str, after_iso: str) -> str:
+def compute_next_fire(recurrence: str, after_iso: str, tz_name: str = "") -> str:
     """Compute the next fire time from a cron expression after a given time.
 
-    Returns ISO datetime string. Returns "" if computation fails.
+    A cron recurrence expresses LOCAL wall-clock intent — "every morning at 8am"
+    means 8am in the user's timezone, not 8am UTC. When ``tz_name`` is given,
+    anchor the cron in that zone (croniter is DST-aware on a tz-aware base) and
+    convert the result back to UTC for storage. Without a tz the cron is
+    evaluated against the (UTC) ``after`` as before — behavior unchanged.
+
+    Returns a UTC ISO datetime string, or "" if computation fails.
     """
     try:
         from croniter import croniter
         after = datetime.fromisoformat(after_iso)
-        cron = croniter(recurrence, after)
-        return cron.get_next(datetime).isoformat()
+        zone = None
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                zone = ZoneInfo(tz_name)
+            except Exception:
+                zone = None
+        if zone is not None:
+            if after.tzinfo is None:
+                after = after.replace(tzinfo=timezone.utc)
+            after = after.astimezone(zone)        # anchor cron in local zone
+        nxt = croniter(recurrence, after).get_next(datetime)
+        if zone is not None:
+            nxt = nxt.astimezone(timezone.utc)    # store UTC
+        return nxt.isoformat()
     except Exception as exc:
         logger.warning("TRIGGER: cron computation failed for %r: %s", recurrence, exc)
         return ""
@@ -542,9 +565,11 @@ async def _extract_schedule_params(
         import json
         parsed = json.loads(result)
 
-        # Event triggers don't need a 'when' — they poll
+        # Event triggers poll (no 'when'); recurring triggers derive next_fire
+        # from the cron (no 'when' needed either).
         is_event = parsed.get("condition_type") == "event"
-        if not parsed.get("when") and not is_event:
+        is_recurring = bool(parsed.get("recurrence"))
+        if not parsed.get("when") and not is_event and not is_recurring:
             return "I couldn't determine when to schedule that. Can you be more specific about the time?"
 
         # Normalize 'when' to ISO 8601 with T separator — Haiku sometimes produces
@@ -779,7 +804,9 @@ async def _create_trigger(
     event_lead_minutes: int = 30,
     user_timezone: str = "",
 ) -> str:
-    if not when and condition_type != "event":
+    if not when and condition_type != "event" and not recurrence:
+        # Recurring triggers derive next_fire from the cron, not `when`, so a
+        # bare recurrence ("every morning at 8am") is valid without a `when`.
         return "Error: 'when' is required — provide an ISO datetime or cron expression."
     if not description:
         return "Error: 'description' is required — what should this trigger do?"
@@ -792,7 +819,7 @@ async def _create_trigger(
     if condition_type == "event":
         next_fire = ""
     elif recurrence:
-        next_fire = compute_next_fire(recurrence, now)
+        next_fire = compute_next_fire(recurrence, now, tz_name=user_timezone)
         if not next_fire:
             return f"Error: Could not parse recurrence '{recurrence}' as a cron expression."
     else:
@@ -824,6 +851,7 @@ async def _create_trigger(
         delivery_class=delivery_class or "stage",
         status="active",
         created_at=now,
+        timezone=user_timezone,
         event_source=event_source if condition_type == "event" else "",
         event_filter=event_filter if condition_type == "event" else "",
         event_lead_minutes=event_lead_minutes if condition_type == "event" else 30,
@@ -915,14 +943,14 @@ async def _update_trigger(
         trigger.condition = when
         if recurrence:
             trigger.recurrence = recurrence
-            trigger.next_fire_at = compute_next_fire(recurrence, utc_now())
+            trigger.next_fire_at = compute_next_fire(recurrence, utc_now(), tz_name=trigger.timezone)
         else:
             trigger.next_fire_at = when
     if message and trigger.action_type == "notify":
         trigger.action_params["message"] = message
     if recurrence and not when:
         trigger.recurrence = recurrence
-        trigger.next_fire_at = compute_next_fire(recurrence, utc_now())
+        trigger.next_fire_at = compute_next_fire(recurrence, utc_now(), tz_name=trigger.timezone)
 
     await store.save(trigger)
     logger.info("TRIGGER_UPDATE: id=%s desc=%r next=%s", trigger_id, trigger.action_description, trigger.next_fire_at[:19] if trigger.next_fire_at else "?")
@@ -975,7 +1003,7 @@ async def evaluate_triggers(
                     # Keep failure_reason for debugging history
 
                 if trigger.recurrence:
-                    trigger.next_fire_at = compute_next_fire(trigger.recurrence, now)
+                    trigger.next_fire_at = compute_next_fire(trigger.recurrence, now, tz_name=trigger.timezone)
                     if not trigger.next_fire_at:
                         trigger.status = "completed"
                 else:
