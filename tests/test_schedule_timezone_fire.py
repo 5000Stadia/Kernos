@@ -135,5 +135,9 @@ async def test_recurring_trigger_stores_tz_and_reschedules_local(tmp_path):
     t = (await store.list_all("inst"))[0]
     assert t.timezone == "America/Los_Angeles"
     assert t.recurrence == "0 8 * * *"
+    # Assert the LOCAL hour (8am), not a fixed UTC hour — this uses the real
+    # `utc_now()`, so the UTC offset is 15 in PDT / 16 in PST. Converting back to
+    # the user's zone is DST-independent (Codex P2).
+    from zoneinfo import ZoneInfo
     nfa = datetime.fromisoformat(t.next_fire_at)
-    assert nfa.astimezone(__import__("datetime").timezone.utc).hour == 15  # 8am PDT in UTC
+    assert nfa.astimezone(ZoneInfo("America/Los_Angeles")).hour == 8
