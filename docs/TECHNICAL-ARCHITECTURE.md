@@ -295,6 +295,49 @@ Action-based tools classified by action param: manage_covenants, manage_capabili
 
 ---
 
+### Dispatch Reliability Stack (TOOL-ARG-REPAIR-V1 arc, 2026-06-09/10)
+
+Four layers, each closing a verified live failure mode of model-driven tool
+calls:
+
+1. **Syntax presentation** (`kernos/kernel/tool_signatures.py`): the dynamic
+   developer message ENDS with a generated `## TOOL CALL SIGNATURES` endcap —
+   one compact signature per surfaced tool (required args first, `?` marks
+   optional, enums inline) under the exact provider wire names, plus curated
+   examples for high-fumble tools that name their anti-patterns. The Codex
+   provider additionally leads every tool description with a generated
+   `SIGNATURE:`/`EXAMPLE:` header. Both surfaces are generated from the same
+   schemas the provider sends — no second source of truth. (Schemas alone are
+   advisory: the transport requires `strict: null`.)
+
+2. **Failure visibility** (`kernos/kernel/tool_failure.py`): `ToolFailure`
+   subclasses `str` — a tool's returned failure IS its message (legacy
+   consumers unchanged by construction) while both live dispatch boundaries
+   (`LiveExecutor`, `LiveIntegrationDispatcher`) detect the type and record
+   `is_error=True` + events/audit, so `StepDispatcher` yields
+   `completed=False`. Carries `code` + `pre_side_effect` (conservative
+   default False — only explicitly-tagged pre-side-effect validation errors
+   are candidates for a future bounded auto-retry).
+
+3. **Argument repair** (per-tool, value/role-based): `manage_schedule` folds
+   time-bearing fields into the extraction description; `register_tool`
+   coerces object-shaped `implementation` / missing `input_schema` (security
+   guards intact); `consult` resolves harness by ROLE (near-miss aliases,
+   prompt-in-harness, label-with-real-question → default codex) with an
+   explicit unsupported-agent denylist that gates ALL recovery branches.
+
+4. **Step-completion discipline** (`execution.verify_step_completion` + the
+   spine gate in `_execute_self_directed_step`): a plan step completes when
+   its NAMED actions ran, not when the turn produced text. One cheap
+   strict-contract model call audits the step description against the
+   agent's own report (fail-open); a named deficit re-dispatches the SAME
+   step once as a CONTINUATION carrying the deficit (`plan.step_incomplete`
+   event emitted; bounded; budget-gated; skipped for non-active plans —
+   blocked steps are HELD: partial receipts recorded, step reset to
+   `pending` for resume). `manage_plan(continue)` issued from inside a plan
+   turn (conversation id `plan_<id>`) defers to the spine — the spine is the
+   single dispatcher. Env-disable: `KERNOS_STEP_COMPLETION_CHECK=off`.
+
 ## 8. Agentic Workspace
 
 ### Execute Code (AW-1)
