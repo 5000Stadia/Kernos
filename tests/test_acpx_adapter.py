@@ -439,6 +439,18 @@ class TestValidateConsultInput:
             assert isinstance(result, dict), agent
             assert result["error"] == "InvalidConsultCall"
 
+    def test_denylist_gates_all_recovery_branches(self):
+        # Codex review P2: the denylist must apply BEFORE swap and
+        # prompt-in-harness recovery — these two shapes previously slipped
+        # through and silently rerouted an explicit other-agent request.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        # Swap-bypass: question canonicalizes to a valid harness.
+        result = validate_consult_input({"harness": "aider", "question": "codex"})
+        assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
+        # Prompt-in-harness bypass: spaced denylisted name, no question.
+        result = validate_consult_input({"harness": "swe agent"})
+        assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
+
     def test_label_harness_without_question_still_errors(self):
         # A short label and NO question: nothing to run — clean error.
         from kernos.kernel.external_agents.tool import validate_consult_input

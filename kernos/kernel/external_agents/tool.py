@@ -287,25 +287,31 @@ def validate_consult_input(
     #      rather than silently route to the wrong agent (spec §3 risk).
     _canon = _canonical_harness(_harness)
     if not _canon and _harness:
-        _swapped = _canonical_harness(_question)
-        _looks_like_prompt = len(_harness) > 40 or " " in _harness
+        # Risk boundary FIRST (Codex review P2): a harness naming a known
+        # OTHER agent must hard-fail before ANY recovery branch can accept
+        # the call — swap and prompt-in-harness recovery would otherwise
+        # silently route an explicit aider/cursor/... request to a different
+        # brain. Denylisted names skip recovery entirely.
         _names_other_agent = (
             re.sub(r"[\s\-_]+", "", _harness.strip().lower())
             in _UNSUPPORTED_AGENT_DENYLIST
         )
-        if _swapped:
-            # The agent name landed in `question`; whatever is in `harness`
-            # is the prompt (or at worst a label — the question field held
-            # nothing else useful).
-            _question, _canon = _harness, _swapped
-        elif _looks_like_prompt and not _question:
-            _question, _canon = _harness, _DEFAULT_CONSULT_HARNESS
-        elif _question and not _names_other_agent:
-            # Role call: there IS a real question, and the harness value
-            # doesn't name a known other agent — it's a label. Default.
-            _canon = _DEFAULT_CONSULT_HARNESS
-        # else: explicit unsupported agent, or no question to run —
-        # fall through to the clean errors below.
+        if not _names_other_agent:
+            _swapped = _canonical_harness(_question)
+            _looks_like_prompt = len(_harness) > 40 or " " in _harness
+            if _swapped:
+                # The agent name landed in `question`; whatever is in
+                # `harness` is the prompt (or at worst a label — the
+                # question field held nothing else useful).
+                _question, _canon = _harness, _swapped
+            elif _looks_like_prompt and not _question:
+                _question, _canon = _harness, _DEFAULT_CONSULT_HARNESS
+            elif _question:
+                # Role call: there IS a real question and the harness value
+                # doesn't name a known other agent — it's a label. Default.
+                _canon = _DEFAULT_CONSULT_HARNESS
+        # else (denylisted, or label with no question to run): fall through
+        # to the clean errors below.
     if _canon:
         _harness = _canon
 
