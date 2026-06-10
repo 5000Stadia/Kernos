@@ -317,7 +317,9 @@ async def test_no_continuation_when_step_paused_its_own_plan(
     assert handler.process.await_count == 1
     final = await load_plan(str(tmp_path), "t1", "sp1")
     assert final["status"] == "paused"
-    assert final["phases"][0]["steps"][0]["status"] == "in_progress"
+    # Codex P1: the held step resets to PENDING so a normal resume
+    # (continue selects pending steps) re-runs the blocked work.
+    assert final["phases"][0]["steps"][0]["status"] == "pending"
     held = [r for r in final.get("step_results", [])
             if "PARTIAL" in (r.get("title") or "")]
     assert held and "held" in held[0]["title"]

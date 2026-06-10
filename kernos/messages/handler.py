@@ -7838,6 +7838,18 @@ class MessageHandler:
                                 f"missing: {_missing})",
                                 response,
                             )
+                            # Codex review P1: resume selects PENDING steps
+                            # only — a held in_progress step would be
+                            # unreachable (a single-step plan's continue would
+                            # even mark the plan complete without rerunning
+                            # the blocked work). Reset to pending so a normal
+                            # resume re-selects it, with the held-PARTIAL
+                            # receipts above in the ledger.
+                            for _ph in _plan_i.get("phases", []):
+                                for _st in _ph.get("steps", []):
+                                    if _st["id"] == envelope.step_id:
+                                        _st["status"] = "pending"
+                                        break
                             await _sp(data_dir, instance_id, space_id, _plan_i)
                         return
                     if not _done_ok and _plan_active:
