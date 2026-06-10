@@ -52,39 +52,6 @@ Most personal-agent systems choose one of three shapes: a chat harness, a persis
 
 ---
 
-## Project status — v1.0: research complete
-
-Kernos was built as a **research project**: a working answer to the question
-*"what does an agent substrate look like when memory, safety, honesty, and
-self-maintenance are infrastructure rather than prompt text?"* — developed in
-the open, operated live, and concluded deliberately at v1.0.
-
-What v1 demonstrated, on a running system with receipts:
-
-- **The full lived surface passes its own plain-English self-test** — 17
-  end-to-end capability checks ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md))
-  the agent executes against itself through its own tools, verified against
-  the event stream rather than its own report.
-- **The system ships reviewed improvements to itself.** Live on this repo: the
-  running agent proposed and committed a diagnosability improvement to its own
-  improvement loop; an external reviewer agent (Codex) found a real edge-case
-  bug in it; a third agent fixed it — a three-AI maintenance loop with the
-  human only at the approval gate.
-- **A reusable set of named architectural principles** distilled from live
-  failures and fixes: **[docs/DESIGN-PRINCIPLES.md](docs/DESIGN-PRINCIPLES.md)**
-  — 17 portable patterns (The Cognitive UI, The Quiet Cohort, Receipts-First
-  Substrate, Narration-Audited Completion, The Typed Failure That Is Its
-  Message, Hard Boundaries Inside Forgiveness, …) any agentic harness can
-  adopt independently.
-
-Identified-but-unbuilt directions are documented as **future research**, not
-unfinished work: a self-calibration loop that mines the repair/failure event
-stream for the model's own habits, per-turn tool-surface dieting, and the
-continuous-cognition V2 below. The codebase is maintained at v1.0; issues and
-discussion are welcome.
-
----
-
 ## What one Kernos holds
 
 Multiple **context domains** · Multiple **members** · Multiple **event-driven workflows** · Multiple **cohorts** · Multiple **presence channels** · Multiple **tool surfaces** · Multiple **providers**
@@ -225,6 +192,39 @@ Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and 
 - **Local/test-provider containment** for live test sweeps so edge-case observation doesn't produce accidental public side effects.
 - **Spec-first development** with multi-round substrate-correctness review and code-correctness review on every batch. Six real correctness bugs caught during the workflow-loop primitive batch (WLP); seven more during the gate-scoping batch that followed (WLP-GS) — every one before it shipped.
 - **Self-hosted single-host orchestrator with subprocesses.** No managed cloud. Your data stays on your hardware.
+
+---
+
+## Project status — v1.0: research complete
+
+Kernos was built as a **research project**: a working answer to the question
+*"what does an agent substrate look like when memory, safety, honesty, and
+self-maintenance are infrastructure rather than prompt text?"* — developed in
+the open, operated live, and concluded deliberately at v1.0.
+
+What v1 demonstrated, on a running system with receipts:
+
+- **The full lived surface passes its own plain-English self-test** — 17
+  end-to-end capability checks ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md))
+  the agent executes against itself through its own tools, verified against
+  the event stream rather than its own report.
+- **The system ships reviewed improvements to itself.** Live on this repo: the
+  running agent proposed and committed a diagnosability improvement to its own
+  improvement loop; an external reviewer agent (Codex) found a real edge-case
+  bug in it; a third agent fixed it — a three-AI maintenance loop with the
+  human only at the approval gate.
+- **A reusable set of named architectural principles** distilled from live
+  failures and fixes: **[docs/DESIGN-PRINCIPLES.md](docs/DESIGN-PRINCIPLES.md)**
+  — 17 portable patterns (The Cognitive UI, The Quiet Cohort, Receipts-First
+  Substrate, Narration-Audited Completion, The Typed Failure That Is Its
+  Message, Hard Boundaries Inside Forgiveness, …) any agentic harness can
+  adopt independently.
+
+Identified-but-unbuilt directions are documented as **future research**, not
+unfinished work: a self-calibration loop that mines the repair/failure event
+stream for the model's own habits, per-turn tool-surface dieting, and the
+continuous-cognition V2 below. The codebase is maintained at v1.0; issues and
+discussion are welcome.
 
 ---
 
