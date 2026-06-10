@@ -43,6 +43,7 @@ flowchart LR
 
 Most personal-agent systems choose one of three shapes: a chat harness, a persistent memory scaffold, or a workflow runner. **Kernos is a kernel.** Memory, tools, members, workflows, safety, and presence are all first-class runtime surfaces — orchestrated around the principal agent, never inside its context.
 
+- **The context window as a rendered UI.** Each turn, mid-pipeline, the kernel composes the agent's entire view from substrate state — named zones in fixed order, a cacheable static prefix, tool signatures at the recency position. The context window is the only UI an agent can ever have: what is surfaced becomes its control set for the turn; what is withheld effectively doesn't exist. Kernos designs that surface deliberately, and a context dump is a screenshot of the rendered frame.
 - **Cohort architecture.** Bounded specialist LLM workers handle routing, gating, fact extraction, disclosure judgment, and friction observation around the principal. The principal never sees them; they never see each other. Judgment work on LLMs; state work in Python.
 - **Parallel context domains.** Work, personal, project-X, research-sprint — each with its own memory, tool promotion, and compaction rhythm. One conversation, routed across many specialist threads, invisibly.
 - **Multi-member runtime.** One install, multiple member identities, with welfare-aware judgment about cross-member disclosure. Your spouse *can* see your calendar; Kernos still makes a judgment about the therapy appointment.
@@ -71,9 +72,10 @@ What v1 demonstrated, on a running system with receipts:
   human only at the approval gate.
 - **A reusable set of named architectural principles** distilled from live
   failures and fixes: **[docs/DESIGN-PRINCIPLES.md](docs/DESIGN-PRINCIPLES.md)**
-  — 15 portable patterns (Receipts-First Substrate, Narration-Audited
-  Completion, The Typed Failure That Is Its Message, Hard Boundaries Inside
-  Forgiveness, …) any agentic harness can adopt independently.
+  — 17 portable patterns (The Cognitive UI, The Quiet Cohort, Receipts-First
+  Substrate, Narration-Audited Completion, The Typed Failure That Is Its
+  Message, Hard Boundaries Inside Forgiveness, …) any agentic harness can
+  adopt independently.
 
 Identified-but-unbuilt directions are documented as **future research**, not
 unfinished work: a self-calibration loop that mines the repair/failure event
