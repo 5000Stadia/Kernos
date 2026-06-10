@@ -7799,16 +7799,35 @@ class MessageHandler:
                     _done_ok, _missing = await verify_step_completion(
                         self.reasoning, envelope.step_description, response,
                     )
-                    if not _done_ok:
+                    # Codex review P2: honor a plan the step itself paused (or
+                    # cancelled/completed) — re-check live status BEFORE
+                    # scheduling a continuation. The function-entry guard only
+                    # ran before the turn; the turn may have called
+                    # manage_plan(pause) because it is genuinely blocked, and
+                    # a continuation would force a paused plan to keep running.
+                    from kernos.kernel.execution import (
+                        load_plan as _lp, save_plan as _sp,
+                    )
+                    _plan_i = await _lp(data_dir, instance_id, space_id)
+                    _plan_active = (
+                        _plan_i is not None
+                        and _plan_i.get("status") == "active"
+                    )
+                    if not _done_ok and not _plan_active:
+                        logger.info(
+                            "PLAN_STEP_INCOMPLETE_SKIP: plan=%s step=%s "
+                            "status=%s — deficit %r noted but no continuation "
+                            "for a non-active plan",
+                            envelope.plan_id, envelope.step_id,
+                            (_plan_i or {}).get("status", "missing"),
+                            _missing[:120],
+                        )
+                    if not _done_ok and _plan_active:
                         logger.info(
                             "PLAN_STEP_INCOMPLETE: plan=%s step=%s missing=%r"
                             " — dispatching bounded continuation",
                             envelope.plan_id, envelope.step_id, _missing[:120],
                         )
-                        from kernos.kernel.execution import (
-                            load_plan as _lp, save_plan as _sp,
-                        )
-                        _plan_i = await _lp(data_dir, instance_id, space_id)
                         if _plan_i:
                             # Record the partial outcome so the continuation
                             # (and the final report) sees the prior receipts.

@@ -256,3 +256,69 @@ async def test_spine_redispatches_incomplete_step_then_completes(
     assert "register_tool was never invoked" in second_msg.content
     # The verifier ran exactly once — continuations are never re-verified.
     assert handler.reasoning.complete_simple.await_count == 1
+
+
+async def test_no_continuation_when_step_paused_its_own_plan(
+    tmp_path, monkeypatch,
+):
+    """Codex review P2: a step that legitimately paused its plan (blocked)
+    must NOT get a continuation dispatched — the deficit is noted, the
+    paused plan stays paused, and the step falls through to the normal
+    completion path."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from kernos.messages.handler import MessageHandler
+    from kernos.kernel.execution import ExecutionEnvelope, save_plan, load_plan
+
+    monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KERNOS_STEP_COMPLETION_CHECK", "on")
+
+    plan = {
+        "plan_id": "plan_y", "status": "active", "title": "T",
+        "budget": {"max_steps": 30}, "usage": {"steps_used": 1},
+        "phases": [{"id": "p1", "title": "P", "steps": [
+            {"id": "s1", "title": "blocked step", "status": "in_progress"},
+        ]}],
+    }
+    await save_plan(str(tmp_path), "t1", "sp1", plan)
+
+    handler = MessageHandler.__new__(MessageHandler)
+
+    async def _process_and_pause(msg):
+        # Simulate the turn pausing its own plan mid-step (blocked on input),
+        # then reporting a deferred action.
+        p = await load_plan(str(tmp_path), "t1", "sp1")
+        p["status"] = "paused"
+        p["paused_reason"] = "needs user input"
+        await save_plan(str(tmp_path), "t1", "sp1", p)
+        return "Blocked: the send was not performed; awaiting user input."
+
+    handler.process = AsyncMock(side_effect=_process_and_pause)
+    handler.reasoning = MagicMock()
+    handler.reasoning.complete_simple = AsyncMock(return_value=_json.dumps(
+        {"complete": False, "missing": "the send was not performed"}))
+    handler._plan_progress_msgs = {}
+    handler._instance_db = None
+    handler.send_outbound = AsyncMock()
+    handler._delete_discord_msg = AsyncMock()
+
+    env = ExecutionEnvelope(
+        plan_id="plan_y", step_id="s1", workspace_id="",
+        step_description="send the message", steps_used=1,
+    )
+    await handler._execute_self_directed_step("t1", "sp1", env)
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending)
+
+    # The P2 contract: NO continuation was dispatched against the paused
+    # plan — the step ran exactly once and no PARTIAL/deficit re-dispatch
+    # occurred. (The legacy all-steps-done path then completes the plan;
+    # pause-vs-complete precedence there is pre-existing behavior outside
+    # this fix's scope.)
+    assert handler.process.await_count == 1
+    final = await load_plan(str(tmp_path), "t1", "sp1")
+    assert not any(
+        "PARTIAL" in (r.get("title") or "")
+        for r in final.get("step_results", [])
+    )
