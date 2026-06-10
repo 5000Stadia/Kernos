@@ -315,6 +315,15 @@ class OpenAICodexProvider(Provider):
         change). OpenClaw's installed Codex transport uses the same
         explicit-null pattern (``convertResponsesTools(tools, {strict: null})``).
         """
+        # TOOL-ARG-REPAIR-V1 guidance: lead every description with a compact
+        # SIGNATURE (+ EXAMPLE for high-fumble tools) so the call pattern is
+        # the FIRST thing the model reads, not buried in prose. Generated from
+        # the same schema we send — no second source of truth. Best-effort:
+        # presentation must never break dispatch.
+        try:
+            from kernos.kernel.tool_signatures import signature_prefix
+        except Exception:  # pragma: no cover
+            signature_prefix = None  # type: ignore[assignment]
         result = []
         for t in tools:
             schema = t.get("input_schema", {"type": "object", "properties": {}})
@@ -322,6 +331,12 @@ class OpenAICodexProvider(Provider):
             # under their area__tool wire name (skin map); MCP/workshop names
             # pass through unchanged. Internal surfaces stay flat.
             _wire_name = (skin or {}).get(t["name"], t["name"])
+            _description = t.get("description", "")
+            if signature_prefix is not None:
+                try:
+                    _description = signature_prefix(t, _wire_name) + _description
+                except Exception:
+                    pass
             result.append({
                 # Tool envelope. The consumer backend expects exactly these
                 # five keys per tool — type, name, description, parameters,
@@ -329,7 +344,7 @@ class OpenAICodexProvider(Provider):
                 # `strict` is the production failure trigger.
                 "type": "function",
                 "name": _wire_name,
-                "description": t.get("description", ""),
+                "description": _description,
                 "parameters": schema,
                 # CRITICAL: `strict` MUST be present, MUST be exactly None
                 # (renders as JSON `null`). This is enforced by the pin

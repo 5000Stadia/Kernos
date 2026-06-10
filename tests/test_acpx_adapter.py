@@ -417,11 +417,32 @@ class TestValidateConsultInput:
         result = validate_consult_input({"question": "x"})
         assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
 
-    def test_short_unrecognized_harness_still_errors(self):
-        # A short typo'd harness ("xyz") is NOT a prompt and NOT an alias →
-        # clean error, not a silent default.
+    def test_label_harness_with_real_question_defaults(self):
+        # TOOL-ARG-REPAIR-V1 §2.2 role-based: the live rerun shape — harness
+        # is the TASK NAME ("synchronous_consult"), question is real → the
+        # harness was a label; default to codex instead of failing the step.
         from kernos.kernel.external_agents.tool import validate_consult_input
-        result = validate_consult_input({"harness": "xyz", "question": "x"})
+        result = validate_consult_input(
+            {"harness": "synchronous_consult",
+             "question": "Reply with the word hello."},
+        )
+        assert result == ("codex", "Reply with the word hello.")
+        # Same for an arbitrary short label.
+        assert validate_consult_input({"harness": "xyz", "question": "x"}) == ("codex", "x")
+
+    def test_explicit_unsupported_agent_still_errors(self):
+        # Spec §3 risk boundary: a harness naming a KNOWN other agent must
+        # hard-fail, never silently route to codex.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        for agent in ("aider", "cursor", "Perplexity", "swe-agent"):
+            result = validate_consult_input({"harness": agent, "question": "x"})
+            assert isinstance(result, dict), agent
+            assert result["error"] == "InvalidConsultCall"
+
+    def test_label_harness_without_question_still_errors(self):
+        # A short label and NO question: nothing to run — clean error.
+        from kernos.kernel.external_agents.tool import validate_consult_input
+        result = validate_consult_input({"harness": "synchronous_consult"})
         assert isinstance(result, dict) and result["error"] == "InvalidConsultCall"
 
     def test_near_miss_harness_aliases_map_to_canonical(self):

@@ -868,13 +868,28 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     procedures = _build_procedures_block(_procedures_prefix)
     canvases = _build_canvases_block(_canvases_prefix)
 
+    # TOOL-ARG-REPAIR-V1 guidance: compact call signatures for THIS turn's
+    # surfaced tools, appended as the LAST dynamic block so the developer
+    # message ENDS with the call patterns (recency placement — Codex
+    # presentation consult 019eaf8e). Wire names match what the provider
+    # presents (same skin source as _translate_tools). Best-effort: a
+    # signature failure must never break assembly.
+    signatures_block = ""
+    try:
+        from kernos.kernel.tool_namespace import build_skin_maps
+        from kernos.kernel.tool_signatures import build_signature_block
+        _sig_skin, _ = build_skin_maps(ctx.tools or [])
+        signatures_block = build_signature_block(ctx.tools or [], skin=_sig_skin)
+    except Exception:
+        logger.exception("TOOL_SIGNATURES: endcap build failed — omitting")
+
     # Cache boundary: static prefix (RULES + ACTIONS) is stable across turns,
-    # dynamic suffix (NOW + STATE + RESULTS + PROCEDURES + CANVASES + MEMORY)
-    # changes every turn. CANVAS-V1: the canvases block sits alongside
-    # procedures — cacheable-prefix-eligible, changes only when a canvas is
-    # created / archived / repinned.
+    # dynamic suffix (NOW + STATE + RESULTS + PROCEDURES + CANVASES + MEMORY
+    # + TOOL CALL SIGNATURES) changes every turn. CANVAS-V1: the canvases
+    # block sits alongside procedures — cacheable-prefix-eligible, changes
+    # only when a canvas is created / archived / repinned.
     ctx.system_prompt_static = _compose_blocks(rules, actions)
-    ctx.system_prompt_dynamic = _compose_blocks(now_block, state_block, results, procedures, canvases, memory)
+    ctx.system_prompt_dynamic = _compose_blocks(now_block, state_block, results, procedures, canvases, memory, signatures_block)
     ctx.system_prompt = _compose_blocks(ctx.system_prompt_static, ctx.system_prompt_dynamic)
 
     # Developer mode: inject pending errors

@@ -59,6 +59,17 @@ _CONSULT_HARNESS_ALIASES: dict[str, str] = {
 }
 
 
+# Agents we KNOW exist but do not support via consult. A harness naming one of
+# these must hard-fail (clean error) rather than silently default to codex —
+# the user/agent explicitly asked for a different brain (spec §3 risk boundary).
+# Compared squashed-lowercase (separators removed).
+_UNSUPPORTED_AGENT_DENYLIST: frozenset[str] = frozenset({
+    "aider", "cursor", "perplexity", "copilot", "githubcopilot", "windsurf",
+    "devin", "cline", "openhands", "swe", "sweagent", "ollama", "llama",
+    "mistral", "deepseek", "qwen", "grok", "openclaw",
+})
+
+
 # Squashed lookup (separators removed) so spaced/hyphenated near-misses like
 # "claude code", "gpt 5", "gemini-pro" resolve to a real harness instead of being
 # mistaken for a prompt.
@@ -262,22 +273,39 @@ def validate_consult_input(
     if not _question:
         _question = _prompt
 
-    # --- Forgiving harness recovery (v1 self-test Test 16) ----------------
-    # Two recoveries, both requiring CLEAR signal (a genuinely empty / short
-    # typo'd harness still surfaces the clean error below — that's intentional):
-    #   1. near-miss names (claude→claude_code, gpt→codex, CODEX→codex, …)
-    #   2. the model parked the PROMPT in `harness` (long text / has spaces) —
-    #      recover it as the question (swap when the name is in `question`,
-    #      else default the harness).
+    # --- Forgiving harness recovery (TOOL-ARG-REPAIR-V1 §2.2, role-based) --
+    # The model keeps inventing harness values that are LABELS, not agents:
+    # the step title ("s16 synchronous consult verification"), the task name
+    # ("synchronous_consult"), etc. Treat fields by ROLE instead of
+    # enumerating shapes:
+    #   1. near-miss agent names map to canonical (alias + squashed lookup).
+    #   2. fields swapped (prompt in `harness`, agent name in `question`).
+    #   3. prompt parked in `harness` with no question at all.
+    #   4. invalid harness + a REAL question → the harness was a label;
+    #      default to codex — UNLESS the value names an explicit agent we
+    #      know we don't support (denylist below), which must hard-fail
+    #      rather than silently route to the wrong agent (spec §3 risk).
     _canon = _canonical_harness(_harness)
     if not _canon and _harness:
-        _looks_like_prompt = len(_harness) > 40 or " " in _harness
         _swapped = _canonical_harness(_question)
-        if _looks_like_prompt and _swapped:
-            _question, _canon = _harness, _swapped          # fields swapped
+        _looks_like_prompt = len(_harness) > 40 or " " in _harness
+        _names_other_agent = (
+            re.sub(r"[\s\-_]+", "", _harness.strip().lower())
+            in _UNSUPPORTED_AGENT_DENYLIST
+        )
+        if _swapped:
+            # The agent name landed in `question`; whatever is in `harness`
+            # is the prompt (or at worst a label — the question field held
+            # nothing else useful).
+            _question, _canon = _harness, _swapped
         elif _looks_like_prompt and not _question:
-            _question, _canon = _harness, _DEFAULT_CONSULT_HARNESS  # prompt-in-harness
-        # else: short unrecognized harness → leave _canon empty → clean error
+            _question, _canon = _harness, _DEFAULT_CONSULT_HARNESS
+        elif _question and not _names_other_agent:
+            # Role call: there IS a real question, and the harness value
+            # doesn't name a known other agent — it's a label. Default.
+            _canon = _DEFAULT_CONSULT_HARNESS
+        # else: explicit unsupported agent, or no question to run —
+        # fall through to the clean errors below.
     if _canon:
         _harness = _canon
 

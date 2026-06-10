@@ -192,16 +192,19 @@ class TestRegisterToolReturnsTypedFailure:
 
 class TestConsultReturnsTypedFailure:
     async def test_invalid_consult_call_is_typed(self):
-        # The live Test-16 shape: harness holds a step LABEL, question holds
-        # a real prompt, neither resolves to a harness → InvalidConsultCall,
-        # raised BEFORE orchestrator.consult → pre_side_effect=True.
+        # A still-hard-failing shape: harness names a KNOWN other agent
+        # (denylist — never silently rerouted). InvalidConsultCall is raised
+        # BEFORE orchestrator.consult → pre_side_effect=True, and crucially
+        # the real ExternalAgentService is never started. (Label-shaped
+        # harnesses like "s16" now RECOVER to codex by design — covered in
+        # test_acpx_adapter — so they no longer exercise this failure path.)
         from kernos.kernel.reasoning import ReasoningService
         svc = ReasoningService(AsyncMock(), AsyncMock(), MagicMock(), AsyncMock())
         request = MagicMock()
         request.instance_id = "inst-x"
         res = await svc.execute_tool(
             "consult",
-            {"harness": "s16", "question": "what is daily mode for?"},
+            {"harness": "aider", "question": "what is daily mode for?"},
             request,
         )
         assert isinstance(res, ToolFailure)
