@@ -120,6 +120,16 @@ lived cognition is possible at all.
 `kernos/messages/handler.py`; static/dynamic cache boundary in the turn
 pipeline. Deep dive: `docs/architecture/cognitive-ui.md`.
 
+**The deeper claim.** A human operates software through a screen; an agent
+operates the world through its context window. It is the only surface the
+system can ever show it — the only place an affordance can exist. What is
+surfaced becomes the agent's control set for this turn; what is withheld
+effectively does not exist. The budgeted tool window is this literally: a
+tool not rendered is a control the agent does not have. So the per-turn
+decision of what to surface and what to omit is not prompt engineering — it
+is UI design for a mind, and it is the highest-leverage decision the harness
+makes.
+
 **Why it generalizes:** the moment a harness stops concatenating and starts
 rendering, it gets prompt caching, provenance, selective refresh, and an
 auditable answer to "what did the model see?" — for free, from one design
