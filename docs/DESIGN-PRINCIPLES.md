@@ -111,10 +111,11 @@ RESULTS, PROCEDURES, CANVASES, MEMORY), each owned by one builder, each
 refreshable on its own terms. A deliberate static/dynamic split keeps the
 stable zones (RULES + ACTIONS) as a cacheable prefix while the per-turn zones
 re-render every frame — ending with the tool-signature endcap (Principle 7)
-at the recency position. Everything the agent knows at the moment of decision
-is the output of this one inspectable function — which is why a context dump
-is a *screenshot of the rendered frame*, and why operator soak-testing of
-lived cognition is possible at all.
+at the recency position. What gets rendered is *chosen*, not accumulated:
+the active space's memory rather than all memory, the knowledge this message
+makes relevant, the receipts and notices of this turn, the tools this
+direction of conversation should reach. Everything the agent knows at the
+moment of decision is the output of this one function.
 
 **Code.** The render: `kernos/messages/phases/assemble.py`; zone builders in
 `kernos/messages/handler.py`; static/dynamic cache boundary in the turn
