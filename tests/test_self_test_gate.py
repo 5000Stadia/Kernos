@@ -7,6 +7,7 @@ fixture so the test stays fast.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -75,6 +76,19 @@ class TestParse:
         assert r["passed"] == 8
         assert r["failed"] == 2
         assert len(r["failing_tests"]) == 2
+
+    def test_failure_evidence_keeps_node_id_and_excerpt(self):
+        out = (
+            "____________________________ test_one ____________________________\n"
+            "    assert 1 == 2\n"
+            "E   AssertionError: substrate mismatch\n\n"
+            "FAILED tests/test_a.py::test_one - AssertionError: "
+            "substrate mismatch\n"
+            "1 failed, 2 passed in 0.10s"
+        )
+        r = _parse_pytest_output(out)
+        assert r["failing_tests"] == ["tests/test_a.py::test_one"]
+        assert "AssertionError: substrate mismatch" in r["failure_excerpt"]
 
     def test_empty_output(self):
         r = _parse_pytest_output("no pytest summary line here")
@@ -278,3 +292,47 @@ async def test_ac7_ac8_ledger_event_written(env):
             assert any(e["kind"] == "self_test_result" for e in events)
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_failure_records_structured_evidence_with_substrate_state(env):
+    """Substrate-fidelity pin: behavioral prose AND persisted attempt/event
+    state carry the same failed test id and bounded failure excerpt."""
+    data_dir, wt_path = env
+    test_file = Path(wt_path) / "tests" / "test_failure.py"
+    test_file.write_text(
+        "def test_failure():\n"
+        "    assert 1 == 2, 'substrate mismatch'\n"
+    )
+
+    text = await handle_run_self_test_suite(
+        tool_input={
+            "workspace_dir": wt_path,
+            "attempt_id": "attempt_smoke",
+            "extra_test_paths": ["tests/test_failure.py"],
+            "timeout_seconds": 30,
+        },
+        instance_id="t1", data_dir=data_dir,
+    )
+
+    db = InstanceDB(data_dir)
+    await db.connect()
+    try:
+        attempt = await _ledger.get_attempt(db._conn, "attempt_smoke")
+        events = await _ledger.get_attempt_events(db._conn, "attempt_smoke")
+    finally:
+        await db.close()
+
+    evidence_events = [
+        e for e in events if e["kind"] == "self_test_failure_evidence"
+    ]
+    detail = json.loads(evidence_events[-1]["detail"])
+    evidence = detail["failure_evidence"]
+
+    assert "1 failed" in text
+    assert "tests/test_failure.py::test_failure" in text
+    assert attempt["test_outcome"] == "fail"
+    assert evidence["failed_test_ids"] == [
+        "tests/test_failure.py::test_failure"
+    ]
+    assert "substrate mismatch" in evidence["failure_excerpt"]

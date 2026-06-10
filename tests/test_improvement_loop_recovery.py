@@ -1628,6 +1628,12 @@ async def test_post_restart_failure_requests_recovery_and_wakes_origin(
         return {
             "outcome": "fail",
             "summary": "1 failed, 0 errors. Failing: tests/test_demo.py.",
+            "failure_evidence": {
+                "failed_test_ids": ["tests/test_demo.py::test_specific"],
+                "failure_excerpt": (
+                    "E   AssertionError: substrate mismatch at recovery"
+                ),
+            },
         }
 
     async def wake_fn(payload):
@@ -1646,7 +1652,20 @@ async def test_post_restart_failure_requests_recovery_and_wakes_origin(
     assert row["first_pass_green"] == 0
     assert any(e["kind"] == "recovery_decision_requested" for e in events)
     assert wakes and wakes[0]["originating_space"] == "space_origin"
-    assert wakes[0]["failed_test_ids"] == ["tests/test_demo.py"]
+    assert wakes[0]["failed_test_ids"] == [
+        "tests/test_demo.py::test_specific"
+    ]
+    assert "substrate mismatch" in wakes[0]["failure_excerpt"]
+    decision = json.loads([
+        e for e in events if e["kind"] == "recovery_decision_requested"
+    ][-1]["detail"])
+    assert decision["failure_evidence"]["failed_test_ids"] == [
+        "tests/test_demo.py::test_specific"
+    ]
+    assert (
+        "substrate mismatch"
+        in decision["failure_evidence"]["failure_excerpt"]
+    )
 
 
 async def test_proceed_recovery_green_requests_approval_not_commit(
@@ -1666,6 +1685,12 @@ async def test_proceed_recovery_green_requests_approval_not_commit(
             detail=json.dumps({
                 "failure_summary": "fail summary",
                 "failed_test_ids": ["tests/test_demo.py"],
+                "failure_evidence": {
+                    "failed_test_ids": ["tests/test_demo.py"],
+                    "failure_excerpt": (
+                        "E   AssertionError: recovery prompt detail"
+                    ),
+                },
             }),
         )
     finally:
@@ -1677,6 +1702,8 @@ async def test_proceed_recovery_green_requests_approval_not_commit(
     async def consult_fn(*, target, prompt):
         assert target == "codex"
         assert "tests/test_demo.py" in prompt
+        assert "Failure excerpt:" in prompt
+        assert "recovery prompt detail" in prompt
         return "fixed\n\nSTATUS: GREEN"
 
     text = await iwf.proceed_with_recovery_service(

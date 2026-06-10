@@ -2082,6 +2082,42 @@ def _failed_test_ids_from_summary(summary: str) -> list[str]:
     ][:10]
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _failure_evidence_from_self_test_result(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    evidence = result.get("failure_evidence")
+    if isinstance(evidence, dict):
+        return dict(evidence)
+    failed_test_ids = _string_list(
+        result.get("failed_test_ids") or result.get("failing_tests")
+    )
+    failure_excerpt = str(result.get("failure_excerpt") or "")
+    if failed_test_ids or failure_excerpt:
+        return {
+            "failed_test_ids": failed_test_ids,
+            "failure_excerpt": failure_excerpt,
+        }
+    return {}
+
+
+async def _latest_self_test_failure_evidence(
+    conn: Any, attempt_id: str,
+) -> dict[str, Any]:
+    detail = _loads_detail(
+        await _latest_event_detail(
+            conn, attempt_id, "self_test_failure_evidence",
+        )
+    )
+    evidence = detail.get("failure_evidence")
+    return dict(evidence) if isinstance(evidence, dict) else {}
+
+
 def _outcome_from_self_test_result(result: Any, attempt: dict) -> tuple[str, str]:
     if isinstance(result, dict):
         summary = str(result.get("summary") or result.get("prose") or "")
@@ -2698,6 +2734,7 @@ async def _surface_recovery_decision(
     *,
     attempt: dict,
     failure_summary: str,
+    failure_evidence: dict[str, Any] | None = None,
     wake_fn: Any = None,
 ) -> None:
     from kernos.kernel import improvement_ledger as _ledger
@@ -2715,7 +2752,12 @@ async def _surface_recovery_decision(
         )
         return
 
-    failed_test_ids = _failed_test_ids_from_summary(failure_summary)
+    evidence = dict(failure_evidence or {})
+    failed_test_ids = (
+        _string_list(evidence.get("failed_test_ids"))
+        or _failed_test_ids_from_summary(failure_summary)
+    )[:10]
+    failure_excerpt = str(evidence.get("failure_excerpt") or "")
     await _ledger.update_attempt(
         conn, attempt_id=attempt_id,
         final_state="awaiting_recovery_decision",
@@ -2724,6 +2766,12 @@ async def _surface_recovery_decision(
         "attempt_id": attempt_id,
         "failure_summary": failure_summary,
         "failed_test_ids": failed_test_ids,
+        "failure_excerpt": failure_excerpt,
+        "failure_evidence": {
+            **evidence,
+            "failed_test_ids": failed_test_ids,
+            "failure_excerpt": failure_excerpt,
+        },
         "worktree_path": attempt.get("worktree_path") or "",
         "recovery_iterations_used": used,
     }
@@ -3258,6 +3306,13 @@ async def run_pending_post_restart_tests(
             outcome, summary = _outcome_from_self_test_result(
                 result, refreshed,
             )
+            failure_evidence = _failure_evidence_from_self_test_result(
+                result,
+            )
+            if not failure_evidence:
+                failure_evidence = await _latest_self_test_failure_evidence(
+                    db._conn, attempt_id,
+                )
             if isinstance(result, dict) and outcome:
                 await _ledger.update_attempt(
                     db._conn, attempt_id=attempt_id,
@@ -3310,6 +3365,7 @@ async def run_pending_post_restart_tests(
                     db._conn,
                     attempt=refreshed,
                     failure_summary=summary,
+                    failure_evidence=failure_evidence,
                     wake_fn=wake_fn,
                 )
             processed += 1
@@ -3323,8 +3379,13 @@ def _recovery_prompt(
     attempt: dict,
     failure_summary: str,
     failed_test_ids: list[str],
+    failure_excerpt: str = "",
 ) -> str:
     failed = ", ".join(failed_test_ids) if failed_test_ids else "(see summary)"
+    excerpt = (
+        f"Failure excerpt:\n{failure_excerpt}\n\n"
+        if failure_excerpt else ""
+    )
     return (
         "An autonomous Kernos improvement was committed and pushed, "
         "but the post-restart self-test failed.\n\n"
@@ -3333,6 +3394,7 @@ def _recovery_prompt(
         f"Worktree: {attempt.get('worktree_path') or ''}\n"
         f"Failed tests: {failed}\n"
         f"Failure summary:\n{failure_summary}\n\n"
+        f"{excerpt}"
         "Edit the existing worktree in place. Keep the fix bounded to "
         "the failure. End with exactly one status line: "
         "STATUS: GREEN if the worktree is ready for approval, or "
@@ -3410,7 +3472,18 @@ async def proceed_with_recovery_service(
             )
         )
         failure_summary = str(decision_detail.get("failure_summary") or "")
-        failed_test_ids = list(decision_detail.get("failed_test_ids") or [])
+        decision_evidence = decision_detail.get("failure_evidence")
+        if not isinstance(decision_evidence, dict):
+            decision_evidence = {}
+        failed_test_ids = (
+            _string_list(decision_detail.get("failed_test_ids"))
+            or _string_list(decision_evidence.get("failed_test_ids"))
+        )
+        failure_excerpt = str(
+            decision_detail.get("failure_excerpt")
+            or decision_evidence.get("failure_excerpt")
+            or ""
+        )
         agent = attempt.get("primary_coding_agent") or "claude_code"
 
         async def _record_recovery_failure(exc: BaseException) -> str:
@@ -3456,6 +3529,7 @@ async def proceed_with_recovery_service(
                     attempt=attempt,
                     failure_summary=failure_summary,
                     failed_test_ids=failed_test_ids,
+                    failure_excerpt=failure_excerpt,
                 ),
                 instance_id=instance_id,
                 workspace_dir=worktree_path,

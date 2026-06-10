@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import logging
 import os
 import re
@@ -486,14 +487,28 @@ _PYTEST_SUMMARY_RE = re.compile(
     re.IGNORECASE,
 )
 _FAILED_TEST_RE = re.compile(
-    r"^FAILED (?P<path>[^\s:]+)(::\S+)?", re.MULTILINE,
+    r"^FAILED (?P<test_id>\S+)", re.MULTILINE,
 )
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_FAILURE_EXCERPT_MAX_CHARS = 4000
+
+
+def _bounded_failure_excerpt(
+    text: str, *, limit: int = _FAILURE_EXCERPT_MAX_CHARS,
+) -> str:
+    """Return a bounded excerpt from pytest output for recovery handoff."""
+    cleaned = _ANSI_RE.sub("", text or "").strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit].rstrip() + "\n... [truncated]"
 
 
 def _parse_pytest_output(text: str) -> dict[str, Any]:
     """Parse the pytest output for pass/fail counts + failing names.
     Returns a dict with: outcome (pass|fail|empty), passed, failed,
-    errors, failing_tests (list[str])."""
+    errors, failing_tests (list[str]), failure_excerpt (str)."""
     passed = 0
     failed = 0
     errors = 0
@@ -504,19 +519,25 @@ def _parse_pytest_output(text: str) -> dict[str, Any]:
             failed = int(m.group("failed"))
         if m.group("errors"):
             errors = int(m.group("errors"))
-    failing_tests = [m.group("path") for m in _FAILED_TEST_RE.finditer(text)]
+    failing_tests = [
+        m.group("test_id") for m in _FAILED_TEST_RE.finditer(text)
+    ]
     if failed == 0 and errors == 0 and passed > 0:
         outcome = "pass"
     elif passed == 0 and failed == 0 and errors == 0:
         outcome = "empty"
     else:
         outcome = "fail"
+    failure_excerpt = (
+        "" if outcome == "pass" else _bounded_failure_excerpt(text)
+    )
     return {
         "outcome": outcome,
         "passed": passed,
         "failed": failed,
         "errors": errors,
         "failing_tests": failing_tests,
+        "failure_excerpt": failure_excerpt,
     }
 
 
@@ -555,6 +576,61 @@ def _compose_prose(
         f"{parsed['passed']} passed in {duration_s:.1f}s. "
         f"Failing: {fail_list}{extra}."
     )
+
+
+def _soak_failure_excerpt(result: SoakSuiteResult | None) -> str:
+    if result is None or result.all_passed:
+        return ""
+    lines = [
+        f"{probe.probe_name}: {probe.failure_reason or 'failed'}"
+        for probe in result.per_probe if not probe.passed
+    ]
+    return _bounded_failure_excerpt("\n".join(lines))
+
+
+def _build_failure_evidence(
+    *,
+    parsed: dict[str, Any],
+    timed_out: bool,
+    timeout_seconds: int,
+    soak_result: SoakSuiteResult | None,
+) -> dict[str, Any]:
+    """Build structured failure evidence for recovery/status readers."""
+    smoke_failed = (
+        timed_out or parsed.get("outcome") in {"fail", "empty"}
+    )
+    soak_failed = soak_result is not None and not soak_result.all_passed
+    if not smoke_failed and not soak_failed:
+        return {}
+
+    excerpt_parts: list[str] = []
+    if timed_out:
+        excerpt_parts.append(
+            f"pytest timed out after {timeout_seconds}s."
+        )
+    if parsed.get("failure_excerpt"):
+        excerpt_parts.append(str(parsed["failure_excerpt"]))
+    soak_excerpt = _soak_failure_excerpt(soak_result)
+    if soak_excerpt:
+        excerpt_parts.append(f"Soak failures:\n{soak_excerpt}")
+
+    failed_soak_probes = (
+        list(soak_result.failing_probe_names())
+        if soak_result is not None and not soak_result.all_passed else []
+    )
+    failure_excerpt = _bounded_failure_excerpt("\n\n".join(excerpt_parts))
+    return {
+        "failed_test_ids": list(parsed.get("failing_tests") or []),
+        "failure_excerpt": failure_excerpt,
+        "pytest": {
+            "outcome": parsed.get("outcome") or "",
+            "passed": int(parsed.get("passed") or 0),
+            "failed": int(parsed.get("failed") or 0),
+            "errors": int(parsed.get("errors") or 0),
+            "timed_out": bool(timed_out),
+        },
+        "failed_soak_probes": failed_soak_probes,
+    }
 
 
 # ---------------------------------------------------------------------
@@ -742,6 +818,12 @@ async def handle_run_self_test_suite(
         "timeout" if timed_out
         else ("pass" if overall_passed else "fail")
     )
+    failure_evidence = _build_failure_evidence(
+        parsed=parsed,
+        timed_out=timed_out,
+        timeout_seconds=timeout_seconds,
+        soak_result=soak_result,
+    )
 
     # Write to ledger with the combined outcome.
     try:
@@ -757,6 +839,18 @@ async def handle_run_self_test_suite(
                 kind="self_test_result",
                 detail=prose,
             )
+            if failure_evidence:
+                await _ledger.append_event(
+                    conn,
+                    attempt_id=attempt_id,
+                    kind="self_test_failure_evidence",
+                    detail=json.dumps({
+                        "attempt_id": attempt_id,
+                        "summary": prose,
+                        "test_outcome": test_outcome,
+                        "failure_evidence": failure_evidence,
+                    }, separators=(",", ":"), sort_keys=True),
+                )
             await _ledger.update_attempt(
                 conn, attempt_id=attempt_id, test_outcome=test_outcome,
             )
