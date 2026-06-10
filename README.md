@@ -8,9 +8,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-4%2C600%2B-brightgreen.svg)](#engineering-proof)
+[![Tests](https://img.shields.io/badge/tests-7%2C000%2B-brightgreen.svg)](#engineering-proof)
 [![Last Commit](https://img.shields.io/github/last-commit/5000Stadia/Kernos.svg)](https://github.com/5000Stadia/Kernos/commits/main)
-[![Status](https://img.shields.io/badge/status-active%20development-blue.svg)](#engineering-proof)
+[![Status](https://img.shields.io/badge/status-v1.0%20research%20complete-blueviolet.svg)](#project-status--v10-research-complete)
 
 </div>
 
@@ -46,8 +46,40 @@ Most personal-agent systems choose one of three shapes: a chat harness, a persis
 - **Cohort architecture.** Bounded specialist LLM workers handle routing, gating, fact extraction, disclosure judgment, and friction observation around the principal. The principal never sees them; they never see each other. Judgment work on LLMs; state work in Python.
 - **Parallel context domains.** Work, personal, project-X, research-sprint — each with its own memory, tool promotion, and compaction rhythm. One conversation, routed across many specialist threads, invisibly.
 - **Multi-member runtime.** One install, multiple member identities, with welfare-aware judgment about cross-member disclosure. Your spouse *can* see your calendar; Kernos still makes a judgment about the therapy appointment.
-- **Event-driven workflows.** Long-running loops triggered by events on the system stream, with bounded action sequences, approval gates, restart-resume, and portable `.workflow.md` descriptors that install like skills.
-- **Infrastructure-level safety.** Every tool call passes through a dispatch gate that classifies effect and evaluates against user-declared covenants. Safety as behavioral shaping, not access control.
+- **Event-driven workflows.** Long-running loops triggered by events on the system stream, with bounded action sequences, approval gates, restart-resume, and portable `.workflow.yaml` descriptors that install like skills.
+- **Infrastructure-level safety.** Tool calls pass through a dispatch gate that classifies effect and evaluates against user-declared covenants — with one deliberate exception: cross-member sends route through the Messenger cohort's welfare judgment instead, a stricter check than the gate. Safety as behavioral shaping, not access control.
+
+---
+
+## Project status — v1.0: research complete
+
+Kernos was built as a **research project**: a working answer to the question
+*"what does an agent substrate look like when memory, safety, honesty, and
+self-maintenance are infrastructure rather than prompt text?"* — developed in
+the open, operated live, and concluded deliberately at v1.0.
+
+What v1 demonstrated, on a running system with receipts:
+
+- **The full lived surface passes its own plain-English self-test** — 17
+  end-to-end capability checks ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md))
+  the agent executes against itself through its own tools, verified against
+  the event stream rather than its own report.
+- **The system ships reviewed improvements to itself.** Live on this repo: the
+  running agent proposed and committed a diagnosability improvement to its own
+  improvement loop; an external reviewer agent (Codex) found a real edge-case
+  bug in it; a third agent fixed it — a three-AI maintenance loop with the
+  human only at the approval gate.
+- **A reusable set of named architectural principles** distilled from live
+  failures and fixes: **[docs/DESIGN-PRINCIPLES.md](docs/DESIGN-PRINCIPLES.md)**
+  — 15 portable patterns (Receipts-First Substrate, Narration-Audited
+  Completion, The Typed Failure That Is Its Message, Hard Boundaries Inside
+  Forgiveness, …) any agentic harness can adopt independently.
+
+Identified-but-unbuilt directions are documented as **future research**, not
+unfinished work: a self-calibration loop that mines the repair/failure event
+stream for the model's own habits, per-turn tool-surface dieting, and the
+continuous-cognition V2 below. The codebase is maintained at v1.0; issues and
+discussion are welcome.
 
 ---
 
@@ -91,7 +123,7 @@ Most agent systems are reactive: you ask, the agent answers. Kernos has a workfl
 
 A workflow has a **trigger** (an event on the system's stream), an **action sequence** (ordered steps composing seven bounded verbs), **approval gates** where they matter (each gate structurally bound to a specific paused execution by per-gate nonce — an unrelated approval can't bypass it; auto-proceed timeouts are forbidden across irreversible continuations), a **verifier** that checks intent satisfaction not just dispatch, and a **per-workflow ledger** any human or agent can read at a glance.
 
-Workflows ship as portable `.workflow.yaml` or `.workflow.md` files. **Authorable, shareable, installable like skills.** A new workflow is a new file plus a `register_workflow` call — not a code change, not a deploy.
+Workflows ship as portable `.workflow.yaml` files. **Authorable, shareable, installable like skills.** A new workflow is a new file plus a `register_workflow` call — not a code change, not a deploy.
 
 The developing system itself runs through one of these workflows: the design review (Kernos) coordinates spec drafting, review, implementation, and approval as a multi-stage loop with human gates at design and push points. The same primitive can run a household morning briefing, a team status sweep, or a small business's invoicing pipeline.
 
@@ -109,8 +141,8 @@ The developing system itself runs through one of these workflows: the design rev
 | **Context spaces** | Parallel context spaces per member, each with its own memory, tool promotion, and compaction boundary. Invisible to user and agent — a single conversation routes transparently across specialist domains. |
 | **Dual memory: Ledger + Facts** | Two stores, two jobs. **Ledger** holds the conversational arc, compressed at compaction boundaries rather than turn-by-turn. **Facts** holds structured knowledge, reconciled in a single LLM call against the existing store. Lossless narrative retrieval and deduplicated fact supersession, both at once. |
 | **Multi-member disclosure layering** | One hatched agent per member, not per install. A relationship matrix declares permissions; a Messenger cohort sits above permissions and evaluates whether a response serves the disclosing member's welfare. |
-| **Workflow loops** | Event-triggered substrate for action sequences that run between turns. Bounded action verbs; approval gates with per-execution nonce binding; auto-proceed forbidden across irreversible continuations. Portable `.workflow.yaml` / `.workflow.md` descriptors — authorable, shareable, installable like skills. |
-| **Infrastructure-level safety** | Every tool call passes through a gate that classifies effect (`read` / `soft_write` / `hard_write`) and evaluates against user-declared covenants. Reactive soft-writes pass; hard-writes gate; non-reactive paths gate. Covenant violations surface as conflicts the agent must resolve — not as silent denials. |
+| **Workflow loops** | Event-triggered substrate for action sequences that run between turns. Bounded action verbs; approval gates with per-execution nonce binding; auto-proceed forbidden across irreversible continuations. Portable `.workflow.yaml` descriptors — authorable, shareable, installable like skills. |
+| **Infrastructure-level safety** | Tool calls pass through a gate that classifies effect (`read` / `soft_write` / `hard_write`) and evaluates against user-declared covenants. Reactive soft-writes pass; hard-writes gate; non-reactive paths gate. Covenant violations surface as conflicts the agent must resolve — not as silent denials. |
 | **Cognitive UI grammar** | The system prompt as a typed document with named zones — RULES, ACTIONS, NOW, STATE, RESULTS, PROCEDURES, MEMORY — cacheable prefix, provenance tags on every knowledge fragment. Selective zone refresh without rebuilding the prompt. |
 
 ---
@@ -124,7 +156,7 @@ The developing system itself runs through one of these workflows: the design rev
 | **Self-directed execution** | `manage_plan` creates multi-phase plans with budget ceilings. Three-tier resilience: provider failover, step retries with exponential backoff, hourly slow-poll. Plans survive restarts. |
 | **Event-driven workflows** | Long-running workflow loops triggered by events on the stream, with bounded action sequences, approval gates, per-execution nonce binding, restart-resume, and portable descriptors. |
 | **Friction-driven improvement** | A friction observer watches the turn trace. When patterns emerge — repeated failures, recurring confusions, missing primitives — the system proposes covenant changes and concrete spec drafts grounded in live evidence. |
-| **Provider flexibility** | Anthropic, OpenAI Codex, or Ollama behind a `Provider` ABC. Three named fallback chains — `primary` / `simple` / `cheap`. Swap providers without touching the agent. |
+| **Provider flexibility** | Anthropic, OpenAI Codex, or Ollama behind a `Provider` ABC. Two named fallback chains — `primary` / `lightweight` (legacy `simple`/`cheap` names alias to `lightweight`). Swap providers without touching the agent. |
 
 ---
 
@@ -154,6 +186,7 @@ Honest status of every major surface, sourced from `kernos/kernel/capabilities.p
 
 ## Docs
 
+- **[Design principles](docs/DESIGN-PRINCIPLES.md)** — 15 named, portable architectural patterns derived from live operation; the intellectual core of the project.
 - **[Canonical introduction](docs/kernos-introduction.md)** — what the running agent reaches when asked what Kernos is. Innovation overview plus a navigable map.
 - **[Architecture overview](docs/architecture/overview.md)** · **[Pipeline reference](docs/architecture/pipeline-reference.md)** · **[Primitives reference](docs/architecture/primitives-reference.md)**
 - **[Cohort architecture](docs/architecture/cohort-and-judgment.md)** · **[Context spaces](docs/architecture/context-spaces.md)** · **[Memory](docs/architecture/memory.md)**
@@ -183,7 +216,8 @@ Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and 
 
 ## Engineering proof
 
-- **Comprehensive test suite** across the runtime — see the phase summary in [`DECISIONS.md`](DECISIONS.md) for the canonical count — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance).
+- **7,000+ test functions across 384 test files** (canonical passing counts tracked per-phase in [`DECISIONS.md`](DECISIONS.md)) — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance) and substrate-fidelity tests that assert on receipts and state, not just return values.
+- **Live-verified, not just unit-tested.** The plain-English self-test ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md)) runs against the production agent through its own tool surface; results are verified against the event stream. The dispatch-reliability stack (typed failures, signature presentation, argument repair, step-completion auditing) was built from failures this test surfaced on the running system.
 - **Durable per-instance event stream** backed by SQLite, with `instance_id` / `member_id` / `space_id` / `correlation_id` schema and a post-flush hook contract for trigger registries that doesn't poison event persistence on workflow code failure.
 - **Workflow primitive with approval gates** — per-gate nonce binding so an approval can't wake an unintended execution; restart-resume per workflow descriptor with conservative default; safe-deny on `auto_proceed_with_default` for irreversible post-gate continuations.
 - **Local/test-provider containment** for live test sweeps so edge-case observation doesn't produce accidental public side effects.

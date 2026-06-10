@@ -2,7 +2,7 @@
 
 > **What this is:** A map of what exists today — components, data structures, data flows, and interfaces. The agent reaches this via `request_reference` (REFERENCE-PRIMITIVE-V1; the legacy direct-path `read_doc` was retired). If the code and this document disagree, fix this document.
 >
-> **Last updated:** 2026-06-04 (reflects: through Multi-Member V1, EXTERNAL-AGENT-CONSULTATION, CROSS_SPACE_REQUESTS, AUTO-UPDATE, WORKFLOW-TRIGGERS-CONSOLIDATION v1, KERNEL-TOOL-REGISTRY-V1, CRB bring-up, REFERENCE-PRIMITIVE-V1, `read_doc` retirement, REQUEST-APPROVAL-ACTION-V1, ASYNC-IO-CONVERSION-V1 Tier 1, LONG-HORIZON-PROJECT-V1, IMPROVEMENT-LOOP-RECOVERY-V1, improve_kernos loop hardening — git-identity / fidelity-gate / proportionality / scratch-cleanup / completion-wake, RECURSIVE-SELF-HEAL-V1, SELF-MAINTENANCE-REVIEW-V1, FRICTION-RESPONSE-V1 incl. conversational surface. Kernel tool surface = 76 — incl. the agent-callable `run_self_review` tool.)
+> **Last updated:** 2026-06-10 (reflects: through Multi-Member V1, EXTERNAL-AGENT-CONSULTATION, CROSS_SPACE_REQUESTS, AUTO-UPDATE, WORKFLOW-TRIGGERS-CONSOLIDATION v1, KERNEL-TOOL-REGISTRY-V1, CRB bring-up, REFERENCE-PRIMITIVE-V1, `read_doc` retirement, REQUEST-APPROVAL-ACTION-V1, ASYNC-IO-CONVERSION-V1 Tier 1, LONG-HORIZON-PROJECT-V1, IMPROVEMENT-LOOP-RECOVERY-V1, improve_kernos loop hardening — git-identity / fidelity-gate / proportionality / scratch-cleanup / completion-wake, RECURSIVE-SELF-HEAL-V1, SELF-MAINTENANCE-REVIEW-V1, FRICTION-RESPONSE-V1 incl. conversational surface, TOOL-ARG-REPAIR-V1 (dispatch reliability stack: typed ToolFailure, signature presentation, value/role-based arg repair) + STEP-COMPLETION DISCIPLINE (narration-audited plan steps, continue-defers-to-spine), timezone-aware scheduling (local→UTC at extraction; Trigger.timezone for DST-correct recurring cron). Kernel tool surface = 76 — incl. the agent-callable `run_self_review` tool.)
 >
 > **For depth on recent substrate:**
 >
@@ -187,7 +187,7 @@ All registered tools with one-line descriptions. `CatalogEntry`: name, descripti
 
 ### Three-Tier Surfacing
 
-- **Tier 1 (Common Check):** Every turn, no LLM call. All kernel tools + common MCP tools (`COMMON_TOOL_NAMES`) + preloaded MCP tools + space's `local_affordance_set` + session-loaded tools. Handles ~80% of turns. Console: `TOOL_SURFACING: tier=common`
+- **Tier 1 (Common Check):** Every turn, no LLM call. All kernel tools + common MCP tools (`COMMON_MCP_NAMES`) + preloaded MCP tools + space's `local_affordance_set` + session-loaded tools. Handles ~80% of turns. Console: `TOOL_SURFACING: tier=common`
 - **Tier 2 (Catalog Scan):** Fallback when Tier 1 insufficient. Surfacer LLM scans full catalog descriptions, picks relevant tools by intent. Console: `TOOL_SURFACING: tier=catalog_scan selected=[...]`
 - **Tier 3 (Promotion):** Successful uncommon tool use promotes into space's `local_affordance_set`. Next turn it's in Tier 1. Console: `TOOL_PROMOTED: tool=X space=Y`
 
@@ -236,7 +236,7 @@ Knowledge entries deduplicated by normalized content. Each tagged with provenanc
 
 Fields: id, instance_id, content, lifecycle_archetype, context_space, confidence, source_event_id, source_description, last_referenced, tags, storage_strength, salience, foresight_signal, foresight_expires, entity_node_id, created_at, expired_at, valid_at, invalid_at.
 
-**Lifecycle archetypes:** identity, habitual, structural, episodic, contextual, ephemeral.
+**Lifecycle archetypes:** identity, structural, habitual, contextual, ephemeral.
 
 ### Three-Tier Injection
 
@@ -820,7 +820,7 @@ The plugin-subagent dispatch path through Claude Code's `codex:rescue` hangs in 
 
 ---
 
-## 12. Identity & Covenants
+## 15. Identity & Covenants
 
 ### Soul
 
@@ -836,7 +836,7 @@ Automatically captured from user behavioral instructions. Types: MUST, MUST NOT,
 
 ---
 
-## 13. Friction Observer
+## 16. Friction Observer
 
 **File:** `kernos/kernel/friction.py`
 
@@ -855,20 +855,11 @@ Post-turn cohort agent. Detects friction signals and writes diagnostic reports t
 
 ---
 
-## 14. Platform Adapters
-
-Handler never knows about adapters. Adapters never know about the handler. All communication through NormalizedMessage.
-
-- **Discord** — Primary interface. Full send/receive.
-- **SMS (Twilio)** — Send/receive via polling.
-
----
-
-## 15. Persistence
+## 17. Persistence
 
 ### State Store
 
-**File:** `kernos/kernel/state_json.py` — JSON files in `data/` directory
+**Primary:** `kernos/kernel/state_sqlite.py` — SQLite with WAL mode (concurrent reads; busy_timeout=5000ms). **Legacy:** `kernos/kernel/state_json.py` — JSON files in `data/`, selectable via `KERNOS_STORE_BACKEND=json`. Both expose the same StateStore interface; the file layout below describes the JSON backend's on-disk shape (the SQLite backend keeps equivalent tables).
 
 Per-tenant: `profile.json`, `soul.json`, `knowledge.json`, `contracts.json`, `preferences.json`, `triggers.json`, `entities.json`, `identity_edges.json`, `spaces.json`, `space_notices.json`
 
@@ -884,7 +875,7 @@ Shadow archive architecture. `delete_file` preserves files in `.deleted/`. Knowl
 
 ---
 
-## 16. Standing Principles
+## 18. Standing Principles
 
 - Conservative by default, expansive by permission
 - Memory as the moat — trust earned through thousands of correct small actions
@@ -896,3 +887,22 @@ Shadow archive architecture. `delete_file` preserves files in `.deleted/`. Knowl
 - Subtraction principle — removal > structural enforcement > simplification > addition
 - Provider neutral — no load-bearing features on specific LLM capabilities
 - LLM routing over algorithmic fingerprinting
+
+---
+
+## 19. Supporting Systems (brief map)
+
+Modules with non-trivial behavior that don't warrant a full section; one line each so a reader knows where to look:
+
+- **Canvases & Gardener** — `kernos/kernel/canvas.py` (markdown page spaces: scopes, pinning, sections, version retention, preference capture) + `kernos/kernel/gardener.py` (canvas shape authority; reacts to canvas events). Registry in `instance_db` (`shared_spaces`, `canvas_members`).
+- **Embeddings & retrieval** — `kernos/kernel/embedding_store.py`, `kernos/kernel/retrieval.py`: embed-on-write vector recall with lexical fallback + subject-key rescue; dual-strength (Bjork) ranking.
+- **Tool namespace (SAE)** — `kernos/kernel/tool_namespace.py`: kernel tools presented to providers as `area__tool` wire names; skins live at the provider boundary only.
+- **Tool aliases & audit** — `kernos/kernel/tool_aliases.py` (central tool-NAME repair with `tool.alias_repaired` receipts), `kernos/kernel/tool_audit.py` (canonical per-dispatch audit entries), `kernos/kernel/dispatch_diagnostics.py` (binding-failure attribution: structured for operators, prose for the agent).
+- **Dispatch reliability stack** — `kernos/kernel/tool_failure.py` (typed returned failures), `kernos/kernel/tool_signatures.py` (generated signature endcap + description headers), step-completion verification in `kernos/kernel/execution.py` — see §8 detail block.
+- **Credentials** — `kernos/kernel/credentials.py` / `credentials_member.py` / `oauth_device_code.py`: per-member secret storage, device-code OAuth, secure paste flow.
+- **Gateway health** — `kernos/kernel/gateway_health.py` + `pattern_heuristics.py`: corroborated-signal detection of gateway/dispatch deafness (single observables false-positive on quiet instances).
+- **Consultation log** — `kernos/kernel/external_agents/consultation_log.py`: every external-agent consult recorded (harness, question, response, exit status, error) in `instance.db`.
+- **Relational messaging** — `kernos/kernel/relational_dispatch.py` / `relational_tools.py` + `kernos/cohorts/messenger.py`: cross-member sends routed through the Messenger's welfare judgment rather than the generic gate.
+- **Entities & display names** — `kernos/kernel/entities.py`, `display_names.py`: entity graph alongside facts; internal ids never shown to users.
+- **Token estimation** — `kernos/kernel/token_estimator.py`: budget accounting for tool surfacing and compaction thresholds.
+- **Boot guard & self-update** — `kernos/setup/self_update.py` + `start.sh` boot-guard: daily idle-time auto-update with execv restart and rollback; `start.sh` itself is the unprotectable bootstrap (human-only changes).
