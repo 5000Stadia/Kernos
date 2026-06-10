@@ -186,7 +186,7 @@ Honest status of every major surface, sourced from `kernos/kernel/capabilities.p
 
 ## Docs
 
-- **[Design principles](docs/DESIGN-PRINCIPLES.md)** — 15 named, portable architectural patterns derived from live operation; the intellectual core of the project.
+- **[Design principles](docs/DESIGN-PRINCIPLES.md)** — 17 named, portable architectural patterns derived from live operation; the intellectual core of the project.
 - **[Canonical introduction](docs/kernos-introduction.md)** — what the running agent reaches when asked what Kernos is. Innovation overview plus a navigable map.
 - **[Architecture overview](docs/architecture/overview.md)** · **[Pipeline reference](docs/architecture/pipeline-reference.md)** · **[Primitives reference](docs/architecture/primitives-reference.md)**
 - **[Cohort architecture](docs/architecture/cohort-and-judgment.md)** · **[Context spaces](docs/architecture/context-spaces.md)** · **[Memory](docs/architecture/memory.md)**

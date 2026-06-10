@@ -89,12 +89,77 @@ whatever it produced; partial output is the only clue.)
 
 ## Family II — Model-Tolerant Interfaces
 
-A schema the API does not enforce is documentation, and models treat
-documentation statistically. Build interfaces that expect drift and make the
-*first* call succeed — with hard boundaries where guessing would be worse
-than failing.
+The model acts on what it is *shown*, not on what the system *stores* — and a
+schema the API does not enforce is documentation, which models treat
+statistically. Design the presentation layer deliberately: render what the
+model reads, expect drift in what it writes, and put hard boundaries where
+guessing would be worse than failing.
 
-### 5. Show the Syntax at the Decision Point
+### 5. The Cognitive UI: Render the Agent's Reality, Don't Accumulate It
+
+**Problem.** Most harnesses accumulate an agent's context — a growing string
+where identity, time, rules, memory, and receipts interleave in ad-hoc order.
+Nothing is cacheable, nothing carries provenance, nothing can be refreshed
+without rebuilding everything, and no one can say what the agent actually
+*saw* when it decided.
+
+**Mechanism.** The kernel treats the context window as a UI it *renders*, not
+a log it appends to. Mid-turn — after routing and analysis, before the model
+sees anything — one assembly phase composes the agent's entire view from
+substrate state into named zones in fixed order (RULES, ACTIONS, NOW, STATE,
+RESULTS, PROCEDURES, CANVASES, MEMORY), each owned by one builder, each
+refreshable on its own terms. A deliberate static/dynamic split keeps the
+stable zones (RULES + ACTIONS) as a cacheable prefix while the per-turn zones
+re-render every frame — ending with the tool-signature endcap (Principle 7)
+at the recency position. Everything the agent knows at the moment of decision
+is the output of this one inspectable function — which is why a context dump
+is a *screenshot of the rendered frame*, and why operator soak-testing of
+lived cognition is possible at all.
+
+**Code.** The render: `kernos/messages/phases/assemble.py`; zone builders in
+`kernos/messages/handler.py`; static/dynamic cache boundary in the turn
+pipeline. Deep dive: `docs/architecture/cognitive-ui.md`.
+
+**Why it generalizes:** the moment a harness stops concatenating and starts
+rendering, it gets prompt caching, provenance, selective refresh, and an
+auditable answer to "what did the model see?" — for free, from one design
+move.
+
+### 6. The Quiet Cohort: Small Judgments Around the Main Mind
+
+**Problem.** Two failure modes pull in opposite directions. Widening the main
+agent's job ("also classify the message, also check covenant relevance, also
+judge whether this cross-member send is kind") degrades its actual work and
+makes every judgment share one context. But bolting on full agent loops for
+each side-judgment is heavyweight, chatty, and slow.
+
+**Mechanism.** The main agent is surrounded by *cohort* calls: single-purpose,
+cheap-model, strict-contract invocations that run before, during, or after
+the turn — a message analyzer (classification + knowledge selection +
+preference detection in one combined call), a schedule extractor (NL → 
+structured trigger), a step-completion verifier, a Messenger welfare judgment
+on cross-member exchanges. Three disciplines make the pattern work:
+**selective invocation** — each cohort runs only when its signal is plausible
+(budget-gated, env-gated, predicate-gated), and is *omitted* entirely
+otherwise; **fail-open** — a broken cohort never blocks the turn (the
+verifier defaults to complete, the analyzer degrades to no-op); and
+**silence** — cohort output shapes the substrate or the rendered context, but
+the cohort itself is invisible to both the user and the main agent. The agent
+experiences a world that is already understood; the user experiences one
+mind, not a committee.
+
+**Code.** Analyzer cohort in `kernos/messages/phases/assemble.py`; Messenger
+welfare hook in `kernos/kernel/relational_dispatch.py` (delegated from
+`kernos/kernel/gate.py`); `kernos/kernel/execution.py::verify_step_completion`;
+extraction in `kernos/kernel/scheduler.py`; sensitivity classification in
+`kernos/kernel/fact_harvest.py`.
+
+**Why it generalizes:** "one big model call vs. an agent swarm" is a false
+choice. A cohort of strict-contract micro-judgments gives specialist quality
+at commodity cost — *if* each one is allowed to be absent, allowed to fail,
+and never allowed to talk.
+
+### 7. Show the Syntax at the Decision Point
 
 **Problem.** Tool schemas were transmitted but never enforced
 (`strict: null` is load-bearing on some transports), buried in ~50KB of 40+
@@ -115,7 +180,7 @@ high-fumble tools *name the anti-pattern* ("do not invent fields like
 `kernos/messages/phases/assemble.py`; description prefixing in
 `kernos/providers/codex_provider.py`.
 
-### 6. Two-Tier Repair: Names, Then Arguments
+### 8. Two-Tier Repair: Names, Then Arguments
 
 **Problem.** Models hallucinate tool *names* (`reminder.create`,
 `external_consultation.consult`) and fumble tool *arguments* (the time in a
@@ -135,7 +200,7 @@ implementation is inferred only from bounded, high-confidence context.
 `kernos/kernel/external_agents/tool.py::validate_consult_input`;
 `kernos/kernel/tool_descriptor.py`.
 
-### 7. Hard Boundaries Inside Forgiveness
+### 9. Hard Boundaries Inside Forgiveness
 
 **Problem.** Aggressive repair becomes silent misrouting: defaulting an
 unrecognized consult target sends the user's question to the *wrong brain*;
@@ -152,7 +217,7 @@ recovers *labels and shapes*; it never overrides *stated intent*.
 `kernos/kernel/external_agents/tool.py`; traversal/non-`.py` guards in
 `kernos/kernel/workspace.py`.
 
-### 8. The Typed Failure That Is Its Message
+### 10. The Typed Failure That Is Its Message
 
 **Problem.** Tools that *returned* their failures (rather than raising) were
 recorded as successes at every dispatch boundary — semantic failures were
@@ -176,7 +241,7 @@ Zero-migration visibility.
 
 Safety as judgment shaped by loss-cost, not as binary access control.
 
-### 9. Gate at Dispatch, Hint at Surfacing
+### 11. Gate at Dispatch, Hint at Surfacing
 
 **Problem.** Permissioning at tool-*surfacing* time can't see the actual
 arguments; permissioning by static rules can't weigh ambiguity.
@@ -192,7 +257,7 @@ proportionality cuts both ways.
 **Code.** `kernos/kernel/gate.py`; classification at both live dispatch
 seams.
 
-### 10. Covenants as Architecture
+### 12. Covenants as Architecture
 
 **Problem.** "Always confirm before sending to a third party" stored as
 prompt text is a suggestion the model may or may not honor under context
@@ -206,7 +271,7 @@ The user's constitution outranks the model's mood.
 **Code.** `kernos/kernel/instance_db.py` covenant storage; gate evaluation;
 covenant tier injection in `kernos/messages/phases/assemble.py`.
 
-### 11. The Unprotectable Bootstrap
+### 13. The Unprotectable Bootstrap
 
 **Problem.** A self-updating system's recovery layer cannot protect itself:
 the boot-guard auto-rollback runs *from* the bootstrap script, so a bad
@@ -221,7 +286,7 @@ constraint instead of pretending the constraint away.
 **Code.** Enforced as a standing constraint on the improvement loop
 (`CLAUDE.md` architectural constraints; improvement-loop scope rules).
 
-### 12. Proportional Abuse Escalation ("The 24 Escalation")
+### 14. Proportional Abuse Escalation ("The 24 Escalation")
 
 **Problem.** Unauthenticated-sender abuse needs deterrence that is firm,
 legible, and not humorless.
@@ -241,7 +306,7 @@ bypass it entirely — a self-directed plan must never rate-limit itself
 The system participates in its own upkeep, with review as a structural
 stage rather than a favor.
 
-### 13. The Plain-English Self-Test
+### 15. The Plain-English Self-Test
 
 **Problem.** Unit tests verify the substrate; nothing verified the *lived
 surface* — what the agent actually does when a person asks it to set a
@@ -257,7 +322,7 @@ discovered this way drove most of the dispatch-reliability stack above.
 prompt × tools × substrate — and produces receipts an operator can verify
 against the event stream.
 
-### 14. The Review Triangle
+### 16. The Review Triangle
 
 **Problem.** A self-improving agent that merges its own unreviewed code is a
 trust cliff; a human reviewing every change is the bottleneck the system was
@@ -275,7 +340,7 @@ real edge-case bug in it; the third agent fixed it — all with receipts.
 **Code.** `kernos/kernel/improvement_loop_workflow.py`,
 `kernos/kernel/self_test_gate.py`, attempt ledger, review protocol.
 
-### 15. Failure Evidence Is a First-Class Artifact
+### 17. Failure Evidence Is a First-Class Artifact
 
 **Problem.** When an autonomous improvement attempt fails its gate, a
 pass/fail bit gives the recovery path nothing to act on; when an external
@@ -300,14 +365,16 @@ self-calibration — the system can learn where it habitually gets hurt.
 2. **Narration-Audited Completion** — "the turn ended" is not "the work happened"; audit the agent's own report.
 3. **Shadow Archive** — nothing deletes; removal is a state.
 4. **Loud-Fail Over Silent Degradation** — surface attributable errors; never quietly get worse.
-5. **Show the Syntax at the Decision Point** — generated signatures at the recency position, from one source of truth.
-6. **Two-Tier Repair** — centralize name repair; repair arguments by value and role, never by field-name lists.
-7. **Hard Boundaries Inside Forgiveness** — recover labels and shapes; never override stated intent.
-8. **The Typed Failure That Is Its Message** — failure visibility with zero legacy migration.
-9. **Gate at Dispatch, Hint at Surfacing** — judge the actual call, proportionally to loss.
-10. **Covenants as Architecture** — user rules live in the dispatch path, not the prompt.
-11. **The Unprotectable Bootstrap** — name what recovery can't recover; make it human-only.
-12. **The 24 Escalation** — proportional deterrence with a sense of humor.
-13. **The Plain-English Self-Test** — the agent verifies its lived surface, with receipts.
-14. **The Review Triangle** — propose, review, fold: three AIs, one codebase, human at the gate.
-15. **Failure Evidence Is a First-Class Artifact** — every failure carries enough of itself to be acted on.
+5. **The Cognitive UI** — render the agent's reality per turn from substrate state; never accumulate it.
+6. **The Quiet Cohort** — single-purpose micro-judgments around the main agent: selectively invoked, fail-open, silent.
+7. **Show the Syntax at the Decision Point** — generated signatures at the recency position, from one source of truth.
+8. **Two-Tier Repair** — centralize name repair; repair arguments by value and role, never by field-name lists.
+9. **Hard Boundaries Inside Forgiveness** — recover labels and shapes; never override stated intent.
+10. **The Typed Failure That Is Its Message** — failure visibility with zero legacy migration.
+11. **Gate at Dispatch, Hint at Surfacing** — judge the actual call, proportionally to loss.
+12. **Covenants as Architecture** — user rules live in the dispatch path, not the prompt.
+13. **The Unprotectable Bootstrap** — name what recovery can't recover; make it human-only.
+14. **The 24 Escalation** — proportional deterrence with a sense of humor.
+15. **The Plain-English Self-Test** — the agent verifies its lived surface, with receipts.
+16. **The Review Triangle** — propose, review, fold: three AIs, one codebase, human at the gate.
+17. **Failure Evidence Is a First-Class Artifact** — every failure carries enough of itself to be acted on.
