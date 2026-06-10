@@ -94,7 +94,7 @@ A workflow has a **trigger** (an event on the system's stream), an **action sequ
 
 Workflows ship as portable `.workflow.yaml` files. **Authorable, shareable, installable like skills.** A new workflow is a new file plus a `register_workflow` call — not a code change, not a deploy.
 
-The developing system itself runs through one of these workflows: the design review (Kernos) coordinates spec drafting, review, implementation, and approval as a multi-stage loop with human gates at design and push points. The same primitive can run a household morning briefing, a team status sweep, or a small business's invoicing pipeline.
+Kernos's own development runs through this primitive: a design-review workflow coordinates spec drafting, review, implementation, and approval as a multi-stage loop with human gates at design and push points. The same primitive can run a household morning briefing, a team status sweep, or a small business's invoicing pipeline.
 
 **Kernos isn't only a thing you talk to. It's a thing that does work for you in the background, on schedules and triggers you set, with safety gates wherever they belong, and a ledger you can audit at any time.**
 
@@ -185,12 +185,12 @@ Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and 
 
 ## Engineering proof
 
-- **7,000+ test functions across 384 test files** (canonical passing counts tracked per-phase in [`DECISIONS.md`](DECISIONS.md)) — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance) and substrate-fidelity tests that assert on receipts and state, not just return values.
+- **7,000+ test functions across 384 test files** — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance) and substrate-fidelity tests that assert on receipts and state, not just return values.
 - **Live-verified, not just unit-tested.** The plain-English self-test ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md)) runs against the production agent through its own tool surface; results are verified against the event stream. The dispatch-reliability stack (typed failures, signature presentation, argument repair, step-completion auditing) was built from failures this test surfaced on the running system.
 - **Durable per-instance event stream** backed by SQLite, with `instance_id` / `member_id` / `space_id` / `correlation_id` schema and a post-flush hook contract for trigger registries that doesn't poison event persistence on workflow code failure.
 - **Workflow primitive with approval gates** — per-gate nonce binding so an approval can't wake an unintended execution; restart-resume per workflow descriptor with conservative default; safe-deny on `auto_proceed_with_default` for irreversible post-gate continuations.
 - **Local/test-provider containment** for live test sweeps so edge-case observation doesn't produce accidental public side effects.
-- **Spec-first development** with multi-round substrate-correctness review and code-correctness review on every batch. Six real correctness bugs caught during the workflow-loop primitive batch (WLP); seven more during the gate-scoping batch that followed (WLP-GS) — every one before it shipped.
+- **Spec-first development** — every substantive batch goes through multi-round design review before implementation and independent code review after, with findings folded back before anything ships.
 - **Self-hosted single-host orchestrator with subprocesses.** No managed cloud. Your data stays on your hardware.
 
 ---
@@ -208,11 +208,12 @@ What v1 demonstrated, on a running system with receipts:
   end-to-end capability checks ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md))
   the agent executes against itself through its own tools, verified against
   the event stream rather than its own report.
-- **The system ships reviewed improvements to itself.** Live on this repo: the
-  running agent proposed and committed a diagnosability improvement to its own
-  improvement loop; an external reviewer agent (Codex) found a real edge-case
-  bug in it; a third agent fixed it — a three-AI maintenance loop with the
-  human only at the approval gate.
+- **The system ships reviewed improvements to itself.** The improvement loop
+  proposes a change, implements it in an isolated worktree, passes smoke
+  gates, and commits — with independent review before merge and a human only
+  at the approval gate. Review is a structural stage of the loop, not a
+  ceremony; it has caught real defects in the system's own changes before
+  they shipped.
 - **A reusable set of named architectural principles** distilled from live
   failures and fixes: **[docs/DESIGN-PRINCIPLES.md](docs/DESIGN-PRINCIPLES.md)**
   — 17 portable patterns (The Cognitive UI, The Quiet Cohort, Receipts-First
