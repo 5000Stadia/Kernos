@@ -311,14 +311,13 @@ async def test_no_continuation_when_step_paused_its_own_plan(
     if pending:
         await asyncio.gather(*pending)
 
-    # The P2 contract: NO continuation was dispatched against the paused
-    # plan — the step ran exactly once and no PARTIAL/deficit re-dispatch
-    # occurred. (The legacy all-steps-done path then completes the plan;
-    # pause-vs-complete precedence there is pre-existing behavior outside
-    # this fix's scope.)
+    # The P2 contract (r2): the blocked step is HELD, not completed — no
+    # continuation dispatched, the partial outcome is recorded for resume,
+    # the step stays in_progress, and the plan stays paused.
     assert handler.process.await_count == 1
     final = await load_plan(str(tmp_path), "t1", "sp1")
-    assert not any(
-        "PARTIAL" in (r.get("title") or "")
-        for r in final.get("step_results", [])
-    )
+    assert final["status"] == "paused"
+    assert final["phases"][0]["steps"][0]["status"] == "in_progress"
+    held = [r for r in final.get("step_results", [])
+            if "PARTIAL" in (r.get("title") or "")]
+    assert held and "held" in held[0]["title"]

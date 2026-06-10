@@ -7814,14 +7814,32 @@ class MessageHandler:
                         and _plan_i.get("status") == "active"
                     )
                     if not _done_ok and not _plan_active:
+                        # Codex review P2 round 2: do NOT fall through to the
+                        # completion path — that would mark the blocked step
+                        # complete (and an all-done plan complete), losing the
+                        # paused incomplete work. Record the partial outcome
+                        # so resume sees the receipts, leave the step
+                        # in_progress, and stop here. When the user resumes
+                        # the plan, the step re-runs.
                         logger.info(
-                            "PLAN_STEP_INCOMPLETE_SKIP: plan=%s step=%s "
-                            "status=%s — deficit %r noted but no continuation "
-                            "for a non-active plan",
+                            "PLAN_STEP_INCOMPLETE_HELD: plan=%s step=%s "
+                            "status=%s — deficit %r recorded; step left "
+                            "in_progress for resume (no continuation against "
+                            "a non-active plan)",
                             envelope.plan_id, envelope.step_id,
                             (_plan_i or {}).get("status", "missing"),
                             _missing[:120],
                         )
+                        if _plan_i:
+                            _record_plan_step_result(
+                                _plan_i, envelope.step_id,
+                                f"{envelope.step_description} — PARTIAL "
+                                f"(held: plan {_plan_i.get('status', '?')}; "
+                                f"missing: {_missing})",
+                                response,
+                            )
+                            await _sp(data_dir, instance_id, space_id, _plan_i)
+                        return
                     if not _done_ok and _plan_active:
                         logger.info(
                             "PLAN_STEP_INCOMPLETE: plan=%s step=%s missing=%r"
