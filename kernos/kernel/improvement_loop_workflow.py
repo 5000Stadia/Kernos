@@ -2753,10 +2753,17 @@ async def _surface_recovery_decision(
         return
 
     evidence = dict(failure_evidence or {})
-    failed_test_ids = (
-        _string_list(evidence.get("failed_test_ids"))
-        or _failed_test_ids_from_summary(failure_summary)
-    )[:10]
+    # Parse the prose summary ONLY when structured evidence carries no
+    # failed_test_ids KEY at all — present-but-empty is a real signal
+    # (e.g. smoke passed, a soak probe failed: failed_test_ids=[] with
+    # failed_soak_probes populated). The previous `or` treated empty as
+    # missing and rewrote failed_test_ids with a probe sentence scraped
+    # from the prose, so the recovery wake reported a non-test as a
+    # failed test (Codex review P2 on att_f3fb25b9bb93).
+    if "failed_test_ids" in evidence:
+        failed_test_ids = _string_list(evidence.get("failed_test_ids"))[:10]
+    else:
+        failed_test_ids = _failed_test_ids_from_summary(failure_summary)[:10]
     failure_excerpt = str(evidence.get("failure_excerpt") or "")
     await _ledger.update_attempt(
         conn, attempt_id=attempt_id,

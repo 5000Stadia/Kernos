@@ -1668,6 +1668,57 @@ async def test_post_restart_failure_requests_recovery_and_wakes_origin(
     )
 
 
+async def test_soak_only_failure_keeps_failed_test_ids_empty(recovery_env):
+    """Codex review P2 on att_f3fb25b9bb93: when structured evidence is
+    PRESENT with failed_test_ids=[] (smoke passed; a soak probe failed),
+    the prose-summary fallback must NOT fire — the old `or` treated empty
+    as missing and scraped a probe sentence into failed_test_ids, so the
+    recovery wake reported a non-test as a failed test."""
+    data_dir = recovery_env
+    await _create_attempt(data_dir)
+    await _record_final_commit(data_dir, commit_sha="pushedabc123")
+    wakes = []
+
+    async def fake_self_test(**_kwargs):
+        return {
+            "outcome": "fail",
+            "summary": (
+                "0 failed, 0 errors. Failing: probe_dispatch_parity. "
+                "Inspect the soak ledger."
+            ),
+            "failure_evidence": {
+                "failed_test_ids": [],
+                "failed_soak_probes": ["probe_dispatch_parity"],
+                "failure_excerpt": (
+                    "Soak failures:\nprobe_dispatch_parity: parity drift"
+                ),
+            },
+        }
+
+    async def wake_fn(payload):
+        wakes.append(payload)
+
+    await iwf.run_pending_post_restart_tests(
+        data_dir=data_dir,
+        instance_id="t1",
+        self_test_fn=fake_self_test,
+        wake_fn=wake_fn,
+        live_head_fn=_matching_live_head("pushedabc123"),
+    )
+    events = await _events(data_dir)
+    decision = json.loads([
+        e for e in events if e["kind"] == "recovery_decision_requested"
+    ][-1]["detail"])
+    # Empty stays empty — the soak probe is reported via failed_soak_probes,
+    # never rewritten into failed_test_ids from the prose.
+    assert decision["failed_test_ids"] == []
+    assert decision["failure_evidence"]["failed_test_ids"] == []
+    assert decision["failure_evidence"]["failed_soak_probes"] == [
+        "probe_dispatch_parity"
+    ]
+    assert wakes and wakes[0]["failed_test_ids"] == []
+
+
 async def test_proceed_recovery_green_requests_approval_not_commit(
     recovery_env, monkeypatch,
 ):
