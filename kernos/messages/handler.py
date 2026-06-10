@@ -7350,6 +7350,7 @@ class MessageHandler:
     async def _handle_manage_plan(
         self, instance_id: str, space_id: str, tool_input: dict,
         creator_member_id: str = "",
+        in_plan_turn: bool = False,
     ) -> str:
         """Handle manage_plan tool call — create, continue, status, pause.
 
@@ -7357,6 +7358,13 @@ class MessageHandler:
         execute under the plan owner's context (profile/spaces), not the
         global instance owner — a non-owner member's plan must not run with the
         owner's identity (Codex review).
+
+        in_plan_turn: True when this call was issued from INSIDE a
+        self-directed plan step's own turn (#189). The spine auto-advances
+        after every step, so a model-issued ``continue`` there would
+        double-dispatch the next step (ordering race, double-counted budget).
+        The spine is the single dispatcher: continue-in-plan-turn is
+        acknowledged but not acted on.
         """
         from kernos.kernel.execution import (
             load_plan, save_plan, check_budget, build_envelope_from_plan,
@@ -7470,6 +7478,21 @@ class MessageHandler:
 
         # --- CONTINUE ---
         if action == "continue":
+            # STEP-COMPLETION DISCIPLINE (#189): defer continue to the spine
+            # when called from inside a plan step's own turn — the spine
+            # auto-advances after this turn ends; dispatching here too would
+            # double-run the next step and double-count the budget.
+            if in_plan_turn:
+                logger.info(
+                    "PLAN_CONTINUE_DEFERRED: in-plan-turn continue — spine "
+                    "advances automatically (instance=%s space=%s)",
+                    instance_id, space_id,
+                )
+                return (
+                    "Noted — the plan advances automatically after this step "
+                    "completes; no continue call is needed (skipped to avoid "
+                    "double-dispatch)."
+                )
             plan_id = tool_input.get("plan_id", "")
             step_id = tool_input.get("step_id", "")
             step_desc = tool_input.get("step_description", "")
@@ -7692,11 +7715,24 @@ class MessageHandler:
         # the step runs under the plan owner's context, not the global instance
         # owner (Codex review — a non-owner's plan must not execute with the
         # owner's profile/spaces/credentials).
-        msg = NormalizedMessage(
-            content=(
+        # STEP-COMPLETION DISCIPLINE (#189): a continuation re-dispatch carries
+        # the named deficit so the model finishes ONLY what's missing.
+        if envelope.completion_retry and envelope.completion_deficit:
+            _step_content = (
+                f"[PLAN STEP {envelope.step_id} — CONTINUATION] The previous "
+                f"attempt of this step did not finish: "
+                f"{envelope.completion_deficit}. Prior work is recorded in the "
+                f"results ledger below — do NOT redo it. Complete ONLY the "
+                f"missing action(s) now.\nStep: "
+                f"{envelope.step_description}{_ledger_block}"
+            )
+        else:
+            _step_content = (
                 f"[PLAN STEP {envelope.step_id}] "
                 f"{envelope.step_description}{_ledger_block}"
-            ),
+            )
+        msg = NormalizedMessage(
+            content=_step_content,
             sender="self_directed",
             sender_auth_level=_auth,
             platform="internal",
@@ -7739,6 +7775,82 @@ class MessageHandler:
         for step_attempt in range(_max_step_retries):
             try:
                 response = await self.process(msg)
+
+                # STEP-COMPLETION DISCIPLINE (#189): a turn producing text is
+                # not the same as the step's named actions having RUN (live:
+                # "registration was not attempted" narrated honestly, then the
+                # step bookkept complete; the final report-write skipped the
+                # same way). Verify the agent's own report against the step's
+                # named actions; on a named deficit, re-dispatch the SAME step
+                # once with the deficit (bounded — a continuation is never
+                # re-verified into another retry). Env-disable:
+                # KERNOS_STEP_COMPLETION_CHECK=off. Fail-open by design.
+                _verify_on = os.getenv(
+                    "KERNOS_STEP_COMPLETION_CHECK", "on",
+                ).strip().lower() not in ("off", "0", "false")
+                _usage_now = (plan.get("usage", {}) or {}).get("steps_used", 0)
+                _budget_max = (plan.get("budget", {}) or {}).get("max_steps", 30)
+                if (
+                    _verify_on and not envelope.completion_retry
+                    and response and response.strip()
+                    and _usage_now < _budget_max
+                ):
+                    from kernos.kernel.execution import verify_step_completion
+                    _done_ok, _missing = await verify_step_completion(
+                        self.reasoning, envelope.step_description, response,
+                    )
+                    if not _done_ok:
+                        logger.info(
+                            "PLAN_STEP_INCOMPLETE: plan=%s step=%s missing=%r"
+                            " — dispatching bounded continuation",
+                            envelope.plan_id, envelope.step_id, _missing[:120],
+                        )
+                        from kernos.kernel.execution import (
+                            load_plan as _lp, save_plan as _sp,
+                        )
+                        _plan_i = await _lp(data_dir, instance_id, space_id)
+                        if _plan_i:
+                            # Record the partial outcome so the continuation
+                            # (and the final report) sees the prior receipts.
+                            _record_plan_step_result(
+                                _plan_i, envelope.step_id,
+                                f"{envelope.step_description} — PARTIAL "
+                                f"(continuation: {_missing})",
+                                response,
+                            )
+                            _plan_i["usage"]["steps_used"] = (
+                                (_plan_i.get("usage", {}) or {}).get("steps_used", 0) + 1
+                            )
+                            await _sp(data_dir, instance_id, space_id, _plan_i)
+                        try:
+                            from kernos.kernel import event_stream
+                            await event_stream.emit(
+                                instance_id, "plan.step_incomplete",
+                                {
+                                    "plan_id": envelope.plan_id,
+                                    "step_id": envelope.step_id,
+                                    "missing": _missing[:300],
+                                },
+                                space_id=space_id,
+                            )
+                        except Exception as exc:
+                            logger.debug(
+                                "Failed to emit plan.step_incomplete: %s", exc,
+                            )
+                        import dataclasses as _dc
+                        _retry_env = _dc.replace(
+                            envelope,
+                            completion_retry=True,
+                            completion_deficit=_missing,
+                            steps_used=envelope.steps_used + 1,
+                        )
+                        asyncio.create_task(
+                            self._execute_self_directed_step(
+                                instance_id, space_id, _retry_env,
+                            )
+                        )
+                        return
+
                 logger.info("PLAN_STEP_COMPLETE: plan=%s step=%s response_len=%d",
                     envelope.plan_id, envelope.step_id, len(response or ""))
                 # EVENT-STREAM-TO-SQLITE: plan step completed.

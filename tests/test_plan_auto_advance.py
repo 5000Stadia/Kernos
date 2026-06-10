@@ -92,3 +92,167 @@ def test_record_plan_step_result_appends_and_caps():
     assert len(plan["step_results"]) == 50
     # and the ledger reads what was recorded
     assert "PRIOR COMPLETED STEPS" in _plan_ledger_block(plan)
+
+
+# --- STEP-COMPLETION DISCIPLINE (#189, 2026-06-10) -----------------------------
+# A turn producing text != the step's named actions having run (live: Test 7's
+# register skipped, the final report-write skipped — both narrated honestly,
+# both bookkept complete). verify_step_completion reads the narration; the
+# spine re-dispatches the step ONCE with the named deficit. continue issued
+# from inside a plan turn defers to the spine (the original #189 race).
+import json as _json
+
+from kernos.kernel.execution import verify_step_completion
+
+
+class _FakeReasoning:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def complete_simple(self, **kw):
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
+
+
+async def test_verifier_flags_named_skipped_action():
+    # The live Test-7 shape: step names register; report admits it didn't run.
+    fake = _FakeReasoning(_json.dumps(
+        {"complete": False, "missing": "register_tool was not invoked"}))
+    ok, missing = await verify_step_completion(
+        fake, "Test 7 — build/test/register local coin flip tool",
+        "Build/test passed. Registration was not attempted because ...",
+    )
+    assert ok is False
+    assert "register" in missing
+
+
+async def test_verifier_passes_complete_step():
+    fake = _FakeReasoning(_json.dumps({"complete": True, "missing": ""}))
+    ok, missing = await verify_step_completion(fake, "step", "did everything")
+    assert ok is True and missing == ""
+
+
+async def test_verifier_fails_open_on_error_and_garbage():
+    ok, _ = await verify_step_completion(
+        _FakeReasoning(RuntimeError("model down")), "step", "report")
+    assert ok is True  # a broken verifier must never stall a plan
+    ok, _ = await verify_step_completion(
+        _FakeReasoning("not json at all"), "step", "report")
+    assert ok is True
+
+
+async def test_verifier_incomplete_without_deficit_is_treated_complete():
+    # An INCOMPLETE verdict with no named deficit is unactionable.
+    fake = _FakeReasoning(_json.dumps({"complete": False, "missing": ""}))
+    ok, _ = await verify_step_completion(fake, "step", "report")
+    assert ok is True
+
+
+def test_envelope_carries_completion_retry_fields():
+    from kernos.kernel.execution import ExecutionEnvelope
+    env = ExecutionEnvelope(
+        plan_id="p", step_id="s", workspace_id="", step_description="d")
+    assert env.completion_retry is False and env.completion_deficit == ""
+    import dataclasses
+    retry = dataclasses.replace(
+        env, completion_retry=True, completion_deficit="register the tool")
+    assert retry.completion_retry and "register" in retry.completion_deficit
+
+
+async def test_continue_in_plan_turn_defers_to_spine():
+    # The original #189 race: a model-issued continue from INSIDE a plan
+    # step's turn double-dispatches against the spine's auto-advance. The
+    # early-return path needs no handler state — call the unbound method.
+    from unittest.mock import MagicMock
+    from kernos.messages.handler import MessageHandler
+    result = await MessageHandler._handle_manage_plan(
+        MagicMock(), "inst", "space", {"action": "continue"},
+        in_plan_turn=True,
+    )
+    assert "automatically" in result and "double-dispatch" in result
+
+
+async def test_reasoning_flags_plan_turn_conversations():
+    # The dispatch derives in_plan_turn from the plan_<id> conversation id.
+    from unittest.mock import AsyncMock, MagicMock
+    from kernos.kernel.reasoning import ReasoningService
+    svc = ReasoningService(AsyncMock(), AsyncMock(), MagicMock(), AsyncMock())
+    svc._handler = MagicMock()
+    svc._handler._handle_manage_plan = AsyncMock(return_value="ok")
+    request = MagicMock()
+    request.instance_id = "inst"
+    request.active_space_id = "space"
+    request.member_id = "m1"
+    request.conversation_id = "plan_abc123"
+    await svc.execute_tool("manage_plan", {"action": "continue"}, request)
+    assert svc._handler._handle_manage_plan.await_args.kwargs["in_plan_turn"] is True
+
+    request.conversation_id = "1500261768486977587"  # ordinary user channel
+    await svc.execute_tool("manage_plan", {"action": "continue"}, request)
+    assert svc._handler._handle_manage_plan.await_args.kwargs["in_plan_turn"] is False
+
+
+async def test_spine_redispatches_incomplete_step_then_completes(
+    tmp_path, monkeypatch,
+):
+    """End-to-end through the real spine: a step whose report admits a named
+    action didn't run is NOT marked complete — it re-dispatches ONCE as a
+    CONTINUATION carrying the deficit; the continuation then completes the
+    step. Ledger keeps both outcomes (partial + final)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from kernos.messages.handler import MessageHandler
+    from kernos.kernel.execution import ExecutionEnvelope, save_plan, load_plan
+
+    monkeypatch.setenv("KERNOS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KERNOS_STEP_COMPLETION_CHECK", "on")
+
+    plan = {
+        "plan_id": "plan_x", "status": "active", "title": "T",
+        "budget": {"max_steps": 30}, "usage": {"steps_used": 1},
+        "phases": [{"id": "p1", "title": "P", "steps": [
+            {"id": "s1", "title": "build/test/register tool",
+             "status": "in_progress"},
+        ]}],
+    }
+    await save_plan(str(tmp_path), "t1", "sp1", plan)
+
+    handler = MessageHandler.__new__(MessageHandler)
+    handler.process = AsyncMock(
+        return_value="Build/test passed. Registration was not attempted.")
+    handler.reasoning = MagicMock()
+    handler.reasoning.complete_simple = AsyncMock(return_value=_json.dumps(
+        {"complete": False, "missing": "register_tool was never invoked"}))
+    handler._plan_progress_msgs = {}
+    handler._instance_db = None
+    handler.send_outbound = AsyncMock()
+    handler._delete_discord_msg = AsyncMock()
+
+    env = ExecutionEnvelope(
+        plan_id="plan_x", step_id="s1", workspace_id="",
+        step_description="build, test, and register the coin flip tool",
+        steps_used=1,
+    )
+    await handler._execute_self_directed_step("t1", "sp1", env)
+
+    # First pass must NOT have completed the step — partial recorded instead.
+    mid = await load_plan(str(tmp_path), "t1", "sp1")
+    step = mid["phases"][0]["steps"][0]
+    results = mid.get("step_results", [])
+    assert any("PARTIAL" in (r.get("title") or "") for r in results)
+
+    # Let the spawned continuation task run to completion.
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending)
+
+    final = await load_plan(str(tmp_path), "t1", "sp1")
+    assert final["phases"][0]["steps"][0]["status"] == "complete"
+    # process ran twice; the second turn carried the deficit continuation.
+    assert handler.process.await_count == 2
+    second_msg = handler.process.await_args_list[1].args[0]
+    assert "CONTINUATION" in second_msg.content
+    assert "register_tool was never invoked" in second_msg.content
+    # The verifier ran exactly once — continuations are never re-verified.
+    assert handler.reasoning.complete_simple.await_count == 1

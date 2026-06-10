@@ -1238,9 +1238,17 @@ class ReasoningService:
                 return "Workspace manager is not available."
             elif tool_name == "manage_plan":
                 if hasattr(self, '_handler') and self._handler:
+                    # STEP-COMPLETION DISCIPLINE (#189): plan turns use
+                    # conversation_id "plan_<id>"; a continue issued from
+                    # INSIDE a plan step races the spine's auto-advance
+                    # (double-dispatch) — the handler defers it to the spine.
+                    _in_plan_turn = (
+                        (request.conversation_id or "").startswith("plan_")
+                    )
                     return await self._handler._handle_manage_plan(
                         request.instance_id, request.active_space_id, tool_input,
-                        creator_member_id=request.member_id or "")
+                        creator_member_id=request.member_id or "",
+                        in_plan_turn=_in_plan_turn)
                 return "Self-directed execution is not available."
             elif tool_name == "read_runtime_trace":
                 if hasattr(self, '_handler') and self._handler:

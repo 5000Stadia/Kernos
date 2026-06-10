@@ -40,6 +40,75 @@ class ExecutionEnvelope:
     source: str = "self_directed"
     is_final_step: bool = False
     member_id: str = ""  # the member who owns/created the plan (routing context)
+    # STEP-COMPLETION DISCIPLINE (#189): set on the single bounded re-dispatch
+    # of a step whose named actions didn't all run. The continuation turn
+    # carries the deficit so the model finishes ONLY what's missing; a
+    # continuation is never re-dispatched again (bounded at one).
+    completion_retry: bool = False
+    completion_deficit: str = ""
+
+
+async def verify_step_completion(
+    reasoning: Any, step_description: str, response_text: str,
+) -> tuple[bool, str]:
+    """Check whether a plan step's named actions actually ran (#189).
+
+    The spine previously marked a step complete because the turn produced
+    text — even when the step's own report said an action was skipped
+    (live: "registration was not attempted", the unwritten final report).
+    The failures were honestly NARRATED but dishonestly BOOKKEPT, so the
+    verifier only has to read the narration: one cheap, strict-contract
+    model call comparing the step's stated actions against the agent's
+    own report.
+
+    Returns ``(complete, missing)``. Fail-OPEN: any error returns
+    ``(True, "")`` — a broken verifier must never stall a plan.
+    """
+    import json as _json
+    try:
+        result = await reasoning.complete_simple(
+            system_prompt=(
+                "You audit whether a plan step's work is COMPLETE, using the "
+                "step's stated actions and the agent's own report of what it "
+                "did. A step is INCOMPLETE only when the step text names a "
+                "concrete action (e.g. 'register the tool', 'write the "
+                "report', 'send X') that the report shows was NOT performed "
+                "— skipped, deferred, 'not attempted', or simply absent. "
+                "Judge ONLY actions the step names; do not invent extra "
+                "requirements; honest partial results with all named actions "
+                "attempted count as complete. Respond ONLY with JSON: "
+                '{"complete": true|false, "missing": "<missing action(s), '
+                'brief>"}'
+            ),
+            user_content=(
+                f"STEP: {step_description}\n\n"
+                f"AGENT REPORT:\n{(response_text or '')[:4000]}"
+            ),
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "complete": {"type": "boolean"},
+                    "missing": {"type": "string"},
+                },
+                "required": ["complete", "missing"],
+            },
+            max_tokens=150,
+            prefer_cheap=True,
+        )
+        parsed = _json.loads(result)
+        complete = bool(parsed.get("complete", True))
+        missing = str(parsed.get("missing") or "").strip()
+        if complete:
+            return True, ""
+        if not missing:
+            # An INCOMPLETE verdict with no named deficit is unactionable —
+            # treat as complete rather than dispatch a continuation with no
+            # instruction.
+            return True, ""
+        return False, missing[:400]
+    except Exception as exc:  # fail-open — verifier must never stall a plan
+        logger.warning("STEP_COMPLETION_VERIFY: failed open: %s", exc)
+        return True, ""
 
 
 MANAGE_PLAN_TOOL = {
