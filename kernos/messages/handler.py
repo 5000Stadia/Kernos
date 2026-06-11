@@ -4295,6 +4295,7 @@ class MessageHandler:
 
     async def _assess_domain_creation(
         self, instance_id: str, space_id: str, space: ContextSpace, comp_state: "CompactionState",
+        member_id: str = "",
     ) -> None:
         """Assess whether compacted conversation constitutes a new domain.
 
@@ -4309,10 +4310,36 @@ class MessageHandler:
         if space.depth >= 2:
             return
 
-        # Load the freshly compacted document
-        doc = await self.compaction.load_document(instance_id, space_id)
+        # Load the freshly compacted document. Compaction state is
+        # member-scoped in production (Codex r1: loading without member_id
+        # returned None on every member turn and silently killed the
+        # assessment); fall back to the instance-level path for legacy docs.
+        doc = await self.compaction.load_document(instance_id, space_id, member_id)
+        if not doc and member_id:
+            doc = await self.compaction.load_document(instance_id, space_id)
         if not doc:
+            logger.info("DOMAIN_ASSESS: space=%s result=no_document member=%s", space_id, member_id)
             return
+        # Evidence is the most-recent slice (Living State + latest ledger
+        # entry) — the document is ordered oldest-first, so a head slice
+        # would read stale content.
+        from kernos.kernel.compaction import domain_assessment_evidence
+        evidence = domain_assessment_evidence(doc)
+
+        # Recurrence receipts: router topic hints accumulated for this space.
+        from kernos.kernel.topic_hints import TopicHintLedger
+        hint_ledger = TopicHintLedger(os.getenv("KERNOS_DATA_DIR", "./data"))
+        hint_lines = ""
+        try:
+            _top = hint_ledger.top_hints(instance_id, space_id, limit=5)
+            if _top:
+                hint_lines = "\n".join(
+                    f"- {h['hint']}: tagged on {h['count']} message(s), "
+                    f"first {h['first_seen'][:10]}, last {h['last_seen'][:10]}"
+                    for h in _top
+                )
+        except Exception as exc:
+            logger.warning("DOMAIN_ASSESS: hint ledger read failed: %s", exc)
 
         # Build existing space list for context
         all_spaces = await self.state.list_context_spaces(instance_id)
@@ -4373,8 +4400,15 @@ class MessageHandler:
                 user_content=(
                     f"Current space: {space.name} (depth={space.depth})\n"
                     f"Existing spaces:\n" + ("\n".join(existing) or "(none)") + "\n\n"
-                    f"Compaction summary:\n{doc[:3000]}\n\n"
-                    f"Parent content (for migration if creating domain):\n{_parent_inventory}"
+                    f"Current state (most recent first; this is the freshest "
+                    f"picture of the space):\n{evidence}\n\n"
+                    + (
+                        "Recurring topic signals (router has tagged these "
+                        "emerging topics on individual messages — direct "
+                        "evidence of recurrence):\n" + hint_lines + "\n\n"
+                        if hint_lines else ""
+                    )
+                    + f"Parent content (for migration if creating domain):\n{_parent_inventory}"
                 ),
                 output_schema=self.DOMAIN_ASSESSMENT_SCHEMA,
                 max_tokens=512,
@@ -4405,14 +4439,9 @@ class MessageHandler:
                 )
                 return
 
-            if parsed.get("confidence") != "high":
-                logger.info(
-                    "DOMAIN_ASSESS: space=%s result=skip_low_confidence confidence=%s",
-                    space_id, parsed.get("confidence", "?"),
-                )
-                return
-
-            # Check for duplicate or drift (similar name to existing)
+            # Duplicate/drift check runs BEFORE the confidence branch (Codex
+            # r1: a medium verdict naming an existing space must not count
+            # toward a creation suggestion the high path would have blocked).
             new_name = parsed.get("name", "").strip()
             if not new_name:
                 return
@@ -4426,6 +4455,59 @@ class MessageHandler:
                     logger.info("DOMAIN_DRIFT: assessed=%s matches=%s (%s) — skipping creation",
                         new_name, s.name, s.id)
                     return
+
+            if parsed.get("confidence") != "high":
+                logger.info(
+                    "DOMAIN_ASSESS: space=%s result=skip_low_confidence confidence=%s",
+                    space_id, parsed.get("confidence", "?"),
+                )
+                # Escalation ladder: a medium-confidence "this could be a
+                # domain" verdict is a near-miss worth remembering. On
+                # repeat, suggest to the user instead of silently
+                # re-judging from zero. Auto-create stays HIGH-only.
+                _nm_name = new_name
+                if parsed.get("confidence") == "medium" and _nm_name:
+                    try:
+                        _nm_count = hint_ledger.record_near_miss(instance_id, space_id, _nm_name)
+                        logger.info(
+                            "DOMAIN_NEAR_MISS: space=%s name=%r count=%d",
+                            space_id, _nm_name, _nm_count,
+                        )
+                        if hint_ledger.should_suggest(instance_id, space_id, _nm_name):
+                            from kernos.kernel.awareness import Whisper, generate_whisper_id
+                            whisper = Whisper(
+                                whisper_id=generate_whisper_id(),
+                                insight_text=(
+                                    f"This is starting to look like a recurring "
+                                    f"{_nm_name} thread — it has come up across "
+                                    f"several conversations now. Want me to give it "
+                                    f"its own space so it keeps its own memory and files?"
+                                ),
+                                delivery_class="ambient",
+                                source_space_id=space_id,
+                                target_space_id=space_id,
+                                supporting_evidence=[
+                                    f"Domain assessment returned medium confidence {_nm_count} times",
+                                    f"Proposed name: {_nm_name}",
+                                ],
+                                reasoning_trace=(
+                                    "Repeated medium-confidence domain assessments; "
+                                    "suggesting instead of auto-creating (HIGH-only policy)."
+                                ),
+                                knowledge_entry_id="",
+                                foresight_signal=f"domain_near_miss:{_nm_name[:40]}",
+                                created_at=utc_now(),
+                                owner_member_id=space.member_id,
+                            )
+                            await self.state.save_whisper(instance_id, whisper)
+                            hint_ledger.mark_suggested(instance_id, space_id, _nm_name)
+                            logger.info(
+                                "DOMAIN_SUGGESTION: space=%s name=%r whisper=%s",
+                                space_id, _nm_name, whisper.whisper_id,
+                            )
+                    except Exception as exc:
+                        logger.warning("DOMAIN_NEAR_MISS: handling failed: %s", exc)
+                return
 
             # Enforce space cap
             await self._enforce_space_cap(instance_id)
@@ -4447,6 +4529,10 @@ class MessageHandler:
                 last_active_at=now,
             )
             await self.state.save_context_space(new_space)
+            try:
+                hint_ledger.clear_near_miss(instance_id, space_id, new_name)
+            except Exception:
+                pass
 
             # Initialize compaction state with reference-based origin
             try:
@@ -4596,14 +4682,19 @@ class MessageHandler:
 
     async def _produce_child_briefings(
         self, instance_id: str, space_id: str, space: ContextSpace,
+        member_id: str = "",
     ) -> None:
         """Produce context briefings for all child domains after parent compaction."""
         children = await self.state.list_child_spaces(instance_id, space_id)
         if not children:
             return
 
-        # Load the freshly compacted document (Living State)
-        doc = await self.compaction.load_document(instance_id, space_id)
+        # Load the freshly compacted document (Living State). Compaction
+        # state is member-scoped in production; fall back to the legacy
+        # instance-level path.
+        doc = await self.compaction.load_document(instance_id, space_id, member_id)
+        if not doc and member_id:
+            doc = await self.compaction.load_document(instance_id, space_id)
         if not doc:
             return
 

@@ -331,9 +331,11 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                                 try:
                                     import asyncio as _aio
                                     _aio.create_task(handler._assess_domain_creation(
-                                        instance_id, ctx.active_space_id, ctx.active_space, comp_state))
+                                        instance_id, ctx.active_space_id, ctx.active_space, comp_state,
+                                        member_id=ctx.member_id))
                                     _aio.create_task(handler._produce_child_briefings(
-                                        instance_id, ctx.active_space_id, ctx.active_space))
+                                        instance_id, ctx.active_space_id, ctx.active_space,
+                                        member_id=ctx.member_id))
                                 except Exception as _dax:
                                     logger.warning("DOMAIN_ASSESS/BRIEFING: launch failed: %s", _dax)
                             finally:

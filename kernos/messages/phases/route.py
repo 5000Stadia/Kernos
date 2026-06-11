@@ -167,6 +167,27 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         ctx.previous_space_id, ctx.space_switched,
     )
 
+    # Accumulate emerging-topic hints (tags that aren't space IDs) into the
+    # recurrence ledger the domain assessor reads. Best-effort: a ledger
+    # failure must never affect routing.
+    try:
+        from kernos.kernel.topic_hints import TopicHintLedger, extract_hint_tags
+        # Cheap shape filter first; only touch the store when a candidate
+        # survives (diagnostic turns must not pay routing-evidence costs).
+        _candidates = extract_hint_tags(ctx.router_result.tags)
+        if _candidates and ctx.active_space_id:
+            _known_ids = {
+                s.id for s in await handler.state.list_context_spaces(instance_id)
+            }
+            _hint_tags = [c for c in _candidates if c not in _known_ids]
+            if _hint_tags:
+                TopicHintLedger(os.getenv("KERNOS_DATA_DIR", "./data")).record_hints(
+                    instance_id, ctx.active_space_id, _hint_tags,
+                )
+                logger.info("TOPIC_HINTS: space=%s recorded=%s", ctx.active_space_id, _hint_tags)
+    except Exception as _thx:
+        logger.warning("TOPIC_HINTS: recording failed: %s", _thx)
+
     if ctx.space_switched:
         _prev_space = await handler.state.get_context_space(instance_id, ctx.previous_space_id)
         _prev_name = _prev_space.name if _prev_space else "unknown"

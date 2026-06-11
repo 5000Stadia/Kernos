@@ -83,6 +83,16 @@ The router uses the hierarchy when it routes:
 
 Depth is bounded at 2. Spaces don't nest arbitrarily — a three-level tree (General → Business → Phoenix) is the maximum the router is asked to reason about. Deeper nesting produces ambiguity the router can't resolve without becoming expensive.
 
+## How new domains form
+
+New spaces are never created by topic drift alone. Formation is conservative and evidence-driven, in three layers:
+
+1. **Hint accumulation (per turn).** When the router sees a recurring topic that has no space, it tags the message with a snake_case hint (`dnd_campaign`, `kitchen_reno`). Hints are aggregated into a per-space recurrence ledger (`TopicHintLedger`, `data/{instance}/state/topic_hints.json`) — count, first seen, last seen. Recording is best-effort; a ledger failure never affects routing.
+2. **Assessment (per compaction).** After each compaction of a general/domain space, a cheap strict-schema model call judges whether the conversation has earned a dedicated space. Its evidence is the *most recent* slice of the compaction document (latest ledger entry + Living State — the document is ordered oldest-first, so a head slice would judge stale content) plus the top accumulated hints as direct recurrence receipts. Creation requires **high** confidence, a non-duplicate name (with drift detection — "DnD" won't fork alongside "D&D"), and respects a space cap. On creation, domain-specific covenants, files, and procedure sections migrate semantically from the parent. System spaces are excluded — platform work never fragments into domains.
+3. **Escalation ladder (across assessments).** A medium-confidence verdict is recorded as a *near-miss* rather than discarded. When the same candidate recurs (threshold: 2), the system surfaces a one-time ambient suggestion — "this is starting to look like a recurring D&D thread, want me to give it its own space?" — instead of silently re-judging from zero. Auto-creation stays high-confidence-only; the user gets the borderline call.
+
+(`kernos/messages/handler.py::_assess_domain_creation`; `kernos/kernel/topic_hints.py`; `kernos/kernel/compaction.py::domain_assessment_evidence`)
+
 ## Query mode, work mode, continuation
 
 The router returns a structured routing decision, not just a space ID:

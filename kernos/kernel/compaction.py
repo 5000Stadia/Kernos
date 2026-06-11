@@ -86,6 +86,23 @@ def compute_document_budget(
     return model_max_tokens - system_overhead_tokens - index_tokens - conversation_headroom
 
 
+def domain_assessment_evidence(doc: str, max_chars: int = 3000) -> str:
+    """Most-recent slice of a compaction document, for domain assessment.
+
+    The document is ordered ledger-oldest-first with the Living State
+    sections at the tail, so a head slice reads the *stalest* content —
+    exactly the wrong evidence for spotting an emerging domain (live
+    finding 2026-06-10: ``doc[:3000]`` covered days-old ledger entries
+    and cut off the entire Current Situation). Evidence starts at the
+    most recent ledger entry; when even that exceeds the budget, the
+    tail wins — the Living State outranks older ledger lines.
+    """
+    import re as _re
+    matches = list(_re.finditer(r"(?m)^## Compaction #\d+", doc))
+    sliced = doc[matches[-1].start():] if matches else doc
+    return sliced[-max_chars:] if len(sliced) > max_chars else sliced
+
+
 # ---------------------------------------------------------------------------
 # Headroom estimation
 # ---------------------------------------------------------------------------
