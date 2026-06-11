@@ -14,7 +14,7 @@ The reactive agent doesn't disappear. It becomes the interface layer over a subs
 
 Four things, continuously, per member:
 
-**1. Maintains a World Model.** A structured representation of the member's situation that fuses streams the V1 agent only sees one at a time: conversation history, calendar, email, location, plan state, covenants, declared goals, in-progress artifacts. The World Model is not a log; it's a current-state abstraction with typed entities, relationships, salience weights, and temporal structure. When the member says *"what should I work on?"*, the answer is computed against this model in milliseconds, not reconstructed from scratch by the agent reading through context.
+**1. Maintains a World Model.** A structured representation of the member's situation that fuses streams the V1 agent only sees one at a time: conversation history, calendar, email, location, plan state, covenants, declared goals, in-progress artifacts. The World Model is a current-state abstraction **served from an append-only assertion log** — the current-state view is a derived, rebuildable index; the log is the truth. (It is emphatically not a mutable state store: as-of queries, audit, and rebuildability all ride on the log, and a log cannot be reconstructed from a mutable store after the fact.) Salience is a projection-time ranking computed from the log, never a stored weight. When the member says *"what should I work on?"*, the answer is computed against this model in milliseconds, not reconstructed from scratch by the agent reading through context.
 
 **2. Runs reflection passes.** Periodically — not per-turn — the Cognition Kernel re-reads recent state changes and asks: *"did anything about this member's situation meaningfully change? did a plan become blocked? did a goal drift? did a pattern emerge?"* Reflection produces structured updates to the World Model and candidate signals that might warrant a surface to the member. Most candidates get filtered out.
 
@@ -34,6 +34,18 @@ A useful way to think about what the Cognition Kernel enables is through six fic
 - **Cortana (Halo).** Integration across specialist tools and devices. The V2 tool catalog becomes something the Cognition Kernel reaches into without exposing to the member.
 
 None of these characters correspond to V2 1:1. All of them contain architectural ideas V2 composes together. V2 is the system that makes JARVIS-class behavior feasible without the fictional magic.
+
+## The World Model substrate exists: pattern-buffer
+
+V2's hardest prerequisite is no longer hypothetical. The World Model substrate is in active development as **[pattern-buffer](https://github.com/5000Stadia/pattern-buffer)** — a standalone, framework-agnostic engine: one append-only log of perspective-scoped, time-indexed assertions per world, with current state, containment, knowledge frames, history, and rendered briefings all served as derived, disposable projections. The same engine runs authored fiction and real-world tracking under one resolution-policy switch, with provenance discipline that keeps observation, inference, assumption, and generated fill permanently distinguishable. At time of writing the engine is built and invariant-tested, with its acceptance eval (ingest a complete short fiction, delete the prose, interrogate the store against a hand-authored answer key) in progress.
+
+Kernos integrates it the way Kernos integrates SQLite: as a library below the harness, through a thin adapter — context spaces *bind* to worlds (fiction spaces to private worlds; all real-life spaces to the member's one world), an ingest cohort commits turn evidence through the engine's write gate, a push cohort serves deterministic per-turn snapshots, and the member's reality is queried, never re-inferred. The engine never imports from the host; the dependency arrow points one way.
+
+**The lens this gives the whole V2 arc: pattern-buffer makes the world *rememberable*; V2 makes it *attended*.** With the memory substrate accounted for, the remaining gaps between Kernos and JARVIS-class behavior are exactly three, and each is a wiring problem rather than a research problem:
+
+1. **Continuous perception** — an always-on perceiver writing fused streams into the world between turns (the Cognition Kernel's core move, below).
+2. **Branch worlds** — simulation as a world-level operation. Because the log is append-only, a hypothetical is a copy-on-write fork: a new world sharing the parent's log as a read-only prefix up to sequence N. Forward modeling becomes *fork at now, apply hypothetical events, materialize the outcome, compare across forks, discard*. Disposable futures over the same machinery — "running simulations, sir" with receipts.
+3. **The curiosity loop** — epistemic self-maintenance. Tracking-mode confidence decays (a parked car's location fades in hours); the loop turns decayed confidence into verification intents, schedules the check through the existing trigger/workflow substrate, and re-confirms through the ingest gate. The system tends its own frontier instead of waiting to be asked about stale facts. Every component exists in V1; the loop is the line not yet drawn between them.
 
 ## Why continuous, not turn-driven
 
@@ -61,7 +73,7 @@ Most noticings get logged to the World Model and silently resolved (the conflict
 
 ## Forward modeling and bounded autonomy
 
-The projection pass enables something V1 structurally cannot: **forward modeling**. The Cognition Kernel simulates near-term futures given the World Model's current state — *"if I don't act, what happens by end of day? by end of week? which of those outcomes are costly enough to warrant action now?"*
+The projection pass enables something V1 structurally cannot: **forward modeling**. The Cognition Kernel simulates near-term futures given the World Model's current state — *"if I don't act, what happens by end of day? by end of week? which of those outcomes are costly enough to warrant action now?"* The mechanism is branch worlds (above): each simulated future is a disposable copy-on-write fork of the member's world, mutated hypothetically, materialized, compared, and discarded — never a mutation of reality's log.
 
 Forward modeling unlocks a class of agent behavior that would look like care in a human context: the agent that quietly moves a deadline's prep work forward because it sees a conflict forming on Thursday. The agent that drafts the follow-up email Friday because it projects the recipient will forget by Monday. The agent that surfaces *"hey, I notice you have three one-on-ones back-to-back tomorrow; want me to block a recovery gap after?"* — not because the member asked, but because the pattern made the cost of *not* asking too high.
 
@@ -102,8 +114,8 @@ The foundational V2 spec is **SPEC-COGNITION-KERNEL-V1**. Its scope is deliberat
 The spec ships:
 
 - A per-member supervisor process separate from the handler
-- A World Model data structure with typed entity support and temporal structure
-- A sync protocol from V1 turn events to World Model state changes
+- The World Model data structure **adopted, not invented**: the pattern-buffer adapter — space→world binding table, the ingest cohort (turn evidence through the engine's write gate), the push cohort (deterministic per-turn snapshots)
+- A sync protocol from V1 turn events to World Model state changes (the two-cadence discipline: turn-time ingest plus boundary-time reconciliation sweep)
 - A heartbeat contract making the supervisor restartable and observable
 - A no-op relevance filter that, for V1-stable behavior, returns "silence" in every case
 
@@ -121,11 +133,12 @@ The goal is a substrate that V1 runs on top of, without observable behavior chan
 The arc from substrate to JARVIS-class behavior runs through specs in rough order:
 
 1. **Reflection-pass v1.** Periodic World Model re-read; structured update emissions; no outbound surfacing yet.
-2. **Projection-pass v1.** Forward modeling against current World Model; candidate-signal emissions; still no outbound.
-3. **Relevance filter v1.** Bar setting, dedupe logic, principal-model integration, confidence thresholds. This is the spec that makes the pipeline able to produce outbound signals at all.
-4. **Bounded autonomy v1.** Auto / confirm / decline classification; integration with V1 dispatch gate; covenant-relevance modeling.
-5. **Fused streams.** Calendar, email, location, artifact state each ship as their own stream-adapter specs with principal-configurable privacy scopes.
-6. **Principal modeling v1.** Structured principal-model capture, supersession discipline, integration with relevance filter and action-band classifier.
+2. **Curiosity-loop v1.** Decayed confidence emits verification intents; the trigger/workflow substrate schedules checks; re-confirmation flows through the ingest gate. The first V2 behavior that *acts* between turns, and the safest: it only ever asks the world questions.
+3. **Projection-pass v1.** Forward modeling via branch worlds — copy-on-write forks of the member's world, hypothetically mutated, materialized, compared, discarded; candidate-signal emissions; still no outbound.
+4. **Relevance filter v1.** Bar setting, dedupe logic, principal-model integration, confidence thresholds. This is the spec that makes the pipeline able to produce outbound signals at all.
+5. **Bounded autonomy v1.** Auto / confirm / decline classification; integration with V1 dispatch gate; covenant-relevance modeling.
+6. **Fused streams.** Calendar, email, location, artifact state each ship as their own stream-adapter specs with principal-configurable privacy scopes — each a new feed into the engine's singular ingest gate, never a new write path.
+7. **Principal modeling v1.** Structured principal-model capture, supersession discipline, integration with relevance filter and action-band classifier.
 
 The full arc is probably twelve to twenty specs deep; none of them land before SPEC-COGNITION-KERNEL-V1 has a clean substrate to build on.
 
