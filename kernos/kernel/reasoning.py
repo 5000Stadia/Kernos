@@ -1623,6 +1623,7 @@ class ReasoningService:
                     self._state,
                     self._trigger_store,
                     self._registry,
+                    active_space_id=request.active_space_id,
                 )
             elif tool_name == "dump_context":
                 # SELF-ADMIN-TOOLS-V1: agent-callable equivalent of

@@ -15,6 +15,7 @@ async def build_user_truth_view(
     state: Any,              # StateStore
     trigger_store: Any,      # TriggerStore | None
     registry: Any = None,    # CapabilityRegistry | None
+    active_space_id: str = "",
 ) -> str:
     """Build the user-facing truth view.
 
@@ -125,8 +126,12 @@ async def build_user_truth_view(
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
             lines = ["## Context Spaces"]
+            current = next((s for s in active_spaces if s.id == active_space_id), None)
+            if current is not None:
+                cur_tag = f" [{current.space_type}]" if current.space_type == "system" else ""
+                lines.append(f"Current space: {current.name}{cur_tag}")
             for s in sorted(active_spaces, key=lambda x: (x.depth, x.name)):
-                if s.space_type == "system":
+                if s.space_type == "system" and s.id != active_space_id:
                     continue  # Don't clutter the user view with system internals
                 parent_note = ""
                 if s.parent_id:

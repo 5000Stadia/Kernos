@@ -269,3 +269,52 @@ async def test_views_are_separate(store, trigger_store):
     # Operator view has Legacy section, user view does not
     assert "Legacy Unlinked" not in user_view
     assert "Legacy Unlinked" in operator_view
+
+
+# ---------------------------------------------------------------------------
+# Current-space visibility (live finding 2026-06-10: the agent reported
+# "we're in General" while standing in a hidden system space)
+# ---------------------------------------------------------------------------
+
+
+def _space(space_id: str, name: str, space_type: str = "general", **kwargs):
+    from kernos.kernel.spaces import ContextSpace
+    defaults = dict(
+        id=space_id, instance_id=T, name=name, space_type=space_type,
+        status="active", created_at=utc_now(), last_active_at=utc_now(),
+    )
+    defaults.update(kwargs)
+    return ContextSpace(**defaults)
+
+
+async def test_user_view_names_current_space(store):
+    await store.save_context_space(_space("space_gen00001", "General", is_default=True))
+    view = await build_user_truth_view(T, store, None, active_space_id="space_gen00001")
+    assert "Current space: General" in view
+
+
+async def test_user_view_current_system_space_is_visible(store):
+    """The space the user is standing in must never be hidden — even system-type."""
+    await store.save_context_space(_space("space_gen00001", "General", is_default=True))
+    await store.save_context_space(
+        _space("space_sys00001", "Kernos Self-Improvement", space_type="system"))
+    view = await build_user_truth_view(T, store, None, active_space_id="space_sys00001")
+    assert "Current space: Kernos Self-Improvement [system]" in view
+    assert "Kernos Self-Improvement" in view.split("Current space:")[1]
+
+
+async def test_user_view_other_system_spaces_stay_hidden(store):
+    await store.save_context_space(_space("space_gen00001", "General", is_default=True))
+    await store.save_context_space(
+        _space("space_sys00001", "Internal Plumbing", space_type="system"))
+    view = await build_user_truth_view(T, store, None, active_space_id="space_gen00001")
+    assert "Current space: General" in view
+    assert "Internal Plumbing" not in view
+
+
+async def test_user_view_no_active_space_id_keeps_legacy_shape(store):
+    """Backward compat: omitting active_space_id renders the legacy listing."""
+    await store.save_context_space(_space("space_gen00001", "General", is_default=True))
+    view = await build_user_truth_view(T, store, None)
+    assert "Current space:" not in view
+    assert "General" in view
