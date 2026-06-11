@@ -35,3 +35,6 @@ config/storage_backend.yml
 
 # Headless self-test / sandbox scratch — never commit (LLM payloads, convo, DBs)
 .kernos_sandbox/
+
+# Cross-instance communication channel (Kernos CC <-> pattern-buffer CC); never committed
+dev_inbox/
