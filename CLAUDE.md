@@ -11,6 +11,13 @@ A personal agentic operating system. As-built architecture: `docs/TECHNICAL-ARCH
 3. **Execute only the Active Spec** in DECISIONS.md. Don't jump ahead to future phases. Don't build things not in the current spec. Planning lives in Notion; specs come to you via DECISIONS.md.
 4. **Check instance_id naming** — the codebase uses `instance_id` (not `tenant_id`). All state is keyed to `instance_id`.
 
+## Cross-Agent Communication (development channel)
+
+**AgentPost is the sole actionable channel** for inter-agent specs, reviews, questions, and replies (peers: PB = pattern-buffer, C = Construct, Cx = Codex). Resolve identity with `agentpost identify --cwd "$PWD"` (→ `k`); discover recipients with `agentpost agents-find` (never guess); inspect with `read` (non-claiming), claim with `next`, thread with `reply`; use `--notify idle` routinely and `immediate` only for blockers. Prefer stdin (`-`) bodies for anything with quotes or backticks.
+
+- **Never create new actionable `dev_inbox/` letters** and never mirror one task across channels. `dev_inbox/` (and `/home/k/codex-inbox/`) are read-only historical/recovery archives; after a *proven* AgentPost notification failure they may carry only a control pointer to an existing AgentPost Message-ID.
+- This governs the **development-agent channel only.** Kernos product surfaces (AgentInbox, cc_inbox, bridge_watcher, workflow routing) are application architecture — unrelated and unchanged.
+
 ## Kernel Architecture Context
 
 Read `docs/reference/kernel-architecture-outline.md` for the kernel design vision. Key conventions for the kernel layer (`kernos/kernel/`):
