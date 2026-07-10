@@ -1,122 +1,194 @@
 # CLI-FIRST-CORE-V1 — platform-neutral server core + CLI-first onboarding
 
-**Status:** DRAFT for review (Cx spec pass, then build on GREEN + founder go).
-**Origin:** founder directive 2026-07-10 — "The Discord connection should not be
-required to use KERNOS." Coupling audit confirmed the kernel is clean (zero
-`import discord` outside `adapters/discord_bot.py` + `server.py`; the
-adapter/handler isolation constraint held). What remains Discord-coupled is the
-*chassis*: `server.py`'s event loop is `discord.Client.run()`, and owner
-bootstrap is Discord-hardcoded. This spec removes both, and assembles the
-already-built onboarding pieces (`kernos setup llm`, `kernos setup`,
-`credentials_cli`, `repl.py`, the blueprint's onboarding nudge) into a
-CLI-first front door.
+**Status:** DRAFT r2 — Cx spec-review round 1 (YELLOW) folded; awaiting re-review
+GREEN, then build. **Origin:** founder directive 2026-07-10 — "the Discord
+connection should not be required to use KERNOS." Coupling audit: kernel clean
+(zero `import discord` outside `adapters/discord_bot.py` + `server.py`); the
+remaining coupling is the chassis (`server.py` event loop, owner bootstrap).
+
+**r2 changelog (Cx round-1 blocking amendments, all folded):** (1) boot-guard
+promotion moved behind an explicit **readiness barrier** (core AND every
+configured startup-critical adapter) so a Discord-breaking commit can never be
+promoted to last-known-good; (2) supervised **CoreRuntime** lifetime with owned
+shutdown + once-only construction guard (Discord `on_ready` recurs on
+reconnect); (3) the sync 429 wrapper is NOT reusable around `client.start` — an
+**async equivalent** with its own tests; "byte-identical" weakened to
+*behaviorally equivalent with explicit lifecycle pins*; (4) explicit
+**DiscordRuntime** extraction boundary with a block-by-block inventory
+(flusher/watchdog are Discord-only; scheduled update/restart gains a
+platform-neutral activity source); (5) `cli:<hostname-user>` replaced by a
+**persisted instance-id resolver** (env → adopt unambiguous legacy → refuse on
+ambiguity → fresh generates + persists); (6) Telegram-only acceptance
+strengthened to **message→handler→reply** with a bound owner.
 
 ## Intent
 
 1. **Kernos runs with zero platform adapters.** One LLM key → talk on the CLI.
 2. **Every adapter is optional and token-gated** — Discord becomes what
-   Telegram already is in `server.py` (`if token:` → register + start), losing
-   its chassis status.
+   Telegram already is (`if token:` → register + start), losing chassis status.
 3. **First run is a guided product moment** — connect an LLM, meet your agent,
-   then *optionally* connect Telegram/Discord/Twilio, offered capability-first
-   (the blueprint's onboarding nudge), never demanded.
+   then *optionally* connect Telegram/Discord/Twilio (the blueprint's
+   capability-first nudge), never demanded.
 
 ## Non-negotiable constraints
 
 - **`start.sh` untouched.** It invokes `python kernos/server.py`; that entry
-  point and its boot_guard pre-launch interplay must keep working byte-for-byte.
-  The extraction happens *inside* — `server.py` remains the file start.sh runs.
-- **Byte-identical Discord behavior when `DISCORD_BOT_TOKEN` is set** (the
-  production bot must not notice this change). Gateway watchdog, presence,
-  slash commands, reconnect/backoff — all arm exactly as today, but only when
-  the Discord adapter is active.
-- **Adapter/handler isolation preserved** (grep-verified, as always).
-- **Boot symmetry with `repl.py` maintained** — the extracted core is the
-  shared recipe both entry points use (repl.py's docstring contract becomes
-  literal shared code instead of a mirrored copy).
-- No DECISIONS.md status edits (owner/design-review own that).
+  point keeps working, including the adapterless case (the supervisor keeps the
+  process alive — see A2).
+- **Boot-guard auto-rollback contract preserved via the readiness barrier
+  (A5).** This is the hard-brick protection; it must be *stronger* after the
+  extraction, never weaker.
+- **Behaviorally equivalent Discord operation when `DISCORD_BOT_TOKEN` is set**,
+  pinned by explicit lifecycle tests (connect, watchdog arm, presence, command
+  tree sync, reconnect path, 429 backoff schedule + operator text). Not claimed
+  as byte-identical — the run loop changes shape (A3).
+- **Adapter/handler isolation preserved** (grep-verified).
+- **Boot symmetry:** `repl.py` re-bases onto the shared core construction via
+  options, preserving its intentional omissions (no pollers, dev data dir)
+  unless this spec names a change.
+- No DECISIONS.md status edits.
 
 ## Phase A — platform-neutral core extraction
 
-**A1. Extract the boot recipe.** New `kernos/server_core.py` owning the
-platform-neutral boot currently living in `on_ready`: event-stream writer, MCP
-manager, state store, handler construction, scheduler, awareness evaluators,
-boot_guard `mark_boot_ok` + rollback-notice surfacing, improvement-loop orphan
-reconcile, and poller startup. `repl.py` re-bases onto it (delete the mirrored
-copy; keep its public `build_dev_handler` seam and test contract).
+**A1. CoreRuntime.** New `kernos/server_core.py` exposing a
+`build_core_runtime(...) -> CoreRuntime` factory. `CoreRuntime` owns: event
+stream writer, MCP manager, state store + instance DB, handler, scheduler,
+awareness evaluators, poller registry, and **every background task it starts**
+(task list held on the object). It provides `close()` — cancel owned tasks,
+stop pollers, disconnect MCP, flush/stop event writer, close state/instance DB
+— and is **constructed exactly once per process**: the Discord `on_ready`
+re-entry (reconnect) hits a construction guard and only re-runs the
+Discord-facing rewiring, exactly like today's semantics but explicit.
+`repl.py`'s `build_dev_handler` becomes a thin wrapper over the same factory
+(public seam + test contract preserved).
 
-**A2. Plain asyncio main.** `server.py.__main__` becomes: load env → boot core
-→ register each adapter whose credentials exist → run the loop. Discord:
-`await client.start(token)` as a task inside the shared loop (replacing
-blocking `client.run()`), wrapped in the existing smart-backoff/429 logic.
-Telegram/Twilio: exactly as today. **Zero adapters configured is a valid,
-booting state** (scheduler + awareness run; chat happens via CLI).
+**A2. Supervisor main.** `server.py.__main__`: load env → `build_core_runtime`
+→ construct each adapter whose credentials exist → supervise. The supervisor:
+- awaits the set of adapter lifetimes; with **zero adapters it awaits a
+  shutdown event** (the adapterless daemon stays alive under start.sh),
+- installs SIGINT/SIGTERM handlers that trigger orderly shutdown
+  (`CoreRuntime.close()` + adapter closes),
+- propagates adapter-task exceptions to the supervisor (a crashed adapter is
+  loud, not silently dropped).
 
-**A3. Discord-conditional machinery.** Gateway watchdog, Discord presence,
-command-tree sync, and the Discord-shaped wipe/restart handlers arm only when
-the Discord adapter registered. No Discord token → no Discord imports executed
-(module-level `import discord` in server.py moves behind the adapter branch or
-into the adapter module).
+**A3. DiscordRuntime.** All Discord surface moves behind a
+`DiscordRuntime` factory/module: client + intents, command tree + decorators,
+slash/command handlers, gateway watchdog, deferred-delivery flusher,
+gateway-health provider wiring, presence, tree sync, and the **async 429
+smart-backoff** — a new `await client.start()`-based equivalent of
+`_run_with_429_smart_backoff` (asyncio.sleep, same schedule and operator
+text, explicit close/cancel on abort, exception propagation to the
+supervisor), **with its own tests** (the sync wrapper's tests are not evidence
+for the new lifecycle). No Discord token → the module is never imported
+(module-level `import discord` leaves server.py).
 
-**A4. Instance identity decoupled.** `KERNOS_INSTANCE_ID` remains the anchor;
-absent, first-boot derives a platform-neutral default (`cli:<hostname-user>`
-shape) instead of requiring the `discord:<id>` convention. Existing
-`discord:*` instances load unchanged (no migration).
+**on_ready block inventory** (the extraction boundary, per current server.py):
 
-**Acceptance A:**
-- `.env` with ONLY `TELEGRAM_BOT_TOKEN` (+ LLM key): server boots, Telegram
-  serves. ← the founder's original complaint, fixed.
-- `.env` with only an LLM key: server boots adapter-less; REPL/CLI chat works.
-- `.env` with Discord token: existing behavior regression-pinned (watchdog
-  arms, presence sets, slash commands register).
-- Full suite green; new seam tests for each adapter-combination boot.
+| Block | Classification |
+|---|---|
+| event-stream writer, state/instance DB, MCP manager, handler, scheduler, awareness | core (A1) |
+| boot_guard mark-ok + rollback-notice surfacing | production lifecycle — moves to supervisor, gated by the A5 barrier |
+| improvement-loop orphan reconcile | production lifecycle — supervisor, after core ready |
+| Telegram/Twilio poller start | core poller registry (token-gated, as today) |
+| gateway watchdog, deferred-delivery flusher, presence, tree sync, command handlers | Discord-only (A3) |
+| scheduled update/restart quiet-window check (currently reads Discord inbound timestamps) | core, with an **injected activity source** — each registered adapter contributes last-inbound; Discord supplies its timestamps when present; adapterless falls back to handler-level last-turn time |
+| gateway-health provider injection | Discord-only; the injection point must tolerate absence (no provider registered → no observer) |
+
+**A4. Instance-identity resolver** (replaces the r1 `cli:<hostname-user>`
+rule, which collides across clones and ignores legacy keying). One resolver,
+used by server and repl alike:
+1. `KERNOS_INSTANCE_ID` env — explicit wins (as today).
+2. Else inspect the data dir for persisted instance identity; **adopt an
+   unambiguous single legacy instance ID** (rows may be `discord:*`, phone, or
+   explicit — all valid).
+3. **Ambiguity (multiple candidate instance IDs) → refuse with the candidates
+   listed** and the env-var instruction. Never guess.
+4. Fresh data dir → generate one collision-resistant ID (uuid-suffixed
+   platform-neutral shape) and **persist it atomically**; subsequent boots
+   read the persisted value. Identity is never re-derived from mutable
+   hostname/user state per boot.
+**Pin:** an existing no-env Discord install loads the same tenant after the
+change (regression test on a seeded legacy data dir).
+
+**A5. Boot-guard readiness barrier.** `mark_boot_ok` fires only when: **core
+runtime ready AND every configured startup-critical adapter has reached its
+ready signal** (Discord = `on_ready`; Telegram/Twilio = poller started and
+first poll issued). Zero configured adapters → barrier is core-readiness
+alone. Rollback-notice *consumption/surfacing* may run once state/handler
+exist (it only reads + messages), but **promotion to last-known-good uses the
+barrier**. This preserves the exact protective property of today's placement:
+a commit that breaks a configured adapter is never promoted.
+**Pins:** (a) configured-Discord-fails → no mark_boot_ok (rollback fires on
+next boot per existing machinery); (b) Telegram-only success → marks;
+(c) zero-adapter success → marks.
+
+**Acceptance A (slice A = all of Phase A, nothing from B):**
+- `.env` with ONLY `TELEGRAM_BOT_TOKEN` + LLM key **and an already-bound
+  owner member-channel**: a Telegram message from the owner reaches the
+  handler and a reply is delivered (message→handler→reply, not merely
+  poller-start). Fresh-sender rejection unchanged (`_resolve_incoming`
+  semantics; fresh owner bootstrap is Phase B).
+- `.env` with only an LLM key: adapterless daemon boots under
+  `python kernos/server.py`, stays alive, marks boot-ok (barrier c), REPL
+  chat works against the same core recipe, SIGTERM shuts down cleanly.
+- `.env` with Discord token: lifecycle pins (connect, watchdog, presence,
+  tree sync, reconnect re-entry guard, 429 schedule text) green; A5 pin (a).
+- Legacy-tenant pin (A4). Full suite green. Import-isolation grep clean.
+- `no Discord token → discord package never imported` (assert via
+  sys.modules in a seam test).
 
 ## Phase B — CLI-first onboarding (assembling the built pieces)
 
-**B1. First-run detection + guided flow.** `kernos` (or `python -m kernos`,
-whichever entry lands cleanest) with no configured LLM key enters the guided
-first run:
-1. **LLM connect** — reuse `kernos/setup/console.py` (`kernos setup llm`), the
-   existing interactive console. getpass-style key entry, `.env` write,
-   verify with a ping call.
-2. **Meet your agent** — drop straight into the CLI chat (repl surface over
-   the extracted core). Owner bootstrap runs on the **cli channel**
-   (`channels.py` already names it) — hatching proceeds exactly as on Discord:
-   organic turns, the agent names itself when the moment is right. This is the
-   blueprint's "first contact is the product moment," on the terminal.
-3. **Optional platforms, capability-first** — after hatching settles (or on
-   `kernos setup platforms`), offer Telegram/Discord/Twilio connection with
-   the blueprint's nudge framing ("want me on your phone? Telegram takes two
-   minutes"). Wizard steps per platform: BotFather walkthrough → token via
-   getpass → `.env` write → poller hot-start or restart note. Declining is a
-   first-class ending — CLI-only Kernos is complete, not degraded.
+**B0. Canonical terminal namespace decision.** Production CLI channel value is
+**`cli`** (`channels.py`, `chat.py`, NormalizedMessage already use it).
+`repl.py`'s deliberate `repl` platform remains a *dev* namespace; B1's guided
+chat runs on `cli`. Compatibility rule: existing `repl:*` member channels stay
+valid dev artifacts; no migration of dev data; member-channel lookup treats
+them as distinct channels (as today). The spec names this explicitly so the
+cli-vs-repl split is a decision, not an accident.
 
-**B2. Owner bootstrap generalization.** The Discord-hardcoded owner bootstrap
-gains the CLI path: local operator = owner (the machine's user is
-authenticated by possession), member profile + hatching keyed to the
-platform-neutral instance id from A4. Discord-first installs behave as today.
+**B1. First-run detection + guided flow.** `kernos` entry with no configured
+LLM key:
+1. **LLM connect** — reuse `kernos/setup/console.py` (`kernos setup llm`):
+   getpass key entry, `.env` write, verified ping.
+2. **Meet your agent** — CLI chat over the shared core on the `cli` channel.
+   Owner bootstrap per B2; hatching proceeds organically.
+3. **Optional platforms — deterministic transition:** the platform offer
+   surfaces (a) always via explicit command (`kernos setup platforms` /
+   in-chat "connect telegram"), and (b) proactively exactly once, at the
+   first turn boundary where the owner's member profile reads
+   `hatched=true` (the concrete post-hatch condition checked after each
+   turn; no "settles" heuristic). Wizard per platform: BotFather/portal
+   walkthrough → token via getpass → `.env` write → poller hot-start or
+   restart note. Declining is a first-class ending.
 
-**B3. README follows.** Quick start updates to the real one-command story once
-B1 lands (`kernos` → guided everything). Not before.
+**B2. Owner bootstrap on CLI — reuse, don't fork.** Local machine possession =
+owner auth (trusted-local CLI boundary). Implementation **reuses the existing
+`ensure_owner`/`get_member_by_channel` mechanics already exercised by
+`repl.py:219-261`** — no second bootstrap path. **Pin:** an existing owner
+(e.g. Discord-bootstrapped) gains a `cli` channel on their existing member
+profile — one owner, one more channel, no duplicate owner, no tenant split.
+
+**B3. README follows** once B1 lands (`kernos` → guided everything). Not before.
 
 **Acceptance B:**
-- Fresh clone, no `.env`: `kernos` walks LLM connect → chat → hatching
-  completes on CLI → platform offer declined → subsequent runs go straight to
-  chat with memory intact.
-- Same flow accepting Telegram: token wizard → message the bot → same agent,
-  same memory, both surfaces.
+- Fresh clone, no `.env`: guided LLM connect → chat → hatching completes on
+  `cli` → platform offer fires once at the hatched-condition boundary →
+  declined → subsequent runs go straight to chat with memory intact.
+- Same flow accepting Telegram: token wizard → owner messages the bot → same
+  member, same memory, both channels on one profile (B2 pin).
 - Discord-hardcoded bootstrap path untouched for existing installs.
 
 ## Out of scope
 
-Multi-member CLI onboarding; enterprise/phone-verification flows (blueprint
-consumer/enterprise onboarding); any `start.sh` modification; Gemini or new
-adapters; MCP-server exposure of Kernos itself.
+Multi-member CLI onboarding; enterprise/phone-verification flows; any
+`start.sh` modification; new adapters; MCP-server exposure of Kernos itself.
 
 ## Sequencing
 
-A ships alone first (it unblocks Telegram-without-Discord immediately and
-carries all the regression risk — isolate it). B follows on A's core. Codex
-spec-review both phases now; post-impl review per phase; full-suite + targeted
-seam tests per the house standard; live-verify A against the founder's
-Telegram case and B against a scratch data-dir first run.
+Slice A ships alone (Cx-recommended cut: CoreRuntime + readiness barrier +
+supervision + DiscordRuntime + Telegram-existing-owner + adapterless-daemon
+acceptance; `build_dev_handler` rebased; the polished `kernos` command, fresh
+CLI onboarding, hatching UX, and platform wizard all deferred to B). Cx
+re-review of this r2 before code; post-impl review per phase; live-verify A
+against the founder's Telegram case and B against a scratch data-dir first run.
