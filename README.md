@@ -168,28 +168,22 @@ Honest status of every major surface, sourced from `kernos/kernel/capabilities.p
 
 ## Quick start
 
+One LLM API key. No bot tokens, no platform setup.
+
 ```bash
 git clone https://github.com/5000Stadia/Kernos.git && cd Kernos
 python3.11 -m venv .venv && source .venv/bin/activate && pip install -e .
-cp .env.example .env   # add an LLM API key + a Discord bot token
-python kernos/server.py
+cp .env.example .env   # add one LLM API key (Anthropic, OpenAI/Codex, or Ollama)
+python -m kernos.repl
 ```
 
-### Meet your agent
-
-DM your bot on Discord. The first conversation is the hatching — it gets to know you organically, and it names itself when the moment is right. Just talk:
-
-```text
-Hey. I'm Kit. I run a small studio and I'm trying to be better about my mornings.
-```
-
-Then live with it. Tell it something once:
+You're talking to a full production-wired Kernos in your terminal. Tell it something once:
 
 ```text
 My sister's birthday is March 12th — she loves orchids.
 ```
 
-Days later, in a completely different conversation:
+Later, in a completely different conversation:
 
 ```text
 What should I get my sister?
@@ -205,7 +199,16 @@ Other things to say:
 - *"Get a second opinion on this plan before we commit."* — it consults an independent model and returns the verdict.
 - *"Add the ability to track my running pace, then restart yourself."* — the self-improvement loop writes the change, reviews it, ships it, and rolls back on failure.
 
-Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and one messaging adapter (Discord, Twilio, or Telegram). Node.js for `npx`-run MCP servers.
+### On your phone — Telegram
+
+1. Message **@BotFather** on Telegram → `/newbot` → copy the token.
+2. Add to `.env`: `TELEGRAM_BOT_TOKEN=...` — plus `DISCORD_BOT_TOKEN` and `DISCORD_OWNER_ID` (the server anchors on Discord today; a bot token takes two minutes even if it sits idle — [guide](docs/install.md)).
+3. `python kernos/server.py` — Kernos detects the token and starts its Telegram poller.
+4. Open your bot in Telegram and say hi. The first conversation is the **hatching** — it gets to know you organically, and it names itself when the moment is right.
+
+Discord works the same way with just steps 2–4 (DM your bot). Twilio SMS: see the [install guide](docs/install.md).
+
+Requires Python 3.11+. Node.js for `npx`-run MCP servers.
 
 **[Full install guide →](docs/install.md)**
 
