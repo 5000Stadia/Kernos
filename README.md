@@ -166,18 +166,46 @@ Honest status of every major surface, sourced from `kernos/kernel/capabilities.p
 
 ---
 
-## Quick install
+## Quick start
 
 ```bash
-git clone https://github.com/5000Stadia/Kernos.git
-cd Kernos
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp .env.example .env   # fill in API keys
+git clone https://github.com/5000Stadia/Kernos.git && cd Kernos
+python3.11 -m venv .venv && source .venv/bin/activate && pip install -e .
+cp .env.example .env   # add an LLM API key + a Discord bot token
 python kernos/server.py
 ```
 
-Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and at least one messaging adapter credential (Discord token, Twilio, or Telegram bot token). Node.js is required for MCP servers that run via `npx`.
+### Meet your agent
+
+DM your bot on Discord. The first conversation is the hatching — it gets to know you organically, and it names itself when the moment is right. Just talk:
+
+```text
+Hey. I'm Kit. I run a small studio and I'm trying to be better about my mornings.
+```
+
+Then live with it. Tell it something once:
+
+```text
+My sister's birthday is March 12th — she loves orchids.
+```
+
+Days later, in a completely different conversation:
+
+```text
+What should I get my sister?
+```
+
+It remembers. That's the product: memory that compounds, one correct small action at a time.
+
+Other things to say:
+
+- *"Every Sunday evening, remind me to plan my week."*
+- *"What did we decide about the pricing page last month?"*
+- *"Invite my wife."* — she hatches her own agent, and what's shared between you is governed by covenants you set in plain English.
+- *"Get a second opinion on this plan before we commit."* — it consults an independent model and returns the verdict.
+- *"Add the ability to track my running pace, then restart yourself."* — the self-improvement loop writes the change, reviews it, ships it, and rolls back on failure.
+
+Requires Python 3.11+, an LLM API key (Anthropic, OpenAI/Codex, or Ollama), and one messaging adapter (Discord, Twilio, or Telegram). Node.js for `npx`-run MCP servers.
 
 **[Full install guide →](docs/install.md)**
 
