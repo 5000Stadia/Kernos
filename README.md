@@ -11,6 +11,7 @@
 [![Tests](https://img.shields.io/badge/tests-7%2C000%2B-brightgreen.svg)](#engineering-proof)
 [![Last Commit](https://img.shields.io/github/last-commit/5000Stadia/Kernos.svg)](https://github.com/5000Stadia/Kernos/commits/main)
 [![Status](https://img.shields.io/badge/status-v1.0%20research%20complete-blueviolet.svg)](#project-status--v10-research-complete)
+[![Research Report](https://img.shields.io/badge/report-novel%20architectures%20(PDF)-8A2BE2.svg)](docs/research/KERNOS-Novel-Architectures-Report.pdf)
 
 </div>
 
@@ -114,6 +115,10 @@ Kernos's own development runs through this primitive: a design-review workflow c
 | **Infrastructure-level safety** | Tool calls pass through a gate that classifies effect (`read` / `soft_write` / `hard_write`) and evaluates against user-declared covenants. Reactive soft-writes pass; hard-writes gate; non-reactive paths gate. Covenant violations surface as conflicts the agent must resolve — not as silent denials. |
 | **Cognitive UI grammar** | The system prompt as a typed document with named zones — RULES, ACTIONS, NOW, STATE, RESULTS, PROCEDURES, MEMORY — cacheable prefix, provenance tags on every knowledge fragment. Selective zone refresh without rebuilding the prompt. |
 
+> ### 📄 Are these claims actually novel? We checked.
+>
+> **[*Novel Architectures in KERNOS* (PDF, 20 pages)](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — a code-verified research report on which Kernos mechanisms are genuinely novel in the mid-2026 agentic-harness landscape, and which are commonplace. Every mechanism was traced to source at file-and-line, then held against an adversarial survey of ~50 systems and papers (Letta/MemGPT, Mem0, Zep, LangGraph, CrewAI, SICA, Darwin-Gödel Machine, MOSS, …) instructed to *refute* novelty wherever possible. **Ten element clusters clear the bar; three have no located precedent of any kind.** Documentation-vs-code discrepancies are disclosed, not smoothed. For researchers who want the comparative landscape before the deep-dive docs, start here: **[summary & methodology →](docs/research/README.md)**
+
 ---
 
 ## Capability surface
@@ -155,6 +160,7 @@ Honest status of every major surface, sourced from `kernos/kernel/capabilities.p
 
 ## Docs
 
+- **[Novel-architectures research report](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — code-verified survey of what Kernos contributes beyond the current agentic-harness landscape, with an adversarial novelty methodology ([summary →](docs/research/README.md)).
 - **[Design principles](docs/DESIGN-PRINCIPLES.md)** — 17 named, portable architectural patterns derived from live operation; the intellectual core of the project.
 - **[Canonical introduction](docs/kernos-introduction.md)** — what the running agent reaches when asked what Kernos is. Innovation overview plus a navigable map.
 - **[Architecture overview](docs/architecture/overview.md)** · **[Pipeline reference](docs/architecture/pipeline-reference.md)** · **[Primitives reference](docs/architecture/primitives-reference.md)**
