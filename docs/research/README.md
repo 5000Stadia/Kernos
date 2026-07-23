@@ -4,7 +4,10 @@
 
 A code-verified survey of the mechanisms KERNOS contributes beyond the mid-2026
 landscape of agentic harnesses — and an honest accounting of which of its
-elements are commonplace. Prepared 21 July 2026.
+elements are commonplace. v1.0 published 21 July 2026; v1.1 (22 July 2026) is a
+presentation-only tightening pass — matrix counting clarified, §4.6 lede
+sharpened, test-suite figure refreshed. No findings, verdicts, or landscape
+claims changed between versions.
 
 ## The question
 
