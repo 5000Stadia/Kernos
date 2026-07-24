@@ -115,7 +115,7 @@ Kernos's own development runs through this primitive: a design-review workflow c
 | **Infrastructure-level safety** | Tool calls pass through a gate that classifies effect (`read` / `soft_write` / `hard_write`) and evaluates against user-declared covenants. Reactive soft-writes pass; hard-writes gate; non-reactive paths gate. Covenant violations surface as conflicts the agent must resolve — not as silent denials. |
 | **Cognitive UI grammar** | The system prompt as a typed document with named zones — RULES, ACTIONS, NOW, STATE, RESULTS, PROCEDURES, MEMORY — cacheable prefix, provenance tags on every knowledge fragment. Selective zone refresh without rebuilding the prompt. |
 
-> ### 📄 Are these claims actually novel? We checked.
+> ### 📄 Are these claims novel? I ran an adversarial self-audit.
 >
 > **[*Novel Architectures in KERNOS* (PDF, 20 pages)](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — a self-authored, AI-assisted architecture literature review of which Kernos mechanisms are genuinely novel in the mid-2026 agentic-harness landscape, and which are commonplace (a structured self-audit, not third-party review — see the report's colophon). Every mechanism was traced to source at file-and-line, then held against a survey of ~50 systems and papers (Letta/MemGPT, Mem0, Zep, LangGraph, CrewAI, SICA, Darwin-Gödel Machine, MOSS, …) instructed to *refute* novelty wherever possible. **Ten element clusters clear the bar; three have no located precedent of any kind.** Documentation-vs-code discrepancies are disclosed, not smoothed. For researchers who want the comparative landscape before the deep-dive docs, start here: **[summary & methodology →](docs/research/README.md)**
 
@@ -227,7 +227,7 @@ Requires Python 3.11+. Node.js for `npx`-run MCP servers.
 - **Durable per-instance event stream** backed by SQLite, with `instance_id` / `member_id` / `space_id` / `correlation_id` schema and a post-flush hook contract for trigger registries that doesn't poison event persistence on workflow code failure.
 - **Workflow primitive with approval gates** — per-gate nonce binding so an approval can't wake an unintended execution; restart-resume per workflow descriptor with conservative default; safe-deny on `auto_proceed_with_default` for irreversible post-gate continuations.
 - **Local/test-provider containment** for live test sweeps so edge-case observation doesn't produce accidental public side effects.
-- **Spec-first development** — every substantive batch goes through multi-round design review before implementation and independent code review after, with findings folded back before anything ships.
+- **Spec-first development** — every substantive batch goes through multi-round design review before implementation and structured multi-agent review after, with findings folded back before anything ships.
 - **Self-hosted single-host orchestrator with subprocesses.** No managed cloud. Your data stays on your hardware.
 
 ---
@@ -247,7 +247,7 @@ What v1 demonstrated, on a running system with receipts:
   the event stream rather than its own report.
 - **The system ships reviewed improvements to itself.** The improvement loop
   proposes a change, implements it in an isolated worktree, passes smoke
-  gates, and commits — with independent review before merge and a human only
+  gates, and commits — with agent review before merge and a human only
   at the approval gate. Review is a structural stage of the loop, not a
   ceremony; it has caught real defects in the system's own changes before
   they shipped.
