@@ -81,7 +81,7 @@ class ImprovementWorkspace:
     def __init__(self, data_dir: str, instance_id: str,
                  live_repo_dir: str) -> None:
         """live_repo_dir = path to the running Kernos's git repo
-        (e.g., /home/k/Kernos). Worktrees branch off this repo's
+        (e.g., ~/Kernos). Worktrees branch off this repo's
         origin/main."""
         ...
 

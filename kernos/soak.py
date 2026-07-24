@@ -1405,7 +1405,7 @@ PROBE_A_ADAPTERS = Scenario(
     launcher="start.sh",
     automated=False,
     notes=(
-        "From /home/k/Kernos-main run ./start.sh; send a Discord "
+        "From the production deployment clone run ./start.sh; send a Discord "
         "hello; observe via /dump that ## ACTIONS contains "
         "OUTBOUND CHANNELS line + send_to_channel in tools."
     ),

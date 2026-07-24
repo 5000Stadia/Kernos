@@ -19,7 +19,9 @@ excluded from the findings.
 
 ## Method
 
-Three independent verification tracks, reconciled:
+Three separate verification tracks, reconciled. All three were run by the
+author's own AI tooling and adjudicated by the coordinating model (see the
+report's colophon) — a structured self-audit, not third-party review:
 
 1. **Claims extraction** — the full documentation corpus (`DECISIONS.md`,
    `TECHNICAL-ARCHITECTURE.md`, `DESIGN-PRINCIPLES.md`, `docs/architecture/`)

@@ -24,7 +24,10 @@ import sys
 import tempfile
 import time
 
-REPO = "/home/k/Kernos"
+REPO = os.environ.get(
+    "KERNOS_REPO",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+)
 PROMPT = (
     # Mirror the live impl_author prompt's SHAPE: force real fs/write
     # tool calls (the trigger correlated with the hang) + the STATUS
@@ -36,7 +39,7 @@ PROMPT = (
     "Use your file-editing tools to actually make these edits. "
     "End your response with a single final line exactly: STATUS: GREEN"
 )
-ACPX = os.environ.get("KERNOS_ACPX_BINARY", "/home/k/.npm-global/bin/acpx")
+ACPX = os.environ.get("KERNOS_ACPX_BINARY") or shutil.which("acpx") or "acpx"
 
 
 async def _pump(stream, tag: str, start: float, logf) -> int:

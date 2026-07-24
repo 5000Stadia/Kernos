@@ -12,12 +12,12 @@ from kernos.kernel.external_agents import acpx_adapter
 
 
 _PS_OUTPUT = """    ELAPSED   PID CMD
-   1108000   6058 node /home/k/.npm/_npx/abc/node_modules/.bin/codex-acp
-   1108000   6065 /home/k/.npm/_npx/abc/codex-acp-linux-x64/bin/codex-acp
-   1027000  47168 /home/k/.npm/_npx/abc/codex-acp-linux-x64/bin/codex-acp
+   1108000   6058 node /home/user/.npm/_npx/abc/node_modules/.bin/codex-acp
+   1108000   6065 /home/user/.npm/_npx/abc/codex-acp-linux-x64/bin/codex-acp
+   1027000  47168 /home/user/.npm/_npx/abc/codex-acp-linux-x64/bin/codex-acp
        312    130 [irq/9-acpi]
        312    154 [kworker/R-acpi_thermal_pm]
-        45  99001 node /home/k/.npm/_npx/abc/codex-acp-linux-x64/bin/codex-acp
+        45  99001 node /home/user/.npm/_npx/abc/codex-acp-linux-x64/bin/codex-acp
 """
 
 

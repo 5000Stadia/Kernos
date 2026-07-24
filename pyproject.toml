@@ -27,7 +27,7 @@ dependencies = [
     "playwright>=1.45",
     "markdownify>=0.11",
     # Load-bearing runtime imports that were undeclared until now
-    # (caught during a fresh-deployment audit of /home/k/Kernos-main).
+    # (caught during a fresh-deployment audit of a pull-only clone).
     # Without these a clean `pip install -e .` produces an importable
     # but non-runnable Kernos:
     "aiosqlite>=0.20",      # state layer + WLP execution_engine — 14 files

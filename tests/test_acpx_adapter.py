@@ -335,12 +335,12 @@ class TestStaleSessionDetection:
         from kernos.kernel.external_agents.acpx_adapter import (
             _stderr_indicates_stale_agent,
         )
-        # Exact string captured from server.log during the 2026-05-19
-        # bug report.
+        # String captured from server.log during the 2026-05-19
+        # bug report (path anonymized).
         live_stderr = (
             "[acpx] session 5ffe4c7047de1deb "
             "(6e22e50b-072a-4cb3-9edf-5cc7551197a0) · "
-            "/home/k/Kernos-main · agent needs reconnect\n"
+            "/home/user/Kernos-main · agent needs reconnect\n"
         )
         assert _stderr_indicates_stale_agent(live_stderr) is True
 

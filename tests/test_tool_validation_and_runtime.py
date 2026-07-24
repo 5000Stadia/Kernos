@@ -51,7 +51,7 @@ def test_clean_source_passes():
 def test_hardcoded_absolute_path_caught():
     source = textwrap.dedent("""
     def execute(input_data, context):
-        with open("/home/k/secrets/notes.txt") as f:
+        with open("/home/user/secrets/notes.txt") as f:
             return {"data": f.read()}
     """)
     result = validate_tool_source(source)

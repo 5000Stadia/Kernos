@@ -1,4 +1,11 @@
-"""OpenAI Codex OAuth provider — ChatGPT Codex Responses API."""
+"""OpenAI Codex OAuth provider — ChatGPT Codex Responses API.
+
+Explicit opt-in only (``KERNOS_LLM_PROVIDER=openai-codex``); the shipped
+default is the API-key Anthropic provider. This path authenticates with a
+personal ChatGPT-subscription OAuth token — OpenAI's terms steer
+programmatic access to the API-key platform, so this provider exists for
+personal-use configurations, not as a recommended default.
+"""
 import asyncio
 import json
 import logging

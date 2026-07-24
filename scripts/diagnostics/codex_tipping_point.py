@@ -1,7 +1,7 @@
 """Codex wire-shape tipping point investigation.
 
 Boot:
-    cd /home/k/Kernos && source .venv/bin/activate
+    cd ~/Kernos && source .venv/bin/activate
     python scripts/diagnostics/codex_tipping_point.py
 
 What it does:

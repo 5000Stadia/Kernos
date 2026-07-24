@@ -141,7 +141,7 @@ def test_sanitize_strips_python_traceback_tail():
     formatted = (
         "Some prefix message\n"
         "Traceback (most recent call last):\n"
-        '  File "/home/k/Kernos/kernos/x.py", line 1, in <module>\n'
+        '  File "/home/user/Kernos/kernos/x.py", line 1, in <module>\n'
         "    raise RuntimeError('boom')\n"
         "RuntimeError: boom"
     )

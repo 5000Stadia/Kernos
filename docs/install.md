@@ -91,7 +91,12 @@ KERNOS_LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-**OpenAI Codex (ChatGPT OAuth)**
+**OpenAI Codex (ChatGPT OAuth)** — explicit opt-in, never the default. This
+path authenticates with a personal ChatGPT-subscription OAuth token rather
+than an API key; OpenAI's terms steer programmatic access to the API-key
+platform, so treat this as a personal-use configuration and prefer an
+API-key provider for anything beyond that.
+
 ```
 KERNOS_LLM_PROVIDER=openai-codex
 # Either place credentials at .credentials/openai-codex.json, or set via env:

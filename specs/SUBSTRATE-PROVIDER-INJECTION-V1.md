@@ -211,7 +211,7 @@ The lambdas close over `server.py`'s LOCAL `__main__` globals. No
 - Other places in the codebase that import `kernos.server` by name.
   Quick grep:
   ```
-  $ grep -rn "kernos.server" /home/k/Kernos/kernos/ --include='*.py'
+  $ grep -rn "kernos.server" kernos/ --include='*.py'
   ```
   If any production code path does this, it should also be fixed —
   but that's a separate audit. This spec is the heartbeat-detector

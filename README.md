@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-7%2C000%2B-brightgreen.svg)](#engineering-proof)
+[![Tests](https://img.shields.io/badge/test%20functions-7%2C073%20defined-brightgreen.svg)](#engineering-proof)
 [![Last Commit](https://img.shields.io/github/last-commit/5000Stadia/Kernos.svg)](https://github.com/5000Stadia/Kernos/commits/main)
 [![Status](https://img.shields.io/badge/status-v1.0%20research%20complete-blueviolet.svg)](#project-status--v10-research-complete)
 [![Research Report](https://img.shields.io/badge/report-novel%20architectures%20(PDF)-8A2BE2.svg)](docs/research/KERNOS-Novel-Architectures-Report.pdf)
@@ -117,7 +117,7 @@ Kernos's own development runs through this primitive: a design-review workflow c
 
 > ### 📄 Are these claims actually novel? We checked.
 >
-> **[*Novel Architectures in KERNOS* (PDF, 20 pages)](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — a code-verified research report on which Kernos mechanisms are genuinely novel in the mid-2026 agentic-harness landscape, and which are commonplace. Every mechanism was traced to source at file-and-line, then held against an adversarial survey of ~50 systems and papers (Letta/MemGPT, Mem0, Zep, LangGraph, CrewAI, SICA, Darwin-Gödel Machine, MOSS, …) instructed to *refute* novelty wherever possible. **Ten element clusters clear the bar; three have no located precedent of any kind.** Documentation-vs-code discrepancies are disclosed, not smoothed. For researchers who want the comparative landscape before the deep-dive docs, start here: **[summary & methodology →](docs/research/README.md)**
+> **[*Novel Architectures in KERNOS* (PDF, 20 pages)](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — a self-authored, AI-assisted architecture literature review of which Kernos mechanisms are genuinely novel in the mid-2026 agentic-harness landscape, and which are commonplace (a structured self-audit, not third-party review — see the report's colophon). Every mechanism was traced to source at file-and-line, then held against a survey of ~50 systems and papers (Letta/MemGPT, Mem0, Zep, LangGraph, CrewAI, SICA, Darwin-Gödel Machine, MOSS, …) instructed to *refute* novelty wherever possible. **Ten element clusters clear the bar; three have no located precedent of any kind.** Documentation-vs-code discrepancies are disclosed, not smoothed. For researchers who want the comparative landscape before the deep-dive docs, start here: **[summary & methodology →](docs/research/README.md)**
 
 ---
 
@@ -160,7 +160,7 @@ Honest status of every major surface, sourced from `kernos/kernel/capabilities.p
 
 ## Docs
 
-- **[Novel-architectures research report](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — code-verified survey of what Kernos contributes beyond the current agentic-harness landscape, with an adversarial novelty methodology ([summary →](docs/research/README.md)).
+- **[Novel-architectures research report](docs/research/KERNOS-Novel-Architectures-Report.pdf)** — self-authored, AI-assisted literature review of what Kernos contributes beyond the current agentic-harness landscape, with a refute-first novelty methodology ([summary →](docs/research/README.md)).
 - **[Design principles](docs/DESIGN-PRINCIPLES.md)** — 17 named, portable architectural patterns derived from live operation; the intellectual core of the project.
 - **[Canonical introduction](docs/kernos-introduction.md)** — what the running agent reaches when asked what Kernos is. Innovation overview plus a navigable map.
 - **[Architecture overview](docs/architecture/overview.md)** · **[Pipeline reference](docs/architecture/pipeline-reference.md)** · **[Primitives reference](docs/architecture/primitives-reference.md)**
@@ -222,7 +222,7 @@ Requires Python 3.11+. Node.js for `npx`-run MCP servers.
 
 ## Engineering proof
 
-- **7,000+ test functions across 384 test files** — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance) and substrate-fidelity tests that assert on receipts and state, not just return values.
+- **7,073 test functions across 387 test files** (regenerated from source 2026-07-24; the figure counts test functions *defined* — CI gates the 8-probe substrate-soak subset, the full suite runs locally) — with structural pin tests for invariants (multi-tenancy keying, no-destructive-deletions, gate-bypass resistance, action-loop pattern compliance) and substrate-fidelity tests that assert on receipts and state, not just return values.
 - **Live-verified, not just unit-tested.** The plain-English self-test ([docs/V1-SELF-TEST.md](docs/V1-SELF-TEST.md)) runs against the production agent through its own tool surface; results are verified against the event stream. The dispatch-reliability stack (typed failures, signature presentation, argument repair, step-completion auditing) was built from failures this test surfaced on the running system.
 - **Durable per-instance event stream** backed by SQLite, with `instance_id` / `member_id` / `space_id` / `correlation_id` schema and a post-flush hook contract for trigger registries that doesn't poison event persistence on workflow code failure.
 - **Workflow primitive with approval gates** — per-gate nonce binding so an approval can't wake an unintended execution; restart-resume per workflow descriptor with conservative default; safe-deny on `auto_proceed_with_default` for irreversible post-gate continuations.
