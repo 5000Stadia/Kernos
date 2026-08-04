@@ -533,9 +533,16 @@ def upsert_governance_item(
             # opened_iso would fold it into the committed transaction and the
             # recurrence would vanish with no history of its own — so start a
             # new occurrence instead.
+            # An item written before occurrence ids were persisted carries no
+            # Occurrence field. Forcing ABSENT there skips the audit lookup
+            # entirely, so a recurrence arriving over a committed-but-not-yet-
+            # retired LEGACY closure inherited its transaction and vanished.
+            # Derive the compatible legacy id and run the same tri-state.
+            effective_prior = prior_occurrence or _new_occurrence_id(
+                signature, prior_opened, "")
             prior_state = (
-                _governance_txn_state(manifest_path, prior_occurrence)
-                if prior_occurrence else _TXN_ABSENT
+                _governance_txn_state(manifest_path, effective_prior)
+                if prior_opened else _TXN_ABSENT
             )
             if prior_state == _TXN_UNKNOWN:
                 # Completion-ambiguous: we cannot tell whether this occurrence
@@ -550,12 +557,13 @@ def upsert_governance_item(
                 return False
             already_audited = prior_state == _TXN_RECORDED
             if prior_opened and not already_audited:
+                # Live opening: preserve it, migrating the derived legacy id
+                # into the persisted field so the boundary stops being implicit.
                 opened_iso = prior_opened
-                occurrence = prior_occurrence or _new_occurrence_id(
-                    signature, opened_iso, "")
+                occurrence = effective_prior
             else:
                 occurrence = _new_occurrence_id(
-                    signature, now_iso, prior_occurrence or "")
+                    signature, now_iso, effective_prior if prior_opened else "")
         body = _render_governance_item(
             signature=signature, title=title, condition=condition,
             payload=list(payload), opened_iso=opened_iso,
@@ -667,35 +675,86 @@ def _new_occurrence_id(signature: str, opened_iso: str, prior: str) -> str:
     return hashlib.sha256(base.encode()).hexdigest()[:16]
 
 
-def _governance_txn_state(manifest_path: Path, txn: str) -> str:
-    """Tri-state phase lookup: recorded / absent / unknown.
+def _read_manifest(manifest_path: Path) -> tuple:
+    """``(rows, torn_tail)``; ``(None, False)`` when the state is unknowable.
 
-    An UNREADABLE manifest is not evidence that the audit is missing, so it
-    must not collapse into "absent" — doing so lets a retry append a second row
-    for one transaction. It fails closed instead: the caller aborts without
-    touching archive, manifest, or source, and retries when the manifest is
-    readable again. Safe because the open source remains authoritative.
+    A malformed row in the TRAILING position is a torn append: the write never
+    completed, so the audit it describes was never durable and the line can be
+    dropped safely. A malformed row in the INTERIOR is real corruption of
+    committed history and must not be interpreted.
     """
     try:
         if not manifest_path.is_file():
-            return _TXN_ABSENT
+            return [], False
         text = manifest_path.read_text(errors="replace")
     except Exception:
-        return _TXN_UNKNOWN
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+        return None, False
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    rows: list = []
+    for i, line in enumerate(lines):
         try:
-            row = json.loads(line)
+            rows.append(json.loads(line))
         except Exception:
-            # A malformed non-empty row is completion-AMBIGUOUS — it may be a
-            # torn append of the very transaction being asked about. Reporting
-            # ABSENT here would let a retry write a second row.
-            return _TXN_UNKNOWN
+            if i == len(lines) - 1:
+                return rows, True     # recognizable, repairable torn tail
+            return None, False        # corrupt interior — unknowable
+    return rows, False
+
+
+def _write_manifest(manifest_path: Path, rows: list) -> bool:
+    """Replace the manifest ATOMICALLY (temp + replace).
+
+    Appending is not crash-safe: a partial append leaves a torn row, and under
+    the previous fail-closed reading that made closure permanently
+    non-retryable — no state transition could ever make the file valid again.
+    An atomic whole-file replace cannot tear, so the ambiguity is designed out
+    rather than detected.
+    """
+    tmp = manifest_path.with_name(manifest_path.name + ".tmp")
+    try:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text("".join(
+            json.dumps(r, separators=(",", ":")) + "\n" for r in rows))
+        tmp.replace(manifest_path)
+        return True
+    except Exception:
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+        return False
+
+
+def _governance_txn_state(manifest_path: Path, txn: str) -> str:
+    """Tri-state phase lookup: recorded / absent / unknown.
+
+    An UNREADABLE or interior-corrupt manifest is not evidence that the audit
+    is missing, so it must not collapse into "absent" — that lets a retry write
+    a second row for one transaction. It fails closed instead; safe because the
+    open source remains authoritative.
+
+    A torn tail is repaired in passing. It is NOT reported as unknown: an
+    incomplete append means the audit never committed, so the surviving rows
+    are the whole truth. Reporting unknown here would strand closure forever.
+    """
+    rows, torn = _read_manifest(manifest_path)
+    if rows is None:
+        return _TXN_UNKNOWN
+    if torn:
+        _write_manifest(manifest_path, rows)   # best-effort repair
+    for row in rows:
         if row.get("governance_txn") == txn:
             return _TXN_RECORDED
     return _TXN_ABSENT
+
+
+def _recorded_archive_name(manifest_path: Path, txn: str) -> str:
+    """The archive filename a committed row DECLARES for this transaction."""
+    rows, _torn = _read_manifest(manifest_path)
+    for row in rows or []:
+        if row.get("governance_txn") == txn:
+            return str(row.get("archive") or "")
+    return ""
 
 
 def close_governance_item(
@@ -757,6 +816,13 @@ def close_governance_item(
                 "closure retries when the audit is readable", signature, txn)
             return False
         audit_committed = state == _TXN_RECORDED
+        if audit_committed:
+            # The committed row's `archive` field is AUTHORITATIVE. Rebuilding
+            # a canonical name while the row points elsewhere would "recover"
+            # into a permanently broken audit link.
+            declared = _recorded_archive_name(manifest_path, txn)
+            if declared:
+                target = dest / declared
 
         # 1. Archive. While the audit is UNCOMMITTED the target is not yet a
         #    durable artifact — it may be a truncated copy from a crashed
@@ -799,25 +865,19 @@ def close_governance_item(
                 "resolving_condition": resolving_condition,
                 "final_payload": payload,
             }
-            try:
-                with manifest_path.open("a") as fh:
-                    fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
-            except Exception:
-                # Do NOT remove the archive here. An append that raises is
-                # completion-AMBIGUOUS: the row may already be complete and
-                # durable on disk (write + flush can succeed and the failure
-                # arrive afterwards). Deleting the archive in that case leaves
-                # a valid audit row pointing at nothing, and the next retry —
-                # seeing RECORDED — would retire the authoritative source and
-                # destroy the last copy.
-                #
-                # Both source and target are preserved instead, and the retry
-                # reconciles: same txn, same filename, and the RECORDED-but-
-                # missing-archive branch above rebuilds if needed.
+            rows, _torn = _read_manifest(manifest_path)
+            if rows is None or not _write_manifest(manifest_path, rows + [manifest]):
+                # Do NOT remove the archive. The replace either happened or it
+                # did not — but a failure here is still completion-ambiguous
+                # from our side, and deleting the archive would risk leaving a
+                # valid audit row pointing at nothing. The next retry sees
+                # either ABSENT (writes the row) or RECORDED (rebuilds the
+                # declared archive if needed), so both source and target are
+                # preserved and the retry reconciles.
                 logger.warning(
-                    "GOVERNANCE_CLOSE_MANIFEST_AMBIGUOUS signature=%s txn=%s "
-                    "— archive and source both preserved; retry reconciles",
-                    signature, txn, exc_info=True)
+                    "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s txn=%s — "
+                    "archive and source both preserved; retry reconciles",
+                    signature, txn)
                 return False
 
         # 3. All durable — retire the source.

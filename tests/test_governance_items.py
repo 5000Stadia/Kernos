@@ -163,14 +163,8 @@ def test_archive_write_failure_records_no_closure(tmp_path, monkeypatch):
 
 
 def _break_manifest(monkeypatch):
-    real_open = fr.Path.open
-
-    def _boom(self, *a, **k):
-        if self.name == "_manifest.jsonl":
-            raise OSError("audit device full")
-        return real_open(self, *a, **k)
-
-    monkeypatch.setattr(fr.Path, "open", _boom)
+    """Audit commit fails outright — nothing lands."""
+    monkeypatch.setattr(fr, "_write_manifest", lambda *a, **k: False)
 
 
 def test_manifest_failure_leaves_item_open_and_unaudited(tmp_path, monkeypatch):
@@ -449,22 +443,13 @@ def test_ambiguous_append_never_destroys_the_last_copy(tmp_path, monkeypatch):
     d = str(tmp_path)
     _upsert(d, ["a.py"])
 
-    real_open = fr.Path.open
+    real_write = fr._write_manifest
 
-    class _WriterThatCommitsThenRaises:
-        def __init__(self, fh): self._fh = fh
-        def write(self, data):
-            self._fh.write(data); self._fh.flush()
-            raise OSError("ack lost after durable write")
-        def __enter__(self): return self
-        def __exit__(self, *a): self._fh.close(); return False
+    def _commits_then_reports_failure(path, rows):
+        real_write(path, rows)      # the row IS durable on disk
+        return False                # ...but we are told it failed
 
-    def _amb(self, *a, **k):
-        if self.name == "_manifest.jsonl":
-            return _WriterThatCommitsThenRaises(real_open(self, *a, **k))
-        return real_open(self, *a, **k)
-
-    monkeypatch.setattr(fr.Path, "open", _amb)
+    monkeypatch.setattr(fr, "_write_manifest", _commits_then_reports_failure)
     assert fr.close_governance_item(
         d, signature=smr.COVERAGE_GAP_SIGNATURE,
         now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
@@ -482,24 +467,125 @@ def test_ambiguous_append_never_destroys_the_last_copy(tmp_path, monkeypatch):
     assert len(_manifest_rows(tmp_path)) == 1
 
 
-def test_recorded_transaction_with_missing_archive_is_rebuilt(tmp_path):
-    """A manifest row alone is not proof the archive survived."""
+def test_recorded_transaction_rebuilds_the_archive_its_row_declares(tmp_path):
+    """A manifest row alone is not proof the archive survived — and the row's
+    `archive` field is authoritative.
+
+    Rebuilding a *canonical* name while the committed row points elsewhere
+    would "recover" into a permanently broken audit link, so recovery must
+    restore the declared filename and leave the reference resolvable.
+    """
     d = str(tmp_path)
     _upsert(d, ["a.py"])
-    import shutil as _sh
     dest = tmp_path / "diagnostics" / "friction_resolved"
     dest.mkdir(parents=True, exist_ok=True)
     occ = fr.open_governance_items(d)[0]["occurrence"]
-    (dest / "_manifest.jsonl").write_text(json.dumps({
-        "governance_txn": occ, "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
-        "archive": "gone.md"}) + "\n")
+    declared = "GOVERNANCE_custom_name_for_this_txn.md"
+    fr._write_manifest(dest / "_manifest.jsonl", [{
+        "governance_txn": occ,
+        "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
+        "archive": declared,
+    }])
 
     assert fr.close_governance_item(
         d, signature=smr.COVERAGE_GAP_SIGNATURE,
         now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
-    assert len(_archives(tmp_path)) == 1, "missing archive must be rebuilt, not skipped"
-    assert "a.py" in _archive_text(tmp_path)
-    assert len(_manifest_rows(tmp_path)) == 1, "and no duplicate row"
+
+    rows = [json.loads(r) for r in _manifest_rows(tmp_path)]
+    assert len(rows) == 1, "no duplicate row"
+    ref = rows[0]["archive"]
+    assert (dest / ref).is_file(), "the row's archive reference must resolve"
+    assert ref == declared, "recovery must honour the declared name"
+    assert "a.py" in (dest / ref).read_text()
+    assert [p.name for p in _archives(tmp_path)] == [declared], \
+        "exactly the declared archive — no stray canonical duplicate"
+
+
+def test_torn_manifest_tail_is_repaired_not_stranded_forever(tmp_path, monkeypatch):
+    """A partial audit write must not make closure permanently impossible.
+
+    Under append-only + fail-closed, a half-written JSON row parsed as UNKNOWN
+    on every future scan and no state transition could ever repair it — the
+    item stayed visible but could never close without manual surgery.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    # a torn tail: the front of a row, cut mid-write
+    (dest / "_manifest.jsonl").write_text('{"governance_txn": "abc", "arch')
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared"), \
+        "a torn tail must be repairable, not a permanent block"
+
+    rows = _manifest_rows(tmp_path)
+    assert len(rows) == 1
+    json.loads(rows[0])                       # the surviving row is valid
+    assert fr.open_governance_items(d) == []
+
+
+def test_corrupt_interior_row_fails_closed(tmp_path):
+    """The counterweight: corruption of COMMITTED history is not repairable
+    and must never be silently reinterpreted as 'no audit exists'."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "_manifest.jsonl").write_text(
+        'not-json-at-all\n{"governance_txn":"zzz"}\n')
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared") is False
+    assert len(fr.open_governance_items(d)) == 1, "item stays open, nothing destroyed"
+
+
+def test_legacy_recurrence_before_first_close_is_not_absorbed(tmp_path):
+    """P0: recurrence over a LEGACY in-flight closure.
+
+    With no Occurrence field, skipping the audit lookup made upsert overwrite
+    payload A with B under the SAME legacy txn; close then saw RECORDED and
+    merely retired the source, so B had no archive and no audit.
+    """
+    import hashlib as _h
+    d = str(tmp_path)
+    opened = "2026-08-01T00:00:00+00:00"
+    _upsert(d, ["a.py"], opened)
+    path = (tmp_path / "diagnostics" / "friction"
+            / fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE))
+    path.write_text("\n".join(
+        ln for ln in path.read_text().splitlines()
+        if not ln.startswith("Occurrence:")) + "\n")
+
+    legacy = _h.sha256(
+        f"{smr.COVERAGE_GAP_SIGNATURE}|{opened}".encode()).hexdigest()[:16]
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    stem = fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE)[:-3]
+    (dest / f"{stem}_closed_{legacy}.md").write_text(path.read_text())
+    fr._write_manifest(dest / "_manifest.jsonl", [{
+        "governance_txn": legacy,
+        "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
+        "archive": f"{stem}_closed_{legacy}.md",
+        "final_payload": ["a.py"],
+    }])
+
+    # the condition recurs BEFORE the first post-upgrade close
+    assert _upsert(d, ["b.py"], "2026-08-02T00:00:00+00:00")
+    occ = fr.open_governance_items(d)[0]["occurrence"]
+    assert occ and occ != legacy, "recurrence must not inherit the closed txn"
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-03T00:00:00+00:00", resolving_condition="cleared again")
+
+    rows = [json.loads(r) for r in _manifest_rows(tmp_path)]
+    assert len(rows) == 2, "the recurrence must get its own audit"
+    assert {r["governance_txn"] for r in rows} == {legacy, occ}
+    assert any("b.py" in str(r.get("final_payload")) for r in rows)
+    assert len(_archives(tmp_path)) == 2
 
 
 def test_legacy_in_flight_item_from_parent_commit_does_not_duplicate(tmp_path):
