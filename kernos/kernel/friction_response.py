@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -520,7 +521,7 @@ def upsert_governance_item(
         fdir.mkdir(parents=True, exist_ok=True)
         path = fdir / governance_filename(signature)
         manifest_path = (Path(data_dir) / "diagnostics" / "friction_resolved"
-                         / "_manifest.jsonl")
+                         / GOVERNANCE_MANIFEST_NAME)
         opened_iso = now_iso
         occurrence = _new_occurrence_id(signature, opened_iso, "")
         if path.is_file():
@@ -675,6 +676,73 @@ def _new_occurrence_id(signature: str, opened_iso: str, prior: str) -> str:
     return hashlib.sha256(base.encode()).hexdigest()[:16]
 
 
+#: Governance owns its OWN manifest. The friction-resolution manifest has an
+#: append writer (``archive_resolved_signature``), and a read-modify-replace
+#: cycle against a shared file erases whatever another writer appended in
+#: between — atomic visibility prevents tearing, it does not serialize writers.
+#: Separate ownership removes the cross-writer race by construction rather than
+#: coordinating it. (Safe to introduce without migration: verified no
+#: governance rows or archives exist in any deployment.)
+GOVERNANCE_MANIFEST_NAME = "_governance_manifest.jsonl"
+
+
+@contextmanager
+def _manifest_lock(manifest_path: Path):
+    """Serialize read-modify-write cycles across processes.
+
+    Two concurrent governance transactions would otherwise last-writer-win,
+    each replacing the file from its own stale snapshot. Best-effort: if
+    locking is unavailable the body still runs, because refusing to record an
+    audit is worse than a narrow race on a single-host deployment.
+    """
+    lock_path = manifest_path.with_name(manifest_path.name + ".lock")
+    fh = None
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = lock_path.open("a+")
+        try:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            pass
+        yield
+    finally:
+        if fh is not None:
+            try:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                fh.close()
+            except Exception:
+                pass
+
+
+def _safe_archive_path(dest: Path, declared: str) -> Path | None:
+    """Resolve a manifest-declared archive name, or None if it is unsafe.
+
+    The declared name comes from on-disk metadata and must never be trusted as
+    a path. ``dest / "../friction/<open-item>"`` resolves to the AUTHORITATIVE
+    SOURCE: existence then looks satisfied, archive creation is skipped, and
+    phase three unlinks the only copy. Confined to a plain basename inside
+    ``dest``.
+    """
+    if not declared or declared in (".", ".."):
+        return None
+    if declared != os.path.basename(declared):
+        return None                      # separators or absolute path
+    if os.path.isabs(declared):
+        return None
+    candidate = dest / declared
+    try:
+        if candidate.resolve().parent != dest.resolve():
+            return None
+    except Exception:
+        return None
+    return candidate
+
+
 def _read_manifest(manifest_path: Path) -> tuple:
     """``(rows, torn_tail)``; ``(None, False)`` when the state is unknowable.
 
@@ -710,7 +778,8 @@ def _write_manifest(manifest_path: Path, rows: list) -> bool:
     An atomic whole-file replace cannot tear, so the ambiguity is designed out
     rather than detected.
     """
-    tmp = manifest_path.with_name(manifest_path.name + ".tmp")
+    # Unique temp name: a fixed ".tmp" collides between concurrent writers.
+    tmp = manifest_path.with_name(f"{manifest_path.name}.{os.getpid()}.tmp")
     try:
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text("".join(
@@ -725,6 +794,25 @@ def _write_manifest(manifest_path: Path, rows: list) -> bool:
         return False
 
 
+def _governance_txn_lookup(manifest_path: Path, txn: str) -> tuple:
+    """``(state, row)`` from ONE snapshot.
+
+    Reading state and then re-reading for the archive name allowed the second
+    read to fail or change: the name collapsed to "", recovery invented a
+    canonical filename, and the untouched audit still pointed at the missing
+    one. State and metadata now come from the same validated read.
+    """
+    rows, torn = _read_manifest(manifest_path)
+    if rows is None:
+        return _TXN_UNKNOWN, None
+    if torn:
+        _write_manifest(manifest_path, rows)   # best-effort repair
+    for row in rows:
+        if row.get("governance_txn") == txn:
+            return _TXN_RECORDED, row
+    return _TXN_ABSENT, None
+
+
 def _governance_txn_state(manifest_path: Path, txn: str) -> str:
     """Tri-state phase lookup: recorded / absent / unknown.
 
@@ -737,24 +825,7 @@ def _governance_txn_state(manifest_path: Path, txn: str) -> str:
     incomplete append means the audit never committed, so the surviving rows
     are the whole truth. Reporting unknown here would strand closure forever.
     """
-    rows, torn = _read_manifest(manifest_path)
-    if rows is None:
-        return _TXN_UNKNOWN
-    if torn:
-        _write_manifest(manifest_path, rows)   # best-effort repair
-    for row in rows:
-        if row.get("governance_txn") == txn:
-            return _TXN_RECORDED
-    return _TXN_ABSENT
-
-
-def _recorded_archive_name(manifest_path: Path, txn: str) -> str:
-    """The archive filename a committed row DECLARES for this transaction."""
-    rows, _torn = _read_manifest(manifest_path)
-    for row in rows or []:
-        if row.get("governance_txn") == txn:
-            return str(row.get("archive") or "")
-    return ""
+    return _governance_txn_lookup(manifest_path, txn)[0]
 
 
 def close_governance_item(
@@ -806,9 +877,9 @@ def close_governance_item(
         txn = _governance_field(body, "Occurrence") or _new_occurrence_id(
             signature, opened_iso, "")
         target = dest / f"{src.stem}_closed_{txn}.md"
-        manifest_path = dest / "_manifest.jsonl"
+        manifest_path = dest / GOVERNANCE_MANIFEST_NAME
 
-        state = _governance_txn_state(manifest_path, txn)
+        state, row = _governance_txn_lookup(manifest_path, txn)
         if state == _TXN_UNKNOWN:
             logger.warning(
                 "GOVERNANCE_CLOSE_MANIFEST_UNREADABLE signature=%s txn=%s — "
@@ -817,12 +888,29 @@ def close_governance_item(
             return False
         audit_committed = state == _TXN_RECORDED
         if audit_committed:
-            # The committed row's `archive` field is AUTHORITATIVE. Rebuilding
-            # a canonical name while the row points elsewhere would "recover"
-            # into a permanently broken audit link.
-            declared = _recorded_archive_name(manifest_path, txn)
+            # The committed row is AUTHORITATIVE, but it is on-disk metadata
+            # and must be VALIDATED before it steers a filesystem operation.
+            if row.get("governance_signature") not in ("", None, signature):
+                logger.warning(
+                    "GOVERNANCE_CLOSE_ROW_SIGNATURE_MISMATCH signature=%s "
+                    "txn=%s — refusing to act on foreign audit metadata",
+                    signature, txn)
+                return False
+            declared = str(row.get("archive") or "")
             if declared:
-                target = dest / declared
+                safe = _safe_archive_path(dest, declared)
+                if safe is None:
+                    logger.warning(
+                        "GOVERNANCE_CLOSE_UNSAFE_ARCHIVE_REF signature=%s "
+                        "txn=%s archive=%r — refusing to resolve outside the "
+                        "archive directory", signature, txn, declared[:120])
+                    return False
+                target = safe
+            if target.exists() and not target.is_file():
+                logger.warning(
+                    "GOVERNANCE_CLOSE_ARCHIVE_NOT_A_FILE signature=%s txn=%s",
+                    signature, txn)
+                return False
 
         # 1. Archive. While the audit is UNCOMMITTED the target is not yet a
         #    durable artifact — it may be a truncated copy from a crashed
@@ -865,8 +953,14 @@ def close_governance_item(
                 "resolving_condition": resolving_condition,
                 "final_payload": payload,
             }
-            rows, _torn = _read_manifest(manifest_path)
-            if rows is None or not _write_manifest(manifest_path, rows + [manifest]):
+            # Read-modify-write under one lock: atomic REPLACE prevents
+            # tearing but does not serialize writers, so an unlocked
+            # read-then-replace silently drops rows written in between.
+            with _manifest_lock(manifest_path):
+                rows, _torn = _read_manifest(manifest_path)
+                ok = rows is not None and _write_manifest(
+                    manifest_path, rows + [manifest])
+            if not ok:
                 # Do NOT remove the archive. The replace either happened or it
                 # did not — but a failure here is still completion-ambiguous
                 # from our side, and deleting the archive would risk leaving a

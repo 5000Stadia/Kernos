@@ -108,7 +108,7 @@ def test_close_shadow_archives_and_reopens_without_collision(tmp_path):
     resolved = tmp_path / "diagnostics" / "friction_resolved"
     archived = list(resolved.glob("GOVERNANCE_*.md"))
     assert len(archived) == 1, "closure must shadow-archive, never hard-delete"
-    manifest = (resolved / "_manifest.jsonl").read_text()
+    manifest = (resolved / fr.GOVERNANCE_MANIFEST_NAME).read_text()
     assert smr.COVERAGE_GAP_SIGNATURE in manifest
     assert "a.py" in manifest                      # final payload preserved
     assert "resolving_condition" in manifest       # closure audit preserved
@@ -128,7 +128,7 @@ def _archives(tmp_path) -> list:
 
 
 def _manifest_rows(tmp_path) -> list:
-    p = tmp_path / "diagnostics" / "friction_resolved" / "_manifest.jsonl"
+    p = tmp_path / "diagnostics" / "friction_resolved" / fr.GOVERNANCE_MANIFEST_NAME
     if not p.is_file():
         return []
     return [ln for ln in p.read_text().splitlines() if ln.strip()]
@@ -295,7 +295,7 @@ def test_unreadable_manifest_fails_closed_and_changes_nothing(tmp_path, monkeypa
     real_read = fr.Path.read_text
 
     def _boom(self, *a, **k):
-        if self.name == "_manifest.jsonl":
+        if self.name == fr.GOVERNANCE_MANIFEST_NAME:
             raise OSError("unreadable")
         return real_read(self, *a, **k)
 
@@ -412,7 +412,7 @@ def test_upsert_defers_when_audit_state_is_unreadable(tmp_path, monkeypatch):
     real_read = fr.Path.read_text
 
     def _boom(self, *a, **k):
-        if self.name == "_manifest.jsonl":
+        if self.name == fr.GOVERNANCE_MANIFEST_NAME:
             raise OSError("unreadable")
         return real_read(self, *a, **k)
 
@@ -481,7 +481,7 @@ def test_recorded_transaction_rebuilds_the_archive_its_row_declares(tmp_path):
     dest.mkdir(parents=True, exist_ok=True)
     occ = fr.open_governance_items(d)[0]["occurrence"]
     declared = "GOVERNANCE_custom_name_for_this_txn.md"
-    fr._write_manifest(dest / "_manifest.jsonl", [{
+    fr._write_manifest(dest / fr.GOVERNANCE_MANIFEST_NAME, [{
         "governance_txn": occ,
         "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
         "archive": declared,
@@ -501,6 +501,134 @@ def test_recorded_transaction_rebuilds_the_archive_its_row_declares(tmp_path):
         "exactly the declared archive — no stray canonical duplicate"
 
 
+@pytest.mark.parametrize("evil", [
+    "../friction/escape.md",
+    "../../etc/passwd",
+    "/etc/passwd",
+    "sub/dir/file.md",
+    "..",
+])
+def test_declared_archive_path_is_confined(tmp_path, evil):
+    """P0: a manifest-declared name must never steer a filesystem operation.
+
+    `dest / "../friction/<open-item>"` resolves to the AUTHORITATIVE SOURCE:
+    existence then looks satisfied, archive creation is skipped, and phase
+    three unlinks the only copy — close returns True with no item and no
+    archive.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    occ = fr.open_governance_items(d)[0]["occurrence"]
+    fr._write_manifest(dest / fr.GOVERNANCE_MANIFEST_NAME, [{
+        "governance_txn": occ,
+        "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
+        "archive": evil,
+    }])
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared") is False
+    assert len(fr.open_governance_items(d)) == 1, \
+        "the authoritative source must survive an unsafe archive reference"
+
+
+def test_source_is_never_deleted_via_archive_reference_escape(tmp_path):
+    """The precise loss kreview constructed: point `archive` at the open item."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    occ = fr.open_governance_items(d)[0]["occurrence"]
+    src_name = fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE)
+    fr._write_manifest(dest / fr.GOVERNANCE_MANIFEST_NAME, [{
+        "governance_txn": occ,
+        "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
+        "archive": f"../friction/{src_name}",
+    }])
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared") is False
+    assert (tmp_path / "diagnostics" / "friction" / src_name).is_file(), \
+        "the only copy was deleted through an unconfined archive reference"
+
+
+def test_foreign_signature_row_is_not_trusted(tmp_path):
+    """Audit metadata for a DIFFERENT condition must not steer this closure."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    occ = fr.open_governance_items(d)[0]["occurrence"]
+    fr._write_manifest(dest / fr.GOVERNANCE_MANIFEST_NAME, [{
+        "governance_txn": occ,
+        "governance_signature": "some-other:condition",
+        "archive": "whatever.md",
+    }])
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared") is False
+    assert len(fr.open_governance_items(d)) == 1
+
+
+def test_governance_manifest_is_not_shared_with_friction_resolution(tmp_path):
+    """P0: read-modify-replace against a SHARED file erases another writer.
+
+    `archive_resolved_signature` appends to `_manifest.jsonl`. Interleaving:
+    governance reads rows, the friction row is appended, governance replaces
+    from its stale snapshot — and the concurrent row is gone. Separate
+    ownership removes the race by construction.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # a pre-existing friction-resolution audit in the SHARED manifest
+    shared = dest / "_manifest.jsonl"
+    shared.write_text(json.dumps({
+        "friction_signature": "sig_unrelated", "archived": ["x.md"]}) + "\n")
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+
+    assert "sig_unrelated" in shared.read_text(), \
+        "governance must not rewrite the friction-resolution manifest"
+    assert len(_manifest_rows(tmp_path)) == 1, "governance owns its own manifest"
+
+
+def test_concurrent_governance_writes_do_not_lose_rows(tmp_path):
+    """Two transactions interleaving read-modify-write must both survive."""
+    d = str(tmp_path)
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    mp = dest / fr.GOVERNANCE_MANIFEST_NAME
+
+    import threading
+    barrier = threading.Barrier(2)
+
+    def writer(tag):
+        barrier.wait()
+        for i in range(15):
+            with fr._manifest_lock(mp):
+                rows, _t = fr._read_manifest(mp)
+                fr._write_manifest(mp, (rows or []) + [{"governance_txn": f"{tag}{i}"}])
+
+    threads = [threading.Thread(target=writer, args=(t,)) for t in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    rows, torn = fr._read_manifest(mp)
+    assert not torn and rows is not None
+    assert len(rows) == 30, f"lost rows under concurrency: {len(rows)}/30"
+
+
 def test_torn_manifest_tail_is_repaired_not_stranded_forever(tmp_path, monkeypatch):
     """A partial audit write must not make closure permanently impossible.
 
@@ -513,7 +641,7 @@ def test_torn_manifest_tail_is_repaired_not_stranded_forever(tmp_path, monkeypat
     dest = tmp_path / "diagnostics" / "friction_resolved"
     dest.mkdir(parents=True, exist_ok=True)
     # a torn tail: the front of a row, cut mid-write
-    (dest / "_manifest.jsonl").write_text('{"governance_txn": "abc", "arch')
+    (dest / fr.GOVERNANCE_MANIFEST_NAME).write_text('{"governance_txn": "abc", "arch')
 
     assert fr.close_governance_item(
         d, signature=smr.COVERAGE_GAP_SIGNATURE,
@@ -533,7 +661,7 @@ def test_corrupt_interior_row_fails_closed(tmp_path):
     _upsert(d, ["a.py"])
     dest = tmp_path / "diagnostics" / "friction_resolved"
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / "_manifest.jsonl").write_text(
+    (dest / fr.GOVERNANCE_MANIFEST_NAME).write_text(
         'not-json-at-all\n{"governance_txn":"zzz"}\n')
 
     assert fr.close_governance_item(
@@ -565,7 +693,7 @@ def test_legacy_recurrence_before_first_close_is_not_absorbed(tmp_path):
     dest.mkdir(parents=True, exist_ok=True)
     stem = fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE)[:-3]
     (dest / f"{stem}_closed_{legacy}.md").write_text(path.read_text())
-    fr._write_manifest(dest / "_manifest.jsonl", [{
+    fr._write_manifest(dest / fr.GOVERNANCE_MANIFEST_NAME, [{
         "governance_txn": legacy,
         "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
         "archive": f"{stem}_closed_{legacy}.md",
@@ -617,7 +745,7 @@ def test_legacy_in_flight_item_from_parent_commit_does_not_duplicate(tmp_path):
     dest.mkdir(parents=True, exist_ok=True)
     stem = fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE)[:-3]
     (dest / f"{stem}_closed_{legacy}.md").write_text(path.read_text())
-    (dest / "_manifest.jsonl").write_text(json.dumps({
+    (dest / fr.GOVERNANCE_MANIFEST_NAME).write_text(json.dumps({
         "governance_txn": legacy,
         "governance_signature": smr.COVERAGE_GAP_SIGNATURE}) + "\n")
 
