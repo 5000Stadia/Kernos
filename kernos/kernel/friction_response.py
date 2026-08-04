@@ -634,17 +634,22 @@ def close_governance_item(
         dest = Path(data_dir) / "diagnostics" / "friction_resolved"
         dest.mkdir(parents=True, exist_ok=True)
 
-        # Closure is a two-effect operation and BOTH orderings are wrong on
-        # their own: manifest-first records a closure that never happened when
-        # the move fails; move-first strands the archive with no audit when the
-        # manifest fails. So it is a COMPENSATING TRANSACTION — move, then
-        # write the audit, then undo the move if the audit could not be
-        # written. The invariant is that no manifest row survives without its
-        # archive, and no item is lost without its closure being retryable.
+        # Closure has two effects (archive + audit) and must not depend on a
+        # compensating action succeeding — a rollback that can itself fail is
+        # not a transaction, it just moves the stranding window. Earlier
+        # attempts got this wrong twice: manifest-first recorded closures that
+        # never happened, and move-then-undo stranded the item entirely when
+        # the undo failed (source gone, archive orphaned, no audit, invisible
+        # to every queue because readers only scan diagnostics/friction).
+        #
+        # So: COPY, commit the audit, and only then remove the source. The open
+        # item stays AUTHORITATIVE until both the archive and its audit are
+        # durable. Every failure branch therefore leaves the item open and the
+        # closure retryable, with no branch that can lose a human-gated finding.
         #
         # Full-resolution, collision-resistant, no-clobber destination: a
         # truncated stamp collapses two closures in the same minute onto one
-        # name and shutil.move would silently overwrite the earlier archive.
+        # name and would silently overwrite the earlier archive.
         stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)
         target = dest / f"{src.stem}_closed_{stamp}.md"
         n = 1
@@ -652,15 +657,17 @@ def close_governance_item(
             target = dest / f"{src.stem}_closed_{stamp}_{n}.md"
             n += 1
 
+        # 1. Copy — the source is untouched, so this is fully reversible by
+        #    doing nothing at all.
         try:
-            shutil.move(str(src), str(target))
+            shutil.copy2(str(src), str(target))
         except Exception:
             logger.warning(
-                "GOVERNANCE_CLOSE_MOVE_FAILED signature=%s — item left OPEN, "
-                "no manifest row written, closure retryable",
-                signature, exc_info=True)
+                "GOVERNANCE_CLOSE_COPY_FAILED signature=%s — item still OPEN, "
+                "no audit written, closure retryable", signature, exc_info=True)
             return False
 
+        # 2. Commit the audit.
         manifest = {
             "ts": now_iso,
             "class": GOVERNANCE_CLASS,
@@ -674,17 +681,29 @@ def close_governance_item(
             with (dest / "_manifest.jsonl").open("a") as fh:
                 fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
         except Exception:
-            # Compensate: put the item back so closure stays retryable rather
-            # than leaving an archived file with no audit trail.
+            # Best-effort cleanup of the un-audited copy. Crucially, if this
+            # ALSO fails we still have not touched the source: the item stays
+            # open and retryable, and the worst case is a duplicate archive
+            # file with no manifest row — recoverable, never a lost finding.
             try:
-                shutil.move(str(target), str(src))
-                restored = True
+                target.unlink()
+                cleaned = True
             except Exception:
-                restored = False
+                cleaned = False
             logger.warning(
-                "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s restored=%s — "
-                "closure rolled back so the audit cannot go missing",
-                signature, restored, exc_info=True)
+                "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s copy_removed=%s"
+                " — item remains OPEN and closure is retryable",
+                signature, cleaned, exc_info=True)
+            return False
+
+        # 3. Both effects are durable — now retire the source.
+        try:
+            src.unlink()
+        except Exception:
+            logger.warning(
+                "GOVERNANCE_CLOSE_SOURCE_UNLINK_FAILED signature=%s — archive "
+                "and audit are committed but the item is still listed open; "
+                "the next scan will re-close it", signature, exc_info=True)
             return False
 
         return True

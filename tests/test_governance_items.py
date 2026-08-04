@@ -127,8 +127,8 @@ def _manifest_rows(tmp_path) -> list:
     return [ln for ln in p.read_text().splitlines() if ln.strip()]
 
 
-def test_move_failure_records_no_closure(tmp_path, monkeypatch):
-    """A manifest row must never outlive a failed archive move.
+def test_archive_write_failure_records_no_closure(tmp_path, monkeypatch):
+    """A manifest row must never outlive a failed archive write.
 
     Manifest-first would declare the item closed while it is still open, then
     write a SECOND row on a successful retry — one archive, two closures.
@@ -137,7 +137,7 @@ def test_move_failure_records_no_closure(tmp_path, monkeypatch):
     d = str(tmp_path)
     _upsert(d, ["a.py"])
 
-    monkeypatch.setattr(_sh, "move", lambda *a, **k: (_ for _ in ()).throw(
+    monkeypatch.setattr(_sh, "copy2", lambda *a, **k: (_ for _ in ()).throw(
         OSError("disk gone")))
     assert fr.close_governance_item(
         d, signature=smr.COVERAGE_GAP_SIGNATURE,
@@ -155,11 +155,7 @@ def test_move_failure_records_no_closure(tmp_path, monkeypatch):
     assert fr.open_governance_items(d) == []
 
 
-def test_manifest_failure_rolls_back_the_archive(tmp_path, monkeypatch):
-    """The other half: an archived file must never exist without its audit."""
-    d = str(tmp_path)
-    _upsert(d, ["a.py"])
-
+def _break_manifest(monkeypatch):
     real_open = fr.Path.open
 
     def _boom(self, *a, **k):
@@ -168,15 +164,74 @@ def test_manifest_failure_rolls_back_the_archive(tmp_path, monkeypatch):
         return real_open(self, *a, **k)
 
     monkeypatch.setattr(fr.Path, "open", _boom)
+
+
+def test_manifest_failure_leaves_item_open_and_unarchived(tmp_path, monkeypatch):
+    """The other half: an archived file must never exist without its audit."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    _break_manifest(monkeypatch)
+
     assert fr.close_governance_item(
         d, signature=smr.COVERAGE_GAP_SIGNATURE,
         now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
     monkeypatch.undo()
 
-    # compensated: the item is back, and no orphan archive was left behind
     assert len(fr.open_governance_items(d)) == 1
     resolved = tmp_path / "diagnostics" / "friction_resolved"
     assert list(resolved.glob("GOVERNANCE_*.md")) == []
+
+
+def test_cleanup_failure_still_cannot_strand_the_finding(tmp_path, monkeypatch):
+    """The branch that used to lose the item entirely.
+
+    Two-stage failure: the archive is written, the audit fails, AND the
+    cleanup of the un-audited copy also fails. Under a move-then-undo design
+    the source was already gone, so the item vanished from every queue — no
+    reader scans friction_resolved, so nothing could ever retry it.
+
+    Copy-then-commit-then-unlink makes this branch harmless: the source is
+    untouched until both effects are durable, so the worst case is a stray
+    archive file, never a lost human-gated finding.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    _break_manifest(monkeypatch)
+    monkeypatch.setattr(fr.Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(
+        OSError("cannot remove")))
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+
+    # THE invariant: the finding is still queued and still retryable.
+    assert len(fr.open_governance_items(d)) == 1
+    assert _manifest_rows(tmp_path) == []
+
+    # and a later healthy scan closes it exactly once
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+    assert fr.open_governance_items(d) == []
+    assert len(_manifest_rows(tmp_path)) == 1
+
+
+def test_source_unlink_failure_leaves_item_retryable_not_lost(tmp_path, monkeypatch):
+    """Archive + audit committed but the source could not be retired: the item
+    is still listed open, so the next scan re-closes it. Never stranded."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    monkeypatch.setattr(fr.Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(
+        OSError("cannot remove")))
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+
+    assert len(fr.open_governance_items(d)) == 1     # visible, retryable
+    assert len(_manifest_rows(tmp_path)) == 1        # audit is durable
 
 
 def test_enumeration_does_not_whisper(tmp_path):
