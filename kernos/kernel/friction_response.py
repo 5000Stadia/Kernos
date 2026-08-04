@@ -533,11 +533,22 @@ def upsert_governance_item(
             # opened_iso would fold it into the committed transaction and the
             # recurrence would vanish with no history of its own — so start a
             # new occurrence instead.
-            already_audited = (
-                prior_occurrence
-                and _governance_txn_state(manifest_path, prior_occurrence)
-                == _TXN_RECORDED
+            prior_state = (
+                _governance_txn_state(manifest_path, prior_occurrence)
+                if prior_occurrence else _TXN_ABSENT
             )
+            if prior_state == _TXN_UNKNOWN:
+                # Completion-ambiguous: we cannot tell whether this occurrence
+                # is already closed. Preserving it would silently overwrite the
+                # payload of a committed transaction (the recurrence then has
+                # no archive or audit of its own); starting a new one could
+                # orphan a live occurrence. Mutate nothing and retry.
+                logger.warning(
+                    "GOVERNANCE_UPSERT_DEFERRED signature=%s — audit state "
+                    "unreadable; source left untouched and retried next scan",
+                    signature)
+                return False
+            already_audited = prior_state == _TXN_RECORDED
             if prior_opened and not already_audited:
                 opened_iso = prior_opened
                 occurrence = prior_occurrence or _new_occurrence_id(
@@ -645,8 +656,15 @@ def _new_occurrence_id(signature: str, opened_iso: str, prior: str) -> str:
     still gets its own history. Mixing in ``prior`` guarantees the successor
     differs even if it is created within the same ``now_iso``.
     """
-    return hashlib.sha256(
-        f"{signature}|{opened_iso}|{prior}".encode()).hexdigest()[:16]
+    # NOTE the shape: with no predecessor this is exactly
+    # sha256(signature|opened_iso), which is the derivation used before
+    # occurrence ids were persisted. Appending an empty segment would mint a
+    # DIFFERENT id for in-flight items written by the previous version and
+    # duplicate their archive + audit on the next close.
+    base = f"{signature}|{opened_iso}"
+    if prior:
+        base = f"{base}|{prior}"
+    return hashlib.sha256(base.encode()).hexdigest()[:16]
 
 
 def _governance_txn_state(manifest_path: Path, txn: str) -> str:
@@ -669,10 +687,14 @@ def _governance_txn_state(manifest_path: Path, txn: str) -> str:
         if not line:
             continue
         try:
-            if json.loads(line).get("governance_txn") == txn:
-                return _TXN_RECORDED
+            row = json.loads(line)
         except Exception:
-            continue
+            # A malformed non-empty row is completion-AMBIGUOUS — it may be a
+            # torn append of the very transaction being asked about. Reporting
+            # ABSENT here would let a retry write a second row.
+            return _TXN_UNKNOWN
+        if row.get("governance_txn") == txn:
+            return _TXN_RECORDED
     return _TXN_ABSENT
 
 
@@ -743,7 +765,12 @@ def close_governance_item(
         #    authoritative source (temp + replace) rather than trusting it.
         #    Once the audit IS committed the archive is immutable history and
         #    must not be rewritten.
-        if not audit_committed:
+        # A committed audit row is NOT by itself proof the archive survived —
+        # an earlier attempt may have removed it, or it may never have landed.
+        # Retiring the source against a missing archive would destroy the only
+        # copy, so a RECORDED transaction whose archive is absent is rebuilt
+        # from the still-authoritative source before phase three.
+        if not audit_committed or not target.exists():
             tmp = dest / f".{target.name}.tmp"
             try:
                 shutil.copy2(str(src), str(tmp))
@@ -755,8 +782,8 @@ def close_governance_item(
                     pass
                 logger.warning(
                     "GOVERNANCE_CLOSE_COPY_FAILED signature=%s txn=%s — item "
-                    "still OPEN, no audit written, closure retryable",
-                    signature, txn, exc_info=True)
+                    "still OPEN, closure retryable", signature, txn,
+                    exc_info=True)
                 return False
 
         # 2. Audit — exactly one row per occurrence, ever.
@@ -776,19 +803,21 @@ def close_governance_item(
                 with manifest_path.open("a") as fh:
                     fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
             except Exception:
-                # Best-effort removal of the un-audited copy. If THAT also
-                # fails the source is still untouched, and the orphan is
-                # reconciled by the next retry (same txn -> same filename)
-                # rather than being duplicated.
-                try:
-                    target.unlink()
-                    cleaned = True
-                except Exception:
-                    cleaned = False
+                # Do NOT remove the archive here. An append that raises is
+                # completion-AMBIGUOUS: the row may already be complete and
+                # durable on disk (write + flush can succeed and the failure
+                # arrive afterwards). Deleting the archive in that case leaves
+                # a valid audit row pointing at nothing, and the next retry —
+                # seeing RECORDED — would retire the authoritative source and
+                # destroy the last copy.
+                #
+                # Both source and target are preserved instead, and the retry
+                # reconciles: same txn, same filename, and the RECORDED-but-
+                # missing-archive branch above rebuilds if needed.
                 logger.warning(
-                    "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s txn=%s "
-                    "copy_removed=%s — item remains OPEN and closure is "
-                    "retryable", signature, txn, cleaned, exc_info=True)
+                    "GOVERNANCE_CLOSE_MANIFEST_AMBIGUOUS signature=%s txn=%s "
+                    "— archive and source both preserved; retry reconciles",
+                    signature, txn, exc_info=True)
                 return False
 
         # 3. All durable — retire the source.

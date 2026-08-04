@@ -173,8 +173,14 @@ def _break_manifest(monkeypatch):
     monkeypatch.setattr(fr.Path, "open", _boom)
 
 
-def test_manifest_failure_leaves_item_open_and_unarchived(tmp_path, monkeypatch):
-    """The other half: an archived file must never exist without its audit."""
+def test_manifest_failure_leaves_item_open_and_unaudited(tmp_path, monkeypatch):
+    """An append that raises is completion-AMBIGUOUS, so the archive stays.
+
+    Deleting it would leave a possibly-valid audit row pointing at nothing,
+    and the next retry — seeing RECORDED — would retire the authoritative
+    source and destroy the last copy. What must hold is that the item stays
+    OPEN and no closure is recorded, then a retry reconciles to exactly one.
+    """
     d = str(tmp_path)
     _upsert(d, ["a.py"])
     _break_manifest(monkeypatch)
@@ -184,9 +190,15 @@ def test_manifest_failure_leaves_item_open_and_unarchived(tmp_path, monkeypatch)
         now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
     monkeypatch.undo()
 
-    assert len(fr.open_governance_items(d)) == 1
-    resolved = tmp_path / "diagnostics" / "friction_resolved"
-    assert list(resolved.glob("GOVERNANCE_*.md")) == []
+    assert len(fr.open_governance_items(d)) == 1, "item must stay open"
+    assert _manifest_rows(tmp_path) == [], "no closure may be recorded"
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+    assert fr.open_governance_items(d) == []
+    assert len(_archives(tmp_path)) == 1
+    assert len(_manifest_rows(tmp_path)) == 1
 
 
 def test_cleanup_failure_still_cannot_strand_the_finding(tmp_path, monkeypatch):
@@ -253,6 +265,12 @@ def test_source_unlink_failure_leaves_item_retryable_not_lost(tmp_path, monkeypa
     assert fr.open_governance_items(d) == []
     assert len(_manifest_rows(tmp_path)) == 1, "one opening → exactly one closure row"
     assert len(_archives(tmp_path)) == 1, "one opening → exactly one archive"
+
+
+def _read_item(tmp_path) -> str:
+    p = (tmp_path / "diagnostics" / "friction"
+         / fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE))
+    return p.read_text() if p.is_file() else ""
 
 
 def _archive_text(tmp_path) -> str:
@@ -376,6 +394,153 @@ def test_recurrence_during_failed_retirement_gets_its_own_occurrence(tmp_path, m
     assert len(rows) == 2, "two occurrences → two closure rows"
     assert any("a.py" in r for r in rows) and any("b.py" in r for r in rows)
     assert {first, second} == {json.loads(r)["governance_txn"] for r in rows}
+
+
+def test_upsert_defers_when_audit_state_is_unreadable(tmp_path, monkeypatch):
+    """P0: UNKNOWN must not be collapsed to ABSENT during upsert.
+
+    Committed audit + failed retirement + unreadable manifest at recurrence:
+    treating UNKNOWN as not-audited preserved the CLOSED occurrence id while
+    overwriting the payload, so once the manifest was readable the close saw
+    RECORDED and only unlinked the source — the recurrence vanished with no
+    archive and no audit.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    monkeypatch.setattr(fr.Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(
+        OSError("cannot remove")))
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+    before = _read_item(tmp_path)
+
+    real_read = fr.Path.read_text
+
+    def _boom(self, *a, **k):
+        if self.name == "_manifest.jsonl":
+            raise OSError("unreadable")
+        return real_read(self, *a, **k)
+
+    monkeypatch.setattr(fr.Path, "read_text", _boom)
+    assert _upsert(d, ["b.py"], "2026-08-04T02:00:00+00:00") is False
+    monkeypatch.undo()
+
+    assert _read_item(tmp_path) == before, "source must not be mutated"
+    assert "b.py" not in before
+
+    # once readable, the recurrence gets its OWN occurrence and full history
+    assert _upsert(d, ["b.py"], "2026-08-04T03:00:00+00:00")
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T04:00:00+00:00", resolving_condition="cleared again")
+    rows = _manifest_rows(tmp_path)
+    assert len(rows) == 2 and len(_archives(tmp_path)) == 2
+    assert any("b.py" in r for r in rows), "the recurrence must have its own audit"
+
+
+def test_ambiguous_append_never_destroys_the_last_copy(tmp_path, monkeypatch):
+    """P0: a row that lands on disk and THEN raises must not orphan the audit.
+
+    Removing the archive in that branch left a valid row pointing at nothing;
+    the retry saw RECORDED, skipped the refresh, and unlinked the source —
+    ending at one audit row, zero archives, zero open items.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+
+    real_open = fr.Path.open
+
+    class _WriterThatCommitsThenRaises:
+        def __init__(self, fh): self._fh = fh
+        def write(self, data):
+            self._fh.write(data); self._fh.flush()
+            raise OSError("ack lost after durable write")
+        def __enter__(self): return self
+        def __exit__(self, *a): self._fh.close(); return False
+
+    def _amb(self, *a, **k):
+        if self.name == "_manifest.jsonl":
+            return _WriterThatCommitsThenRaises(real_open(self, *a, **k))
+        return real_open(self, *a, **k)
+
+    monkeypatch.setattr(fr.Path, "open", _amb)
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+
+    # the row DID land; the archive must still be there beside it
+    assert len(_manifest_rows(tmp_path)) == 1
+    assert len(_archives(tmp_path)) == 1, "archive must survive an ambiguous append"
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+    assert fr.open_governance_items(d) == []
+    assert len(_archives(tmp_path)) == 1, "the last copy must never be destroyed"
+    assert len(_manifest_rows(tmp_path)) == 1
+
+
+def test_recorded_transaction_with_missing_archive_is_rebuilt(tmp_path):
+    """A manifest row alone is not proof the archive survived."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    import shutil as _sh
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    occ = fr.open_governance_items(d)[0]["occurrence"]
+    (dest / "_manifest.jsonl").write_text(json.dumps({
+        "governance_txn": occ, "governance_signature": smr.COVERAGE_GAP_SIGNATURE,
+        "archive": "gone.md"}) + "\n")
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+    assert len(_archives(tmp_path)) == 1, "missing archive must be rebuilt, not skipped"
+    assert "a.py" in _archive_text(tmp_path)
+    assert len(_manifest_rows(tmp_path)) == 1, "and no duplicate row"
+
+
+def test_legacy_in_flight_item_from_parent_commit_does_not_duplicate(tmp_path):
+    """Upgrade state: an item written before occurrence ids were persisted.
+
+    The parent derived the id as sha256(signature|opened_iso). If the new
+    fallback appends an empty segment it mints a DIFFERENT id and the close
+    writes a second archive and row for the same opening.
+    """
+    import hashlib as _h
+    d = str(tmp_path)
+    _upsert(d, ["a.py"], "2026-08-01T00:00:00+00:00")
+    path = (tmp_path / "diagnostics" / "friction"
+            / fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE))
+    # strip the Occurrence line → exactly the parent commit's on-disk format
+    path.write_text("\n".join(
+        ln for ln in path.read_text().splitlines()
+        if not ln.startswith("Occurrence:")) + "\n")
+    assert "Occurrence:" not in path.read_text()
+
+    legacy = _h.sha256(
+        f"{smr.COVERAGE_GAP_SIGNATURE}|2026-08-01T00:00:00+00:00".encode()
+    ).hexdigest()[:16]
+    assert fr._new_occurrence_id(
+        smr.COVERAGE_GAP_SIGNATURE, "2026-08-01T00:00:00+00:00", "") == legacy
+
+    # legacy archive + audit already committed, retirement pending
+    dest = tmp_path / "diagnostics" / "friction_resolved"
+    dest.mkdir(parents=True, exist_ok=True)
+    stem = fr.governance_filename(smr.COVERAGE_GAP_SIGNATURE)[:-3]
+    (dest / f"{stem}_closed_{legacy}.md").write_text(path.read_text())
+    (dest / "_manifest.jsonl").write_text(json.dumps({
+        "governance_txn": legacy,
+        "governance_signature": smr.COVERAGE_GAP_SIGNATURE}) + "\n")
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared")
+    assert len(_archives(tmp_path)) == 1, "legacy in-flight item must not duplicate"
+    assert len(_manifest_rows(tmp_path)) == 1
+    assert fr.open_governance_items(d) == []
 
 
 def test_repeated_close_of_an_already_closed_item_is_a_noop(tmp_path):
