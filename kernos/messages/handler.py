@@ -3918,6 +3918,68 @@ class MessageHandler:
 
         return "\n".join(lines)
 
+    def _render_governance_dump_sections(self) -> str:
+        """The three governance blocks written into `/dump`.
+
+        Extracted so tests exercise the PRODUCTION renderer rather than a
+        duplicate of it — a test that reimplements the rendering stays green
+        when the real section is deleted, which is no test at all.
+
+        `/status` is deliberately free of internal identifiers and file paths
+        (SURFACE-DISCIPLINE-PASS D5), so all of this belongs here instead.
+        """
+        out: list[str] = []
+        data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+
+        # RUNTIME-DEFAULTS-TRUTH-V1 — live lane state from the registry.
+        out.append("\n=== GOVERNANCE LANES ===\n")
+        out.append("(live state; defaults documented in "
+                   "docs/reference/runtime-defaults.md)\n\n")
+        try:
+            from kernos.kernel.governance_lanes import lane_states
+            for st in lane_states():
+                on = {True: "ON", False: "OFF", None: "UNOBSERVABLE"}[st["enabled"]]
+                out.append(f"{st['key']:26} {on:12} {','.join(st['env_vars'])}\n")
+                out.append(f"{'':26} {st['title']}\n")
+                out.append(f"{'':26} {st['module']}\n")
+        except Exception as exc:
+            out.append(f"(governance lane state unavailable: {exc})\n")
+
+        # SRSI-V1 — the recovery path for a missed one-shot whisper.
+        # Reading the queue never re-surfaces it.
+        out.append("\n=== OPEN GOVERNANCE ITEMS ===\n")
+        out.append("(human-gated; persist until the condition clears)\n\n")
+        try:
+            from kernos.kernel.friction_response import open_governance_items
+            items = open_governance_items(data_dir)
+            if not items:
+                out.append("(none open)\n")
+            for it in items:
+                out.append(f"- {it['signature']} (opened {it['opened_iso']}, "
+                           f"last seen {it['last_seen_iso']}, "
+                           f"human-gated={it['human_gated']})\n")
+                for p in it["payload"][:25]:
+                    out.append(f"    · {p}\n")
+        except Exception as exc:
+            out.append(f"(governance items unavailable: {exc})\n")
+
+        # SRSI-V1 — fail-closed classification quarantine. Excluded from every
+        # automated lane, so this listing is the only place they surface.
+        out.append("\n=== QUARANTINED REPORTS (unknown class) ===\n")
+        out.append("(excluded from Shape B and all auto-triggers)\n\n")
+        try:
+            from kernos.kernel.friction_response import quarantined_reports
+            quarantined = quarantined_reports(data_dir)
+            if not quarantined:
+                out.append("(none)\n")
+            for q in quarantined:
+                out.append(f"- {q['file']} declared class="
+                           f"{q['declared_class']!r}\n")
+        except Exception as exc:
+            out.append(f"(quarantined reports unavailable: {exc})\n")
+
+        return "".join(out)
+
     async def _deliver_pending_whispers(
         self, ctx: "TurnContext", response: str,
     ) -> str:
@@ -6196,41 +6258,7 @@ class MessageHandler:
             # RUNTIME-DEFAULTS-TRUTH-V1: live state of the self-governance
             # lanes, rendered from the production registry. Operator surface
             # only — /status is deliberately free of internal identifiers.
-            f.write("\n=== GOVERNANCE LANES ===\n")
-            f.write("(live state; defaults documented in "
-                    "docs/reference/runtime-defaults.md)\n\n")
-            try:
-                from kernos.kernel.governance_lanes import lane_states
-                for _st in lane_states():
-                    _on = {True: "ON", False: "OFF", None: "UNOBSERVABLE"}[
-                        _st["enabled"]]
-                    f.write(f"{_st['key']:26} {_on:12} "
-                            f"{','.join(_st['env_vars'])}\n")
-                    f.write(f"{'':26} {_st['module']}\n")
-            except Exception as exc:
-                f.write(f"(governance lane state unavailable: {exc})\n")
-
-            # ---- OPEN GOVERNANCE ITEMS --------------------------------
-            # SELF-REVIEW-SURFACING-INTEGRITY-V1: the recovery path. A
-            # human-gated finding must stay findable after its one-shot
-            # whisper is missed. Reading here never re-surfaces the item.
-            f.write("\n=== OPEN GOVERNANCE ITEMS ===\n")
-            f.write("(human-gated; persist until the condition clears)\n\n")
-            try:
-                from kernos.kernel.friction_response import open_governance_items
-                _items = open_governance_items(
-                    os.getenv("KERNOS_DATA_DIR", "./data"))
-                if not _items:
-                    f.write("(none open)\n")
-                for _it in _items:
-                    f.write(f"- {_it['signature']} "
-                            f"(opened {_it['opened_iso']}, "
-                            f"last seen {_it['last_seen_iso']}, "
-                            f"human-gated={_it['human_gated']})\n")
-                    for _p in _it["payload"][:25]:
-                        f.write(f"    · {_p}\n")
-            except Exception as exc:
-                f.write(f"(governance items unavailable: {exc})\n")
+            f.write(self._render_governance_dump_sections())
 
             # ---- RECENT CONVERSATION ----------------------------------
             # Tail the persisted conversation log for this space/member.

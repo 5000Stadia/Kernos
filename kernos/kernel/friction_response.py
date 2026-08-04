@@ -576,6 +576,39 @@ def open_governance_items(data_dir: str) -> list[dict]:
     return out
 
 
+def quarantined_reports(data_dir: str) -> list[dict]:
+    """Friction reports whose declared class is unrecognized.
+
+    These are excluded from Shape B and every auto-trigger (fail-closed), so
+    without a durable listing they would vanish from operator view entirely —
+    a log warning is not a recovery surface. Best-effort: [] on any error.
+    """
+    out: list[dict] = []
+    try:
+        fdir = Path(data_dir) / "diagnostics" / "friction"
+        if not fdir.is_dir():
+            return []
+        paths = sorted(fdir.glob("*.md"))
+    except Exception:
+        return []
+    for p in paths:
+        try:
+            body = p.read_text(errors="replace")
+        except Exception:
+            continue
+        if report_class(body) != UNKNOWN_CLASS:
+            continue
+        declared = ""
+        for line in body.splitlines()[:12]:
+            s = line.strip()
+            if s.lower().startswith("class:"):
+                declared = s.split(":", 1)[1].strip()
+                break
+        out.append({"file": p.name, "declared_class": declared,
+                    "excerpt": body[:200]})
+    return out
+
+
 def close_governance_item(
     data_dir: str, *, signature: str, now_iso: str, resolving_condition: str,
 ) -> bool:
@@ -600,8 +633,10 @@ def close_governance_item(
         opened_iso = _governance_field(body, "Opened")
         dest = Path(data_dir) / "diagnostics" / "friction_resolved"
         dest.mkdir(parents=True, exist_ok=True)
-        stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)[:14]
-        shutil.move(str(src), str(dest / f"{src.stem}_closed_{stamp}.md"))
+
+        # The closure AUDIT is written before the move. If the manifest cannot
+        # be written we must not move the only open copy — otherwise the audit
+        # is permanently unrecoverable and the caller has no way to retry.
         manifest = {
             "ts": now_iso,
             "class": GOVERNANCE_CLASS,
@@ -615,7 +650,22 @@ def close_governance_item(
             with (dest / "_manifest.jsonl").open("a") as fh:
                 fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
         except Exception:
-            pass
+            logger.warning(
+                "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s — leaving the "
+                "item OPEN so closure stays retryable", signature, exc_info=True)
+            return False
+
+        # Full-resolution, collision-resistant, no-clobber destination. A
+        # truncated stamp collapses two closures in the same minute onto one
+        # name and shutil.move would silently overwrite the earlier archive,
+        # destroying it while the manifest still claimed both.
+        stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)
+        target = dest / f"{src.stem}_closed_{stamp}.md"
+        n = 1
+        while target.exists():
+            target = dest / f"{src.stem}_closed_{stamp}_{n}.md"
+            n += 1
+        shutil.move(str(src), str(target))
         return True
     except Exception:
         logger.warning(

@@ -166,7 +166,11 @@ async def test_coverage_gap_retries_on_failed_surface(tmp_path, monkeypatch):
     seen = {"gap_calls": 0, "fail_next": True}
 
     async def whisper(text, report):
-        if report.get("kind") == "coverage_gap":
+        # SRSI-V1 Part C: the coverage note is now folded into the single
+        # combined review report, nested under "coverage_gap", rather than
+        # emitted as its own whisper with a top-level "kind".
+        cov = report.get("coverage_gap")
+        if cov and cov.get("kind") == "coverage_gap":
             seen["gap_calls"] += 1
             if seen["fail_next"]:
                 seen["fail_next"] = False

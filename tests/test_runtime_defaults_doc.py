@@ -182,10 +182,18 @@ def test_inconsistent_truthiness_is_pinned_not_endorsed(monkeypatch):
 # --- best-effort discovery guardrail (NOT completeness enforcement) ----------
 
 #: Modules that define an `is_enabled()` reading a KERNOS_* var but are not
-#: self-governance lanes. Every entry needs a written reason.
-DISCOVERY_EXEMPTIONS = {
-    # (none today — add with a reason if a non-lane adopts the convention)
+#: self-governance lanes. Mapping (not a set) so a written reason is
+#: STRUCTURALLY required — Part A says every exemption carries one, and a bare
+#: set lets an entry in with no justification at all.
+DISCOVERY_EXEMPTIONS: dict[str, str] = {
+    # "kernos/kernel/example.py": "why this is not a governance lane",
 }
+
+
+def test_every_discovery_exemption_carries_a_reason():
+    for module, reason in DISCOVERY_EXEMPTIONS.items():
+        assert reason and reason.strip(), (
+            f"exemption for {module} has no written reason")
 
 
 def _defines_env_gated_is_enabled(path: Path) -> bool:
@@ -229,8 +237,18 @@ def test_env_gated_lanes_are_registered_or_exempted():
 
 # --- lane-scoped documentation audit ----------------------------------------
 
+#: Enablement vocabulary. kreview demonstrated the earlier pattern had false
+#: negatives for exactly the drift class it claims to prevent: both
+#: "self_maintenance_review is default-off" and "KERNOS_FRICTION_RESPONSE is
+#: enabled by default" passed the audit. Phrase list widened accordingly.
 DEFAULT_ASSERTION = re.compile(
-    r"default[- ](on|off)|defaults? to (on|off)|ships? default", re.I)
+    r"default[-\s](on|off)\b"
+    r"|defaults?\s+to\s+(on|off|enabled|disabled)"
+    r"|ships?\s+default"
+    r"|(enabled|disabled|on|off)\s+by\s+default"
+    r"|(default|out\s+of\s+the\s+box)[^.\n]{0,40}\b(enabled|disabled)\b"
+    r"|is\s+default[-\s](on|off)",
+    re.I)
 
 
 def test_default_assertions_for_these_lanes_live_only_in_the_table():
@@ -238,10 +256,14 @@ def test_default_assertions_for_these_lanes_live_only_in_the_table():
 
     Scoped to these four lanes' identifiers — a global default-on/off grep is
     unsatisfiable because unrelated Kernos features legitimately use the words.
+    Identifiers include lane KEYS as well as env vars (AC5): a claim written as
+    "self_maintenance_review is default-off" names no env var and would
+    otherwise slip through.
     """
     identifiers = set()
     for lane in GOVERNANCE_LANES:
         identifiers.update(lane.env_vars)
+        identifiers.add(lane.key)
     offenders = []
     for path in sorted((REPO_ROOT / "docs").rglob("*.md")):
         if path == DOC:

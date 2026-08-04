@@ -16,9 +16,9 @@ out-of-hand mutation: at most ONE minor, reversible, well-justified evolution
 idea per review.
 
 Design mirrors recursive_self_heal: seam-injected (consult_fn / whisper_fn),
-deterministic + unit-testable. Unlike that lane, this one ships DEFAULT-ON as
-of V3 (reflection-only); disable it with ``KERNOS_SELF_MAINTENANCE_REVIEW`` in
-{0, false, off, no}. The orchestration (``maybe_run_daily``) is
+deterministic + unit-testable. This lane's default and enablement semantics are
+recorded in ``docs/reference/runtime-defaults.md`` — the single authoritative
+table — rather than restated here, where they would drift. The orchestration (``maybe_run_daily``) is
 idle-aware and runs at most once per 24h.
 """
 from __future__ import annotations
@@ -48,11 +48,14 @@ DEDUP_TTL_DAYS = 14.0  # don't re-surface the same observation for two weeks.
 
 
 def is_enabled() -> bool:
-    """SELF-MAINTENANCE-REVIEW-V3: ships DEFAULT-ON. The daily review is
-    reflection-only (never changes code on its own), idle-aware (defers to live
-    turns), and costs ~one bounded LLM call/day, so it's on out of the box.
-    Disable explicitly with ``KERNOS_SELF_MAINTENANCE_REVIEW`` in
-    {0, false, off, no}."""
+    """Whether the background daily review loop runs.
+
+    The daily review is reflection-only (never changes code on its own),
+    idle-aware, and costs ~one bounded LLM call/day. The authoritative
+    statement of this lane's default and enablement semantics lives in
+    ``docs/reference/runtime-defaults.md``, which is machine-compared against
+    this function; the expression below is the behavior it is checked against.
+    """
     return os.environ.get("KERNOS_SELF_MAINTENANCE_REVIEW", "").strip().lower() not in (
         "0", "false", "off", "no",
     )
@@ -382,6 +385,7 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "still the healthiest, most effective approach, and does it serve the "
         "whole? Nothing is exempt — the methodology audits itself.",
         ("kernos/kernel/self_maintenance_review.py",
+         "kernos/kernel/governance_lanes.py",
          "kernos/kernel/improvement_review_protocol.py",
          "specs/SELF-MAINTENANCE-REVIEW-V1.md",
          "specs/SELF-MAINTENANCE-REVIEW-V2.md",

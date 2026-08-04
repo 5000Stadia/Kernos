@@ -166,7 +166,8 @@ async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
     assert smr.load_state(d)["seen"] == {}          # NOT buried
     # next cycle, whisper works -> the concern still surfaces
     seen_whispers = []
-    async def _ok(t, rr): seen_whispers.append(t)
+    seen_reports = []
+    async def _ok(t, rr): seen_whispers.append(t); seen_reports.append(rr)
     # same slice again: force cursor back + clear the daily gate
     st = smr.load_state(d); st["cursor"] -= 1; st["last_run_iso"] = ""
     smr.save_state(d, st)
@@ -180,6 +181,12 @@ async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
     # landed at index 1; asserting a fixed index was the stale assumption.
     assert len(seen_whispers) == 1
     assert "real concern" in seen_whispers[0]
+    # SRSI-V1 Part D: any coverage payload rides NESTED in the combined report,
+    # so the top-level report is the review — never kind == "coverage_gap".
+    assert seen_reports[0].get("kind") != "coverage_gap"
+    _cov = seen_reports[0].get("coverage_gap")
+    if _cov:
+        assert _cov["kind"] == "coverage_gap"
     # substrate: `seen` was {} after the failed surface (asserted above) and is
     # committed only now, after a successful one — the invariant this test is
     # actually named for. (`seen` holds finding fingerprints, not raw text.)
