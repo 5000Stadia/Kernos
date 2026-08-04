@@ -175,7 +175,15 @@ async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
         consult_fn=_consult, whisper_fn=_ok,
     )
     assert r2["outcome"] == "reviewed_surfaced"
-    assert seen_whispers and "real concern" in seen_whispers[0]
+    # SRSI-V1 Part C/D: ONE review tick → exactly ONE whisper. Before the fold
+    # the coverage-gap note was a second, separate whisper and the finding
+    # landed at index 1; asserting a fixed index was the stale assumption.
+    assert len(seen_whispers) == 1
+    assert "real concern" in seen_whispers[0]
+    # substrate: `seen` was {} after the failed surface (asserted above) and is
+    # committed only now, after a successful one — the invariant this test is
+    # actually named for. (`seen` holds finding fingerprints, not raw text.)
+    assert len(smr.load_state(d)["seen"]) == 1
 
 
 @pytest.mark.asyncio

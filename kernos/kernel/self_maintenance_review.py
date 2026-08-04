@@ -16,8 +16,9 @@ out-of-hand mutation: at most ONE minor, reversible, well-justified evolution
 idea per review.
 
 Design mirrors recursive_self_heal: seam-injected (consult_fn / whisper_fn),
-inert unless ``KERNOS_SELF_MAINTENANCE_REVIEW`` is set (default OFF for v1),
-deterministic + unit-testable. The orchestration (``maybe_run_daily``) is
+deterministic + unit-testable. Unlike that lane, this one ships DEFAULT-ON as
+of V3 (reflection-only); disable it with ``KERNOS_SELF_MAINTENANCE_REVIEW`` in
+{0, false, off, no}. The orchestration (``maybe_run_daily``) is
 idle-aware and runs at most once per 24h.
 """
 from __future__ import annotations
@@ -30,8 +31,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from kernos.kernel import friction_response
+
+#: Stable condition identity for the durable coverage-gap governance item. The
+#: CONDITION is the signature; the unassigned-module set is the payload, so a
+#: partial repair updates one item instead of stranding it and opening another.
+COVERAGE_GAP_SIGNATURE = "self-review:coverage-gap"
+
 # ---------------------------------------------------------------------------
-# Kill switch (default OFF for v1) + cadence
+# Kill switch (default ON as of V3) + cadence
 # ---------------------------------------------------------------------------
 
 MIN_HOURS_BETWEEN_REVIEWS = 20.0  # "~once a day", with slack so a slightly
@@ -89,7 +97,7 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "Platform adapters (Discord/Telegram/SMS): translate events to/from "
         "NormalizedMessage; never import the handler.",
         ("kernos/messages/adapters/", "kernos/sms_poller.py",
-         "kernos/telegram_poller.py"),
+         "kernos/telegram_poller.py", "kernos/discord_runtime.py"),
     ),
     ReviewSlice(
         "reasoning",
@@ -115,7 +123,8 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "context-routing",
         "Message→ContextSpace routing, candidate selection, per-space evidence.",
         ("kernos/kernel/router.py", "kernos/kernel/space_candidates.py",
-         "kernos/kernel/space_evidence.py", "kernos/kernel/spaces.py"),
+         "kernos/kernel/space_evidence.py", "kernos/kernel/spaces.py",
+         "kernos/kernel/topic_hints.py"),
     ),
     ReviewSlice(
         "dispatch-gate",
@@ -232,15 +241,17 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
          "kernos/kernel/tools/", "kernos/kernel/tool_aliases.py",
          "kernos/kernel/tool_namespace.py",
          "kernos/kernel/tool_audit.py", "kernos/kernel/tool_introspection.py",
-         "kernos/kernel/tool_gate_routing.py"),
+         "kernos/kernel/tool_gate_routing.py", "kernos/kernel/tool_signatures.py"),
     ),
     ReviewSlice(
         "workshop-tool-primitive",
-        "Tool-making: descriptors, runtime context + enforcement, authoring-"
-        "pattern validation, the external-service registry.",
+        "Tool-making AND the universal tool-execution/result contract: "
+        "descriptors, runtime context + enforcement, authoring-pattern "
+        "validation, typed execution failures, the external-service registry.",
         ("kernos/kernel/tool_descriptor.py", "kernos/kernel/tool_runtime.py",
          "kernos/kernel/tool_runtime_enforcement.py", "kernos/kernel/tool_validation.py",
-         "kernos/kernel/services.py", "kernos/kernel/self_admin_tools.py"),
+         "kernos/kernel/services.py", "kernos/kernel/self_admin_tools.py",
+         "kernos/kernel/tool_failure.py"),
     ),
     ReviewSlice(
         "capability-registry",
@@ -487,7 +498,12 @@ def _state_path(data_dir: str) -> Path:
 def load_state(data_dir: str) -> dict:
     p = _state_path(data_dir)
     _fresh = {"cursor": 0, "last_run_iso": "", "seen": {}, "last_reviewed": {},
-              "shape_fingerprint": "", "gap_surfaced_fingerprint": ""}
+              "shape_fingerprint": "", "gap_surfaced_fingerprint": "",
+              # SELF-REVIEW-SURFACING-INTEGRITY-V1: durable-write acknowledgement,
+              # tracked INDEPENDENTLY of gap_surfaced_fingerprint. If the whisper
+              # lands but the durable write fails, the surface fingerprint must
+              # not be allowed to imply the finding was recorded.
+              "governance_persisted_fingerprint": ""}
     if not p.exists():
         return dict(_fresh)
     try:
@@ -725,6 +741,11 @@ def has_anything_to_say(report: dict) -> bool:
         or report.get("evolution_idea")
         or report.get("role_concern_fresh")
         or report.get("opportunities")     # V3: open docket items folded in
+        # SRSI-V1: a pending coverage gap is substance too. Without this a
+        # healthy, quiet slice never calls the whisper at all and the folded
+        # coverage note would silently vanish — strictly worse than the two
+        # separate whispers it replaces.
+        or report.get("coverage_gap")
     )
 
 
@@ -757,6 +778,18 @@ def to_whisper_text(report: dict) -> str:
         lines.append(
             "If one is a clean single improvement, consider proposing it through "
             "the normal approval gate; otherwise leave it on the docket.")
+    # SRSI-V1: the coverage gap is folded into THIS whisper rather than emitted
+    # as a second interruption for one scheduled reflection.
+    cov = report.get("coverage_gap")
+    if cov:
+        gaps = cov.get("unassigned") or []
+        lines.append("")
+        lines.append(_coverage_gap_text(gaps))
+        lines.append(
+            "This is tracked as a durable HUMAN-GATED governance item — it "
+            "stays open until every module above is owned, and it is not "
+            "something to self-apply."
+        )
     if report.get("constitutional"):
         lines.append(
             "This slice is governance/maintenance machinery — CONSTITUTIONAL. "
@@ -1128,32 +1161,60 @@ async def maybe_run_daily(
     if not force and not due_for_review(state, now_iso):
         return {"outcome": "not_due"}
 
-    # --- coverage-gap check (V3): structural-only, surface once per shape change
-    # Record shape_fingerprint on every successful scan; surface a gap note only
-    # when the shape changed AND there's an unassigned module AND we haven't
-    # already surfaced for this shape; set gap_surfaced_fingerprint only on a
-    # successful surface (a failed surface re-tries next shape-change tick).
+    # --- coverage-gap: durable lifecycle EVERY scan, surfacing once per shape
+    #
+    # SELF-REVIEW-SURFACING-INTEGRITY-V1. The lifecycle (open/update/close of the
+    # durable governance item) MUST NOT sit behind the shape fingerprint.
+    # `shape_fingerprint()` hashes the set of module PATHS; repairing the map
+    # edits REVIEW_SLICES ownership and changes no path, so the fingerprint is
+    # unchanged by exactly the repair that resolves the gap. Gating closure on it
+    # would make the item permanently un-closable — the very failure this lane
+    # exists to prevent. The fingerprint is retained ONLY as the anti-nag key for
+    # whisper surfacing.
+    pending_coverage: dict | None = None
     try:
         _repo = repo_root or os.getenv("KERNOS_REPO_DIR", ".")
+        _gaps = unassigned_modules(REVIEW_SLICES, _repo)
+        _payload_fp = hashlib.sha256("\n".join(_gaps).encode()).hexdigest()[:16]
+
+        # 1. Durable lifecycle — evaluated on EVERY due scan, live condition.
+        if _gaps:
+            _ok = friction_response.upsert_governance_item(
+                data_dir,
+                signature=COVERAGE_GAP_SIGNATURE,
+                title="Self-review functional map coverage gap",
+                condition=(
+                    "`unassigned_modules(REVIEW_SLICES)` is non-empty: these "
+                    "modules belong to no element of the functional map and are "
+                    "therefore structurally ineligible for daily self-review. "
+                    "Resolves when every module below is owned by an element."
+                ),
+                payload=_gaps,
+                now_iso=now_iso,
+            )
+            # Acknowledge persistence separately from surfacing.
+            state["governance_persisted_fingerprint"] = _payload_fp if _ok else ""
+        else:
+            # Condition genuinely cleared → close + shadow-archive.
+            if state.get("governance_persisted_fingerprint") or \
+                    friction_response.open_governance_items(data_dir):
+                friction_response.close_governance_item(
+                    data_dir,
+                    signature=COVERAGE_GAP_SIGNATURE,
+                    now_iso=now_iso,
+                    resolving_condition="unassigned_modules(REVIEW_SLICES) is empty",
+                )
+            state["governance_persisted_fingerprint"] = ""
+
+        # 2. Surfacing — anti-nag, still once per structural shape change.
         _fp = shape_fingerprint(_repo)
         if _fp:
-            state["shape_fingerprint"] = _fp   # record every successful scan
-            # Gate surfacing on the SURFACED fingerprint, not on "changed since
-            # last scan" — else a failed surface (or absent whisper_fn) records
-            # the shape but never re-tries (Codex code-review must-fix).
-            if (_fp != state.get("gap_surfaced_fingerprint", "")
-                    and whisper_fn is not None):
-                _gaps = unassigned_modules(REVIEW_SLICES, _repo)
-                if _gaps:
-                    try:
-                        await whisper_fn(_coverage_gap_text(_gaps),
-                                         {"kind": "coverage_gap",
-                                          "slice": "coverage-gap",
-                                          "unassigned": _gaps[:50]})
-                        state["gap_surfaced_fingerprint"] = _fp
-                    except Exception:
-                        pass  # gap_surfaced unchanged → retries next tick
-            save_state(data_dir, state)
+            state["shape_fingerprint"] = _fp
+            if _gaps and _fp != state.get("gap_surfaced_fingerprint", ""):
+                pending_coverage = {"kind": "coverage_gap",
+                                    "fingerprint": _fp,
+                                    "unassigned": _gaps[:50]}
+        save_state(data_dir, state)
     except Exception:
         pass
 
@@ -1215,6 +1276,11 @@ async def maybe_run_daily(
     except Exception:
         filtered["opportunities"] = []
 
+    # SRSI-V1 Part C: one review tick → one whisper. The coverage note rides in
+    # the combined report instead of a second whisper call.
+    if pending_coverage:
+        filtered["coverage_gap"] = pending_coverage
+
     surfaced = False
     if has_anything_to_say(filtered) and whisper_fn is not None:
         try:
@@ -1222,6 +1288,13 @@ async def maybe_run_daily(
             surfaced = True
         except Exception:
             surfaced = False
+
+    # Commit the anti-nag fingerprint ONLY on successful delivery, preserving the
+    # prior must-fix ("a failed surface re-tries next shape-change tick"). The
+    # early `error` / `parse_error` returns above never reach here, so the note
+    # is never silently dropped — it is simply retried.
+    if surfaced and pending_coverage:
+        state["gap_surfaced_fingerprint"] = pending_coverage.get("fingerprint", "")
 
     # Commit fresh fingerprints ONLY after a successful surface, so a failed or
     # absent whisper doesn't bury the concern for the TTL (Codex #2). A quiet

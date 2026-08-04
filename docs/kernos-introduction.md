@@ -192,11 +192,19 @@ wakes the owner on completion, on a needed approval, or on failure.
 `start.sh` (the un-protectable bootstrap) is off-limits to this loop by
 construction.
 
-Two quieter self-stewardship lanes share the same machinery: a **daily
-self-maintenance review** (a creative two-lens pass over one slice of
-the system per day) and an **immediate friction response** (reactive,
-anti-looping resolution of the system's own operational errors). All
-three ship **default-off** and opt-in.
+Two quieter self-stewardship lanes share the same machinery. The
+**daily self-maintenance review** is a creative two-lens pass over one
+slice of the system per day — reflection-only, surfacing an
+observation to consider rather than changing anything. The
+**immediate friction response** is reactive, anti-looping resolution
+of the system's own operational errors. A narrower **recursive
+self-heal** lane handles a bounded one-child repair when an attempt
+aborts on a bug in the loop machinery itself — not a general
+self-repair capability.
+
+Which of these are on out of the box, which are opt-in, and the exact
+environment variable for each are recorded in one authoritative place:
+[`reference/runtime-defaults.md`](reference/runtime-defaults.md).
 
 See [`TECHNICAL-ARCHITECTURE.md`](TECHNICAL-ARCHITECTURE.md) §11b.
 
@@ -228,8 +236,10 @@ See [`TECHNICAL-ARCHITECTURE.md`](TECHNICAL-ARCHITECTURE.md) §11b.
 - **Improve its own code.** Ask it to make itself better and the
   `improve_kernos` loop specs, implements, reviews, gets your
   approval, deploys, and self-tests — rolling back if the new build
-  fails. Default-off self-maintenance and friction-response lanes
-  round it out. See [`TECHNICAL-ARCHITECTURE.md`](TECHNICAL-ARCHITECTURE.md) §11b.
+  fails. A reflection-only daily self-review and a friction-response
+  lane round it out. See
+  [`TECHNICAL-ARCHITECTURE.md`](TECHNICAL-ARCHITECTURE.md) §11b and
+  [`reference/runtime-defaults.md`](reference/runtime-defaults.md).
 
 ---
 

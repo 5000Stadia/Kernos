@@ -6192,6 +6192,46 @@ class MessageHandler:
             for tool in ctx.tools:
                 f.write(f"{json.dumps(tool, indent=2)}\n\n")
 
+            # ---- GOVERNANCE LANES -------------------------------------
+            # RUNTIME-DEFAULTS-TRUTH-V1: live state of the self-governance
+            # lanes, rendered from the production registry. Operator surface
+            # only — /status is deliberately free of internal identifiers.
+            f.write("\n=== GOVERNANCE LANES ===\n")
+            f.write("(live state; defaults documented in "
+                    "docs/reference/runtime-defaults.md)\n\n")
+            try:
+                from kernos.kernel.governance_lanes import lane_states
+                for _st in lane_states():
+                    _on = {True: "ON", False: "OFF", None: "UNOBSERVABLE"}[
+                        _st["enabled"]]
+                    f.write(f"{_st['key']:26} {_on:12} "
+                            f"{','.join(_st['env_vars'])}\n")
+                    f.write(f"{'':26} {_st['module']}\n")
+            except Exception as exc:
+                f.write(f"(governance lane state unavailable: {exc})\n")
+
+            # ---- OPEN GOVERNANCE ITEMS --------------------------------
+            # SELF-REVIEW-SURFACING-INTEGRITY-V1: the recovery path. A
+            # human-gated finding must stay findable after its one-shot
+            # whisper is missed. Reading here never re-surfaces the item.
+            f.write("\n=== OPEN GOVERNANCE ITEMS ===\n")
+            f.write("(human-gated; persist until the condition clears)\n\n")
+            try:
+                from kernos.kernel.friction_response import open_governance_items
+                _items = open_governance_items(
+                    os.getenv("KERNOS_DATA_DIR", "./data"))
+                if not _items:
+                    f.write("(none open)\n")
+                for _it in _items:
+                    f.write(f"- {_it['signature']} "
+                            f"(opened {_it['opened_iso']}, "
+                            f"last seen {_it['last_seen_iso']}, "
+                            f"human-gated={_it['human_gated']})\n")
+                    for _p in _it["payload"][:25]:
+                        f.write(f"    · {_p}\n")
+            except Exception as exc:
+                f.write(f"(governance items unavailable: {exc})\n")
+
             # ---- RECENT CONVERSATION ----------------------------------
             # Tail the persisted conversation log for this space/member.
             # Best-effort: failures here never break the dump.

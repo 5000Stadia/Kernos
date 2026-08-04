@@ -23,9 +23,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Kill switch + bounds (§6)
@@ -433,21 +436,248 @@ def archive_resolved_signature(
 
 
 # ---------------------------------------------------------------------------
+# Durable governance items (SELF-REVIEW-SURFACING-INTEGRITY-V1)
+#
+# A human-gated finding routed to a one-shot ephemeral whisper is
+# indistinguishable from a finding that was never raised. Governance items are
+# the persistent queue behind the human gate: opened on a deterministic
+# condition, upserted by stable signature, never TTL'd, closed only when the
+# condition itself clears, and shadow-archived (never deleted) on closure.
+#
+# v1 admits ONLY deterministically-verifiable conditions (one producer: the
+# self-review coverage gap). Stochastic LLM findings stay whisper-only — a
+# queue whose items cannot be reliably closed is the very failure this fixes.
+# ---------------------------------------------------------------------------
+
+GOVERNANCE_PREFIX = "GOVERNANCE_"
+
+
+def governance_filename(signature: str) -> str:
+    """Stable, path-safe filename for a governance signature.
+
+    The raw signature (e.g. ``self-review:coverage-gap``) contains a colon and
+    must never reach a path. Slug + short hash keeps it readable AND collision-
+    free, and is stable across upserts by construction.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", (signature or "").lower()).strip("_")[:48]
+    digest = hashlib.sha256((signature or "").encode()).hexdigest()[:12]
+    return f"{GOVERNANCE_PREFIX}{slug}_{digest}.md"
+
+
+def _governance_field(body: str, field: str) -> str:
+    """Read a single ``Field: value`` line out of a governance report."""
+    want = field.lower() + ":"
+    for line in (body or "").splitlines()[:20]:
+        s = line.strip()
+        if s.lower().startswith(want):
+            return s.split(":", 1)[1].strip()
+    return ""
+
+
+def _render_governance_item(
+    *, signature: str, title: str, condition: str, payload: list,
+    opened_iso: str, last_seen_iso: str,
+) -> str:
+    lines = [
+        f"# GOVERNANCE: {title}",
+        "",
+        f"Class: {GOVERNANCE_CLASS}",
+        f"Signature: {signature}",
+        "Human-gated: true",
+        f"Opened: {opened_iso}",
+        f"Last-seen: {last_seen_iso}",
+        "",
+        "## Condition",
+        condition,
+        "",
+        "## Payload",
+    ]
+    lines.extend(f"- {item}" for item in payload)
+    lines.append("")
+    lines.append(
+        "This item is HUMAN-GATED. It is bookkeeping, not authority: no "
+        "auto-trigger consumes it and nothing here may be self-applied. It "
+        "stays open until the condition above genuinely clears."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def upsert_governance_item(
+    data_dir: str, *, signature: str, title: str, condition: str,
+    payload: list, now_iso: str,
+) -> bool:
+    """Open or update the governance item for ``signature``. Idempotent.
+
+    Re-detection updates payload + last-seen and PRESERVES the original
+    ``Opened:`` stamp — one item per condition, never a duplicate per scan.
+    Returns True on a durable write, False otherwise; the caller tracks that
+    acknowledgement SEPARATELY from any surfacing state, so a failed write
+    stays retryable without re-nagging the whisper.
+    """
+    try:
+        fdir = Path(data_dir) / "diagnostics" / "friction"
+        fdir.mkdir(parents=True, exist_ok=True)
+        path = fdir / governance_filename(signature)
+        opened_iso = now_iso
+        if path.is_file():
+            prior = _governance_field(path.read_text(errors="replace"), "Opened")
+            if prior:
+                opened_iso = prior
+        body = _render_governance_item(
+            signature=signature, title=title, condition=condition,
+            payload=list(payload), opened_iso=opened_iso,
+            last_seen_iso=now_iso,
+        )
+        tmp = path.with_suffix(".md.tmp")
+        tmp.write_text(body)
+        tmp.replace(path)  # atomic
+        return True
+    except Exception:
+        logger.warning(
+            "GOVERNANCE_ITEM_WRITE_FAILED signature=%s — item remains "
+            "eligible for retry on the next scan", signature, exc_info=True,
+        )
+        return False
+
+
+def open_governance_items(data_dir: str) -> list[dict]:
+    """Enumerate OPEN governance items. No TTL — they persist until resolved.
+
+    This is the recovery path: a missed one-shot whisper must not lose the
+    finding. Reading the queue is NOT surfacing it — enumeration never
+    re-whispers. Best-effort: [] on any error.
+    """
+    out: list[dict] = []
+    try:
+        fdir = Path(data_dir) / "diagnostics" / "friction"
+        if not fdir.is_dir():
+            return []
+        paths = sorted(fdir.glob(f"{GOVERNANCE_PREFIX}*.md"))
+    except Exception:
+        return []
+    for p in paths:
+        try:
+            body = p.read_text(errors="replace")
+        except Exception:
+            continue
+        if report_class(body) != GOVERNANCE_CLASS:
+            continue
+        payload = [
+            ln[2:].strip() for ln in body.splitlines() if ln.startswith("- ")
+        ]
+        out.append({
+            "signature": _governance_field(body, "Signature"),
+            "title": (body.splitlines() or [""])[0].lstrip("# ").strip(),
+            "payload": payload,
+            "opened_iso": _governance_field(body, "Opened"),
+            "last_seen_iso": _governance_field(body, "Last-seen"),
+            "human_gated": _governance_field(body, "Human-gated").lower() == "true",
+        })
+    return out
+
+
+def close_governance_item(
+    data_dir: str, *, signature: str, now_iso: str, resolving_condition: str,
+) -> bool:
+    """Close a governance item: shadow-archive it, never hard-delete.
+
+    Reuses the existing ``diagnostics/friction_resolved/`` substrate and its
+    ``_manifest.jsonl`` convention rather than inventing a parallel archive.
+    The archived filename carries a closure timestamp so a later recurrence of
+    the SAME condition reopens cleanly without colliding. Returns True if an
+    open item was archived.
+    """
+    import shutil
+
+    try:
+        src = Path(data_dir) / "diagnostics" / "friction" / governance_filename(signature)
+        if not src.is_file():
+            return False
+        body = src.read_text(errors="replace")
+        payload = [
+            ln[2:].strip() for ln in body.splitlines() if ln.startswith("- ")
+        ]
+        opened_iso = _governance_field(body, "Opened")
+        dest = Path(data_dir) / "diagnostics" / "friction_resolved"
+        dest.mkdir(parents=True, exist_ok=True)
+        stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)[:14]
+        shutil.move(str(src), str(dest / f"{src.stem}_closed_{stamp}.md"))
+        manifest = {
+            "ts": now_iso,
+            "class": GOVERNANCE_CLASS,
+            "governance_signature": signature,
+            "opened_iso": opened_iso,
+            "closed_iso": now_iso,
+            "resolving_condition": resolving_condition,
+            "final_payload": payload,
+        }
+        try:
+            with (dest / "_manifest.jsonl").open("a") as fh:
+                fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
+        except Exception:
+            pass
+        return True
+    except Exception:
+        logger.warning(
+            "GOVERNANCE_ITEM_CLOSE_FAILED signature=%s", signature,
+            exc_info=True,
+        )
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Open-friction inventory + the response orchestrator (seam-injected)
 # ---------------------------------------------------------------------------
 
 RESOLVED_WINDOW_HOURS = 24.0  # quiet this long (with activity) ⇒ resolved
 
 
+OPPORTUNITY_CLASS = "opportunity"
+GOVERNANCE_CLASS = "governance"
+UNKNOWN_CLASS = "unknown"
+ERROR_CLASS = "error"
+
+#: Classes reactive Shape B must never pick up. `opportunity` is worked by the
+#: daily self-review; `governance` is human-gated bookkeeping; `unknown` is a
+#: quarantined mis-classification. SELF-REVIEW-SURFACING-INTEGRITY-V1.
+SHAPE_B_EXCLUDED_CLASSES = frozenset(
+    {OPPORTUNITY_CLASS, GOVERNANCE_CLASS, UNKNOWN_CLASS}
+)
+
+_RECOGNIZED_CLASSES = frozenset(
+    {OPPORTUNITY_CLASS, GOVERNANCE_CLASS, ERROR_CLASS}
+)
+
+
 def report_class(body: str) -> str:
-    """Parse the report's `Class:` front-matter (SELF-MAINTENANCE-REVIEW-V3).
-    A class-less report — every legacy/error report — defaults to ``error``;
-    only ``opportunity`` is special-cased so reactive Shape B skips it."""
+    """Parse the report's `Class:` front-matter.
+
+    SELF-REVIEW-SURFACING-INTEGRITY-V1 — the classification boundary FAILS
+    CLOSED. An explicitly-stated but unrecognized class becomes ``unknown``
+    (quarantined) rather than ``error``: ``error`` is not a neutral bucket, it
+    enters reactive Shape B and can reach gated automation, so a typo in
+    ``Class: governance`` must never *broaden* a human-gated item into an
+    automated lane.
+
+    - no ``Class:`` header      → ``error``  (legacy compatibility, unchanged)
+    - explicit ``error``        → ``error``
+    - exact ``opportunity``     → ``opportunity``
+    - exact ``governance``      → ``governance``
+    - any other explicit value  → ``unknown`` (excluded from every auto lane)
+    """
     for line in (body or "").splitlines()[:12]:
         s = line.strip().lower()
         if s.startswith("class:"):
-            return "opportunity" if s.split(":", 1)[1].strip() == "opportunity" else "error"
-    return "error"
+            declared = s.split(":", 1)[1].strip()
+            if declared in _RECOGNIZED_CLASSES:
+                return declared
+            logger.warning(
+                "FRICTION_REPORT_UNKNOWN_CLASS declared=%r — quarantined as "
+                "'unknown'; excluded from Shape B and every auto-trigger",
+                declared[:80],
+            )
+            return UNKNOWN_CLASS
+    return ERROR_CLASS
 
 
 def list_open_signatures(data_dir: str, *, max_files: int = 300) -> list[dict]:
@@ -465,8 +695,9 @@ def list_open_signatures(data_dir: str, *, max_files: int = 300) -> list[dict]:
             body = p.read_text(errors="replace")
         except Exception:
             body = ""
-        if report_class(body) == "opportunity":
-            continue  # V3: opportunity notes are worked by the daily self-review, not reactively
+        if report_class(body) in SHAPE_B_EXCLUDED_CLASSES:
+            continue  # opportunity → daily self-review; governance → human-gated;
+            #           unknown → quarantined. None are reactive Shape B work.
         ftype, sig = signature_from_report(p.name, body)  # body-aware, stable
         src = source_of_report(body)
         g = groups.setdefault(sig, {
@@ -571,8 +802,8 @@ def verify_and_archive(data_dir: str, *, now_iso: str) -> dict:
                 body = p.read_text(errors="replace")
             except Exception:
                 body = ""
-            if report_class(body) == "opportunity":
-                continue  # V3: opportunity notes are not Shape B detector activity
+            if report_class(body) in SHAPE_B_EXCLUDED_CLASSES:
+                continue  # not Shape B detector activity (V3 + SRSI-V1)
             _t, s = signature_from_report(p.name, body)
             report_index.append((s, p.stat().st_mtime))
 

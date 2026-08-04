@@ -678,13 +678,18 @@ async def bring_up_substrate(
     # rest of the substrate operates normally so the bring-up isn't
     # blocked on autonomy-loop optionality.
     import os as _os_si
+    from kernos.kernel.governance_lanes import autonomy_loop_enabled
     _architect_actor_id_si = _os_si.environ.get(
         "KERNOS_ARCHITECT_ACTOR_ID", "",
     )
     _operator_actor_id_si = _os_si.environ.get(
         "KERNOS_OPERATOR_ACTOR_ID", "",
     )
-    if _architect_actor_id_si and _operator_actor_id_si:
+    # RUNTIME-DEFAULTS-TRUTH-V1: the enable condition is a pure, testable
+    # predicate rather than an inline boolean, so the documented default can be
+    # asserted against real behavior instead of against a grep for two strings
+    # (which would pass with the logic inverted). Behavior is unchanged.
+    if autonomy_loop_enabled(_os_si.environ):
         # Spec 6 commit 7 Codex round-1 H1 fold: BOTH architect and
         # operator identities required before announcing the autonomy
         # loop live. The operator actor authorizes the workflow's

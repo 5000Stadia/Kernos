@@ -13,7 +13,7 @@ Kernos is a personal AI agent operating system. It lives in the cloud, works 24/
 - **Follows your rules.** Behavioral contracts you set are enforced at the infrastructure level. "Always confirm before spending money" or "don't ask follow-ups about food logging" — these are captured once and respected permanently.
 - **Gets smarter over time.** Learns your procedures, detects capability gaps, proposes solutions. A 30-minute awareness cycle watches for patterns and suggests improvements.
 - **A first-class agent for every person it serves.** Multi-member: each person gets their own hatched agent — its own name, personality, memory, and conversations — with relationship-scoped disclosure between members (you choose what's shared with whom). Not one shared bot; a distinct relationship per person.
-- **Improves its own code.** Kernos can rewrite itself: an autonomous loop drafts a spec, implements it with a coding agent, reviews the diff for fidelity to your request, gets your approval, commits, redeploys, and self-tests after restart — recovering or rolling back if the new build fails. Two quieter self-stewardship lanes round it out: a daily creative self-review and immediate response to its own operational friction. All of this ships default-off and is opt-in.
+- **Improves its own code.** Kernos can rewrite itself: an autonomous loop drafts a spec, implements it with a coding agent, reviews the diff for fidelity to your request, gets your approval, commits, redeploys, and self-tests after restart — recovering or rolling back if the new build fails. Two quieter self-stewardship lanes round it out: a daily creative self-review, which is reflection-only and never changes code on its own, and immediate response to its own operational friction. Which lanes are on out of the box, and how to change that, is recorded in one place: [`runtime-defaults.md`](../reference/runtime-defaults.md).
 
 ## How It Works (Technical)
 
@@ -24,7 +24,7 @@ Kernos is a personal AI agent operating system. It lives in the cloud, works 24/
 - **Behavioral contracts:** Covenants captured from user instructions, enforced at infrastructure level. Space-scoped for domain-specific rules. The agent thinks; the kernel enforces.
 - **Procedural knowledge:** Domain-specific workflows stored as `_procedures.md` files, inherited through the space tree. Covenants define behavior; procedures define processes.
 - **Agentic workspace:** The agent can write code, test it, register tools, and track artifacts. Workspace-built tools become permanently available across all spaces.
-- **Provider-neutral:** Works with any LLM backend through two named provider chains (`primary` for the main model, `lightweight` for the fast/cheap tier), each an ordered list of `(provider, model)` entries with automatic fallback on transient failure. The current lineup is gpt-5.5 / gpt-5.4-mini via the Codex provider, but no feature is load-bearing on any specific provider's capabilities.
+- **Provider-neutral:** Works with any LLM backend through two named provider chains (`primary` for the main model, `lightweight` for the fast/cheap tier), each an ordered list of `(provider, model)` entries with automatic fallback on transient failure. The current lineup is gpt-5.6-sol / gpt-5.4-mini via the Codex provider, but no feature is load-bearing on any specific provider's capabilities.
 
 ## What Makes It Different
 
