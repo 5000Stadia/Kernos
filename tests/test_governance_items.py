@@ -6,6 +6,8 @@ that was never raised. These assert the durable queue behind the human gate —
 open, upsert, enumerate, close-on-condition, shadow-archive, reopen — plus the
 fail-closed classification boundary.
 """
+import json
+
 import pytest
 
 from kernos.kernel import friction_response as fr
@@ -251,6 +253,129 @@ def test_source_unlink_failure_leaves_item_retryable_not_lost(tmp_path, monkeypa
     assert fr.open_governance_items(d) == []
     assert len(_manifest_rows(tmp_path)) == 1, "one opening → exactly one closure row"
     assert len(_archives(tmp_path)) == 1, "one opening → exactly one archive"
+
+
+def _archive_text(tmp_path) -> str:
+    return "\n".join(p.read_text() for p in _archives(tmp_path))
+
+
+def test_unreadable_manifest_fails_closed_and_changes_nothing(tmp_path, monkeypatch):
+    """A read error is not evidence the audit is missing.
+
+    Collapsing UNREADABLE into "absent" let a retry append a second row for one
+    transaction. Since the open source is still authoritative, the safe move is
+    to abort and retry later.
+    """
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    # phase two committed, source retirement failed
+    monkeypatch.setattr(fr.Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(
+        OSError("cannot remove")))
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+    before = (len(_archives(tmp_path)), len(_manifest_rows(tmp_path)),
+              len(fr.open_governance_items(d)))
+    assert before == (1, 1, 1)
+
+    # now make ONLY the manifest read fail; append stays healthy
+    real_read = fr.Path.read_text
+
+    def _boom(self, *a, **k):
+        if self.name == "_manifest.jsonl":
+            raise OSError("unreadable")
+        return real_read(self, *a, **k)
+
+    monkeypatch.setattr(fr.Path, "read_text", _boom)
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+
+    assert (len(_archives(tmp_path)), len(_manifest_rows(tmp_path)),
+            len(fr.open_governance_items(d))) == before, \
+        "an unreadable audit must change nothing at all"
+
+
+def test_partial_copy_is_never_blessed_by_a_later_retry(tmp_path, monkeypatch):
+    """A crashed copy must not leave a target a retry will trust."""
+    import shutil as _sh
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    real_copy = _sh.copy2
+
+    def _partial(s, t, *a, **k):
+        fr.Path(t).write_text("PARTIAL")
+        raise OSError("crashed mid-copy")
+
+    monkeypatch.setattr(_sh, "copy2", _partial)
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+    assert len(_archives(tmp_path)) == 1
+    text = _archive_text(tmp_path)
+    assert "PARTIAL" not in text, "retry blessed a truncated archive"
+    assert "a.py" in text, "archive must match the authoritative source"
+
+
+def test_orphan_archive_is_refreshed_to_match_final_payload(tmp_path, monkeypatch):
+    """An unaudited orphan must not outlive an update to the open item."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    _break_manifest(monkeypatch)
+    monkeypatch.setattr(fr.Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(
+        OSError("cannot remove")))
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+    assert len(_archives(tmp_path)) == 1          # unaudited orphan holding a.py
+
+    _upsert(d, ["b.py"], "2026-08-04T00:30:00+00:00")   # payload superseded
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
+
+    assert len(_archives(tmp_path)) == 1
+    assert len(_manifest_rows(tmp_path)) == 1
+    text = _archive_text(tmp_path)
+    assert "b.py" in text, "archive content must match the recorded final_payload"
+    assert "a.py" not in text
+    assert "b.py" in _manifest_rows(tmp_path)[0]
+
+
+def test_recurrence_during_failed_retirement_gets_its_own_occurrence(tmp_path, monkeypatch):
+    """A real recurrence must never be absorbed into a committed transaction."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    monkeypatch.setattr(fr.Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(
+        OSError("cannot remove")))
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+    first = fr.open_governance_items(d)[0]["occurrence"]
+
+    # the condition recurs before the stale source is retired
+    _upsert(d, ["b.py"], "2026-08-04T02:00:00+00:00")
+    second = fr.open_governance_items(d)[0]["occurrence"]
+    assert second and second != first, "recurrence must start a NEW occurrence"
+
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T03:00:00+00:00", resolving_condition="cleared again")
+
+    assert len(_archives(tmp_path)) == 2, "two occurrences → two archives"
+    rows = _manifest_rows(tmp_path)
+    assert len(rows) == 2, "two occurrences → two closure rows"
+    assert any("a.py" in r for r in rows) and any("b.py" in r for r in rows)
+    assert {first, second} == {json.loads(r)["governance_txn"] for r in rows}
 
 
 def test_repeated_close_of_an_already_closed_item_is_a_noop(tmp_path):

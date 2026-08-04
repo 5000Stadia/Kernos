@@ -476,13 +476,14 @@ def _governance_field(body: str, field: str) -> str:
 
 def _render_governance_item(
     *, signature: str, title: str, condition: str, payload: list,
-    opened_iso: str, last_seen_iso: str,
+    opened_iso: str, last_seen_iso: str, occurrence: str,
 ) -> str:
     lines = [
         f"# GOVERNANCE: {title}",
         "",
         f"Class: {GOVERNANCE_CLASS}",
         f"Signature: {signature}",
+        f"Occurrence: {occurrence}",
         "Human-gated: true",
         f"Opened: {opened_iso}",
         f"Last-seen: {last_seen_iso}",
@@ -518,15 +519,36 @@ def upsert_governance_item(
         fdir = Path(data_dir) / "diagnostics" / "friction"
         fdir.mkdir(parents=True, exist_ok=True)
         path = fdir / governance_filename(signature)
+        manifest_path = (Path(data_dir) / "diagnostics" / "friction_resolved"
+                         / "_manifest.jsonl")
         opened_iso = now_iso
+        occurrence = _new_occurrence_id(signature, opened_iso, "")
         if path.is_file():
-            prior = _governance_field(path.read_text(errors="replace"), "Opened")
-            if prior:
-                opened_iso = prior
+            prior_body = path.read_text(errors="replace")
+            prior_opened = _governance_field(prior_body, "Opened")
+            prior_occurrence = _governance_field(prior_body, "Occurrence")
+            # If the existing occurrence's closure was ALREADY audited, this
+            # update is a genuine RECURRENCE that happens to share a file
+            # because source retirement had not completed. Preserving
+            # opened_iso would fold it into the committed transaction and the
+            # recurrence would vanish with no history of its own — so start a
+            # new occurrence instead.
+            already_audited = (
+                prior_occurrence
+                and _governance_txn_state(manifest_path, prior_occurrence)
+                == _TXN_RECORDED
+            )
+            if prior_opened and not already_audited:
+                opened_iso = prior_opened
+                occurrence = prior_occurrence or _new_occurrence_id(
+                    signature, opened_iso, "")
+            else:
+                occurrence = _new_occurrence_id(
+                    signature, now_iso, prior_occurrence or "")
         body = _render_governance_item(
             signature=signature, title=title, condition=condition,
             payload=list(payload), opened_iso=opened_iso,
-            last_seen_iso=now_iso,
+            last_seen_iso=now_iso, occurrence=occurrence,
         )
         tmp = path.with_suffix(".md.tmp")
         tmp.write_text(body)
@@ -567,6 +589,7 @@ def open_governance_items(data_dir: str) -> list[dict]:
         ]
         out.append({
             "signature": _governance_field(body, "Signature"),
+            "occurrence": _governance_field(body, "Occurrence"),
             "title": (body.splitlines() or [""])[0].lstrip("# ").strip(),
             "payload": payload,
             "opened_iso": _governance_field(body, "Opened"),
@@ -609,28 +632,48 @@ def quarantined_reports(data_dir: str) -> list[dict]:
     return out
 
 
-def _governance_txn_recorded(manifest_path: Path, txn: str) -> bool:
-    """Whether a closure row for this transaction id is already committed.
+_TXN_RECORDED = "recorded"
+_TXN_ABSENT = "absent"
+_TXN_UNKNOWN = "unknown"
 
-    Phase recognition for the idempotent close: a retry must resume, not
-    restart. Read failures are reported as "not recorded", which is the safe
-    direction — a duplicate row is recoverable, a missing audit is not.
+
+def _new_occurrence_id(signature: str, opened_iso: str, prior: str) -> str:
+    """Identity for one OPEN occurrence of a condition.
+
+    Persisted in the item rather than derived from the timestamp alone, so a
+    recurrence that shares a file with a committed-but-not-yet-retired closure
+    still gets its own history. Mixing in ``prior`` guarantees the successor
+    differs even if it is created within the same ``now_iso``.
+    """
+    return hashlib.sha256(
+        f"{signature}|{opened_iso}|{prior}".encode()).hexdigest()[:16]
+
+
+def _governance_txn_state(manifest_path: Path, txn: str) -> str:
+    """Tri-state phase lookup: recorded / absent / unknown.
+
+    An UNREADABLE manifest is not evidence that the audit is missing, so it
+    must not collapse into "absent" — doing so lets a retry append a second row
+    for one transaction. It fails closed instead: the caller aborts without
+    touching archive, manifest, or source, and retries when the manifest is
+    readable again. Safe because the open source remains authoritative.
     """
     try:
         if not manifest_path.is_file():
-            return False
-        for line in manifest_path.read_text(errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                if json.loads(line).get("governance_txn") == txn:
-                    return True
-            except Exception:
-                continue
+            return _TXN_ABSENT
+        text = manifest_path.read_text(errors="replace")
     except Exception:
-        return False
-    return False
+        return _TXN_UNKNOWN
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            if json.loads(line).get("governance_txn") == txn:
+                return _TXN_RECORDED
+        except Exception:
+            continue
+    return _TXN_ABSENT
 
 
 def close_governance_item(
@@ -679,18 +722,37 @@ def close_governance_item(
         # The source stays AUTHORITATIVE until all three are done, so no branch
         # can lose a human-gated finding, and no branch can duplicate its
         # closure history.
-        txn = hashlib.sha256(
-            f"{signature}|{opened_iso}".encode()).hexdigest()[:16]
+        txn = _governance_field(body, "Occurrence") or _new_occurrence_id(
+            signature, opened_iso, "")
         target = dest / f"{src.stem}_closed_{txn}.md"
         manifest_path = dest / "_manifest.jsonl"
 
-        audit_committed = _governance_txn_recorded(manifest_path, txn)
+        state = _governance_txn_state(manifest_path, txn)
+        if state == _TXN_UNKNOWN:
+            logger.warning(
+                "GOVERNANCE_CLOSE_MANIFEST_UNREADABLE signature=%s txn=%s — "
+                "aborting without touching archive, manifest or source; "
+                "closure retries when the audit is readable", signature, txn)
+            return False
+        audit_committed = state == _TXN_RECORDED
 
-        # 1. Archive — skip if a prior attempt already produced it.
-        if not target.exists():
+        # 1. Archive. While the audit is UNCOMMITTED the target is not yet a
+        #    durable artifact — it may be a truncated copy from a crashed
+        #    attempt, or hold a payload that has since been superseded by an
+        #    upsert. Existence is not proof, so refresh it atomically from the
+        #    authoritative source (temp + replace) rather than trusting it.
+        #    Once the audit IS committed the archive is immutable history and
+        #    must not be rewritten.
+        if not audit_committed:
+            tmp = dest / f".{target.name}.tmp"
             try:
-                shutil.copy2(str(src), str(target))
+                shutil.copy2(str(src), str(tmp))
+                tmp.replace(target)   # atomic: no partial target is observable
             except Exception:
+                try:
+                    tmp.unlink()
+                except Exception:
+                    pass
                 logger.warning(
                     "GOVERNANCE_CLOSE_COPY_FAILED signature=%s txn=%s — item "
                     "still OPEN, no audit written, closure retryable",
