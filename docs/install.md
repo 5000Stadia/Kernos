@@ -104,7 +104,7 @@ OPENAI_CODEX_ACCESS_TOKEN=...
 OPENAI_CODEX_REFRESH_TOKEN=...
 OPENAI_CODEX_EXPIRES=...
 OPENAI_CODEX_ACCOUNT_ID=...
-OPENAI_CODEX_MODEL=gpt-5.5
+OPENAI_CODEX_MODEL=gpt-5.6-sol
 ```
 
 **Ollama (local)** — configure via fallback-chain environment variables. See the provider chain section below.
@@ -166,7 +166,7 @@ Kernos creates subdirectories under this for instances, spaces, members, convers
 
 ### Provider Fallback Chains
 
-Kernos uses two named provider chains (`primary` for the main model, `lightweight` for the fast/cheap tier) built from environment configuration. The default lineup is gpt-5.5 / gpt-5.4-mini via the Codex provider, but the provider and chains can be customized. See `kernos/providers/chains.py` for chain construction.
+Kernos uses two named provider chains (`primary` for the main model, `lightweight` for the fast/cheap tier) built from environment configuration. The default lineup is gpt-5.6-sol / gpt-5.4-mini via the Codex provider, but the provider and chains can be customized. See `kernos/providers/chains.py` for chain construction.
 
 Ollama endpoints are configured through chain-specific variables.
 

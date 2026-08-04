@@ -210,7 +210,7 @@ class OpenAICodexProvider(Provider):
         model: str = "",
     ) -> None:
         self._credential = credential
-        self.main_model = model or os.getenv("OPENAI_CODEX_MODEL", "gpt-5.5")
+        self.main_model = model or os.getenv("OPENAI_CODEX_MODEL", "gpt-5.6-sol")
         # Two-tier: primary (main_model) + lightweight. Env var resolution
         # prefers OPENAI_CODEX_LIGHTWEIGHT_MODEL; falls back to the legacy
         # OPENAI_CODEX_CHEAP_MODEL so existing .env files keep working;

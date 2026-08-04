@@ -20,7 +20,7 @@ Kernos has three layers:
 2. **The Message Handler** orchestrates everything: routing messages to the right context space, assembling conversation history, calling the reasoning engine, extracting knowledge, and persisting state.
 3. **The Kernel** provides the intelligence infrastructure: events, state, memory, reasoning, behavioral rules, file storage, capabilities, and proactive awareness.
 
-The agent runs inside the handler's reasoning service on the configured primary provider chain (currently gpt-5.5, with gpt-5.4-mini on the lightweight tier, via the Codex provider). The lineup is provider-neutral — no feature is load-bearing on any one vendor. The kernel is not the agent — it's the infrastructure that gives the agent context, memory, tools, and boundaries. The kernel owns all state and safety enforcement. The agent's job is to think, respond, and use the tools the kernel surfaces.
+The agent runs inside the handler's reasoning service on the configured primary provider chain (currently gpt-5.6-sol, with gpt-5.4-mini on the lightweight tier, via the Codex provider). The lineup is provider-neutral — no feature is load-bearing on any one vendor. The kernel is not the agent — it's the infrastructure that gives the agent context, memory, tools, and boundaries. The kernel owns all state and safety enforcement. The agent's job is to think, respond, and use the tools the kernel surfaces.
 
 ## Core Principles
 
