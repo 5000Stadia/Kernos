@@ -150,6 +150,11 @@ def test_evolution_idea_dropped_unless_serves_the_whole():
 async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
     monkeypatch.setenv("KERNOS_SELF_MAINTENANCE_REVIEW", "1")
     d = str(tmp_path)
+    # Force a coverage gap so the nested-payload assertion below is REAL. On
+    # the repaired (clean) map there is no gap, and a conditional assertion
+    # would silently verify nothing — which is what Part D actually requires
+    # this named test to check.
+    monkeypatch.setattr(smr, "unassigned_modules", lambda *a, **k: ["kernos/x.py"])
     payload = (
         '```json\n{"overall_health":"minor_concerns",'
         '"corrective_findings":["real concern"],"evolution_idea":null,'
@@ -181,12 +186,15 @@ async def test_failed_whisper_does_not_bury_finding(tmp_path, monkeypatch):
     # landed at index 1; asserting a fixed index was the stale assumption.
     assert len(seen_whispers) == 1
     assert "real concern" in seen_whispers[0]
-    # SRSI-V1 Part D: any coverage payload rides NESTED in the combined report,
+    # SRSI-V1 Part D: the coverage payload rides NESTED in the combined report,
     # so the top-level report is the review — never kind == "coverage_gap".
+    # Unconditional: a gap is forced above, so this must be present.
     assert seen_reports[0].get("kind") != "coverage_gap"
-    _cov = seen_reports[0].get("coverage_gap")
-    if _cov:
-        assert _cov["kind"] == "coverage_gap"
+    _cov = seen_reports[0]["coverage_gap"]
+    assert _cov["kind"] == "coverage_gap"
+    assert _cov["unassigned"] == ["kernos/x.py"]
+    # and the gap note is genuinely IN the one whisper's text
+    assert "kernos/x.py" in seen_whispers[0]
     # substrate: `seen` was {} after the failed surface (asserted above) and is
     # committed only now, after a successful one — the invariant this test is
     # actually named for. (`seen` holds finding fingerprints, not raw text.)

@@ -640,6 +640,19 @@ async def test_dump_writes_context_file(tmp_path, monkeypatch):
     # Summary should contain token estimates and tool count
     assert "tokens" in content
     assert "schemas" in content
+    # RUNTIME-DEFAULTS-TRUTH-V1 + SELF-REVIEW-SURFACING-INTEGRITY-V1: the
+    # governance sections must be in the ACTUALLY EMITTED file. Asserting only
+    # against the renderer leaves the tests green if the _handle_dump call site
+    # is deleted, which is not a test of the integration at all.
+    assert "=== GOVERNANCE LANES ===" in content
+    assert "=== OPEN GOVERNANCE ITEMS ===" in content
+    assert "=== QUARANTINED REPORTS" in content
+    # live lane state, rendered from the production registry
+    from kernos.kernel.governance_lanes import GOVERNANCE_LANES
+    for _lane in GOVERNANCE_LANES:
+        assert _lane.key in content
+        assert _lane.title in content
+        assert _lane.module in content
 
 
 async def test_dump_does_not_persist_message(tmp_path, monkeypatch):

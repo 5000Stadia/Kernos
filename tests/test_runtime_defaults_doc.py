@@ -242,12 +242,20 @@ def test_env_gated_lanes_are_registered_or_exempted():
 #: "self_maintenance_review is default-off" and "KERNOS_FRICTION_RESPONSE is
 #: enabled by default" passed the audit. Phrase list widened accordingly.
 DEFAULT_ASSERTION = re.compile(
+    # default-state claims
     r"default[-\s](on|off)\b"
     r"|defaults?\s+to\s+(on|off|enabled|disabled)"
     r"|ships?\s+default"
     r"|(enabled|disabled|on|off)\s+by\s+default"
     r"|(default|out\s+of\s+the\s+box)[^.\n]{0,40}\b(enabled|disabled)\b"
-    r"|is\s+default[-\s](on|off)",
+    # opt-in / opt-out — the exact wording the ORIGINAL stale prose used, and
+    # a default claim in disguise (kreview round-2 corrective)
+    r"|opt[-\s]?(in|out)"
+    # direct value-to-enable/disable instructions restate truthiness semantics
+    r"|=\s*[\w\"']+\s+to\s+(enable|disable|turn\s+(on|off))"
+    r"|set\s+[A-Z_]{4,}\s*=\s*\S+\s+to\s+(enable|disable)"
+    r"|(enable|disable)\s+(it|the\s+lane|this\s+lane)\s+with\b"
+    r"|inert\s+unless|runs?\s+unless|only\s+when\s+set",
     re.I)
 
 
@@ -280,3 +288,48 @@ def test_default_assertions_for_these_lanes_live_only_in_the_table():
     assert not offenders, (
         "default/enablement assertions for the governance lanes must appear "
         f"ONLY in {DOC.relative_to(REPO_ROOT)} — link there instead: {offenders}")
+
+
+#: Phrasings that MUST be caught. Every entry here was either a real historical
+#: restatement or one kreview demonstrated slipping through a previous version
+#: of the audit. Mutation-tested below so the policy cannot silently regress.
+PROHIBITED_SAMPLES = [
+    "self_maintenance_review is default-off.",
+    "KERNOS_FRICTION_RESPONSE is enabled by default.",
+    "The self_maintenance_review lane is opt-in.",
+    "Set KERNOS_FRICTION_RESPONSE=1 to enable its lane.",
+    "The recursive_self_heal lane ships default-off and is opt-in.",
+    "Disable it with KERNOS_SELF_MAINTENANCE_REVIEW=0.",
+    "The self_maintenance_review loop is inert unless the env var is set.",
+    "autonomy_loop is on by default.",
+]
+
+
+@pytest.mark.parametrize("sample", PROHIBITED_SAMPLES)
+def test_audit_catches_each_prohibited_phrasing(sample):
+    """Mutation test: the policy must reject every known restatement form.
+
+    Asserting the audit passes on a clean tree proves nothing about whether it
+    can detect anything — that is exactly how two of these got through before.
+    """
+    identifiers = set()
+    for lane in GOVERNANCE_LANES:
+        identifiers.update(lane.env_vars)
+        identifiers.add(lane.key)
+    assert any(ident in sample for ident in identifiers), (
+        f"sample names no lane identifier, so it is out of policy scope: {sample!r}")
+    assert DEFAULT_ASSERTION.search(sample), (
+        f"audit would MISS this prohibited restatement: {sample!r}")
+
+
+def test_audit_permits_pure_purpose_prose():
+    """The counterweight: mentions without state claims must stay legal, or
+    the policy becomes unusable and gets disabled."""
+    allowed = [
+        "The self_maintenance_review lane reviews one element per day.",
+        "See runtime-defaults.md for KERNOS_FRICTION_RESPONSE.",
+        "recursive_self_heal performs a bounded one-child repair.",
+    ]
+    for sample in allowed:
+        assert not DEFAULT_ASSERTION.search(sample), (
+            f"audit is over-broad; this is purpose prose, not a state claim: {sample!r}")

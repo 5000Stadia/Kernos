@@ -634,9 +634,33 @@ def close_governance_item(
         dest = Path(data_dir) / "diagnostics" / "friction_resolved"
         dest.mkdir(parents=True, exist_ok=True)
 
-        # The closure AUDIT is written before the move. If the manifest cannot
-        # be written we must not move the only open copy — otherwise the audit
-        # is permanently unrecoverable and the caller has no way to retry.
+        # Closure is a two-effect operation and BOTH orderings are wrong on
+        # their own: manifest-first records a closure that never happened when
+        # the move fails; move-first strands the archive with no audit when the
+        # manifest fails. So it is a COMPENSATING TRANSACTION — move, then
+        # write the audit, then undo the move if the audit could not be
+        # written. The invariant is that no manifest row survives without its
+        # archive, and no item is lost without its closure being retryable.
+        #
+        # Full-resolution, collision-resistant, no-clobber destination: a
+        # truncated stamp collapses two closures in the same minute onto one
+        # name and shutil.move would silently overwrite the earlier archive.
+        stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)
+        target = dest / f"{src.stem}_closed_{stamp}.md"
+        n = 1
+        while target.exists():
+            target = dest / f"{src.stem}_closed_{stamp}_{n}.md"
+            n += 1
+
+        try:
+            shutil.move(str(src), str(target))
+        except Exception:
+            logger.warning(
+                "GOVERNANCE_CLOSE_MOVE_FAILED signature=%s — item left OPEN, "
+                "no manifest row written, closure retryable",
+                signature, exc_info=True)
+            return False
+
         manifest = {
             "ts": now_iso,
             "class": GOVERNANCE_CLASS,
@@ -650,22 +674,19 @@ def close_governance_item(
             with (dest / "_manifest.jsonl").open("a") as fh:
                 fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
         except Exception:
+            # Compensate: put the item back so closure stays retryable rather
+            # than leaving an archived file with no audit trail.
+            try:
+                shutil.move(str(target), str(src))
+                restored = True
+            except Exception:
+                restored = False
             logger.warning(
-                "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s — leaving the "
-                "item OPEN so closure stays retryable", signature, exc_info=True)
+                "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s restored=%s — "
+                "closure rolled back so the audit cannot go missing",
+                signature, restored, exc_info=True)
             return False
 
-        # Full-resolution, collision-resistant, no-clobber destination. A
-        # truncated stamp collapses two closures in the same minute onto one
-        # name and shutil.move would silently overwrite the earlier archive,
-        # destroying it while the manifest still claimed both.
-        stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)
-        target = dest / f"{src.stem}_closed_{stamp}.md"
-        n = 1
-        while target.exists():
-            target = dest / f"{src.stem}_closed_{stamp}_{n}.md"
-            n += 1
-        shutil.move(str(src), str(target))
         return True
     except Exception:
         logger.warning(

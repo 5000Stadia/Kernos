@@ -120,6 +120,65 @@ def test_close_shadow_archives_and_reopens_without_collision(tmp_path):
     assert len(list(resolved.glob("GOVERNANCE_*.md"))) == 2
 
 
+def _manifest_rows(tmp_path) -> list:
+    p = tmp_path / "diagnostics" / "friction_resolved" / "_manifest.jsonl"
+    if not p.is_file():
+        return []
+    return [ln for ln in p.read_text().splitlines() if ln.strip()]
+
+
+def test_move_failure_records_no_closure(tmp_path, monkeypatch):
+    """A manifest row must never outlive a failed archive move.
+
+    Manifest-first would declare the item closed while it is still open, then
+    write a SECOND row on a successful retry — one archive, two closures.
+    """
+    import shutil as _sh
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+
+    monkeypatch.setattr(_sh, "move", lambda *a, **k: (_ for _ in ()).throw(
+        OSError("disk gone")))
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+
+    assert len(fr.open_governance_items(d)) == 1, "item must stay open"
+    assert _manifest_rows(tmp_path) == [], "no closure may be recorded"
+
+    # a later successful retry produces exactly ONE closure, not two
+    monkeypatch.undo()
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:09+00:00", resolving_condition="cleared")
+    assert len(_manifest_rows(tmp_path)) == 1
+    assert fr.open_governance_items(d) == []
+
+
+def test_manifest_failure_rolls_back_the_archive(tmp_path, monkeypatch):
+    """The other half: an archived file must never exist without its audit."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+
+    real_open = fr.Path.open
+
+    def _boom(self, *a, **k):
+        if self.name == "_manifest.jsonl":
+            raise OSError("audit device full")
+        return real_open(self, *a, **k)
+
+    monkeypatch.setattr(fr.Path, "open", _boom)
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared") is False
+    monkeypatch.undo()
+
+    # compensated: the item is back, and no orphan archive was left behind
+    assert len(fr.open_governance_items(d)) == 1
+    resolved = tmp_path / "diagnostics" / "friction_resolved"
+    assert list(resolved.glob("GOVERNANCE_*.md")) == []
+
+
 def test_enumeration_does_not_whisper(tmp_path):
     """Reading the recovery queue is not surfacing it."""
     d = str(tmp_path)
