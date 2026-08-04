@@ -120,6 +120,11 @@ def test_close_shadow_archives_and_reopens_without_collision(tmp_path):
     assert len(list(resolved.glob("GOVERNANCE_*.md"))) == 2
 
 
+def _archives(tmp_path) -> list:
+    return list((tmp_path / "diagnostics" / "friction_resolved").glob(
+        "GOVERNANCE_*.md"))
+
+
 def _manifest_rows(tmp_path) -> list:
     p = tmp_path / "diagnostics" / "friction_resolved" / "_manifest.jsonl"
     if not p.is_file():
@@ -209,12 +214,15 @@ def test_cleanup_failure_still_cannot_strand_the_finding(tmp_path, monkeypatch):
     assert len(fr.open_governance_items(d)) == 1
     assert _manifest_rows(tmp_path) == []
 
-    # and a later healthy scan closes it exactly once
+    # a later healthy scan RESUMES the same transaction: it reconciles the
+    # orphaned archive instead of writing a second one.
     assert fr.close_governance_item(
         d, signature=smr.COVERAGE_GAP_SIGNATURE,
         now_iso="2026-08-04T01:00:00+00:00", resolving_condition="cleared")
     assert fr.open_governance_items(d) == []
     assert len(_manifest_rows(tmp_path)) == 1
+    assert len(_archives(tmp_path)) == 1, (
+        "retry must reuse the orphaned archive, not create a second one")
 
 
 def test_source_unlink_failure_leaves_item_retryable_not_lost(tmp_path, monkeypatch):
@@ -232,6 +240,48 @@ def test_source_unlink_failure_leaves_item_retryable_not_lost(tmp_path, monkeypa
 
     assert len(fr.open_governance_items(d)) == 1     # visible, retryable
     assert len(_manifest_rows(tmp_path)) == 1        # audit is durable
+    assert len(_archives(tmp_path)) == 1
+
+    # The next healthy scan must RESUME at phase three — retire the source
+    # only. Restarting would append a second closure row and a second archive
+    # for a single opening, which is what made the previous design non-idempotent.
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T02:00:00+00:00", resolving_condition="cleared")
+    assert fr.open_governance_items(d) == []
+    assert len(_manifest_rows(tmp_path)) == 1, "one opening → exactly one closure row"
+    assert len(_archives(tmp_path)) == 1, "one opening → exactly one archive"
+
+
+def test_repeated_close_of_an_already_closed_item_is_a_noop(tmp_path):
+    """Idempotency at the simplest level: closing twice changes nothing."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"])
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T00:00:00+00:00", resolving_condition="cleared")
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-04T03:00:00+00:00", resolving_condition="cleared") is False
+    assert len(_manifest_rows(tmp_path)) == 1
+    assert len(_archives(tmp_path)) == 1
+
+
+def test_reopening_after_close_gets_its_own_transaction(tmp_path):
+    """A genuine recurrence is a NEW occurrence: its own archive and row."""
+    d = str(tmp_path)
+    _upsert(d, ["a.py"], "2026-08-01T00:00:00+00:00")
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-08-02T00:00:00+00:00", resolving_condition="cleared")
+
+    _upsert(d, ["b.py"], "2026-09-01T00:00:00+00:00")   # recurrence
+    assert fr.close_governance_item(
+        d, signature=smr.COVERAGE_GAP_SIGNATURE,
+        now_iso="2026-09-02T00:00:00+00:00", resolving_condition="cleared again")
+
+    assert len(_manifest_rows(tmp_path)) == 2
+    assert len(_archives(tmp_path)) == 2, "distinct occurrences must not collide"
 
 
 def test_enumeration_does_not_whisper(tmp_path):

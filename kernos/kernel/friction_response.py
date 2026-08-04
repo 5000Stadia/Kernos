@@ -609,6 +609,30 @@ def quarantined_reports(data_dir: str) -> list[dict]:
     return out
 
 
+def _governance_txn_recorded(manifest_path: Path, txn: str) -> bool:
+    """Whether a closure row for this transaction id is already committed.
+
+    Phase recognition for the idempotent close: a retry must resume, not
+    restart. Read failures are reported as "not recorded", which is the safe
+    direction — a duplicate row is recoverable, a missing audit is not.
+    """
+    try:
+        if not manifest_path.is_file():
+            return False
+        for line in manifest_path.read_text(errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                if json.loads(line).get("governance_txn") == txn:
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        return False
+    return False
+
+
 def close_governance_item(
     data_dir: str, *, signature: str, now_iso: str, resolving_condition: str,
 ) -> bool:
@@ -634,76 +658,86 @@ def close_governance_item(
         dest = Path(data_dir) / "diagnostics" / "friction_resolved"
         dest.mkdir(parents=True, exist_ok=True)
 
-        # Closure has two effects (archive + audit) and must not depend on a
-        # compensating action succeeding — a rollback that can itself fail is
-        # not a transaction, it just moves the stranding window. Earlier
-        # attempts got this wrong twice: manifest-first recorded closures that
-        # never happened, and move-then-undo stranded the item entirely when
-        # the undo failed (source gone, archive orphaned, no audit, invisible
-        # to every queue because readers only scan diagnostics/friction).
+        # Closure has three effects (archive, audit, retire) and must be both
+        # LOSS-FREE and IDEMPOTENT. Earlier attempts failed one or the other:
+        # manifest-first recorded closures that never happened; move-then-undo
+        # stranded the item when the undo failed; and copy-first fixed the loss
+        # but let a retry append a SECOND archive and audit row for one opening,
+        # because retry identity was the new attempt's timestamp.
         #
-        # So: COPY, commit the audit, and only then remove the source. The open
-        # item stays AUTHORITATIVE until both the archive and its audit are
-        # durable. Every failure branch therefore leaves the item open and the
-        # closure retryable, with no branch that can lose a human-gated finding.
+        # So each OPEN OCCURRENCE carries a stable transaction id derived from
+        # (signature, opened_iso). `opened_iso` is preserved across upserts, so
+        # the id is stable across retries but distinct per reopening. The
+        # archive filename and the manifest row both carry it, which makes the
+        # phases recognizable on disk and lets a retry RESUME rather than
+        # restart:
         #
-        # Full-resolution, collision-resistant, no-clobber destination: a
-        # truncated stamp collapses two closures in the same minute onto one
-        # name and would silently overwrite the earlier archive.
-        stamp = re.sub(r"[^0-9A-Za-z]+", "", now_iso)
-        target = dest / f"{src.stem}_closed_{stamp}.md"
-        n = 1
-        while target.exists():
-            target = dest / f"{src.stem}_closed_{stamp}_{n}.md"
-            n += 1
+        #   audit row + archive present -> retire the source only
+        #   archive present, no row     -> reuse the orphan, commit one row
+        #   nothing                     -> copy, commit, retire
+        #
+        # The source stays AUTHORITATIVE until all three are done, so no branch
+        # can lose a human-gated finding, and no branch can duplicate its
+        # closure history.
+        txn = hashlib.sha256(
+            f"{signature}|{opened_iso}".encode()).hexdigest()[:16]
+        target = dest / f"{src.stem}_closed_{txn}.md"
+        manifest_path = dest / "_manifest.jsonl"
 
-        # 1. Copy — the source is untouched, so this is fully reversible by
-        #    doing nothing at all.
-        try:
-            shutil.copy2(str(src), str(target))
-        except Exception:
-            logger.warning(
-                "GOVERNANCE_CLOSE_COPY_FAILED signature=%s — item still OPEN, "
-                "no audit written, closure retryable", signature, exc_info=True)
-            return False
+        audit_committed = _governance_txn_recorded(manifest_path, txn)
 
-        # 2. Commit the audit.
-        manifest = {
-            "ts": now_iso,
-            "class": GOVERNANCE_CLASS,
-            "governance_signature": signature,
-            "opened_iso": opened_iso,
-            "closed_iso": now_iso,
-            "resolving_condition": resolving_condition,
-            "final_payload": payload,
-        }
-        try:
-            with (dest / "_manifest.jsonl").open("a") as fh:
-                fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
-        except Exception:
-            # Best-effort cleanup of the un-audited copy. Crucially, if this
-            # ALSO fails we still have not touched the source: the item stays
-            # open and retryable, and the worst case is a duplicate archive
-            # file with no manifest row — recoverable, never a lost finding.
+        # 1. Archive — skip if a prior attempt already produced it.
+        if not target.exists():
             try:
-                target.unlink()
-                cleaned = True
+                shutil.copy2(str(src), str(target))
             except Exception:
-                cleaned = False
-            logger.warning(
-                "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s copy_removed=%s"
-                " — item remains OPEN and closure is retryable",
-                signature, cleaned, exc_info=True)
-            return False
+                logger.warning(
+                    "GOVERNANCE_CLOSE_COPY_FAILED signature=%s txn=%s — item "
+                    "still OPEN, no audit written, closure retryable",
+                    signature, txn, exc_info=True)
+                return False
 
-        # 3. Both effects are durable — now retire the source.
+        # 2. Audit — exactly one row per occurrence, ever.
+        if not audit_committed:
+            manifest = {
+                "ts": now_iso,
+                "class": GOVERNANCE_CLASS,
+                "governance_txn": txn,
+                "archive": target.name,
+                "governance_signature": signature,
+                "opened_iso": opened_iso,
+                "closed_iso": now_iso,
+                "resolving_condition": resolving_condition,
+                "final_payload": payload,
+            }
+            try:
+                with manifest_path.open("a") as fh:
+                    fh.write(json.dumps(manifest, separators=(",", ":")) + "\n")
+            except Exception:
+                # Best-effort removal of the un-audited copy. If THAT also
+                # fails the source is still untouched, and the orphan is
+                # reconciled by the next retry (same txn -> same filename)
+                # rather than being duplicated.
+                try:
+                    target.unlink()
+                    cleaned = True
+                except Exception:
+                    cleaned = False
+                logger.warning(
+                    "GOVERNANCE_CLOSE_MANIFEST_FAILED signature=%s txn=%s "
+                    "copy_removed=%s — item remains OPEN and closure is "
+                    "retryable", signature, txn, cleaned, exc_info=True)
+                return False
+
+        # 3. All durable — retire the source.
         try:
             src.unlink()
         except Exception:
             logger.warning(
-                "GOVERNANCE_CLOSE_SOURCE_UNLINK_FAILED signature=%s — archive "
-                "and audit are committed but the item is still listed open; "
-                "the next scan will re-close it", signature, exc_info=True)
+                "GOVERNANCE_CLOSE_SOURCE_UNLINK_FAILED signature=%s txn=%s — "
+                "archive and audit are committed; the item is still listed "
+                "open and the next scan resumes at this phase",
+                signature, txn, exc_info=True)
             return False
 
         return True
