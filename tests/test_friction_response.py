@@ -376,20 +376,21 @@ def test_recurrence_detection_is_independent_of_the_host_clock(tmp_path, base_is
 # --- Codex final-review folds ----------------------------------------------
 
 
-@pytest.mark.mtime_domain_inert(
-    reason="no friction report exists in this scenario, so no report mtime "
-           "participates in the assertion — the point of the test is the "
-           "absence of detector activity")
 def test_idle_with_no_opportunity_is_unknown_not_resolved(tmp_path):
     """Quiet but NO friction produced after pending ⇒ unknown, never resolved
     (Codex High-2: idle is not proof)."""
     d = str(tmp_path)
+    tl = LogicalTimeline.from_iso(PENDING_ISO)
     (tmp_path / "diagnostics" / "friction").mkdir(parents=True)
     sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
     fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
                       resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
-                      now_iso="2026-06-04T00:00:00+00:00")
-    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")  # 36h, no activity
+                      now_iso=tl.iso())
+    # No report exists, so verify_in_domain's check trivially passes — the
+    # wrapper is still the entry point, so the module has ONE fail-closed rule
+    # with no raw-call exception (kreview: a waiver should not be the normal
+    # escape from the boundary).
+    out = verify_in_domain(tl, d, now_iso=tl.iso(hours=36))  # 36h, no activity
     assert sig not in out["resolved"]
     assert fr._latest_state(fr.load_attempts(d), sig) == fr.UNKNOWN_NO_OBS
 

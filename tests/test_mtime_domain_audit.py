@@ -69,36 +69,64 @@ def _inert_reason(fn: ast.AST):
     return None
 
 
+def _enclosing_functions(tree: ast.AST) -> dict:
+    """line -> the function node containing it, for attributing findings."""
+    owner = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for n in ast.walk(fn):
+                owner.setdefault(id(n), fn)
+    return owner
+
+
 def audit_source(source: str) -> list:
     """Findings for one module. Exposed so mutation tests exercise the audit
-    itself rather than only its verdict on a clean tree."""
+    itself rather than only its verdict on a clean tree.
+
+    **Module scope, not test-body scope.** An earlier version walked only
+    functions named `test_*`, so an ordinary helper extraction defeated it:
+    `raw_helper()` calls production directly, `test_thing()` calls `raw_helper`,
+    and the audit returned nothing. No aliasing or dynamic dispatch needed —
+    just a refactor. The rule is now: a direct call to a registered production
+    mtime-domain helper is rejected *anywhere* in an audited module.
+
+    A direct import of the production helper is rejected too, since
+    `verify_and_archive(...)` called bare would otherwise read as an ordinary
+    local name.
+    """
     tree = ast.parse(source)
+    owner = _enclosing_functions(tree)
     findings = []
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if not fn.name.startswith("test_"):
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in MTIME_DOMAIN_CALLS:
+                    findings.append(
+                        f"line {node.lineno}: imports {alias.name} directly; "
+                        f"audited modules must reach it through "
+                        f"{DOMAIN_WRAPPER}()")
             continue
 
-        raw_calls = [
-            n for n in ast.walk(fn)
-            if isinstance(n, ast.Call)
-            and getattr(n.func, "attr", getattr(n.func, "id", None))
-            in MTIME_DOMAIN_CALLS
-        ]
-        if not raw_calls:
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "attr", getattr(node.func, "id", None))
+        if name not in MTIME_DOMAIN_CALLS:
             continue
 
-        reason = _inert_reason(fn)
-        if reason is not None:
-            if not reason.strip():
-                findings.append(f"{fn.name}: {MARKER} marker with no reason")
-            continue
+        fn = owner.get(id(node))
+        where = fn.name if fn is not None else "<module scope>"
+        if fn is not None:
+            reason = _inert_reason(fn)
+            if reason is not None:
+                if not reason.strip():
+                    findings.append(f"{where}: {MARKER} marker with no reason")
+                continue
 
         findings.append(
-            f"{fn.name}: calls a production mtime-domain helper directly "
-            f"(line {raw_calls[0].lineno}); use {DOMAIN_WRAPPER}() so report "
-            f"mtimes are verified against the logical timeline at call time")
+            f"{where}: calls a production mtime-domain helper directly "
+            f"(line {node.lineno}); use {DOMAIN_WRAPPER}() so report mtimes "
+            f"are verified against the logical timeline at call time")
     return findings
 
 
@@ -143,8 +171,29 @@ def test_thing(tmp_path):
 '''
 
 
+_HELPER_INDIRECTION = '''
+def raw_helper(d):
+    return fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")
+
+def test_thing(tmp_path):
+    f = _seed_friction(tmp_path, "x.md")
+    out = raw_helper(d)
+    assert out
+'''
+
+_DIRECT_IMPORT = '''
+from kernos.kernel.friction_response import verify_and_archive
+
+def test_thing(tmp_path):
+    out = verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")
+    assert out
+'''
+
+
 @pytest.mark.parametrize("src,label", [
     (_RAW_CALL, "direct production call bypassing the boundary"),
+    (_HELPER_INDIRECTION, "raw call hidden in a non-test helper"),
+    (_DIRECT_IMPORT, "production helper imported directly"),
 ])
 def test_audit_rejects_boundary_bypass(src, label):
     assert audit_source(src), f"audit MISSED: {label}"
