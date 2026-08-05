@@ -1,6 +1,24 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 7 (kreview round 6; write-side cutover, stopped-install apply, closed payload union)
+**Status:** Draft rev 8 (kreview round 7 — all six blockers, including three I
+had left standing for multiple revisions)
+
+## Open blocker ledger
+
+Maintained because three blockers survived unanswered while I folded newer
+findings — F1 for **seven** revisions, F2 and F3 for **three** each. Reading the
+latest letter and answering it is not the same as closing what is open. Every
+future revision states each blocker's status explicitly.
+
+| ID | Blocker | Status |
+|---|---|---|
+| F1 | Slash deferral can lose a whisper inside the expiry window | **CLOSED rev 8** — accepted, documented, tested; the non-regression claim is corrected |
+| F2 | Approval not bound to the reviewed manifest | **CLOSED rev 8** — `--approve <sha256>` required |
+| F3 | Completion marker is a second non-atomic effect | **CLOSED rev 8** — completion moves inside the backend-local atomic operation |
+| F4 | Phase-N read compatibility contradicts criterion 4 | **CLOSED rev 8** — separate loader; criterion split four ways |
+| F5 | The "service lease" does not exist | **CLOSED rev 8** — a real `flock` lifetime lock is specified |
+| F6 | Rollout evidence can be stale | **CLOSED rev 8** — predicate-versioned evidence record |
+
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
@@ -23,11 +41,22 @@ ceilings, `inspect_update`, a `WITHHELD` state machine with an authorized
 recovery command — all exists to provide a **delivery guarantee that does not
 exist today**. That is a real feature and it should be entered deliberately.
 
-**This spec is strictly non-regressive.** Whispers are still delivered on the
-same path, with the same reliability, to the same recipient. Only the *register
-of the text* and the *content of one payload* change. Nothing here weakens an
-existing contract, which is why it does not need the machinery that protects
-one.
+**This spec is non-regressive except in one bounded, documented case**, and rev
+1–7's flat "strictly non-regressive / same reliability" claim was **false**.
+kreview raised it seven times; I asserted it away each time instead of checking
+it.
+
+**The exception:** today a slash turn *delivers* a pending whisper. Under this
+spec it *defers* it. A whisper already at 47h59m of its 48h expiry is therefore
+delivered today and **expires undelivered** under the new behaviour, because the
+next conversational turn arrives after expiry.
+
+That is a real, if narrow, loss. It is **accepted rather than denied**, and the
+alternatives were each worse for a register fix: extending expiry on deferral
+changes a shared mechanism, and delivering on slash turns is the defect being
+removed. The window is bounded by the existing expiry, no whisper is dropped
+outside it, and criterion 7 tests the 47h59m schedule explicitly rather than
+asserting it cannot happen.
 
 **Explicit non-goals**, deferred to `WHISPER-NOTIFICATION-DURABILITY-V1`:
 guaranteed eventual delivery, owner-bound routing, multi-event aggregation,
@@ -118,28 +147,71 @@ hitting dataclass construction itself.
    (`KERNOS_STORE_BACKEND`), writing the manifest into that data root at
    `diagnostics/whisper_legacy_manifest.json`. Remnants in the inactive store
    are reported and left untouched.
-2. **The operator reviews and approves** that manifest.
-3. `--apply` re-enumerates, requires an **exact match** against the approved
-   manifest, and on any mismatch mutates nothing and exits non-zero.
+2. **The operator reviews and approves** that manifest, taking its canonical
+   SHA-256.
+3. **`--apply --approve <canonical-manifest-sha256>`.** A bare `--apply` is
+   rejected. The digest binds the approval to the *reviewed bytes*: rev 5–7 had
+   review followed by an unqualified apply, so manifest M1 could be reviewed and
+   replaced by M2 before apply ran, and nothing would notice. Apply
+   re-enumerates, requires an exact match against the manifest **and** that the
+   manifest matches the approved digest, and on any mismatch mutates nothing and
+   exits non-zero. The approval identity is retained in the completion record.
 4. **Only then** is the required-field code deployed.
 
-**The approved manifest IS the audit record.** That removes the two-effect
-problem entirely — there is no separate audit sink to keep atomic with the
-delete, so JSON needs no versioned document shape and no sentinel object in its
-bare list. `--apply` writes a completion marker beside the manifest recording
-when it ran and against which digest.
+**The approved manifest IS the audit record — and completion is recorded INSIDE
+the same atomic operation.** Rev 5–7 said the manifest removed the two-effect
+problem and then wrote a *sidecar completion marker*, reintroducing exactly the
+second effect it claimed to have eliminated. A crash after the backend deletion
+but before the marker leaves an empty candidate set that no longer exact-matches
+the approved manifest, so the "idempotent" claim was false: the retry would
+abort on mismatch with no record of why.
 
-**`--apply` requires a STOPPED install, and verifies it rather than trusting
-it.** SQLite serializes its own writes, but JSON apply snapshots a bare list and
-replaces it by temp+rename — so a valid whisper written by the live server
-between the read and the rename is **silently overwritten**, even though it was
-never a deletion candidate. A cleanup that can destroy unrelated data is worse
-than the two rows it removes.
+Completion is therefore part of the backend-local commit:
 
-Operator discipline is not a mechanism, so `--apply` **positively checks the
-service lease / process lock and refuses while it is held**, in ordinary phase-N
-use and not only in post-refusal recovery. A barrier-controlled concurrent-writer
-test proves no unrelated row is lost.
+- **JSON** — the same temp+rename that removes the rows also writes a
+  `cleanup_completed` record carrying the approval digest and timestamp. One
+  write, one effect.
+- **SQLite** — the same transaction inserts the completion row and deletes the
+  whisper rows.
+
+**Idempotence is then well-defined:** a re-run that finds a completion record
+matching the approved digest is a **success no-op**; it does not re-enumerate
+and does not abort on the now-empty candidate set.
+
+**`--apply` requires a STOPPED install, and verifies it against a lock this spec
+must first CREATE.** JSON apply snapshots a bare list and replaces it by
+temp+rename, so a valid whisper written by the live server between the read and
+the rename is silently overwritten though it was never a candidate. A cleanup
+that can destroy unrelated data is worse than the two rows it removes.
+
+Rev 7 said apply "positively checks the service lease / process lock" — kreview
+searched the runtime and **no such primitive exists**. There is no
+server-lifetime lease, PID lock, or global process lock in `server.py` or
+`start.sh`; only unrelated component locks. I specified a check against
+something imaginary, and a barrier test would have passed against a mock
+production never holds. That is the synthetic-affordance failure I have now made
+four times.
+
+**So the lock is part of this spec, and it is a real one:**
+
+- **Path** — `<data_root>/.kernos_instance.lock`, under the *selected* data
+  root, so two installs never contend.
+- **Held by** — `server.py` and `repl.py`, acquired **before any store access**
+  and held for the whole process lifetime via `fcntl.flock(LOCK_EX | LOCK_NB)`.
+- **Cleanup** — acquires the same lock **non-blocking**; failure to acquire
+  means an install is live, and apply refuses. It **holds the lock across
+  re-enumeration and apply**, not merely at the start.
+- **Staleness** — file *existence is never proof*; `flock` ownership is released
+  by the kernel when the holder dies, so a leftover file is acquirable and
+  correctly treated as stopped.
+- **Platform** — no `fcntl` means apply refuses rather than proceeding
+  unlocked.
+- **Other writers** — any CLI path that can write whispers acquires the same
+  lock or is prohibited while apply runs; the audit enumerates them.
+
+Tested with a **real subprocess** holding the lock, not an in-process barrier —
+an in-process test cannot prove a cross-process contract. A barrier-controlled
+concurrent-writer case additionally proves no unrelated row is lost.
 
 **Each manifest entry is `(backend, instance, whisper_id, digest, reason)`**,
 with both variable parts pinned so report and apply compute identical sets from
@@ -189,10 +261,18 @@ required**, and it ships **only when every supported install reports zero
 candidates** under phase N's shared predicate.
 
 Rev 6 said "after phase N has been available long enough". **Elapsed time is not
-evidence of cleanup** — it is the absence-of-evidence error this spec has already
-been caught making twice, applied to a release decision. Two installs exist
-(`Kernos-main` live, `Kernos` dev); `--report` against each returning zero
-candidates is achievable evidence, and it is the gate.
+evidence of cleanup** — the absence-of-evidence error this spec has already been
+caught making twice, applied to a release decision.
+
+The gate is a **durable, predicate-versioned evidence record** per install, not
+a remembered zero: `{install identity, authoritative backend, data-root
+identity, cleanup predicate version, schema version, report digest, candidate
+count, observed_at}`. Without those fields a stale zero — taken before a
+producer regression reintroduced field-less writes — could authorize N+1.
+
+**Freshness is part of the gate:** each record must be generated *after* the
+final Phase-N build and *after* the write-side rejection tests pass on that
+install. Two installs exist, so this is obtainable rather than aspirational.
 
 If the backstop is ever *deliberately* allowed to catch stragglers instead, that
 is a rollout policy with an accepted outage and must be stated as such — not
@@ -256,10 +336,22 @@ normally, so a typo cannot swallow delivery.
    is fixed against observed data rather than a generated example.
 3. A whisper genuinely about a **third party** survives unaltered — proving this
    is a register contract, not a pronoun filter.
-4. `user_facing_text` is **validated non-empty** at central construction.
-   Omission, `""`, whitespace-only, `None`, and non-string each raise — tested
-   on the **new-construction path and both persistence read paths**. Producer
-   audit covers dict-splat construction.
+4. **Read and write compatibility are separate mechanisms, and the criterion is
+   split four ways.** Rev 7's design allowed Phase-N legacy *reads* while
+   criterion 4 still demanded that invalidity raise on "both persistence read
+   paths" — the two cannot both be the acceptance rule. A single optional
+   dataclass constructor also cannot accept a legacy read and reject an
+   identical new construction, because it has no provenance.
+   So compatibility lives in a **dedicated Phase-N persistence loader**, not in
+   the dataclass:
+   - **N-write** — `save_whisper` / the new-write factory rejects missing, `""`,
+     whitespace-only, `None`, non-string. A producer calling the ordinary
+     constructor cannot exploit read compatibility.
+   - **N-read** — the compatibility loader constructs legacy rows successfully.
+   - **N+1-write** — unchanged: rejected.
+   - **N+1-read** — the compatibility path is gone; legacy rows do not
+     construct, and the startup verifier prevents that being reached at all.
+   Producer audit covers dict-splat construction in every phase.
 5. **Pre-deployment cleanup, per install, authoritative backend only.**
    `--report` enumerates by raw row reads and writes the manifest into the named
    data root; `--apply` re-enumerates and requires an exact match.
@@ -295,7 +387,11 @@ normally, so a typo cannot swallow delivery.
    The payload is **immutable after construction**.
    Round-trip and invalid-shape tests cover: unknown event, missing key, extra
    key, non-string timestamp, **naive** timestamp, `{}`, and caller mutation
-   after construction.
+   after construction. The round-trip exercises the **production serializer** —
+   not a hand-built dict — because an immutable representation (frozen mapping,
+   mapping proxy, dataclass) is not automatically serializable by either
+   backend, and a hand-built dict would prove nothing about what production
+   actually persists.
    `format_update_event_text(payload)` renders one sentence from those two keys
    and nothing else — rev 4 specified keys with no field to hold them and no
    function to render them, so the requirement had no owner.
@@ -314,9 +410,15 @@ normally, so a typo cannot swallow delivery.
    vocabulary", which is a lexical proxy — it would miss a novel impact
    inference phrased differently and could reject harmless wording. Pinning the
    fields makes the property checkable rather than guessed at.
-7. A whisper pending when a slash command runs is not delivered, **not marked**,
-   and is delivered on the next conversational turn including in a different
-   space; a third turn proves no duplicate.
+7. **Slash deferral, including its bounded loss.** A pending whisper is not
+   delivered on a slash turn, **not marked**, and is delivered on the next
+   conversational turn including in a **different space**; a third turn proves
+   no duplicate.
+   **And the 47h59m schedule is tested explicitly**: a whisper at 47h59m
+   deferred by a slash turn **expires undelivered**, asserting the documented
+   loss rather than a claim that it cannot occur. Delivery today, expiry under
+   this spec — that difference is the accepted regression, and the test is what
+   keeps it accepted rather than forgotten.
 8. Mutation-proved: remove the field selection and the register test fails;
    remove the command guard and the deferral test fails.
 9. No change to whisper dedup, expiry, suppression, disclosure-gate scoping, or
