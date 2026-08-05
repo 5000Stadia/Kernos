@@ -1,7 +1,7 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 8 (kreview round 7 — all six blockers, including three I
-had left standing for multiple revisions)
+**Status:** Draft rev 9 (kreview round 8 — my rev-8 ledger overstated closure;
+only F4 was actually closed)
 
 ## Open blocker ledger
 
@@ -10,14 +10,20 @@ findings — F1 for **seven** revisions, F2 and F3 for **three** each. Reading t
 latest letter and answering it is not the same as closing what is open. Every
 future revision states each blocker's status explicitly.
 
-| ID | Blocker | Status |
-|---|---|---|
-| F1 | Slash deferral can lose a whisper inside the expiry window | **CLOSED rev 8** — accepted, documented, tested; the non-regression claim is corrected |
-| F2 | Approval not bound to the reviewed manifest | **CLOSED rev 8** — `--approve <sha256>` required |
-| F3 | Completion marker is a second non-atomic effect | **CLOSED rev 8** — completion moves inside the backend-local atomic operation |
-| F4 | Phase-N read compatibility contradicts criterion 4 | **CLOSED rev 8** — separate loader; criterion split four ways |
-| F5 | The "service lease" does not exist | **CLOSED rev 8** — a real `flock` lifetime lock is specified |
-| F6 | Rollout evidence can be stale | **CLOSED rev 8** — predicate-versioned evidence record |
+**A design fix is not a closure.** My rev-8 ledger marked all six closed;
+kreview's audit found only F4 was. The pattern is specific and worth naming: I
+corrected the *design prose* and left the *acceptance assertions* unwritten, so
+nothing would have failed if an implementation ignored the prose. Status is now
+tracked in two columns, because they are two different claims.
+
+| ID | Blocker | Design | Acceptance |
+|---|---|---|---|
+| F1 | Slash deferral loses a whisper in the expiry window | rev 8 | **rev 9** — two residual contradictions removed |
+| F2 | Approval not bound to the reviewed manifest | rev 8 | **rev 9** — four assertions added |
+| F3 | Completion is a second non-atomic effect | **rev 9** — JSON envelope defined | **rev 9** |
+| F4 | Phase-N read compatibility vs criterion 4 | rev 8 | rev 8 — **CLOSED** |
+| F5 | The lock, and who must hold it | rev 8 | **rev 9** — writers enumerated, tests bound |
+| F6 | Rollout evidence can be stale | rev 8 | **rev 9** — gate test added |
 
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
@@ -168,9 +174,21 @@ abort on mismatch with no record of why.
 
 Completion is therefore part of the backend-local commit:
 
-- **JSON** — the same temp+rename that removes the rows also writes a
-  `cleanup_completed` record carrying the approval digest and timestamp. One
-  write, one effect.
+- **JSON — this requires a document shape the store does not currently have.**
+  `whispers.json` is a **bare list**, and `get_pending_whispers` sends every
+  unsurfaced element through `Whisper(**d)`. Appending a completion record to
+  that list recreates exactly the sentinel-crash problem I removed two
+  revisions ago. So Phase N introduces a **versioned envelope**:
+
+  ```json
+  {"schema_version": 1, "whispers": [...], "cleanup_completed": {...} }
+  ```
+
+  **Every** production path — pending reads, save, delete, mark-surfaced, dedup
+  — goes through one load/store helper that accepts **either** a legacy bare
+  list **or** an envelope, and always writes an envelope. Only `whispers` is
+  ever iterated as rows, so no reader can meet the completion record. The
+  temp+rename then carries both effects in one write.
 - **SQLite** — the same transaction inserts the completion row and deletes the
   whisper rows.
 
@@ -206,8 +224,18 @@ four times.
   correctly treated as stopped.
 - **Platform** — no `fcntl` means apply refuses rather than proceeding
   unlocked.
-- **Other writers** — any CLI path that can write whispers acquires the same
-  lock or is prohibited while apply runs; the audit enumerates them.
+- **Other writers — enumerated, not gestured at.** Rev 8 promised an audit and
+  did not perform one. Executable entry points that construct a
+  `MessageHandler` and can therefore reach whisper writes:
+  `server.py`, `repl.py`, **`chat.py`** (kreview named this one; it calls
+  `handler.process` directly), and `evals/bootstrap.py`. **All four acquire the
+  lifetime lock.**
+  Direct `save_whisper` / `delete_whisper` / `mark_whisper_surfaced` call sites
+  live in `awareness.py`, `fact_harvest.py`, `covenant_manager.py` and
+  `server.py` — all **transitively covered**, since they are reachable only
+  from a lock-held host. The rule is stated so a new entry point cannot be
+  added silently: **any executable path that can construct a handler or reach a
+  whisper writer holds the lock, or is prohibited while apply runs.**
 
 Tested with a **real subprocess** holding the lock, not an in-process barrier —
 an in-process test cannot prove a cross-process contract. A barrier-controlled
@@ -278,6 +306,13 @@ If the backstop is ever *deliberately* allowed to catch stragglers instead, that
 is a rollout policy with an accepted outage and must be stated as such — not
 implied by a waiting period.
 
+**Acceptance (F6):** an N+1 gate test asserts the evidence record carries every
+required field; that it **binds install identity, authoritative backend and
+data-root identity**; that predicate and schema versions match the shipping
+build; and that the gate **rejects** evidence which is stale (generated before
+the final Phase-N build), mismatched (different predicate version), or drawn
+from an install whose write-side rejection tests had not yet passed.
+
 The two phase schemas are specified and tested **independently**: phase N
 asserts legacy rows still read while new writes are rejected; phase N+1 asserts
 legacy rows no longer construct at all.
@@ -321,7 +356,7 @@ claim the agent can retrieve it.
 Recognized slash commands do not carry pending whispers. The **transient**
 offered batch is cleared; **no durable whisper is marked** surfaced or
 suppressed, so the next conversational assembly re-offers it from pending state.
-Deferral, not loss. Unknown leading-slash input is conversational and delivers
+Deferred — except inside the expiry window documented above. Unknown leading-slash input is conversational and delivers
 normally, so a typo cannot swallow delivery.
 
 ## Acceptance criteria
@@ -363,6 +398,23 @@ normally, so a typo cannot swallow delivery.
    SQLite: transaction rolled back); `--apply` is idempotent; **no `surfaced_at`
    is ever written** by this path; remnants in the **inactive** backend are
    reported but untouched.
+   **Approval binds the reviewed bytes (F2):** a bare `--apply` is **rejected**;
+   reviewing manifest M1 and replacing it with M2 before apply **cannot apply**;
+   a wrong `--approve` digest yields **zero mutation and a non-zero exit**; and
+   the approval digest is **retained in the completion record**.
+   **Completion is inside the commit (F3):** asserted that the JSON completion
+   record and the row removal land in the **same** temp+rename and the SQLite
+   completion row and deletes in the **same** transaction; that a crash at that
+   boundary leaves the document byte-unchanged / the transaction rolled back;
+   that a re-run with a **matching** digest is a success no-op that does not
+   re-enumerate; and that **every** production path (pending read, save,
+   delete, mark-surfaced, dedup) reads both a legacy bare list and an envelope,
+   never iterating the completion record as a row.
+   **The lock is proved across processes (F5):** a **real subprocess** holds the
+   lifetime lock and apply refuses; a barrier-controlled concurrent writer
+   proves no unrelated row is lost; and each of `server.py`, `repl.py`,
+   `chat.py`, `evals/bootstrap.py` is asserted to acquire it before any store
+   access.
    **The startup guard shares the cleanup's validity predicate exactly.** Rev 5
    said it refuses on "field-less rows" while the cleanup classified missing,
    blank, whitespace-only, `null` **and** non-string as candidates — so a row
@@ -422,7 +474,9 @@ normally, so a typo cannot swallow delivery.
 8. Mutation-proved: remove the field selection and the register test fails;
    remove the command guard and the deferral test fails.
 9. No change to whisper dedup, expiry, suppression, disclosure-gate scoping, or
-   recipient routing. This spec adds no guarantee and removes none.
+   recipient routing. This spec **adds no guarantee**, and removes none **except
+   the bounded slash-deferral expiry case in criterion 7**, which is accepted
+   and tested rather than denied.
 
 ## Known, unchanged, deferred
 
