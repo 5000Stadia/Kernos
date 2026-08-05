@@ -1,7 +1,7 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft (for kreview spec review — NARROW contract, replaces the
-review-in-flight on WHISPER-SURFACE-DISCIPLINE-V1)
+**Status:** Draft rev 2 (kreview round 1; migration discard bound, impact
+classification dropped as out-of-scope machinery)
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
@@ -65,53 +65,73 @@ specificity, in an engineering register it then adopts.
 
 ### 1. Dual register, required at construction
 
-`Whisper` gains `user_facing_text`, **required with no default**. Producers
+`Whisper` gains `user_facing_text`, **required and validated as a non-empty
+string** at central construction. Required-with-no-default rejects *omission*
+only — it accepts `""`, whitespace, `None`, and non-strings, any of which would
+be appended or sent and then marked surfaced, breaking deliver-on-delivery with
+no durability feature involved. A persisted row whose value is **present but
+invalid** follows the same migration-discard policy as a missing one. Producers
 whose text is already reader-addressed set it equal to `insight_text`. Both
 delivery paths emit `user_facing_text`; agent-awareness context continues to
 consume `insight_text`.
 
-**Both paths, not one.** `_deliver_pending_whispers` appends it, and
-`AwarenessService._push_interrupt` sends `message=` and writes conversation
-history via `_store_whisper_message` — fixing only the first would leave the
-second publishing the wrong register into durable logs.
+**Three sinks, not two.** `_deliver_pending_whispers` appends it; and
+`_push_interrupt` uses `insight_text` in **three** places — the outbound
+`message=`, `_store_whisper_message`, and a separate per-space
+`conv_logger.append(content=…)`. Rev 1 named the first two. Leaving the third
+would give the user the correct register while the durable per-space
+conversation log still recorded the agent-facing text — the wrong voice
+preserved in exactly the place it outlives the conversation.
 
-### 2. Legacy rows are not delivered — a one-time cleanup, not a lifecycle
+### 2. Legacy rows get an explicit migration discard
 
-Exactly **two** stored whispers lack the field, and both are the agent-facing
-noise this spec removes. They are **not delivered**, are logged once with their
-ids, and expire through the existing path.
+kreview accepted that these rows do not warrant a durable recovery lifecycle,
+and then showed that rev 1's "not delivered, logged once, expire naturally" has
+no implementable read path:
 
-This is deliberately *not* a durable `WITHHELD` state with a recovery command.
-The obligation to deliver those two specific whispers is one nobody wants met —
-"never silently drop" protects *future* whispers, and every future whisper
-carries the field because it is required at construction. Building a recovery
-lifecycle for two rows we want gone would be scope inversion.
+- **both backends construct the dataclass directly** — `Whisper(**d)` in
+  `state_json.py` and `_build_dataclass(Whisper, …)` in `state_sqlite.py` — so a
+  required field makes a legacy row **raise before it can be skipped**;
+- **"logged once" needs a durable discriminator.** Without mutating the row,
+  every read and every restart logs it again;
+- **existing expiry writes `surfaced_at`**, manufacturing a false delivery
+  receipt for a row deliberately never surfaced.
 
-**Bounded by assertion:** a test pins that the number of legacy field-less rows
-in the live schema is what we believe it is, so this cleanup cannot quietly
-become a general policy applied to rows nobody audited.
+So it is a **bounded migration disposition**, not a filter:
 
-### 3. The update event carries no changelog
+- **intercept before construction in BOTH backends**;
+- durably record a `migration_discarded` reason — a state that is **never**
+  interpreted as surfaced — or delete the audited row outright;
+- the disposition is idempotent: restart and repeated reads produce no further
+  audit entries.
 
-`format_update_event_text` is reduced to: the fact, the timestamp, and what was
-**observed** — not what was inferred from commit prose.
+**The count cannot be asserted by a unit test.** Rev 1's criterion claimed a test
+would pin "exactly two in the live schema"; no unit test can know a deployed
+data root. Instead the **deployment migration enumerates the actual target** and
+**fails closed on mismatch**: if it finds ids or a count outside the audited set,
+it reports and stops rather than discarding rows nobody examined.
 
-Impact may only be claimed from surfaces that can actually be diffed across the
-update (tool catalog, covenants/default preferences, procedure files). A
-positive delta supports a narrow positive claim. **Anything else — computation
-failure, or all deltas successfully empty — is `unknown`**, because those three
-surfaces are an *incomplete observer*: this very change alters what the user
-sees while leaving all three empty.
+### 3. The update event carries no changelog — and claims no impact
 
-So the payload reports what was measured and never concludes from it:
+`format_update_event_text` is reduced to **the fact and the timestamp**. No
+commit SHAs, no subjects.
 
-> "Kernos updated. I did not detect changes to my tools, standing rules, or
-> procedures."
+**Impact classification is dropped from this spec.** Rev 1 said positive deltas
+on tool catalog / covenants / procedures could support narrow claims. kreview
+checked and there is **no observation mechanism**: nothing snapshots the
+pre-update side before pull and restart, and `format_update_event_text` only
+parses commit prose. A test could therefore pass by stubbing a delta production
+can never obtain — the same synthetic-affordance failure as the parked design,
+which I had just finished objecting to.
 
-`internal_only` / *"nothing you'd notice"* is not offered. The full changelog
-remains in `.auto_update_log.md` unchanged; this spec makes **no claim** that
-the agent can retrieve it, because it currently cannot — that affordance belongs
-to the deferred spec.
+Building it properly means a versioned pre-update surface manifest persisted
+before restart, a post-update manifest after readiness, like-version comparison
+only, and everything else resolving to `unknown`. That is real new machinery and
+belongs with the deferred guarantee, not in a non-regressive register fix.
+
+So the agent is told **only what is true and observable**: an update applied, and
+when. The changelog remains in `.auto_update_log.md`, and this spec makes no
+claim the agent can retrieve it.
 
 ### 4. Slash commands defer
 
@@ -123,23 +143,32 @@ normally, so a typo cannot swallow delivery.
 
 ## Acceptance criteria
 
-1. Delivery emits `user_facing_text` on **both** paths — asserted separately for
-   `_deliver_pending_whispers` and for `_push_interrupt` including the text
-   `_store_whisper_message` writes to history. Agent context still gets
+1. Delivery emits `user_facing_text` at **all three sinks**, asserted
+   separately: `_deliver_pending_whispers`; `_push_interrupt`'s outbound
+   `message=`; `_store_whisper_message`; and the per-space
+   `conv_logger.append(content=…)`. Agent-awareness assembly alone keeps
    `insight_text`.
 2. Pinned exact renderings for the **two real captured cases**, so the contract
    is fixed against observed data rather than a generated example.
 3. A whisper genuinely about a **third party** survives unaltered — proving this
    is a register contract, not a pronoun filter.
-4. `user_facing_text` is required at construction; omission raises. Producer
+4. `user_facing_text` is **validated non-empty** at central construction.
+   Omission, `""`, whitespace-only, `None`, and non-string each raise — tested
+   on the **new-construction path and both persistence read paths**. Producer
    audit covers dict-splat construction.
-5. Legacy field-less rows are not delivered, are logged with ids, and the count
-   of such rows is asserted against the live schema.
-6. The update payload contains **no commit SHA or subject**; positive deltas
-   yield narrow claims; **both** computation-failure and successful-all-empty
-   yield `unknown`. Two mutations — force failure, and force successful-empty on
-   a change that alters user-visible behaviour — asserting neither claims
-   "nothing changed".
+5. **Migration discard, both backends.** Legacy rows missing or carrying an
+   invalid reader payload are intercepted **before dataclass construction** in
+   `state_json` and `state_sqlite`, receive a durable `migration_discarded`
+   disposition that is **never** read as surfaced, and are idempotent across
+   restart and repeated reads — no re-logging, no `surfaced_at` written.
+   Compatibility tests on **both** backends, including restart, repeated reads,
+   and **an unexpected third field-less row**. The deployment migration
+   enumerates the real data root and **fails closed** when the discovered set
+   differs from the audited one; no unit test claims to know the live count.
+6. The update payload contains **the fact and timestamp only** — no commit SHA,
+   no subject, and **no impact claim of any kind**. Asserted that no
+   delta-classification vocabulary appears in it, so a future contributor cannot
+   reintroduce an unobservable claim without failing this test.
 7. A whisper pending when a slash command runs is not delivered, **not marked**,
    and is delivered on the next conversational turn including in a different
    space; a third turn proves no duplicate.
