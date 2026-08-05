@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from kernos.kernel import friction_response as fr
-from tests._logical_timeline import LogicalTimeline
+from tests._logical_timeline import LogicalTimeline, verify_in_domain
 
 #: TEST-TIME-COUPLING-V1: the base instant for verification fixtures. Both the
 #: ISO timestamps and the report mtimes derive from it, so these tests do not
@@ -298,7 +298,7 @@ def test_verify_archives_quiet_resolved(tmp_path):
     # the detectors were live (so the quiet pool-leak is genuinely resolved)
     opp = _seed_friction(tmp_path, "2026-06-05T11-00-00_INTEGRATION_NO_TOOL_USE_abcdef12.md")
     tl.stamp(opp, hours=25)
-    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
+    out = verify_in_domain(tl, d, now_iso=tl.iso(hours=36))
     assert sig in out["resolved"]
     # reports archived out of the active folder
     assert not list((tmp_path / "diagnostics" / "friction").glob("*CONNECTION_POOL_LEAK*"))
@@ -316,7 +316,7 @@ def test_verify_marks_recurred_failed(tmp_path):
     # passing with recurrence detection broken.
     rec = _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
     tl.stamp(rec, hours=8)
-    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
+    out = verify_in_domain(tl, d, now_iso=tl.iso(hours=36))
     assert sig in out["recurred"]
     assert "fix_1" in fr.failed_fingerprints(fr.load_attempts(d), sig)
 
@@ -349,7 +349,7 @@ def test_verification_is_independent_of_the_host_clock(tmp_path, base_iso):
     opp = _seed_friction(tmp_path, "2026-06-05T11-00-00_INTEGRATION_NO_TOOL_USE_abcdef12.md")
     tl.stamp(opp, hours=25)
 
-    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
+    out = verify_in_domain(tl, d, now_iso=tl.iso(hours=36))
     assert sig in out["resolved"]
     assert sig not in out["recurred"]
 
@@ -369,13 +369,17 @@ def test_recurrence_detection_is_independent_of_the_host_clock(tmp_path, base_is
                       now_iso=tl.iso())
     rec = _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
     tl.stamp(rec, hours=8)
-    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
+    out = verify_in_domain(tl, d, now_iso=tl.iso(hours=36))
     assert sig in out["recurred"]
 
 
 # --- Codex final-review folds ----------------------------------------------
 
 
+@pytest.mark.mtime_domain_inert(
+    reason="no friction report exists in this scenario, so no report mtime "
+           "participates in the assertion — the point of the test is the "
+           "absence of detector activity")
 def test_idle_with_no_opportunity_is_unknown_not_resolved(tmp_path):
     """Quiet but NO friction produced after pending ⇒ unknown, never resolved
     (Codex High-2: idle is not proof)."""
