@@ -1,7 +1,7 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 9 (kreview round 8 — my rev-8 ledger overstated closure;
-only F4 was actually closed)
+**Status:** Draft rev 10 (kreview round 9 — F1/F2/F4/F6 closed; per-instance
+commit, shared runtime lock, truthful writer inventory)
 
 ## Open blocker ledger
 
@@ -18,12 +18,18 @@ tracked in two columns, because they are two different claims.
 
 | ID | Blocker | Design | Acceptance |
 |---|---|---|---|
-| F1 | Slash deferral loses a whisper in the expiry window | rev 8 | **rev 9** — two residual contradictions removed |
-| F2 | Approval not bound to the reviewed manifest | rev 8 | **rev 9** — four assertions added |
-| F3 | Completion is a second non-atomic effect | **rev 9** — JSON envelope defined | **rev 9** |
-| F4 | Phase-N read compatibility vs criterion 4 | rev 8 | rev 8 — **CLOSED** |
-| F5 | The lock, and who must hold it | rev 8 | **rev 9** — writers enumerated, tests bound |
-| F6 | Rollout evidence can be stale | rev 8 | **rev 9** — gate test added |
+| ID | Blocker | Design | Acceptance | Audited |
+|---|---|---|---|---|
+| F1 | Slash deferral loses a whisper in the expiry window | rev 8 | rev 9 | **CLOSED r9** |
+| F2 | Approval not bound to the reviewed manifest | rev 8 | rev 9 | **CLOSED r9** (original finding) |
+| F3 | Completion is not atomic across instance shards | **rev 10** | **rev 10** | open |
+| F4 | Phase-N read compatibility vs criterion 4 | rev 8 | rev 8 | **CLOSED r8** |
+| F5 | Lock exclusivity, and a truthful writer inventory | **rev 10** | **rev 10** | open |
+| F6 | Rollout evidence can be stale | rev 8 | rev 9 | **CLOSED r9** |
+| F7 | Approval not bound to the target install/root | **rev 10** | **rev 10** | new |
+
+The fourth column is kreview's independent audit, not my claim. Rev 8 taught me
+my statuses are not evidence; rev 9 taught me a design fix is not a closure.
 
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
@@ -192,9 +198,30 @@ Completion is therefore part of the backend-local commit:
 - **SQLite** — the same transaction inserts the completion row and deletes the
   whisper rows.
 
-**Idempotence is then well-defined:** a re-run that finds a completion record
-matching the approved digest is a **success no-op**; it does not re-enumerate
-and does not abort on the now-empty candidate set.
+**The commit unit is ONE INSTANCE, because that is what storage actually
+shards.** Rev 8–9 described a single atomic commit for an install-wide manifest
+— but JSON keeps one `whispers.json` per instance and SQLite one
+`data/{instance_id}/kernos.db` per instance, and **no temp+rename or
+transaction spans those shards**. A crash after instance A commits and before B
+leaves an install-wide partial apply, which criterion 5's "interrupted apply
+leaves no partial state" flatly denied. A singular completion record also cannot
+distinguish *fully* complete from *partially* complete.
+
+So:
+
+- the manifest is **partitioned by instance**, each partition carrying its own
+  canonical digest;
+- **each instance commits independently** — its own atomic rewrite or
+  transaction, its own completion record holding the approval digest;
+- an **aggregate coordinator** drives them, and is **resumable**: on re-run it
+  **skips instances whose completion record matches** the approved digest and
+  continues with the remainder;
+- overall success requires **every** partition complete; a partial run exits
+  non-zero naming the outstanding instances.
+
+**Idempotence is then well-defined per shard**: a re-run finding a matching
+completion record for an instance is a success no-op for that instance and does
+not re-enumerate it.
 
 **`--apply` requires a STOPPED install, and verifies it against a lock this spec
 must first CREATE.** JSON apply snapshots a bare list and replaces it by
@@ -214,28 +241,38 @@ four times.
 
 - **Path** — `<data_root>/.kernos_instance.lock`, under the *selected* data
   root, so two installs never contend.
-- **Held by** — `server.py` and `repl.py`, acquired **before any store access**
-  and held for the whole process lifetime via `fcntl.flock(LOCK_EX | LOCK_NB)`.
-- **Cleanup** — acquires the same lock **non-blocking**; failure to acquire
-  means an install is live, and apply refuses. It **holds the lock across
-  re-enumeration and apply**, not merely at the start.
+- **Held SHARED by every runtime host** — `LOCK_SH`, acquired **before any
+  store access** and held for process lifetime. Rev 8–9 said `LOCK_EX |
+  LOCK_NB`, which would have made server, repl, chat and eval hosts **mutually
+  exclusive with each other** for their whole lifetimes — breaking the
+  documented "same tenant, different door" chat path whenever the server is
+  live. That is a **second regression**, outside the one bounded loss this spec
+  accepts, introduced by a lock intended only to exclude cleanup.
+- **Cleanup takes `LOCK_EX | LOCK_NB`** — non-blocking, so it fails immediately
+  while any runtime host holds shared access, and it **holds the exclusive lock
+  across re-enumeration and apply**, not merely at the start.
 - **Staleness** — file *existence is never proof*; `flock` ownership is released
   by the kernel when the holder dies, so a leftover file is acquirable and
   correctly treated as stopped.
 - **Platform** — no `fcntl` means apply refuses rather than proceeding
   unlocked.
-- **Other writers — enumerated, not gestured at.** Rev 8 promised an audit and
-  did not perform one. Executable entry points that construct a
-  `MessageHandler` and can therefore reach whisper writes:
-  `server.py`, `repl.py`, **`chat.py`** (kreview named this one; it calls
-  `handler.process` directly), and `evals/bootstrap.py`. **All four acquire the
-  lifetime lock.**
-  Direct `save_whisper` / `delete_whisper` / `mark_whisper_surfaced` call sites
-  live in `awareness.py`, `fact_harvest.py`, `covenant_manager.py` and
-  `server.py` — all **transitively covered**, since they are reachable only
-  from a lock-held host. The rule is stated so a new entry point cannot be
-  added silently: **any executable path that can construct a handler or reach a
-  whisper writer holds the lock, or is prohibited while apply runs.**
+- **Other writers — enumerated truthfully this time, and structurally
+  enforced.** Rev 9 claimed direct writer call sites live in four modules. That
+  was **false**, and the cause is worth naming: I enumerated from a `head`-
+  truncated grep and reported the visible subset as an audit. The real set is
+  **eleven** modules — `kernel/awareness.py`, `messages/handler.py`,
+  `kernel/improvement_loop_workflow.py`, `server.py`,
+  `kernel/relational_dispatch.py`, `setup/self_update.py`,
+  `messages/phases/persist.py`, `kernel/reasoning.py`, `kernel/fact_harvest.py`,
+  `kernel/diagnostics.py`, `kernel/covenant_manager.py`.
+
+  All eleven are **transitively covered today** — reachable only from a
+  lock-held host — but a fixed list is not a guarantee. **Enforcement is
+  structural:** the store is constructed through one central path that
+  **requires proof the runtime lock is held**, so a new entry point that skips
+  it cannot obtain a store at all. A supporting source-inventory test fails on
+  any newly introduced host or writer edge not covered by that path, so the
+  inventory cannot silently rot back to being a stale list.
 
 Tested with a **real subprocess** holding the lock, not an in-process barrier —
 an in-process test cannot prove a cross-process contract. A barrier-controlled
@@ -262,6 +299,14 @@ unchanged data:
   content, and differ between stores for the same logical row.
 - **`reason`** — a closed enum: `missing`, `blank`, `whitespace_only`,
   `non_string`. Not free text.
+
+**The manifest's canonical top-level bytes bind the TARGET INSTALL** — its
+stable install identity and data-root identity, the same ones F6's evidence
+record uses. Without that, two installs holding identical candidate rows produce
+an **identical approval digest**, so an approval reviewed against root A would
+authorize deletion in root B. `--apply` verifies the manifest's bound identity
+against `--data-root` and refuses on mismatch. Tested directly: two roots with
+byte-identical rows **cannot share an approval**.
 
 ### The release is TWO-PHASE, because one phase cannot be ordered
 
@@ -410,11 +455,22 @@ normally, so a typo cannot swallow delivery.
    re-enumerate; and that **every** production path (pending read, save,
    delete, mark-surfaced, dedup) reads both a legacy bare list and an envelope,
    never iterating the completion record as a row.
-   **The lock is proved across processes (F5):** a **real subprocess** holds the
-   lifetime lock and apply refuses; a barrier-controlled concurrent writer
-   proves no unrelated row is lost; and each of `server.py`, `repl.py`,
-   `chat.py`, `evals/bootstrap.py` is asserted to acquire it before any store
-   access.
+   **The lock is proved across processes, and is SHARED among runtime hosts
+   (F5):** **two** real subprocess runtime hosts hold `LOCK_SH` **concurrently**
+   — proving the chat path is not broken by the server being live — while
+   cleanup's `LOCK_EX | LOCK_NB` **fails until both release**. A
+   barrier-controlled concurrent writer proves no unrelated row is lost. Each of
+   `server.py`, `repl.py`, `chat.py`, `evals/bootstrap.py` acquires before any
+   store access, and the **structural guard** is asserted: a store constructed
+   outside the lock-holding path **raises**, and the source-inventory test fails
+   on any new host or writer edge.
+   **Multi-instance commit (F3):** a two-instance install with a crash **between
+   shard commits** leaves instance A complete and B untouched — never a torn
+   shard — and the resumed run **skips A** and completes B, ending with one
+   completion record per instance and a non-zero exit on the interrupted run.
+   **Approval binds the target root (F7):** two data roots with byte-identical
+   candidate rows produce **different** approval digests, and an approval
+   generated for root A **refuses** against root B with zero mutation.
    **The startup guard shares the cleanup's validity predicate exactly.** Rev 5
    said it refuses on "field-less rows" while the cleanup classified missing,
    blank, whitespace-only, `null` **and** non-string as candidates — so a row
