@@ -1,6 +1,6 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 6 (kreview round 5; TWO-PHASE RELEASE — the only sequence that is actually orderable)
+**Status:** Draft rev 7 (kreview round 6; write-side cutover, stopped-install apply, closed payload union)
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
@@ -126,9 +126,20 @@ hitting dataclass construction itself.
 **The approved manifest IS the audit record.** That removes the two-effect
 problem entirely — there is no separate audit sink to keep atomic with the
 delete, so JSON needs no versioned document shape and no sentinel object in its
-bare list. Deletion is one atomic rewrite (temp + rename) in JSON, or one
-transaction in SQLite. `--apply` writes a completion marker beside the manifest
-recording when it ran and against which digest.
+bare list. `--apply` writes a completion marker beside the manifest recording
+when it ran and against which digest.
+
+**`--apply` requires a STOPPED install, and verifies it rather than trusting
+it.** SQLite serializes its own writes, but JSON apply snapshots a bare list and
+replaces it by temp+rename — so a valid whisper written by the live server
+between the read and the rename is **silently overwritten**, even though it was
+never a deletion candidate. A cleanup that can destroy unrelated data is worse
+than the two rows it removes.
+
+Operator discipline is not a mechanism, so `--apply` **positively checks the
+service lease / process lock and refuses while it is held**, in ordinary phase-N
+use and not only in post-refusal recovery. A barrier-controlled concurrent-writer
+test proves no unrelated row is lost.
 
 **Each manifest entry is `(backend, instance, whisper_id, digest, reason)`**,
 with both variable parts pinned so report and apply compute identical sets from
@@ -162,13 +173,34 @@ the new code is pulled and exec'd before an operator could run a tool that did
 not exist in the previous version — so the "pre-deployment" step is
 unschedulable, and the service goes offline until someone intervenes.
 
-**Phase N — the cleanup tool ships, the field stays optional.**
-`whisper_register_cleanup` becomes available; nothing yet requires
-`user_facing_text`. Auto-update applies this with no behaviour change and no
-outage. Operators run `--report`, review, and `--apply` at their convenience.
+**Phase N has two distinct schemas, and rev 6 conflated them.** "Optional on
+read" cannot mean "optional on new write" — if new writes may omit the field,
+cleanup can never converge, because fresh candidates keep appearing behind it.
+So phase N is ordered internally:
 
-**Phase N+1 — the field becomes required.** Only after phase N has been
-available long enough for installs to clean.
+1. **Write-side cutover.** Every producer sets `user_facing_text`; new writes
+   without it are rejected. Reads remain **compatible** with legacy rows so the
+   service keeps running.
+2. **Only then** does `--apply` run — against a set that can no longer grow.
+3. `whisper_register_cleanup` is available throughout for `--report`.
+
+**Phase N+1 — read compatibility is removed and the dataclass field becomes
+required**, and it ships **only when every supported install reports zero
+candidates** under phase N's shared predicate.
+
+Rev 6 said "after phase N has been available long enough". **Elapsed time is not
+evidence of cleanup** — it is the absence-of-evidence error this spec has already
+been caught making twice, applied to a release decision. Two installs exist
+(`Kernos-main` live, `Kernos` dev); `--report` against each returning zero
+candidates is achievable evidence, and it is the gate.
+
+If the backstop is ever *deliberately* allowed to catch stragglers instead, that
+is a rollout policy with an accepted outage and must be stated as such — not
+implied by a waiting period.
+
+The two phase schemas are specified and tested **independently**: phase N
+asserts legacy rows still read while new writes are rejected; phase N+1 asserts
+legacy rows no longer construct at all.
 
 **The startup guard is the BACKSTOP, not the path.** An install that reaches
 N+1 without cleaning refuses to start, naming the exact recovery command. Two
@@ -249,13 +281,21 @@ normally, so a typo cannot swallow delivery.
    and `repl.py` startup, and no whisper producer or consumer runs when it
    does.
 
-6. **The update payload is pinned by structure, with a named production binding
-   and its own field invariant.** `Whisper` gains
-   `event_payload: Mapping | None = None` — **optional**, since most whispers
-   are not events, and **never a mutable shared default** (`None`, not `{}`).
-   When `event == "kernos_self_updated"` it carries **exactly** the two keys
-   `{event, applied_iso}` and no others; that shape is asserted, and asserted to
-   **round-trip through both JSON and SQLite** unchanged.
+6. **`event_payload` is a CLOSED union in v1**, not a mapping with one
+   constrained case. Rev 6 constrained the shape only "when
+   `event == kernos_self_updated`", which accepts `{}`, a mapping with no
+   `event` key, and arbitrary `{event: other, …}` — three shapes with no defined
+   meaning. V1 is exactly `None | KernosSelfUpdatedPayload`; **every other
+   non-`None` shape is rejected at construction and at persistence read**.
+   The field is **optional** (most whispers are not events) and **never a
+   mutable shared default** — `None`, not `{}`.
+   `applied_iso` is a **timezone-qualified ISO-8601 string**; the marker text is
+   **normalized to UTC on ingest** and the normalized form is what is persisted
+   and rendered, so report and render cannot disagree about the same instant.
+   The payload is **immutable after construction**.
+   Round-trip and invalid-shape tests cover: unknown event, missing key, extra
+   key, non-string timestamp, **naive** timestamp, `{}`, and caller mutation
+   after construction.
    `format_update_event_text(payload)` renders one sentence from those two keys
    and nothing else — rev 4 specified keys with no field to hold them and no
    function to render them, so the requirement had no owner.
