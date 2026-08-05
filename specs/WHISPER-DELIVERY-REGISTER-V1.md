@@ -1,6 +1,6 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 5 (kreview round 4; cleanup is PRE-DEPLOYMENT, startup only verifies)
+**Status:** Draft rev 6 (kreview round 5; TWO-PHASE RELEASE — the only sequence that is actually orderable)
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
@@ -152,11 +152,35 @@ unchanged data:
 - **`reason`** — a closed enum: `missing`, `blank`, `whitespace_only`,
   `non_string`. Not free text.
 
-**Startup verifies; it never migrates.** `server.py` and `repl.py` perform a
-cheap read-only check: if field-less rows remain, refuse to start with a message
-naming the cleanup command. That is a guard, not a coordinator — no manifest
-semantics, no first-start ambiguity, no recovery protocol. Zero candidates
-passes silently.
+### The release is TWO-PHASE, because one phase cannot be ordered
+
+Rev 5 claimed a `report → approve → apply → then deploy` sequence and that this
+removed the auto-update restart question. **That claim was false**, and kreview
+caught it against the real updater: the cleanup command ships in the *same
+artifact* that makes the field required. Under the default unattended updater
+the new code is pulled and exec'd before an operator could run a tool that did
+not exist in the previous version — so the "pre-deployment" step is
+unschedulable, and the service goes offline until someone intervenes.
+
+**Phase N — the cleanup tool ships, the field stays optional.**
+`whisper_register_cleanup` becomes available; nothing yet requires
+`user_facing_text`. Auto-update applies this with no behaviour change and no
+outage. Operators run `--report`, review, and `--apply` at their convenience.
+
+**Phase N+1 — the field becomes required.** Only after phase N has been
+available long enough for installs to clean.
+
+**The startup guard is the BACKSTOP, not the path.** An install that reaches
+N+1 without cleaning refuses to start, naming the exact recovery command. Two
+things must be documented rather than implied, because both are true here:
+
+- the recovery command is run **externally**, against the stopped install;
+- **`start.sh` is not a supervisor** — `python kernos/server.py` is its last
+  line with no restart loop — so a refusing start leaves the service **down
+  until manual intervention**. That is the honest cost of the backstop, and it
+  is why phase N exists to make the backstop rare rather than routine.
+
+Zero candidates passes silently in both phases.
 
 ### 3. The update event carries no changelog — and claims no impact
 
@@ -215,23 +239,36 @@ normally, so a typo cannot swallow delivery.
    SQLite: transaction rolled back); `--apply` is idempotent; **no `surfaced_at`
    is ever written** by this path; remnants in the **inactive** backend are
    reported but untouched.
-   **Startup verification is a guard, not a migration:** with field-less rows
-   present, `server.py` and `repl.py` refuse to start naming the cleanup
-   command; with zero candidates they start silently; and no whisper producer or
-   consumer runs when the guard trips.
+   **The startup guard shares the cleanup's validity predicate exactly.** Rev 5
+   said it refuses on "field-less rows" while the cleanup classified missing,
+   blank, whitespace-only, `null` **and** non-string as candidates — so a row
+   with `user_facing_text=""` passed the guard and then raised on the first
+   pending read, which is precisely the crash the guard exists to prevent. One
+   closed predicate and one `reason` enum, shared by report, apply and verify.
+   Mutation-tested: **each** invalid type independently trips both `server.py`
+   and `repl.py` startup, and no whisper producer or consumer runs when it
+   does.
 
-6. **The update payload is pinned by structure, with a named production
-   binding.** `Whisper` gains an `event_payload` mapping carrying exactly
-   `{event: "kernos_self_updated", applied_iso}`, and
+6. **The update payload is pinned by structure, with a named production binding
+   and its own field invariant.** `Whisper` gains
+   `event_payload: Mapping | None = None` — **optional**, since most whispers
+   are not events, and **never a mutable shared default** (`None`, not `{}`).
+   When `event == "kernos_self_updated"` it carries **exactly** the two keys
+   `{event, applied_iso}` and no others; that shape is asserted, and asserted to
+   **round-trip through both JSON and SQLite** unchanged.
    `format_update_event_text(payload)` renders one sentence from those two keys
-   and nothing else — rev 4 specified the keys but named no field to hold them
-   and no function to render them, so the requirement had no owner.
+   and nothing else — rev 4 specified keys with no field to hold them and no
+   function to render them, so the requirement had no owner.
    **`applied_iso` comes from the pending-update marker** `self_update` already
-   persists across exec, *not* from the log heading, so "no value derived from
-   the update log" is actually true. If that timestamp is **missing or
-   malformed the whisper is not emitted at all** and the condition is logged;
-   inventing a time would be the manufactured-fact defect this spec exists to
-   remove. Asserted: the structured payload
+   persists across exec, *not* the log heading, so "no value derived from the
+   update log" is true rather than nominal.
+   **Malformed or missing timestamp: the whisper is not emitted, and the marker
+   is CONSUMED**, with the offending value recorded in the log for diagnosis.
+   Rev 5 said "do not emit and log" and left the next restart unspecified —
+   retaining the marker would re-log and re-fail on every boot, which is the
+   same "logged once needs a durable discriminator" defect kreview raised
+   against my legacy handling three rounds ago. Losing one notification beats an
+   endless warning, and beats inventing a time. Asserted: the structured payload
    has **no other keys**, and **no value derived from the commit log or the
    update log** appears anywhere in it. Rev 3 asserted "no delta-classification
    vocabulary", which is a lexical proxy — it would miss a novel impact
