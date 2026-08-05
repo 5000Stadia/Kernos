@@ -1,12 +1,14 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 2 (kreview round 1; migration discard bound, impact
-classification dropped as out-of-scope machinery)
+**Status:** Draft rev 3 (kreview round 2; migration is one audited transaction)
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
-every direct `Whisper(...)` producer, `tests/test_handler.py`,
-`tests/test_awareness*.py`, `tests/test_fact_harvest_whisper_emit.py`.
+**`kernos/kernel/state_json.py`**, **`kernos/kernel/state_sqlite.py`**,
+**`kernos/setup/whisper_register_migration.py`** (new — the audited
+transaction), every direct `Whisper(...)` producer, `tests/test_handler.py`,
+`tests/test_awareness*.py`, `tests/test_fact_harvest_whisper_emit.py`,
+state round-trip and migration tests on **both** backends.
 
 ## Why this spec exists separately
 
@@ -97,19 +99,39 @@ no implementable read path:
 - **existing expiry writes `surfaced_at`**, manufacturing a false delivery
   receipt for a row deliberately never surfaced.
 
-So it is a **bounded migration disposition**, not a filter:
+kreview's decisive framing: **an audited one-time deletion, not a durable
+pseudo-pending state.** Rev 2 said "record `migration_discarded` **or** delete"
+and separately "fail closed on mismatch" — which contradict. An unexpected
+invalid row is simultaneously something to discard *and* a mismatch that must
+stop. So the disposition is **one transaction**, in this order:
 
-- **intercept before construction in BOTH backends**;
-- durably record a `migration_discarded` reason — a state that is **never**
-  interpreted as surfaced — or delete the audited row outright;
-- the disposition is idempotent: restart and repeated reads produce no further
-  audit entries.
+1. **Identify candidates without constructing `Whisper`** — raw row reads in
+   both backends, since construction is what raises.
+2. **Compare the complete set** of `(backend, instance, whisper_id, digest,
+   reason)` against a concrete audited manifest.
+3. **On any mismatch — extra row, missing row, changed digest — mutate NOTHING**
+   and fail closed.
+4. **On exact match, atomically audit and delete all of them.** One transaction;
+   a partial disposition is a failure, not a partial success.
+5. **Only after success** are normal pending reads permitted under the new
+   required schema.
 
-**The count cannot be asserted by a unit test.** Rev 1's criterion claimed a test
-would pin "exactly two in the live schema"; no unit test can know a deployed
-data root. Instead the **deployment migration enumerates the actual target** and
-**fails closed on mismatch**: if it finds ids or a count outside the audited set,
-it reports and stops rather than discarding rows nobody examined.
+**The audited manifest is a real, locatable artifact**, not a notion: the
+migration's `--report` mode enumerates the target data root and writes
+`specs/manifests/whisper-legacy-rows.json` — `(backend, instance, whisper_id,
+digest, reason)` per row. A human reviews and commits it. The migration then
+requires an exact match against that committed file. Rev 2 said "differs from
+the audited set" while never saying where that set lives, which made the rule
+unexecutable.
+
+**Target scope** is the `KERNOS_DATA_DIR` of the install being migrated, named
+explicitly at invocation — not "wherever it runs".
+
+**Fail-closed aborts service startup**, not merely the migration. This is the
+important half: if the migration cannot complete, the required field cannot be
+safely enforced, and continuing would crash on the first whisper read with a
+constructor error instead of a legible operator message. Aborting with that
+message is the honest failure.
 
 ### 3. The update event carries no changelog — and claims no impact
 
@@ -143,8 +165,9 @@ normally, so a typo cannot swallow delivery.
 
 ## Acceptance criteria
 
-1. Delivery emits `user_facing_text` at **all three sinks**, asserted
-   separately: `_deliver_pending_whispers`; `_push_interrupt`'s outbound
+1. Delivery emits `user_facing_text` at **all four delivery/logging sinks**
+   — stated as a list, not a count, so a test plan cannot collapse one by
+   interpreting the number. Asserted separately: `_deliver_pending_whispers`; `_push_interrupt`'s outbound
    `message=`; `_store_whisper_message`; and the per-space
    `conv_logger.append(content=…)`. Agent-awareness assembly alone keeps
    `insight_text`.
@@ -156,15 +179,20 @@ normally, so a typo cannot swallow delivery.
    Omission, `""`, whitespace-only, `None`, and non-string each raise — tested
    on the **new-construction path and both persistence read paths**. Producer
    audit covers dict-splat construction.
-5. **Migration discard, both backends.** Legacy rows missing or carrying an
-   invalid reader payload are intercepted **before dataclass construction** in
-   `state_json` and `state_sqlite`, receive a durable `migration_discarded`
-   disposition that is **never** read as surfaced, and are idempotent across
-   restart and repeated reads — no re-logging, no `surfaced_at` written.
-   Compatibility tests on **both** backends, including restart, repeated reads,
-   and **an unexpected third field-less row**. The deployment migration
-   enumerates the real data root and **fails closed** when the discovered set
-   differs from the audited one; no unit test claims to know the live count.
+5. **The migration is one audited transaction.** Candidates are identified by
+   **raw row reads** in both backends (never by constructing `Whisper`). The
+   complete `(backend, instance, whisper_id, digest, reason)` set is compared
+   against the committed `specs/manifests/whisper-legacy-rows.json`. **Any**
+   mismatch — an extra row, a missing row, a changed digest — mutates nothing
+   and fails closed. On exact match all rows are audited and deleted
+   atomically.
+   Asserted: an **unexpected third row** aborts with zero mutations; a
+   **missing** expected row aborts with zero mutations; a **write failure on
+   one backend** leaves **no partial disposition** on either; success is
+   idempotent across restart and repeated reads; and **no `surfaced_at` is ever
+   written** by this path. Fail-closed **aborts service startup**, verified by
+   asserting the startup path refuses rather than proceeding to a read that
+   would raise on the required field.
 6. The update payload contains **the fact and timestamp only** — no commit SHA,
    no subject, and **no impact claim of any kind**. Asserted that no
    delta-classification vocabulary appears in it, so a future contributor cannot
