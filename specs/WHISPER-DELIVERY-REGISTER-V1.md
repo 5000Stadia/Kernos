@@ -1,7 +1,7 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 11 (kreview round 10 — F6 REOPENED; root identity is the
-canonical path, not a new primitive)
+**Status:** Draft rev 12 (kreview round 11 — root fingerprint is path + fs
+object identity; lock proof is a live capability)
 
 ## Open blocker ledger
 
@@ -20,7 +20,7 @@ tracked in two columns, because they are two different claims.
 |---|---|---|---|---|
 | F1 | Slash deferral loses a whisper in the expiry window | rev 8 | rev 9 | **CLOSED r9** |
 | F2 | Approval not bound to the reviewed manifest | rev 8 | rev 9 | **CLOSED r9** (original finding) |
-| F3 | Completion is not atomic across instance shards | **rev 10** | **rev 10** | open |
+| F3 | Completion is not atomic across instance shards | rev 10 | rev 10 | **CLOSED r11** |
 | F4 | Phase-N read compatibility vs criterion 4 | rev 8 | rev 8 | **CLOSED r8** |
 | F5 | Lock exclusivity, and a truthful writer inventory | **rev 10** | **rev 10** | open |
 | F6 | Rollout evidence can be stale | rev 8 | rev 9 | **REOPENED r10** — bound to a primitive that did not exist |
@@ -163,7 +163,9 @@ hitting dataclass construction itself.
 2. **The operator reviews and approves** that manifest, taking its canonical
    SHA-256.
 3. **`--apply --approve <canonical-manifest-sha256>`.** A bare `--apply` is
-   rejected. The digest binds the approval to the *reviewed bytes*: rev 5–7 had
+   rejected. Apply re-enumerates and exact-matches **every incomplete
+   partition**; completed partitions are skipped per the resume rule, so this
+   summary cannot be implemented as an unconditional whole-manifest match. The digest binds the approval to the *reviewed bytes*: rev 5–7 had
    review followed by an unqualified apply, so manifest M1 could be reviewed and
    replaced by M2 before apply ran, and nothing would notice. Apply
    re-enumerates, requires an exact match against the manifest **and** that the
@@ -287,9 +289,15 @@ four times.
 
   **Enforcement is structural and ROOT-BOUND:** every production store is
   constructed through one guarded factory that **requires proof the runtime lock
-  is held for that canonical root**. The proof is not a boolean or a bare token:
-  it carries the `realpath` it was acquired for, so a guard obtained for root A
-  **cannot** construct a store for root B. Alternatively a CLI path may take a
+  is held for that canonical root**. Rev 11 called that proof
+  "unforgeable" because it *carried a realpath* — but a string is not proof of a
+  **currently held** lock: a fabricated guard bearing root A's path, and a
+  genuine guard used after its fd is closed, both satisfy that description.
+  The guard is therefore an **opaque live capability owning the open lock fd**:
+  non-copyable, non-serializable, **retained by the writable store for its own
+  lifetime**, with construction *and every whisper mutation* failing **after
+  release**. The factory checks **both** liveness **and** the root fingerprint,
+  so a guard for root A cannot construct a store for root B. Alternatively a CLI path may take a
   store narrowed so that whisper writes are literally unavailable. A
   source-inventory test classifies **every** construction site — lock-held,
   transitively covered, read-only-narrowed, test-only, or prohibited — and fails
@@ -336,20 +344,42 @@ lifecycle, alias canonicalization, copy/move semantics and migration — a
 deployment-identity subsystem arriving through a different door than the one
 already refused.
 
-**Root identity is `os.path.realpath(data_root)`** — the canonical absolute
-path. No creation, no lifecycle, no migration:
+**Root identity is a FINGERPRINT: strict canonical path + filesystem object
+identity.** Rev 11 used `os.path.realpath` alone. kreview refuted it on two
+counts and both are verified:
 
-- **aliases** — relative paths, `..` segments and symlinks canonicalize to the
-  same value by construction;
-- **distinct roots** differ trivially, so identical rows cannot share an
-  approval;
-- **a moved or copied root** resolves to a *different* path, the manifest no
-  longer matches, and apply **refuses** — correct, since a copied root must not
-  inherit an approval reviewed against the original;
-- **missing or malformed** fails closed;
-- **unforgeable by apply** — derived from the `--data-root` argument at
-  invocation, never read from stored state, so apply cannot generate or replace
-  it to make a mismatch pass.
+1. `os.path.realpath` defaults to **`strict=False`** — `/definitely/not/here`
+   returns that string unchanged rather than raising, so my "missing fails
+   closed" claim was simply untrue.
+2. **A canonical pathname is not the identity of the directory mounted there.**
+   Report root A at `/data`, move it away, mount or copy root B at `/data`:
+   realpath is still `/data`, so the old approval matches the **wrong physical
+   root**, and F6 evidence from a retired root reads as current. My statement
+   that "a moved or copied root necessarily resolves to a different path" was
+   **false** — it holds only when the path changes, which is the case I happened
+   to picture.
+
+The fix stays OS-derived rather than inventing a lifecycle:
+
+```
+root_fingerprint = (realpath(data_root, strict=True),  st_dev, st_ino)
+```
+
+- **strict resolution** raises on a missing root, plus an explicit directory
+  check — "fails closed" is now mechanism, not assertion;
+- **`st_dev` + `st_ino`** identify the directory *object*, so a same-path
+  replacement is detected;
+- symlink and relative aliases still converge through strict realpath;
+- the fingerprint is **recomputed and compared at apply — after acquiring the
+  root lock and before any mutation** — and all work operates on the resolved
+  root, never the caller's alias.
+
+**Documented limitations, because they are real:** a bind mount or container
+presenting the *same* root under a different canonical path requires
+re-report and re-approval — a safe availability cost, not a correctness hole.
+And network filesystems need an explicit support boundary: importing `fcntl`
+successfully does **not** prove reliable cross-host `flock` semantics, so the
+lock's guarantees are stated for local filesystems only.
 
 The **same value** binds F6's rollout evidence and the lock guard's root
 binding, so all three rest on one real mechanism instead of three prose ones. Without that, two installs holding identical candidate rows produce
@@ -388,9 +418,9 @@ evidence of cleanup** — the absence-of-evidence error this spec has already be
 caught making twice, applied to a release decision.
 
 The gate is a **durable, predicate-versioned evidence record** per install, not
-a remembered zero: `{install identity, authoritative backend, data-root
-identity, cleanup predicate version, schema version, report digest, candidate
-count, observed_at}`. Without those fields a stale zero — taken before a
+a remembered zero: `{root fingerprint (strict path + `st_dev`/`st_ino`), authoritative backend,
+cleanup predicate version, schema version, report digest, candidate count,
+observed_at}`. Without those fields a stale zero — taken before a
 producer regression reintroduced field-less writes — could authorize N+1.
 
 **Freshness is part of the gate:** each record must be generated *after* the
@@ -402,8 +432,8 @@ is a rollout policy with an accepted outage and must be stated as such — not
 implied by a waiting period.
 
 **Acceptance (F6):** an N+1 gate test asserts the evidence record carries every
-required field; that it **binds install identity, authoritative backend and
-data-root identity**; that predicate and schema versions match the shipping
+required field; that it **binds the root fingerprint** (strict path + `st_dev`/`st_ino`)
+**and the authoritative backend**; that predicate and schema versions match the shipping
 build; and that the gate **rejects** evidence which is stale (generated before
 the final Phase-N build), mismatched (different predicate version), or drawn
 from an install whose write-side rejection tests had not yet passed.
@@ -520,15 +550,22 @@ normally, so a typo cannot swallow delivery.
    shard commits** leaves instance A complete and B untouched — never a torn
    shard — and the resumed run **skips A** and completes B, ending with one
    completion record per instance and a non-zero exit on the interrupted run.
-   **Root identity is real and unforgeable (F6/F7):** two unchanged `--report`
-   runs of one root produce the **same** identity; path aliases (relative,
-   `..`, symlink) resolve to the **same** root; two roots with byte-identical
-   rows produce **different** approval digests and an approval for A **refuses**
-   against B with zero mutation; a **moved/copied** root refuses; and apply
-   **never generates or replaces** identity to make a mismatch pass — asserted
-   by mutating the stored value and confirming apply still derives it from
-   `--data-root`. A lock guard acquired for root A **cannot** construct a store
-   for root B.
+   **Root fingerprint (F6/F7):** two unchanged `--report` runs give the **same**
+   fingerprint; symlink/relative/`..` aliases resolve alike; two roots with
+   byte-identical rows differ; a **missing** root raises under strict resolution
+   rather than returning a canonical-looking string; and **same-path
+   replacement** is tested directly — report A at path P, move A away, place
+   byte-identical B at P, and apply, evidence and guard all **reject on changed
+   `st_dev`/`st_ino`** though the path is unchanged. Mutating the stored
+   fingerprint still leaves apply deriving it from the resolved `--data-root`.
+   **The lock guard is a live capability (F5):** a **fabricated** guard is
+   rejected; a **released** guard is rejected; a store **outliving its caller**
+   fails on the next whisper mutation; a guard for root A cannot construct a
+   store for root B; a source assertion proves **no production path constructs a
+   whisper-writable store directly**; and the **eleven existing
+   `kernos/cli.py` construction sites** are each bound — guarded path, or a
+   wrapper that genuinely omits or raises on every whisper mutator — not merely
+   new edges.
    **Two-pass preflight (F3):** a mismatch in the **last** partition produces
    **zero mutations in earlier partitions**; and on resume a partition whose
    completion record matches is skipped, while a completion whose top-level
