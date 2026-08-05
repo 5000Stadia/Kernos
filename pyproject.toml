@@ -39,6 +39,12 @@ dependencies = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    # TEST-TIME-COUPLING-V1: waiver for the mtime-domain audit. A registered
+    # marker rather than a parsed comment, because comments detach from the
+    # code they were meant to exempt. A non-empty reason is required.
+    "mtime_domain_inert(reason): report mtimes in this test do not participate in an assertion",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

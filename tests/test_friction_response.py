@@ -7,6 +7,12 @@ from __future__ import annotations
 import pytest
 
 from kernos.kernel import friction_response as fr
+from tests._logical_timeline import LogicalTimeline
+
+#: TEST-TIME-COUPLING-V1: the base instant for verification fixtures. Both the
+#: ISO timestamps and the report mtimes derive from it, so these tests do not
+#: acquire the host clock as a second, drifting time source.
+PENDING_ISO = "2026-06-04T00:00:00+00:00"
 
 
 # --- kill switch -----------------------------------------------------------
@@ -277,19 +283,22 @@ async def test_respond_once_disabled(tmp_path, monkeypatch):
 
 def test_verify_archives_quiet_resolved(tmp_path):
     d = str(tmp_path)
+    tl = LogicalTimeline.from_iso(PENDING_ISO)
     f = _seed_friction(tmp_path, "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md")
     sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
-    # mark pending 25h ago (> 24h window), no new reports since
-    import os as _os, time as _time
-    old = _time.time() - 100 * 3600
-    _os.utime(f, (old, old))
+    # The pool-leak report is QUIET: its mtime precedes the pending marker.
+    # Binding it to the logical timeline is what makes this test independent of
+    # the host clock — using the filesystem default made the "quiet" report look
+    # like a recurrence once wall time drifted past the fixture date.
+    tl.stamp(f, hours=-25)
     fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
                       resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
-                      now_iso="2026-06-04T00:00:00+00:00")
-    # opportunity: a DIFFERENT-signature report lands after pending, proving
+                      now_iso=tl.iso())
+    # opportunity: a DIFFERENT-signature report lands AFTER pending, proving
     # the detectors were live (so the quiet pool-leak is genuinely resolved)
-    _seed_friction(tmp_path, "2026-06-05T11-00-00_INTEGRATION_NO_TOOL_USE_abcdef12.md")
-    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")
+    opp = _seed_friction(tmp_path, "2026-06-05T11-00-00_INTEGRATION_NO_TOOL_USE_abcdef12.md")
+    tl.stamp(opp, hours=25)
+    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
     assert sig in out["resolved"]
     # reports archived out of the active folder
     assert not list((tmp_path / "diagnostics" / "friction").glob("*CONNECTION_POOL_LEAK*"))
@@ -298,14 +307,70 @@ def test_verify_archives_quiet_resolved(tmp_path):
 def test_verify_marks_recurred_failed(tmp_path):
     d = str(tmp_path)
     sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+    tl = LogicalTimeline.from_iso(PENDING_ISO)
     fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
                       resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
-                      now_iso="2026-06-04T00:00:00+00:00")
-    # a NEW report lands after the pending timestamp (recurred)
-    _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
-    out = fr.verify_and_archive(d, now_iso="2026-06-05T12:00:00+00:00")
+                      now_iso=tl.iso())
+    # a NEW report lands AFTER the pending timestamp (recurred). Without an
+    # explicit stamp this passed on host-clock drift alone and would have kept
+    # passing with recurrence detection broken.
+    rec = _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
+    tl.stamp(rec, hours=8)
+    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
     assert sig in out["recurred"]
     assert "fix_1" in fr.failed_fingerprints(fr.load_attempts(d), sig)
+
+
+@pytest.mark.parametrize("base_iso", [
+    "1999-01-01T00:00:00+00:00",   # far past
+    "2026-06-04T00:00:00+00:00",   # the original fixture instant
+    "2099-12-31T00:00:00+00:00",   # far future
+])
+def test_verification_is_independent_of_the_host_clock(tmp_path, base_iso):
+    """TEST-TIME-COUPLING-V1: the same scenario at any base instant.
+
+    The production comparison is purely RELATIVE — report mtime versus the
+    pending epoch — so a base far from the host date is a valid input. If any
+    part of the fixture silently reacquires the wall clock, the far-past and
+    far-future cases diverge from the middle one and this fails.
+
+    Cheap and parametrized rather than a process-wide clock freezer: no global
+    patching, no moving part in unrelated tests.
+    """
+    d = str(tmp_path)
+    tl = LogicalTimeline.from_iso(base_iso)
+    sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+
+    quiet = _seed_friction(tmp_path, "2026-06-01T07-51-41_CONNECTION_POOL_LEAK_82f2f4aa.md")
+    tl.stamp(quiet, hours=-25)
+    fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
+                      resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
+                      now_iso=tl.iso())
+    opp = _seed_friction(tmp_path, "2026-06-05T11-00-00_INTEGRATION_NO_TOOL_USE_abcdef12.md")
+    tl.stamp(opp, hours=25)
+
+    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
+    assert sig in out["resolved"]
+    assert sig not in out["recurred"]
+
+
+@pytest.mark.parametrize("base_iso", [
+    "1999-01-01T00:00:00+00:00",
+    "2099-12-31T00:00:00+00:00",
+])
+def test_recurrence_detection_is_independent_of_the_host_clock(tmp_path, base_iso):
+    """The mutation counterpart: recurrence must still be DETECTED at any base,
+    so the fix above cannot have been achieved by neutering detection."""
+    d = str(tmp_path)
+    tl = LogicalTimeline.from_iso(base_iso)
+    sig = fr.friction_signature(friction_type="CONNECTION_POOL_LEAK")
+    fr.record_attempt(d, friction_signature=sig, friction_type="CONNECTION_POOL_LEAK",
+                      resolution_fingerprint="fix_1", state=fr.PENDING_VERIFICATION,
+                      now_iso=tl.iso())
+    rec = _seed_friction(tmp_path, "2026-06-05T07-51-41_CONNECTION_POOL_LEAK_99999999.md")
+    tl.stamp(rec, hours=8)
+    out = fr.verify_and_archive(d, now_iso=tl.iso(hours=36))
+    assert sig in out["recurred"]
 
 
 # --- Codex final-review folds ----------------------------------------------
