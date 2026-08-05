@@ -1,7 +1,7 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 10 (kreview round 9 — F1/F2/F4/F6 closed; per-instance
-commit, shared runtime lock, truthful writer inventory)
+**Status:** Draft rev 11 (kreview round 10 — F6 REOPENED; root identity is the
+canonical path, not a new primitive)
 
 ## Open blocker ledger
 
@@ -16,8 +16,6 @@ corrected the *design prose* and left the *acceptance assertions* unwritten, so
 nothing would have failed if an implementation ignored the prose. Status is now
 tracked in two columns, because they are two different claims.
 
-| ID | Blocker | Design | Acceptance |
-|---|---|---|---|
 | ID | Blocker | Design | Acceptance | Audited |
 |---|---|---|---|---|
 | F1 | Slash deferral loses a whisper in the expiry window | rev 8 | rev 9 | **CLOSED r9** |
@@ -25,7 +23,7 @@ tracked in two columns, because they are two different claims.
 | F3 | Completion is not atomic across instance shards | **rev 10** | **rev 10** | open |
 | F4 | Phase-N read compatibility vs criterion 4 | rev 8 | rev 8 | **CLOSED r8** |
 | F5 | Lock exclusivity, and a truthful writer inventory | **rev 10** | **rev 10** | open |
-| F6 | Rollout evidence can be stale | rev 8 | rev 9 | **CLOSED r9** |
+| F6 | Rollout evidence can be stale | rev 8 | rev 9 | **REOPENED r10** — bound to a primitive that did not exist |
 | F7 | Approval not bound to the target install/root | **rev 10** | **rev 10** | new |
 
 The fourth column is kreview's independent audit, not my claim. Rev 8 taught me
@@ -36,8 +34,11 @@ my statuses are not evidence; rev 9 taught me a design fix is not a closure.
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
 **`kernos/kernel/state_json.py`**, **`kernos/kernel/state_sqlite.py`**,
 **`kernos/setup/whisper_register_cleanup.py`** (new — the pre-deployment
-command), **`kernos/server.py`** and **`kernos/repl.py`** (a read-only startup
-*verification*, not a migration), every direct `Whisper(...)` producer, `tests/test_handler.py`,
+command), **`kernos/server.py`**, **`kernos/repl.py`**, **`kernos/chat.py`**,
+**`kernos/evals/bootstrap.py`** (runtime hosts holding the shared root lock;
+server and repl additionally run the read-only startup *verification*),
+**`kernos/cli.py`** (eleven store constructors — guarded or narrowed), and the
+new **central lock/store-factory module**, every direct `Whisper(...)` producer, `tests/test_handler.py`,
 `tests/test_awareness*.py`, `tests/test_fact_harvest_whisper_emit.py`,
 state round-trip and migration tests on **both** backends.
 
@@ -213,9 +214,19 @@ So:
   canonical digest;
 - **each instance commits independently** — its own atomic rewrite or
   transaction, its own completion record holding the approval digest;
-- an **aggregate coordinator** drives them, and is **resumable**: on re-run it
-  **skips instances whose completion record matches** the approved digest and
-  continues with the remainder;
+- an **aggregate coordinator** drives them in **two passes while holding the
+  exclusive lock**. Pass one **preflights every incomplete partition**; only if
+  all verify does pass two commit any of them. Without that, "any mismatch
+  aborts with zero mutations" is unimplementable — the coordinator could commit
+  A and only then discover a mismatch in B;
+- **resume has an explicit exception to the exact-match rule**, because rows in
+  a completed partition are *intentionally* missing and would otherwise read as
+  a mismatch. On re-run: verify the **unchanged approved top-level manifest**
+  first; a partition whose completion record matches is **skipped without
+  re-enumeration**; every incomplete partition is re-enumerated and
+  exact-matched. Each completion record stores **both** the operator-approved
+  top-level digest **and** its partition digest, plus the bound root identity —
+  and **either** mismatch refuses rather than skipping;
 - overall success requires **every** partition complete; a partial run exits
   non-zero naming the outstanding instances.
 
@@ -267,12 +278,22 @@ four times.
   `kernel/diagnostics.py`, `kernel/covenant_manager.py`.
 
   All eleven are **transitively covered today** — reachable only from a
-  lock-held host — but a fixed list is not a guarantee. **Enforcement is
-  structural:** the store is constructed through one central path that
-  **requires proof the runtime lock is held**, so a new entry point that skips
-  it cannot obtain a store at all. A supporting source-inventory test fails on
-  any newly introduced host or writer edge not covered by that path, so the
-  inventory cannot silently rot back to being a stale list.
+  lock-held host — but a fixed list is not a guarantee.
+
+  **And the host list was still incomplete.** `kernos/cli.py` constructs
+  `JsonStateStore` in **eleven** places and was absent from it. A store exposes
+  whisper mutation whether or not today's CLI commands call it, so capability —
+  not current usage — is what must be covered.
+
+  **Enforcement is structural and ROOT-BOUND:** every production store is
+  constructed through one guarded factory that **requires proof the runtime lock
+  is held for that canonical root**. The proof is not a boolean or a bare token:
+  it carries the `realpath` it was acquired for, so a guard obtained for root A
+  **cannot** construct a store for root B. Alternatively a CLI path may take a
+  store narrowed so that whisper writes are literally unavailable. A
+  source-inventory test classifies **every** construction site — lock-held,
+  transitively covered, read-only-narrowed, test-only, or prohibited — and fails
+  on any new one, so the inventory cannot rot back into a stale list.
 
 Tested with a **real subprocess** holding the lock, not an in-process barrier —
 an in-process test cannot prove a cross-process contract. A barrier-controlled
@@ -300,9 +321,38 @@ unchanged data:
 - **`reason`** — a closed enum: `missing`, `blank`, `whitespace_only`,
   `non_string`. Not free text.
 
-**The manifest's canonical top-level bytes bind the TARGET INSTALL** — its
-stable install identity and data-root identity, the same ones F6's evidence
-record uses. Without that, two installs holding identical candidate rows produce
+**The manifest's canonical top-level bytes bind the TARGET ROOT — and "root
+identity" is a real thing, not a primitive I am inventing.**
+
+Rev 10 bound approval and rollout evidence to "stable install identity and
+data-root identity". kreview checked: **no such primitive exists**.
+`KERNOS_INSTANCE_ID` is optional tenant/adapter identity, not install identity.
+I bound two safety properties to a mechanism that lived only in my prose — the
+fifth affordance in this feature that production does not have.
+
+I am **declining to invent an install-ID primitive.** kreview's own questions
+show why it is wrong for a two-row cleanup: it would need a creation event, a
+lifecycle, alias canonicalization, copy/move semantics and migration — a
+deployment-identity subsystem arriving through a different door than the one
+already refused.
+
+**Root identity is `os.path.realpath(data_root)`** — the canonical absolute
+path. No creation, no lifecycle, no migration:
+
+- **aliases** — relative paths, `..` segments and symlinks canonicalize to the
+  same value by construction;
+- **distinct roots** differ trivially, so identical rows cannot share an
+  approval;
+- **a moved or copied root** resolves to a *different* path, the manifest no
+  longer matches, and apply **refuses** — correct, since a copied root must not
+  inherit an approval reviewed against the original;
+- **missing or malformed** fails closed;
+- **unforgeable by apply** — derived from the `--data-root` argument at
+  invocation, never read from stored state, so apply cannot generate or replace
+  it to make a mismatch pass.
+
+The **same value** binds F6's rollout evidence and the lock guard's root
+binding, so all three rest on one real mechanism instead of three prose ones. Without that, two installs holding identical candidate rows produce
 an **identical approval digest**, so an approval reviewed against root A would
 authorize deletion in root B. `--apply` verifies the manifest's bound identity
 against `--data-root` and refuses on mismatch. Tested directly: two roots with
@@ -438,9 +488,11 @@ normally, so a typo cannot swallow delivery.
    Asserted: `--report` twice on unchanged data yields an **identical** manifest
    (proving canonicalization); **any** mismatch — extra row, missing row,
    changed reader value, changed `surfaced_at`, changed supporting evidence —
-   aborts with **zero mutations** and a non-zero exit; an interrupted `--apply`
-   leaves no partial state (JSON: temp discarded, document byte-unchanged;
-   SQLite: transaction rolled back); `--apply` is idempotent; **no `surfaced_at`
+   aborts with **zero mutations** and a non-zero exit; an interrupted `--apply` leaves
+   **no torn per-instance shard** (JSON: temp discarded, document
+   byte-unchanged; SQLite: transaction rolled back), while **between-shard
+   partial progress is durable and resumable** — the blanket "no partial state"
+   of rev 8–10 contradicted the multi-instance assertion in the same criterion; `--apply` is idempotent; **no `surfaced_at`
    is ever written** by this path; remnants in the **inactive** backend are
    reported but untouched.
    **Approval binds the reviewed bytes (F2):** a bare `--apply` is **rejected**;
@@ -468,9 +520,19 @@ normally, so a typo cannot swallow delivery.
    shard commits** leaves instance A complete and B untouched — never a torn
    shard — and the resumed run **skips A** and completes B, ending with one
    completion record per instance and a non-zero exit on the interrupted run.
-   **Approval binds the target root (F7):** two data roots with byte-identical
-   candidate rows produce **different** approval digests, and an approval
-   generated for root A **refuses** against root B with zero mutation.
+   **Root identity is real and unforgeable (F6/F7):** two unchanged `--report`
+   runs of one root produce the **same** identity; path aliases (relative,
+   `..`, symlink) resolve to the **same** root; two roots with byte-identical
+   rows produce **different** approval digests and an approval for A **refuses**
+   against B with zero mutation; a **moved/copied** root refuses; and apply
+   **never generates or replaces** identity to make a mismatch pass — asserted
+   by mutating the stored value and confirming apply still derives it from
+   `--data-root`. A lock guard acquired for root A **cannot** construct a store
+   for root B.
+   **Two-pass preflight (F3):** a mismatch in the **last** partition produces
+   **zero mutations in earlier partitions**; and on resume a partition whose
+   completion record matches is skipped, while a completion whose top-level
+   **or** partition digest disagrees **refuses** rather than skipping.
    **The startup guard shares the cleanup's validity predicate exactly.** Rev 5
    said it refuses on "field-less rows" while the cleanup classified missing,
    blank, whitespace-only, `null` **and** non-string as candidates — so a row
