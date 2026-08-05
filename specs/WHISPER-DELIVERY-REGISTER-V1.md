@@ -1,12 +1,13 @@
 # WHISPER-DELIVERY-REGISTER-V1 — say it in the reader's register
 
-**Status:** Draft rev 3 (kreview round 2; migration is one audited transaction)
+**Status:** Draft rev 4 (kreview round 3; per-install, per-authoritative-backend)
 **Modules:** `kernos/kernel/awareness.py` (the `Whisper` dataclass and
 `AwarenessService._push_interrupt`), `kernos/messages/handler.py`
 (`_deliver_pending_whispers`, slash dispatch), `kernos/setup/self_update.py`,
 **`kernos/kernel/state_json.py`**, **`kernos/kernel/state_sqlite.py`**,
 **`kernos/setup/whisper_register_migration.py`** (new — the audited
-transaction), every direct `Whisper(...)` producer, `tests/test_handler.py`,
+transaction), **`kernos/server.py`** (backend selection and the startup gate),
+the REPL entry point, every direct `Whisper(...)` producer, `tests/test_handler.py`,
 `tests/test_awareness*.py`, `tests/test_fact_harvest_whisper_emit.py`,
 state round-trip and migration tests on **both** backends.
 
@@ -111,27 +112,64 @@ stop. So the disposition is **one transaction**, in this order:
    reason)` against a concrete audited manifest.
 3. **On any mismatch — extra row, missing row, changed digest — mutate NOTHING**
    and fail closed.
-4. **On exact match, atomically audit and delete all of them.** One transaction;
-   a partial disposition is a failure, not a partial success.
+4. **On exact match, atomically audit and delete — inside the ONE authoritative
+   backend.** Production selects exactly one store via `KERNOS_STORE_BACKEND`,
+   and rev 3's "atomic across JSON and SQLite" is not implementable: neither
+   provides an ACID transaction spanning both plus an audit sink, and a crash
+   between commits defeats the guarantee. Specifying it properly would mean a
+   two-phase journal with before-images, a commit marker and roll-forward
+   recovery — turning a two-row cleanup into a deployment coordinator. So:
+   **migrate only the authoritative backend**; remnants in the inactive store
+   are **reported and left untouched**.
+
+   Atomicity is backend-local and real:
+   - **JSON** — the audit record lives in the **same document** as the rows, so
+     one temp-write-plus-rename both records the audit and removes them. Two
+     files could not be made atomic; one can.
+   - **SQLite** — one transaction: `BEGIN`, insert the audit row, delete the
+     whisper rows, `COMMIT`.
 5. **Only after success** are normal pending reads permitted under the new
    required schema.
 
-**The audited manifest is a real, locatable artifact**, not a notion: the
-migration's `--report` mode enumerates the target data root and writes
-`specs/manifests/whisper-legacy-rows.json` — `(backend, instance, whisper_id,
-digest, reason)` per row. A human reviews and commits it. The migration then
-requires an exact match against that committed file. Rev 2 said "differs from
-the audited set" while never saying where that set lives, which made the rule
-unexecutable.
+**The audited manifest is per-install, not source-committed.** `--report`
+enumerates the named data root and writes the manifest **into that data root**
+(`diagnostics/whisper_legacy_manifest.json`); the operator reviews it and the
+apply step requires an exact match. Rev 3 put it in `specs/` — but live-row
+identity is a property of an *install*, not of the repository, and committing
+one install's row ids to source would make every other install's migration
+spuriously abort.
+
+Each entry is `(backend, instance, whisper_id, digest, reason)` with both
+variable parts pinned, because report and apply must compute identical sets from
+unchanged data:
+
+- **`digest`** — SHA-256 over a canonical JSON serialization of exactly
+  `{whisper_id, created_at, insight_text, delivery_class, foresight_signal,
+  knowledge_entry_id, owner_member_id}`, UTF-8, sorted keys, no whitespace.
+  Backend-specific storage columns are **excluded**, so the same logical row
+  digests identically in either store.
+- **`reason`** — a closed enum: `missing`, `blank`, `whitespace_only`,
+  `non_string`. Not free text.
 
 **Target scope** is the `KERNOS_DATA_DIR` of the install being migrated, named
 explicitly at invocation — not "wherever it runs".
 
-**Fail-closed aborts service startup**, not merely the migration. This is the
-important half: if the migration cannot complete, the required field cannot be
-safely enforced, and continuing would crash on the first whisper read with a
-constructor error instead of a legible operator message. Aborting with that
-message is the honest failure.
+**Fail-closed aborts service startup**, not merely the migration — otherwise the
+required field crashes the first whisper read with a constructor error instead
+of a legible operator message.
+
+**The gate needs an owner, and rev 3 gave it none.** "Only then are normal
+pending reads permitted" was prose with nothing enforcing it. `server.py` owns
+backend selection and startup; the REPL entry point mirrors that construction
+and can reach normal handler behaviour too. Both are in scope, with an explicit
+ordering:
+
+1. select backend and data root;
+2. **run the migration gate** (report / verify / apply);
+3. **only on success**, initialize whisper producers and consumers.
+
+Nothing that reads or writes whispers may run before step 3 — not the awareness
+task, not a post-update enqueue, not a handler pending read.
 
 ### 3. The update event carries no changelog — and claims no impact
 
@@ -182,21 +220,31 @@ normally, so a typo cannot swallow delivery.
 5. **The migration is one audited transaction.** Candidates are identified by
    **raw row reads** in both backends (never by constructing `Whisper`). The
    complete `(backend, instance, whisper_id, digest, reason)` set is compared
-   against the committed `specs/manifests/whisper-legacy-rows.json`. **Any**
+   against the per-install manifest at
+   `<data_root>/diagnostics/whisper_legacy_manifest.json`. **Any**
    mismatch — an extra row, a missing row, a changed digest — mutates nothing
    and fails closed. On exact match all rows are audited and deleted
    atomically.
-   Asserted: an **unexpected third row** aborts with zero mutations; a
-   **missing** expected row aborts with zero mutations; a **write failure on
-   one backend** leaves **no partial disposition** on either; success is
-   idempotent across restart and repeated reads; and **no `surfaced_at` is ever
-   written** by this path. Fail-closed **aborts service startup**, verified by
-   asserting the startup path refuses rather than proceeding to a read that
-   would raise on the required field.
-6. The update payload contains **the fact and timestamp only** — no commit SHA,
-   no subject, and **no impact claim of any kind**. Asserted that no
-   delta-classification vocabulary appears in it, so a future contributor cannot
-   reintroduce an unobservable claim without failing this test.
+   Runs against the **authoritative backend only**; remnants in the inactive
+   store are reported and left untouched.
+   Asserted per backend: an **unexpected row** aborts with zero mutations; a
+   **missing** expected row aborts with zero mutations; an interrupted apply
+   leaves **no partial disposition** (JSON: the pre-rename temp is discarded and
+   the document is byte-unchanged; SQLite: the transaction rolls back); success
+   is idempotent across restart and repeated reads; **no `surfaced_at` is ever
+   written** by this path; and `--report` run twice on unchanged data produces
+   an **identical manifest**, proving the digest is canonical.
+   Fail-closed **aborts service startup**, verified by asserting no whisper
+   producer or consumer — awareness task, post-update enqueue, handler pending
+   read — runs before the gate succeeds.
+6. **The update payload is pinned by structure, not by vocabulary.** It carries
+   exactly `{event: "kernos_self_updated", applied_iso}` and one rendered
+   sentence derived solely from those fields. Asserted: the structured payload
+   has **no other keys**, and **no value derived from the commit log or the
+   update log** appears anywhere in it. Rev 3 asserted "no delta-classification
+   vocabulary", which is a lexical proxy — it would miss a novel impact
+   inference phrased differently and could reject harmless wording. Pinning the
+   fields makes the property checkable rather than guessed at.
 7. A whisper pending when a slash command runs is not delivered, **not marked**,
    and is delivered on the next conversational turn including in a different
    space; a third turn proves no duplicate.
