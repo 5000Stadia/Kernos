@@ -1,6 +1,27 @@
-"""Shared prompt formatting for self-directed execution context."""
+"""Shared prompt context for channel guidance, facts and self-directed plans."""
 
 from typing import Any
+
+
+PLATFORM_CONTEXT: dict[str, str] = {
+    "sms": (
+        "You are communicating via SMS. Keep responses very short — "
+        "a few sentences max. No one wants a wall of text on their phone. "
+        "If content is long (reports, detailed explanations, lists), "
+        "offer to send it to Discord instead using send_to_channel. "
+        "Use abbreviations where natural."
+    ),
+    "discord": (
+        "You are communicating via Discord. Keep responses concise and clear; "
+        "you can use a paragraph or two when the topic warrants it."
+    ),
+}
+
+KNOWLEDGE_SOURCE_TAGS = {
+    "identity": "stated", "habitual": "observed",
+    "structural": "established", "episodic": "remembered",
+    "contextual": "recent",
+}
 
 
 def format_execution_envelope(envelope: dict[str, Any] | None) -> str:

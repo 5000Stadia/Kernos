@@ -21,6 +21,10 @@ from kernos.kernel.engine import TaskEngine
 from kernos.kernel.router import LLMRouter, RouterResult
 from kernos.kernel.event_types import EventType
 from kernos.kernel.events import EventStream, emit_event
+from kernos.kernel.execution_context import (
+    KNOWLEDGE_SOURCE_TAGS,
+    PLATFORM_CONTEXT as _PLATFORM_CONTEXT,
+)
 from kernos.kernel.exceptions import (
     LLMChainExhausted,
     ReasoningConnectionError,
@@ -227,20 +231,6 @@ ACTIVE_SPACE_CAP = 40
 
 # Minimum interaction count before bootstrap graduation is even evaluated.
 _BOOTSTRAP_MIN_INTERACTIONS = 15
-
-_PLATFORM_CONTEXT: dict[str, str] = {
-    "sms": (
-        "You are communicating via SMS. Keep responses very short — "
-        "a few sentences max. No one wants a wall of text on their phone. "
-        "If content is long (reports, detailed explanations, lists), "
-        "offer to send it to Discord instead using send_to_channel. "
-        "Use abbreviations where natural."
-    ),
-    "discord": (
-        "You are communicating via Discord. Keep responses concise and clear; "
-        "you can use a paragraph or two when the topic warrants it."
-    ),
-}
 
 _AUTH_CONTEXT: dict[str, str] = {
     "owner_verified": (
@@ -858,11 +848,6 @@ def _build_state_block(
     if _user_name:
         user_parts.append(f"Name: {_user_name}")
     if user_knowledge_entries:
-        _SOURCE_TAGS = {
-            "identity": "stated", "habitual": "observed",
-            "structural": "established", "episodic": "remembered",
-            "contextual": "recent",
-        }
         seen_content: set[str] = set()
         for entry in user_knowledge_entries:
             normalized = entry.content.strip().lower()
@@ -872,7 +857,7 @@ def _build_state_block(
             if agent_name.lower() in normalized and "user" in normalized and "name" in normalized:
                 continue
             seen_content.add(normalized)
-            tag = _SOURCE_TAGS.get(getattr(entry, "lifecycle_archetype", ""), "known")
+            tag = KNOWLEDGE_SOURCE_TAGS.get(getattr(entry, "lifecycle_archetype", ""), "known")
             user_parts.append(f"{entry.content} [{tag}]")
     # Member-first communication style: profile → soul (legacy compat)
     _comm_style = (member_profile or {}).get("communication_style", "") or soul.communication_style

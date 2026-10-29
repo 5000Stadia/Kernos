@@ -17,11 +17,13 @@ from kernos.messages.models import AuthLevel
 from kernos.providers.base import ContentBlock, ProviderResponse
 
 
-async def _capture_system(*, timestamp, user_timezone="UTC", envelope=None):
+async def _capture_system(*, timestamp, user_timezone="UTC", envelope=None,
+                          platform="internal", knowledge_entries=()):
     packet = await populate_packet(PopulationContext(
         timestamp_utc=timestamp,
         user_timezone=user_timezone,
-        platform="internal",
+        platform=platform,
+        knowledge_entries=knowledge_entries,
         member_profile={"hatched": True, "bootstrap_graduated": True},
         execution_envelope=envelope,
     ))
@@ -105,3 +107,24 @@ async def test_running_plan_uses_auto_advance_guidance_on_both_prompt_paths():
         assert "The system advances the plan after this step completes" in prompt
         assert "then call manage_plan" not in prompt
         assert "FINAL STEP" not in prompt
+
+
+@pytest.mark.parametrize("platform, guidance", [
+    ("sms", "Keep responses very short"),
+    ("discord", "Keep responses concise and clear"),
+])
+async def test_live_prompt_keeps_platform_response_guidance(platform, guidance):
+    system = await _capture_system(
+        timestamp=datetime(2026, 10, 29, tzinfo=timezone.utc), platform=platform,
+    )
+    assert guidance in system
+
+
+async def test_observed_fact_keeps_its_source_label_in_live_prompt():
+    system = await _capture_system(
+        timestamp=datetime(2026, 10, 29, tzinfo=timezone.utc),
+        knowledge_entries=(SimpleNamespace(
+            content="Usually chooses a short report", lifecycle_archetype="habitual",
+        ),),
+    )
+    assert "Usually chooses a short report [observed]" in system

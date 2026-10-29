@@ -48,7 +48,11 @@ from typing import Any, Awaitable, Callable
 from kernos.kernel.enactment.service import (
     PresenceRenderResult,
 )
-from kernos.kernel.execution_context import format_execution_envelope
+from kernos.kernel.execution_context import (
+    KNOWLEDGE_SOURCE_TAGS,
+    PLATFORM_CONTEXT,
+    format_execution_envelope,
+)
 from kernos.kernel.integration.briefing import (
     ActionKind,
     Briefing,
@@ -418,6 +422,10 @@ def _render_substrate(packet: Any) -> str:
             )
         if now.platform:
             now_lines.append(f"Platform: {now.platform}")
+            now_lines.append(PLATFORM_CONTEXT.get(
+                now.platform,
+                f"You are communicating via {now.platform}. Keep responses concise.",
+            ))
         if now.auth_level:
             now_lines.append(f"Sender auth level: {now.auth_level}")
         if now.member_display_name:
@@ -470,7 +478,8 @@ def _render_substrate(packet: Any) -> str:
         for entry in state.knowledge_entries or ():
             content = getattr(entry, "content", "")
             if content:
-                user_lines.append(content)
+                tag = KNOWLEDGE_SOURCE_TAGS.get(getattr(entry, "lifecycle_archetype", ""), "known")
+                user_lines.append(f"{content} [{tag}]")
         if user_lines:
             state_parts.append("USER CONTEXT:\n" + "\n".join(user_lines))
         # Relationships — only render non-default declarations
