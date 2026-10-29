@@ -107,6 +107,7 @@ class NowBlock:
     active_space_name: str
     agent_name: str
     execution_envelope: dict[str, Any] | None = None
+    active_space_posture: str = ""
 
 
 @dataclass(frozen=True)

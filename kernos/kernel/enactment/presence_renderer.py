@@ -428,6 +428,13 @@ def _render_substrate(packet: Any) -> str:
             now_lines.append(
                 f"Active space: {now.active_space_name}"
             )
+        if now.active_space_posture:
+            now_lines.append(
+                f"Current operating context: {now.active_space_name}\n"
+                "(This shapes your working style — it does not override "
+                "your core values or hard boundaries.)\n"
+                f"{now.active_space_posture}"
+            )
         execution_context = format_execution_envelope(now.execution_envelope)
         if execution_context:
             now_lines.append(execution_context)

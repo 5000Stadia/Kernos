@@ -97,6 +97,7 @@ from kernos.kernel.response_delivery import (
     wrap_chain_caller_with_telemetry,
 )
 from kernos.kernel.soul import Soul
+from kernos.kernel.spaces import ContextSpace
 from kernos.kernel.state import (
     CovenantRule,
     InstanceProfile,
@@ -1250,3 +1251,63 @@ async def test_presence_directive_additive_not_replacing_substrate(
             f"Looked for: {PRESENCE_DIRECTIVE_MARKER!r}; "
             f"system head: {system[:300]!r}"
         )
+
+
+@pytest.mark.parametrize("is_default", [False, True])
+async def test_configured_space_posture_reaches_final_model(monkeypatch, is_default):
+    from kernos.kernel.router import RouterResult
+
+    handler, mock_provider = _make_handler(decoupled=True, monkeypatch=monkeypatch)
+    space = ContextSpace(
+        id="space_example", instance_id="sms:+15555550100", name="Writing",
+        posture="Explain choices through short fictional examples.",
+        is_default=is_default,
+    )
+    handler._router.route = AsyncMock(return_value=RouterResult(
+        tags=[space.id], focus=space.id, continuation=True,
+    ))
+    handler.state.get_context_space.return_value = space
+    _inject_space_context(handler)
+
+    system, _tools, _messages = await _run_capture(handler, mock_provider)
+
+    if is_default:
+        assert space.posture not in system
+    else:
+        assert "Current operating context: Writing" in system
+        assert "This shapes your working style" in system
+        assert "does not override your core values or hard boundaries" in system
+        assert space.posture in system
+
+
+@pytest.mark.parametrize("developer_mode", [True, False])
+async def test_pending_developer_error_reaches_final_model_once(
+    monkeypatch, developer_mode,
+):
+    handler, mock_provider = _make_handler(decoupled=True, monkeypatch=monkeypatch)
+    handler.state.get_instance_profile.return_value.developer_mode = developer_mode
+    _inject_space_context(handler, results_prefix="Earlier synthetic receipt.")
+    error_marker = "Synthetic lookup failed: example item missing."
+    handler._error_buffer.collect("sms:+15555550100", error_marker)
+    drain = MagicMock(wraps=handler._error_buffer.drain)
+    monkeypatch.setattr(handler._error_buffer, "drain", drain)
+    assembled = {}
+    original_assemble = handler._phase_assemble
+
+    async def capture_assemble(ctx):
+        await original_assemble(ctx)
+        assembled["ctx"] = ctx
+
+    monkeypatch.setattr(handler, "_phase_assemble", capture_assemble)
+    system, _tools, _messages = await _run_capture(handler, mock_provider)
+    ctx = assembled["ctx"]
+
+    assert "Earlier synthetic receipt." in system
+    if developer_mode:
+        drain.assert_called_once_with("sms:+15555550100")
+        for text in (system, ctx.results_prefix, ctx.system_prompt,
+                     ctx.system_prompt_dynamic, ctx.cognitive_context.results.results_prefix):
+            assert text.count(error_marker) == 1
+    else:
+        drain.assert_not_called()
+        assert error_marker not in system

@@ -212,7 +212,8 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         wiring_state="wired",
         notes=(
             "Constructed from turn provisioning context (member_id, "
-            "space_id, platform, message timestamp, auth_level). The "
+            "space_id, platform, message timestamp, auth_level, and "
+            "non-default active-space working style). The "
             "construction helper lives in this module so the source "
             "is self-contained."
         ),
@@ -567,6 +568,7 @@ class PopulationContext:
     auth_level: str = ""
     timestamp_utc: datetime | None = None
     active_space_name: str = ""
+    active_space_posture: str = ""
     member_display_name: str = ""
     agent_name: str = ""
     execution_envelope: dict[str, Any] | None = None
@@ -764,6 +766,7 @@ def _construct_now_block(ctx: PopulationContext) -> Any:
         active_space_name=ctx.active_space_name,
         agent_name=ctx.agent_name,
         execution_envelope=ctx.execution_envelope,
+        active_space_posture=ctx.active_space_posture,
     )
 
 

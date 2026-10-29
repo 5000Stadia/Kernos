@@ -864,6 +864,14 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         except Exception:
             pass
     state_block = _build_state_block(soul, PRIMARY_TEMPLATE, user_knowledge_entries, member_profile=ctx.member_profile, relationships=_rels)
+    # Drain developer errors once into RESULTS so both prompt paths receive them.
+    instance_profile = await handler.state.get_instance_profile(instance_id)
+    if instance_profile and getattr(instance_profile, 'developer_mode', False):
+        error_block = handler._error_buffer.drain(instance_id)
+        if error_block:
+            ctx.results_prefix = "\n\n".join(
+                part for part in (ctx.results_prefix, error_block) if part
+            )
     results = _build_results_block(ctx.results_prefix)
     actions = _build_actions_block(capability_prompt, message, handler._channel_registry)
     memory = _build_memory_block(ctx.memory_prefix)
@@ -893,13 +901,6 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     ctx.system_prompt_static = _compose_blocks(rules, actions)
     ctx.system_prompt_dynamic = _compose_blocks(now_block, state_block, results, procedures, canvases, memory, signatures_block)
     ctx.system_prompt = _compose_blocks(ctx.system_prompt_static, ctx.system_prompt_dynamic)
-
-    # Developer mode: inject pending errors
-    instance_profile = await handler.state.get_instance_profile(instance_id)
-    if instance_profile and getattr(instance_profile, 'developer_mode', False):
-        error_block = handler._error_buffer.drain(instance_id)
-        if error_block:
-            ctx.system_prompt += "\n\n" + error_block
 
     # Pending trigger deliveries
     try:
@@ -1099,6 +1100,10 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             timestamp_utc=utc_now_dt(),
             active_space_name=(
                 active_space.name if active_space else ""
+            ),
+            active_space_posture=(
+                active_space.posture
+                if active_space and not active_space.is_default else ""
             ),
             member_display_name=(
                 (ctx.member_profile or {}).get("display_name", "")
