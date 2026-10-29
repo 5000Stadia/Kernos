@@ -501,9 +501,12 @@ class RetrievalService:
             instance_id, query, active_space_id, scope_chain,
             member_id=requesting_member_id, include_ledger=False,
         )
+        thread_task = self._search_threads(
+            instance_id, query, scope_chain or [active_space_id], requesting_member_id,
+        )
 
-        knowledge_candidates, entity_results, ledger_hits, raw_hits, archive_result = await asyncio.gather(
-            knowledge_task, entity_task, ledger_task, raw_task, archive_task,
+        knowledge_candidates, entity_results, ledger_hits, raw_hits, archive_result, thread_result = await asyncio.gather(
+            knowledge_task, entity_task, ledger_task, raw_task, archive_task, thread_task,
             return_exceptions=True,
         )
 
@@ -523,6 +526,9 @@ class RetrievalService:
         if isinstance(archive_result, Exception):
             logger.warning("Retrieval: legacy archive search failed: %s", archive_result)
             archive_result = None
+        if isinstance(thread_result, Exception):
+            logger.warning("Retrieval: thread-state search failed: %s", thread_result)
+            thread_result = None
 
         # Collect MAYBE_SAME_AS for uncertainty notes (gated per the design review edit #4)
         maybe_same_as = await self._collect_maybe_same_as(
@@ -549,7 +555,36 @@ class RetrievalService:
             knowledge_candidates, entity_results, archive_result, maybe_same_as,
             ledger_hits=ledger_hits, active_space_id=active_space_id,
             raw_hits=raw_hits, query=query,
+            thread_result=thread_result,
         )
+
+    async def _search_threads(self, instance_id: str, query: str, spaces: list[str], member_id: str) -> list[tuple[str, str]]:
+        if not member_id or self.compaction is None:
+            return []
+        docs = []
+        for space in spaces:
+            for item in await self.compaction.load_thread_evidence(instance_id, space, member_id):
+                docs.append((space, item))
+        overview = re.search(r"\b(open|pending|unresolved)\b.*\b(commitment|decision|thread|item)s?\b", query, re.I)
+        if overview:
+            open_docs = [(i, item) for i, (_, item) in enumerate(docs) if item["status"] == "open"]
+            # Status and record-type words describe the filter, not the subject.
+            # Excluding them prevents generic matches from displacing the topic.
+            subject = " ".join(
+                token for token in _bm25_tokens(query)
+                if token not in {"open", "pending", "unresolved", "commitment", "commitments",
+                                 "decision", "decisions", "thread", "threads", "item", "items"}
+            )
+            if subject:
+                hits = [open_docs[i][0] for i, _ in bm25_rank(subject, [item["text"] for _, item in open_docs])[:3]]
+            else:
+                hits = [i for i, _ in open_docs[:3]]
+        else:
+            hits = [i for i, _ in bm25_rank(query, [item["text"] for _, item in docs])[:3]]
+        if not hits:
+            return []
+        return [(f"Thread state [space: {docs[i][0]}; {docs[i][1].get('label', docs[i][1]['status'])}]:",
+                 docs[i][1]["text"]) for i in hits]
 
     async def _search_conversations(
         self, instance_id: str, query: str, scope_chain: list[str], member_id: str,
@@ -1139,6 +1174,7 @@ class RetrievalService:
         active_space_id: str = "",
         raw_hits: list | None = None,
         query: str = "",
+        thread_result: list[tuple[str, str]] | None = None,
     ) -> str:
         """Pack evidence within the shared 1,500-token (6,000-character) budget.
 
@@ -1159,7 +1195,17 @@ class RetrievalService:
                 return True
             return False
 
-        other = knowledge_results or entity_results or ledger_hits or archive_result
+        if thread_result:
+            from kernos.kernel.raw_recall import excerpt_text
+            thread_remaining = 1600
+            for header, body in thread_result:
+                available = min(900, thread_remaining - len(header) - 3)
+                if available < 100:
+                    continue
+                part = header + "\n" + excerpt_text(body, query, available)
+                if append(part):
+                    thread_remaining -= len(part) + 2
+        other = knowledge_results or entity_results or ledger_hits or archive_result or thread_result
         raw_remaining = min(remaining, 4000) if other else remaining
         for window in raw_hits or []:
             text = format_window(window, query, raw_remaining - (2 if parts else 0))
