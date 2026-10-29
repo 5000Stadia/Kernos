@@ -1,77 +1,77 @@
 {
   "file_path": "docs/architecture/memory.md",
-  "source_hash": "31a47184845a987dab3637654ffaca6afddf0fd64370b8c87261f287708d8619",
-  "generated_at": "2026-10-29T07:51:31.379480+00:00",
+  "source_hash": "44f136e4b07c37d764aa4eabfeed278a6b694ea142e3142cc02737162d58e997",
+  "generated_at": "2026-10-29T09:28:25.246434+00:00",
   "sections": [
     {
       "section_title": "The problem",
-      "one_line": "The problem of combining narrative history and durable facts in a single memory store",
+      "one_line": "Separates narrative history from durable facts to make agent memory reliable and referenceable.",
       "line_start": 5,
       "line_end": 17
     },
     {
       "section_title": "Two stores",
-      "one_line": "How the Ledger and Facts stores preserve conversation history and durable structured knowledge",
+      "one_line": "How the Ledger and Facts stores preserve conversational history and durable structured knowledge.",
       "line_start": 18,
       "line_end": 56
     },
     {
       "section_title": "Single-call reconciliation",
-      "one_line": "Single-call fact extraction that reconciles new information with existing facts and safely applies updates or reinforce…",
+      "one_line": "Single-call fact extraction that reconciles new information with existing facts and safely applies changes.",
       "line_start": 57,
       "line_end": 90
     },
     {
       "section_title": "Boundary-triggered, not turn-triggered",
-      "one_line": "Boundary-based refresh of durable memory at compaction and space switches, rather than on every turn",
+      "one_line": "When durable memory stores refresh at compaction and space-switch boundaries rather than every turn",
       "line_start": 91,
       "line_end": 111
     },
     {
       "section_title": "Member-scoping",
-      "one_line": "Per-member scoping of logs, facts, archives, and knowledge in multi-member installations",
+      "one_line": "Per-member scoping of ledgers, facts, logs, archives, and knowledge queries in multi-member installations",
       "line_start": 112,
       "line_end": 124
     },
     {
       "section_title": "The two failure modes, addressed",
-      "one_line": "How the two-store model prevents summary drift, fact duplication, contradiction, and orphaned truth",
+      "one_line": "How the two-store model prevents summary drift, fact duplication, contradictions, and orphaned truths",
       "line_start": 125,
       "line_end": 133
     },
     {
       "section_title": "What this architecture makes easy",
-      "one_line": "Architecture benefits for long-term grounding, trustworthy facts, graceful updates, sensitivity, and per-member privacy",
+      "one_line": "Architecture benefits for long-term grounding, reliable facts, clean updates, sensitivity, and member-level privacy",
       "line_start": 134,
       "line_end": 141
     },
     {
       "section_title": "What this architecture explicitly does not try to do",
-      "one_line": "Scope and limitations of Kernos's fact harvesting, state refresh, and history management architecture",
+      "one_line": "Explicit boundaries and non-goals of Kernos’s state, memory, and fact-harvesting architecture",
       "line_start": 142,
       "line_end": 148
     },
     {
       "section_title": "Raw-history recall: an architectural upgrade",
-      "one_line": "Raw-history recall in remember: lexical search, caching, isolation, and response-budget behavior",
+      "one_line": "Raw lexical search of closed conversation logs, caching, result windows, and retrieval limits",
       "line_start": 149,
       "line_end": 156
     },
     {
       "section_title": "Living State: cohesive continuation without recursive prose",
-      "one_line": "Member-scoped durable memory, evidence verification, narrative compaction, migration, and bounded thread state.",
+      "one_line": "Evidence-backed member-scoped Living State for verified decisions, cohesive compaction, migration, and durable continui…",
       "line_start": 157,
       "line_end": 172
     },
     {
       "section_title": "Related architecture",
-      "one_line": "Architecture links covering context spaces, disclosure layering, and cohort services",
+      "one_line": "Links to related documentation on context spaces, disclosure layering, and cohort architecture",
       "line_start": 173,
       "line_end": 178
     },
     {
       "section_title": "Code entry points",
-      "one_line": "Code entry points for fact harvesting, compaction, retrieval, historical recall, and member-scoped state management.",
+      "one_line": "Code entry points for fact harvesting, compaction, retrieval, conversation history, and member-scoped state management",
       "line_start": 179,
       "line_end": 189
     }
