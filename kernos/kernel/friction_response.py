@@ -120,14 +120,56 @@ def signature_of_filename(name: str) -> tuple[str, str]:
 _RECOMMENDATION_RE = re.compile(r"^#*\s*Recommendation:\s*(.+)$", re.MULTILINE)
 
 
+def _detector_identity(body: str, friction_type: str) -> dict | None:
+    """Read only the bounded writer preamble, never user/model report content.
+
+    Unknown or malformed metadata retains the legacy signature contract. This
+    is additive: historical reports and their ledger keys are never re-keyed.
+    """
+    prefix = body[:4096]
+    if "\n\n" not in prefix:
+        return None
+    preamble = prefix.split("\n\n", 1)[0].splitlines()
+    if (len(preamble) != 4
+            or preamble[0] != f"# Friction Report: {friction_type}"
+            or not preamble[1].startswith("Generated: ")
+            or not preamble[2].startswith("Class: ")
+            or not preamble[3].startswith("Problem-Identity: ")):
+        return None
+    raw = preamble[3][len("Problem-Identity: "):]
+    if len(raw) > 2048:
+        return None
+    try:
+        identity = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if (not isinstance(identity, dict)
+            or set(identity) != {"version", "site", "resource"}
+            or type(identity["version"]) is not int
+            or identity["version"] != 1):
+        return None
+    site, resource = identity["site"], identity["resource"]
+    if (not isinstance(site, str) or not site.strip() or len(site) > 200
+            or not isinstance(resource, str) or len(resource) > 1000
+            or any(c in site + resource for c in "\r\n")):
+        return None
+    return identity
+
+
 def signature_from_report(name: str, body: str = "") -> tuple[str, str]:
-    """A STABLE per-problem (type, signature) using the report BODY, not just
-    the coarse filename type (Codex code-review High-4). Folds the report's
-    Recommendation (a stable detector field) into the signature, so two
-    different problems sharing a generic type don't collapse — while same-cause
-    repeats (e.g. one connection leak) still share a signature. Falls back to
-    type-only when there's no body."""
+    """Prefer deterministic detector metadata; preserve legacy keys otherwise.
+
+    New identities exclude model-chosen recommendations and distinguish sites
+    and resources within a coarse type. Existing reports keep their historical
+    Recommendation-based identity so existing ledger references still work.
+    """
     ftype, _ = signature_of_filename(name)
+    identity = _detector_identity(body, ftype)
+    if identity is not None:
+        return ftype, friction_signature(
+            friction_type=ftype,
+            code=json.dumps(identity, sort_keys=True, separators=(",", ":")),
+        )
     rec = ""
     if body:
         m = _RECOMMENDATION_RE.search(body)

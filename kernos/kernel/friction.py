@@ -49,6 +49,10 @@ class FrictionSignal:
     # future need — Shape A daily review works it during downtime; reactive Shape
     # B and the active-pattern/autonomy escalation path both SKIP it).
     report_class: str = "error"
+    # Deterministic detector site/resource, never generated description or
+    # recommendation. Empty site retains the legacy report identity contract.
+    problem_site: str = ""
+    problem_resource: str = ""
 
 
 # Opportunity detector cues (SELF-MAINTENANCE-REVIEW-V3). High-precision: a
@@ -140,6 +144,7 @@ class FrictionObserver:
                     f"Tool calls: {[t['name'] for t in tool_trace] or 'none'}",
                 ],
                 context=ctx_snapshot,
+                problem_site="response.empty",
             ))
 
         # Signal 1: TOOL_REQUEST_FOR_SURFACED_TOOL
@@ -266,6 +271,8 @@ class FrictionObserver:
                         f"Matching surfaced: {sorted(set(matching_surfaced))}",
                     ],
                     context=ctx,
+                    problem_site="request_tool.already_surfaced",
+                    problem_resource=json.dumps(sorted(set(matching_surfaced))),
                 )
         return None
 
@@ -321,6 +328,7 @@ class FrictionObserver:
                     f"Response words: {words}",
                 ],
                 context=ctx,
+                problem_site="response.merged_messages_dropped",
             )
         return None
 
@@ -344,6 +352,7 @@ class FrictionObserver:
                     f"pref_detected: {pref_detected}",
                 ],
                 context=ctx,
+                problem_site="preference.capture_missed",
             )
         return None
 
@@ -371,6 +380,8 @@ class FrictionObserver:
                     ],
                     context=ctx,
                     heuristic=True,
+                    problem_site="time.authoritative_source_unused",
+                    problem_resource="get-current-time",
                 )
         return None
 
@@ -401,6 +412,8 @@ class FrictionObserver:
                     ],
                     context=ctx,
                     heuristic=True,
+                    problem_site="state.structured_read_unused",
+                    problem_resource="inspect_state/remember",
                 )
 
         # Schedule/trigger queries — manage_schedule is for triggers, NOT calendar.
@@ -424,6 +437,8 @@ class FrictionObserver:
                     ],
                     context=ctx,
                     heuristic=True,
+                    problem_site="trigger.structured_read_unused",
+                    problem_resource="manage_schedule",
                 )
         return None
 
@@ -442,6 +457,8 @@ class FrictionObserver:
             return None
 
         top_msg, top_count = max(repeated.items(), key=lambda x: x[1])
+        # The input has no structured provider/code/site identity. Keep legacy
+        # identity rather than guessing which parts of an error string vary.
         return FrictionSignal(
             signal_type="PROVIDER_ERROR_REPEATED",
             description=(
@@ -491,6 +508,8 @@ class FrictionObserver:
                         context=ctx,
                         heuristic=True,
                         report_class="opportunity",
+                        problem_site="tool.retry_better_method",
+                        problem_resource=json.dumps([worse, name]),
                     )
         return None
 
@@ -509,6 +528,8 @@ class FrictionObserver:
             return None
         if not any(c in text for c in _NEED_CUES):
             return None
+        # Free-form capability requests have no structured resource identity;
+        # retain legacy keys instead of treating every future need as one.
         return FrictionSignal(
             signal_type="DEFERRED_CAPABILITY_REQUEST",
             description=(
@@ -554,10 +575,18 @@ class FrictionObserver:
         if signal.heuristic:
             heuristic_note = "\n**Confidence:** LOW (heuristic — may be a false positive)\n"
 
+        identity_line = ""
+        if signal.problem_site:
+            identity_line = "Problem-Identity: " + json.dumps({
+                "version": 1, "site": signal.problem_site,
+                "resource": signal.problem_resource,
+            }, sort_keys=True) + "\n"
+
         report = (
             f"# Friction Report: {signal.signal_type}\n"
             f"Generated: {datetime.now(timezone.utc).isoformat()}\n"
             f"Class: {signal.report_class}\n"
+            f"{identity_line}"
             f"{heuristic_note}\n"
             f"## Description\n{llm_description}\n\n"
             f"## Recommendation: {recommendation}\n"
