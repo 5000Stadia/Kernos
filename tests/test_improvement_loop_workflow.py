@@ -851,7 +851,7 @@ async def test_handle_returns_prose_with_attempt_id(loop_env):
         handle_improve_kernos,
     )
 
-    data_dir, _ = loop_env
+    data_dir, repo_dir = loop_env
 
     # Build a stub "handler" object that exposes consult_fn
     # the orchestrator can find.
@@ -865,6 +865,7 @@ async def test_handle_returns_prose_with_attempt_id(loop_env):
         tool_input={"spec_requirement": "trivial fix"},
         instance_id="t1",
         data_dir=data_dir,
+        live_repo_dir=repo_dir,
     )
     await handler._last_improvement_orchestrator.wait_for_running_tasks(
         timeout=10,
@@ -881,7 +882,7 @@ async def test_handle_missing_consult_seam_fails_before_attempt(loop_env):
         handle_improve_kernos,
     )
 
-    data_dir, _ = loop_env
+    data_dir, repo_dir = loop_env
 
     class _UnwiredHandler:
         events = None
@@ -891,6 +892,7 @@ async def test_handle_missing_consult_seam_fails_before_attempt(loop_env):
         tool_input={"spec_requirement": "trivial fix"},
         instance_id="t1",
         data_dir=data_dir,
+        live_repo_dir=repo_dir,
     )
     assert "consult seam" in text
     db = InstanceDB(data_dir)

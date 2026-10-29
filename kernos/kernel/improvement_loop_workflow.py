@@ -3732,6 +3732,7 @@ async def recovery_tools_visible_for_space(
 async def handle_improve_kernos(
     *, handler: Any, tool_input: dict, instance_id: str,
     data_dir: str, origin_space_id: str = "", origin_member_id: str = "",
+    live_repo_dir: str = "",
 ) -> str:
     """Dispatch entry point. Builds an orchestrator + starts
     the attempt + returns prose containing the attempt_id."""
@@ -3765,10 +3766,13 @@ async def handle_improve_kernos(
     # Resolve live_repo_dir from the running process. The Kernos
     # binary lives in <repo>/kernos/server.py; walk up from this
     # module's path.
-    from pathlib import Path
-    import kernos
-    kernos_pkg_dir = Path(kernos.__file__).resolve().parent
-    live_repo_dir = str(kernos_pkg_dir.parent)
+    # live_repo_dir is passed only by tests, which must never branch or
+    # worktree the real repository.
+    if not live_repo_dir:
+        from pathlib import Path
+        import kernos
+        kernos_pkg_dir = Path(kernos.__file__).resolve().parent
+        live_repo_dir = str(kernos_pkg_dir.parent)
 
     async def _notify_terminal(attempt_id: str, final_state: str) -> None:
         """When the background attempt finishes (approval gate OR abort),
