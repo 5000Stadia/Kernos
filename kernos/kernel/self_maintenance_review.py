@@ -121,7 +121,8 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "cognitive-context-assembly",
         "The typed cognitive substrate + seven Cognitive-UI zones + response "
         "delivery.",
-        ("kernos/kernel/cognitive_context/", "kernos/kernel/response_delivery.py"),
+        ("kernos/kernel/cognitive_context/", "kernos/kernel/response_delivery.py",
+         "kernos/kernel/execution_context.py"),
     ),
     ReviewSlice(
         "context-routing",
