@@ -31,6 +31,7 @@ import asyncio
 import inspect
 import json
 import logging
+import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -282,6 +283,20 @@ class Event:
 # ---------------------------------------------------------------------------
 
 
+def _is_event_data_error(exc: Exception) -> bool:
+    """Errors tied to one row, rather than database availability/health."""
+    if isinstance(
+        exc, (sqlite3.IntegrityError, sqlite3.DataError, OverflowError, UnicodeError),
+    ):
+        return True
+    # ProgrammingError also covers a closed connection: only binding errors
+    # identify malformed event data that retrying cannot repair.
+    return (
+        isinstance(exc, sqlite3.ProgrammingError)
+        and str(exc).startswith("Error binding parameter ")
+    )
+
+
 class _EventWriter:
     """Background writer — owns the queue, the flusher task, the DB conn."""
 
@@ -363,38 +378,81 @@ class _EventWriter:
                 logger.warning("EVENT_STREAM_FLUSH_FAILED: %s", exc)
 
     async def _flush_once(self) -> None:
-        """Take the queue snapshot, write it to SQLite, clear."""
+        """Commit valid events; reject bad rows and retry database failures."""
         if self._db is None:
             return
         if not self._queue:
             return
         async with self._lock:
+            # Aiosqlite serializes statements, not transactions. Keep the
+            # snapshot, writes, commit and any rollback under one flush lock.
             batch = list(self._queue)
             self._queue.clear()
-        if not batch:
-            return
-        rows = [e.to_row() for e in batch]
-        try:
-            await self._db.executemany(
-                "INSERT INTO events "
-                "(event_id, instance_id, member_id, space_id, timestamp, "
-                " event_type, payload, correlation_id, source_module) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rows,
-            )
-            await self._db.commit()
-        except Exception as exc:
-            logger.warning(
-                "EVENT_STREAM_WRITE_FAILED: batch=%d error=%s", len(rows), exc,
-            )
-            # Put them back at the front so we retry next flush
-            async with self._lock:
+            if not batch:
+                return
+            try:
+                prepared = []
+                for event in batch:
+                    try:
+                        prepared.append((event, event.to_row()))
+                    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+                        logger.warning(
+                            "EVENT_STREAM_EVENT_REJECTED event_id=%s event_type=%s error=%s",
+                            event.event_id, event.event_type, exc,
+                        )
+                batch = [event for event, _ in prepared]
+                if not batch:
+                    return
+                insert_sql = (
+                    "INSERT INTO events "
+                    "(event_id, instance_id, member_id, space_id, timestamp, "
+                    " event_type, payload, correlation_id, source_module) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                try:
+                    await self._db.executemany(insert_sql, [row for _, row in prepared])
+                except Exception as exc:
+                    if not _is_event_data_error(exc):
+                        raise
+                    # Executemany may have inserted a valid prefix. Undo it
+                    # before isolating individual bad rows in a fresh batch.
+                    await self._db.rollback()
+                    accepted = []
+                    for index, (event, row) in enumerate(prepared):
+                        try:
+                            async with self._db.execute(insert_sql, row):
+                                pass
+                        except Exception as row_exc:
+                            if not _is_event_data_error(row_exc):
+                                # Retain accepted and not-yet-tried events if
+                                # a database failure interrupts row isolation.
+                                batch = accepted + [e for e, _ in prepared[index:]]
+                                raise
+                            logger.warning(
+                                "EVENT_STREAM_EVENT_REJECTED event_id=%s event_type=%s error=%s",
+                                event.event_id, event.event_type, row_exc,
+                            )
+                            continue
+                        accepted.append(event)
+                    batch = accepted
+                await self._db.commit()
+            except Exception as exc:
+                logger.warning(
+                    "EVENT_STREAM_WRITE_FAILED: batch=%d error=%s", len(batch), exc,
+                )
+                try:
+                    await self._db.rollback()
+                except Exception as rollback_exc:
+                    logger.warning("EVENT_STREAM_ROLLBACK_FAILED: %s", rollback_exc)
+                # Enqueues can arrive while SQLite is awaited. Retry older
+                # valid events before them, without replaying rejected rows.
                 self._queue = batch + self._queue
-            return
+                return
         # Successful durable persist — fire post-flush hooks. Hook
         # exceptions are caught inside _fire_post_flush_hooks so they
         # cannot disturb the writer task's flush path.
-        await _fire_post_flush_hooks(batch)
+        if batch:
+            await _fire_post_flush_hooks(batch)
 
     async def read_db(self) -> aiosqlite.Connection | None:
         """Return the live DB connection for queries. Used by read functions."""
