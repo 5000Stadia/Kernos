@@ -3545,7 +3545,9 @@ class MessageHandler:
             logger.warning("CROSS_DOMAIN_DELIVER: failed: %s", exc)
 
         # 2c. System events → RESULTS
-        system_events = self.drain_system_events(instance_id, member_id=member_id)
+        from kernos.kernel.scheduler import resolve_owner_member_id
+        recipient = member_id or resolve_owner_member_id(instance_id)
+        system_events = self.drain_system_events(instance_id, member_id=recipient)
         if system_events:
             events_block = "RECENT SYSTEM EVENTS:\n" + "\n".join(system_events)
             results_parts.append(events_block)

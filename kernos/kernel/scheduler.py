@@ -1072,9 +1072,9 @@ async def evaluate_triggers(
                     "TRIGGER_RETIRED: id=%s reason=structural error=%s",
                     trigger.trigger_id, exc,
                 )
-                _notify_retirement(handler, trigger)
+                await _notify_retirement(handler, trigger)
             else:
-                _apply_transient_failure(trigger, handler)
+                await _apply_transient_failure(trigger, handler)
             await trigger_store.save(trigger)
             logger.error(
                 "TRIGGER_FIRE: id=%s action=%s EXCEPTION: %s",
@@ -1225,7 +1225,7 @@ async def _fire_trigger(trigger: Trigger, handler) -> bool:
                     "TRIGGER_RETIRED: id=%s reason=structural tool=%s",
                     trigger.trigger_id, tool_name,
                 )
-                _notify_retirement(handler, trigger)
+                await _notify_retirement(handler, trigger)
                 return False
 
             # Deliver result to user
@@ -1259,29 +1259,29 @@ async def _fire_trigger(trigger: Trigger, handler) -> bool:
                     "TRIGGER_RETIRED: id=%s reason=structural error=%s",
                     trigger.trigger_id, exc,
                 )
-                _notify_retirement(handler, trigger)
+                await _notify_retirement(handler, trigger)
             else:
-                _apply_transient_failure(trigger, handler)
+                await _apply_transient_failure(trigger, handler)
             return False
 
     trigger.failure_reason = f"Unknown action_type: {trigger.action_type}"
     return False
 
 
-def _notify_retirement(handler, trigger: Trigger) -> None:
+async def _notify_retirement(handler, trigger: Trigger) -> None:
     """Queue a system event for trigger retirement."""
     try:
         handler.queue_system_event(
             trigger.instance_id,
             f'[SYSTEM] trigger_retired: "{trigger.action_description}" — '
             f'{trigger.failure_reason}. Recreate under event triggers if needed.',
-            member_id=trigger.member_id,
+            member_id=await trigger_member_id(trigger, handler),
         )
     except Exception:
         pass
 
 
-def _apply_transient_failure(trigger: Trigger, handler) -> None:
+async def _apply_transient_failure(trigger: Trigger, handler) -> None:
     """Update trigger state for a transient failure."""
     trigger.transient_failure_count += 1
     trigger.last_failure_at = utc_now()
@@ -1304,7 +1304,7 @@ def _apply_transient_failure(trigger: Trigger, handler) -> None:
                 trigger.instance_id,
                 f'[SYSTEM] trigger_degraded: "{trigger.action_description}" — '
                 f'{trigger.failure_reason}. Service may need reconnection.',
-                member_id=trigger.member_id,
+                member_id=await trigger_member_id(trigger, handler),
             )
         except Exception:
             pass
@@ -1347,7 +1347,7 @@ async def retire_stale_triggers(
                         trigger.instance_id,
                         f'[SYSTEM] trigger_retired: "{trigger.action_description}" — '
                         f'{trigger.failure_reason}. Recreate if needed.',
-                        member_id=trigger.member_id,
+                        member_id=await trigger_member_id(trigger, handler),
                     )
                 except Exception:
                     pass

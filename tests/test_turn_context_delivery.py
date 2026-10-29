@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kernos.kernel.awareness import Whisper
+from kernos.kernel.instance_db import InstanceDB
 from kernos.kernel.scheduler import Trigger, _notify_retirement
 from kernos.kernel.soul import Soul
 from kernos.messages.handler import TurnContext
@@ -142,7 +143,7 @@ async def test_trigger_notice_is_not_consumed_by_next_unrelated_speaker(handler)
         member_id="member-a", action_description="example scheduled action",
         failure_reason="missing example tool",
     )
-    _notify_retirement(handler, trigger)
+    await _notify_retirement(handler, trigger)
     b = turn(handler, "member-b", "space-b")
     await handler._phase_assemble(b)
     assert "trigger_retired" not in (b.results_prefix or "")
@@ -152,3 +153,34 @@ async def test_trigger_notice_is_not_consumed_by_next_unrelated_speaker(handler)
     again = turn(handler, "member-a", "space-a")
     await handler._phase_assemble(again)
     assert "trigger_retired" not in (again.results_prefix or "")
+
+
+@pytest.mark.parametrize("legacy_member", ["", "shared-space"])
+async def test_legacy_scheduled_context_reaches_resolved_owner(handler, tmp_path, legacy_member):
+    db = InstanceDB(str(tmp_path))
+    await db.connect()
+    try:
+        owner = await db.ensure_owner(
+            "example-owner", "Example owner", "example-instance", "discord", "example-channel",
+        )
+        handler._instance_db = db
+        trigger = Trigger(
+            trigger_id="legacy-trigger", instance_id="example-instance",
+            member_id=legacy_member, space_id="shared-space",
+            pending_delivery="legacy held result", action_description="legacy scheduled action",
+            failure_reason="missing example tool",
+        )
+        handler._trigger_store.list_all.return_value = [trigger]
+        await _notify_retirement(handler, trigger)
+        unrelated = turn(handler, "member-b", "space-b")
+        await handler._phase_assemble(unrelated)
+        assert "legacy held result" not in unrelated.messages[-1]["content"]
+        assert "trigger_retired" not in (unrelated.results_prefix or "")
+        assert trigger.pending_delivery == "legacy held result"
+        recipient = turn(handler, owner, "shared-space")
+        await handler._phase_assemble(recipient)
+        assert "legacy held result" in recipient.messages[-1]["content"]
+        assert "trigger_retired" in recipient.results_prefix
+        assert trigger.pending_delivery == ""
+    finally:
+        await db.close()

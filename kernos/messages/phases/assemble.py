@@ -904,11 +904,13 @@ async def run(ctx: PhaseContext) -> PhaseContext:
 
     # Pending trigger deliveries
     try:
+        from kernos.kernel.scheduler import resolve_owner_member_id, trigger_member_id
+        recipient = ctx.member_id or resolve_owner_member_id(instance_id)
         pending_triggers = await handler._trigger_store.list_all(instance_id)
         for trig in pending_triggers:
-            if trig.member_id and trig.member_id != ctx.member_id:
-                continue
             if trig.pending_delivery:
+                if await trigger_member_id(trig, handler) != recipient:
+                    continue
                 ctx.upload_notifications.append(
                     f"[Scheduled action result — {trig.action_description}]: {trig.pending_delivery}")
                 trig.pending_delivery = ""
