@@ -676,6 +676,7 @@ class FrictionObserver:
         hand-classify later. Uses the event_stream emit hook if wired,
         otherwise the kernel.event_stream module fallback."""
         payload = {
+            "instance_id": instance_id,
             "signal_type": signal.signal_type,
             "description": signal.description[:200],
             "report_path": filepath,
