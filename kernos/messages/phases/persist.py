@@ -171,9 +171,37 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             content=receipt_text, member_id=ctx.member_id,
         )
 
+    # Compaction and fact harvest are boundary work: they run after the
+    # reply is delivered (run_boundary, called by the space runner).
+    ctx.boundary_pending = True
+
+    # Emit message.sent
+    try:
+        await emit_event(handler.events, EventType.MESSAGE_SENT, instance_id, "handler",
+            payload={"content": ctx.response_text, "conversation_id": ctx.conversation_id, "platform": message.platform})
+    except Exception as exc:
+        logger.warning("Failed to emit message.sent: %s", exc)
+
+    await handler._update_conversation_summary(instance_id, ctx.conversation_id, message.platform)
+    return ctx
+
+
+async def run_boundary(ctx: PhaseContext) -> None:
+    """Compaction and fact harvest for this turn's space and member.
+
+    Runs after the reply has been delivered, still inside the space's turn,
+    so the user never waits on it and the next message in the space waits
+    for it. Failures are logged and backed off; they never reach the user.
+    """
+    handler = ctx.handler
+    instance_id = ctx.instance_id
+    message = ctx.message
+
     # Compaction (with concurrency guard + backoff)
-    if ctx.active_space_id in handler._compacting:
-        logger.info("COMPACTION: already in progress for space=%s, skipping", ctx.active_space_id)
+    _guard = (ctx.active_space_id, ctx.member_id)
+    if _guard in handler._compacting:
+        logger.info("COMPACTION: already in progress for space=%s member=%s, skipping",
+                    ctx.active_space_id, ctx.member_id)
     else:
         try:
             comp_state = await handler.compaction.load_state(instance_id, ctx.active_space_id, member_id=ctx.member_id)
@@ -225,9 +253,14 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                         ctx.active_space_id, new_tokens, comp_state.compaction_threshold, _real_ctx,
                     )
                     if new_tokens >= comp_state.compaction_threshold:
-                        log_text, log_num = await handler.conv_logger.read_current_log_text(instance_id, ctx.active_space_id, member_id=ctx.member_id)
+                        full_text, log_num = await handler.conv_logger.read_current_log_text(instance_id, ctx.active_space_id, member_id=ctx.member_id)
+                        # The seeded head was compacted (and harvested) with the
+                        # previous log; harvest skips what a space switch covered.
+                        _seeded = log_info.get("seeded_chars", 0)
+                        log_text = full_text[_seeded:]
+                        harvest_text = full_text[max(_seeded, log_info.get("harvested_chars", 0)):]
                         if log_text.strip() and ctx.active_space:
-                            handler._compacting.add(ctx.active_space_id)
+                            handler._compacting.add(_guard)
                             # UX signal: notify user on Discord (not SMS)
                             if message.platform == "discord":
                                 try:
@@ -248,8 +281,13 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                                 logger.info("COMPACTION_SEED: space=%s depth=%d (%s)",
                                     ctx.active_space_id, _seed, _seed_source)
                                 handler.reasoning.clear_loaded_tools(ctx.active_space_id)
-                                comp_state.consecutive_failures = 0
-                                comp_state.last_compaction_failure_at = ""
+                                if comp_state.consecutive_failures:
+                                    comp_state.consecutive_failures = 0
+                                    comp_state.last_compaction_failure_at = ""
+                                    await handler.compaction.save_state(
+                                        instance_id, ctx.active_space_id, comp_state,
+                                        member_id=ctx.member_id,
+                                    )
                                 logger.info("COMPACTION_COMPLETE: space=%s source=log_%03d new_log=log_%03d",
                                     ctx.active_space_id, old_num, new_num)
 
@@ -262,7 +300,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                                     from kernos.kernel.fact_harvest import harvest_facts
                                     _outcome = await harvest_facts(
                                         handler.reasoning, handler.state, handler.events,
-                                        instance_id, ctx.active_space_id, log_text,
+                                        instance_id, ctx.active_space_id, harvest_text,
                                         data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
                                         member_id=ctx.member_id,
                                         embedding_service=getattr(handler._retrieval, "embeddings", None),
@@ -341,7 +379,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                                 except Exception as _dax:
                                     logger.warning("DOMAIN_ASSESS/BRIEFING: launch failed: %s", _dax)
                             finally:
-                                handler._compacting.discard(ctx.active_space_id)
+                                handler._compacting.discard(_guard)
                     else:
                         await handler.compaction.save_state(instance_id, ctx.active_space_id, comp_state, member_id=ctx.member_id)
         except Exception as exc:
@@ -354,14 +392,4 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                     await handler.compaction.save_state(instance_id, ctx.active_space_id, comp_state, member_id=ctx.member_id)
             except Exception:
                 pass
-            handler._compacting.discard(ctx.active_space_id)
-
-    # Emit message.sent
-    try:
-        await emit_event(handler.events, EventType.MESSAGE_SENT, instance_id, "handler",
-            payload={"content": ctx.response_text, "conversation_id": ctx.conversation_id, "platform": message.platform})
-    except Exception as exc:
-        logger.warning("Failed to emit message.sent: %s", exc)
-
-    await handler._update_conversation_summary(instance_id, ctx.conversation_id, message.platform)
-    return ctx
+            handler._compacting.discard(_guard)

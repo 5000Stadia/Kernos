@@ -447,7 +447,8 @@ REMEMBER_DETAILS_TOOL = {
     "name": "remember_details",
     "description": (
         "Retrieve exact conversation text from a specific archived source log. "
-        "Use after remember() when a Ledger entry includes 'source: log_NNN'. "
+        "Use after remember() when a Ledger entry includes 'source: log_NNN' "
+        "(and pass its space when remember() names one). "
         "Optional query narrows to the relevant section within that log. "
         "This is a read-only operation — no state is changed."
     ),
@@ -459,6 +460,13 @@ REMEMBER_DETAILS_TOOL = {
                 "description": (
                     "The log reference to retrieve, e.g., 'log_003'. "
                     "Get this from a Ledger entry returned by remember()."
+                ),
+            },
+            "space": {
+                "type": "string",
+                "description": (
+                    "Optional space id the Ledger entry came from, when "
+                    "remember() shows '[space: ...]'. Defaults to the current space."
                 ),
             },
             "query": {

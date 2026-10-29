@@ -8,6 +8,8 @@ When the reasoning service encounters a `remember` tool call, it routes
 to this service instead of MCPClientManager.
 """
 import asyncio
+import math
+import re
 from kernos.utils import utc_now
 import logging
 from dataclasses import dataclass, field
@@ -98,8 +100,46 @@ def lexical_overlap_score(query: str, text: str, key: str = "") -> float:
 
 
 RETRIEVAL_RESULT_TOKEN_BUDGET = 1500
+LEDGER_TOP_K = 3  # Ledger entries returned per remember() call
 FORESIGHT_BOOST = 1.5  # Multiplier for active foresight signals matching the query
 SPACE_RELEVANCE_BOOST = 1.2  # Multiplier for entries extracted in the active space
+
+_BM25_STOPWORDS = frozenset(
+    "a an and are as at be but by did do does for from had has have how i in is it "
+    "its me my of on or our so that the their them then there they this to was we "
+    "were what when where which who why will with you your".split()
+)
+
+
+def _bm25_tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _BM25_STOPWORDS]
+
+
+def bm25_rank(
+    query: str, docs: list[str], k1: float = 1.5, b: float = 0.75,
+) -> list[tuple[int, float]]:
+    """Okapi BM25: (doc index, score) for docs sharing a term with the query, best first."""
+    q_terms = set(_bm25_tokens(query))
+    if not q_terms or not docs:
+        return []
+    tokenized = [_bm25_tokens(d) for d in docs]
+    n = len(docs)
+    avg_len = sum(len(t) for t in tokenized) / n or 1.0
+    df = {term: sum(1 for t in tokenized if term in t) for term in q_terms}
+    scores: list[tuple[int, float]] = []
+    for i, terms in enumerate(tokenized):
+        score = 0.0
+        for term in q_terms:
+            tf = terms.count(term)
+            if not tf:
+                continue
+            idf = math.log(1 + (n - df[term] + 0.5) / (df[term] + 0.5))
+            score += idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * len(terms) / avg_len))
+        if score > 0:
+            scores.append((i, score))
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores
+
 
 # ---------------------------------------------------------------------------
 # Tool definition
@@ -428,27 +468,15 @@ class RetrievalService:
                 instance_db, requesting_member_id,
             )
 
-        # Embed the query
-        try:
-            query_embedding = await self.embeddings.embed(query)
-            embedding_succeeded = True
-        except Exception as exc:
-            logger.warning("Retrieval: embedding failed for query %r: %s", query[:60], exc)
-            query_embedding = None
-            embedding_succeeded = False
+        # Embed the query; without an embedding, facts are matched by words
+        query_embedding = await self._embed_query(query)
 
         # Stage 1: Gather candidates (concurrent via asyncio.gather)
-        async def _empty_knowledge() -> list[ScoredKnowledge]:
-            return []
-
-        if query_embedding is not None:
-            knowledge_task = self._search_knowledge(
-                instance_id, query, query_embedding, active_space_id, scope_chain,
-                requesting_member_id=requesting_member_id,
-                instance_db=instance_db, trace=trace,
-            )
-        else:
-            knowledge_task = _empty_knowledge()
+        knowledge_task = self._search_knowledge(
+            instance_id, query, query_embedding, active_space_id, scope_chain,
+            requesting_member_id=requesting_member_id,
+            instance_db=instance_db, trace=trace,
+        )
 
         entity_task = self._search_entities(
             instance_id, query, active_space_id, scope_chain,
@@ -456,10 +484,16 @@ class RetrievalService:
             permission_map=permission_map,
             trace=trace,
         )
-        archive_task = self._search_archives(instance_id, query, active_space_id, scope_chain)
+        archive_task = self._search_archives(
+            instance_id, query, active_space_id, scope_chain,
+            member_id=requesting_member_id,
+        )
+        ledger_task = self._search_ledger(
+            instance_id, query, active_space_id, scope_chain, requesting_member_id,
+        )
 
-        knowledge_candidates, entity_results, archive_result = await asyncio.gather(
-            knowledge_task, entity_task, archive_task,
+        knowledge_candidates, entity_results, archive_result, ledger_hits = await asyncio.gather(
+            knowledge_task, entity_task, archive_task, ledger_task,
             return_exceptions=True,
         )
 
@@ -473,6 +507,9 @@ class RetrievalService:
         if isinstance(archive_result, Exception):
             logger.warning("Retrieval: archive search failed: %s", archive_result)
             archive_result = None
+        if isinstance(ledger_hits, Exception):
+            logger.warning("Retrieval: ledger search failed: %s", ledger_hits)
+            ledger_hits = []
 
         # Collect MAYBE_SAME_AS for uncertainty notes (gated per the design review edit #4)
         maybe_same_as = await self._collect_maybe_same_as(
@@ -491,19 +528,20 @@ class RetrievalService:
 
         # Stage 3: Format within token budget
         logger.info(
-            "REMEMBER query=%s space=%s knowledge=%d entities=%d archive=%s",
+            "REMEMBER query=%s space=%s knowledge=%d entities=%d ledger=%d archive=%s",
             query[:60], active_space_id, len(knowledge_candidates),
-            len(entity_results), bool(archive_result),
+            len(entity_results), len(ledger_hits), bool(archive_result),
         )
         return self._format_results(
-            knowledge_candidates, entity_results, archive_result, maybe_same_as
+            knowledge_candidates, entity_results, archive_result, maybe_same_as,
+            ledger_hits=ledger_hits, active_space_id=active_space_id,
         )
 
     async def _search_knowledge(
         self,
         instance_id: str,
         query: str,
-        query_embedding: list[float],
+        query_embedding: list[float] | None,
         active_space_id: str,
         scope_chain: list[str] | None = None,
         requesting_member_id: str = "",
@@ -546,7 +584,10 @@ class RetrievalService:
 
         candidates = []
         for entry in entries:
-            entry_embedding = await self.embedding_store.get(instance_id, entry.id)
+            entry_embedding = (
+                await self.embedding_store.get(instance_id, entry.id)
+                if query_embedding is not None else None
+            )
             if entry_embedding is not None:
                 similarity = cosine_similarity(query_embedding, entry_embedding)
                 if similarity >= SIMILARITY_THRESHOLD:
@@ -719,12 +760,13 @@ class RetrievalService:
         query: str,
         active_space_id: str,
         scope_chain: list[str] | None = None,
+        member_id: str = "",
     ) -> str | None:
-        """Search compaction archives via the index. Walks scope chain."""
+        """Search the member's compaction archives via the index. Walks scope chain."""
         _chain = scope_chain or [active_space_id]
 
         for ancestor_id in _chain:
-            index_text = await self.compaction.load_index(instance_id, ancestor_id)
+            index_text = await self.compaction.load_index(instance_id, ancestor_id, member_id)
             if not index_text:
                 continue
 
@@ -746,7 +788,7 @@ class RetrievalService:
 
             # Load the matching archive
             archive_text = await self.compaction.load_archive(
-                instance_id, ancestor_id, result
+                instance_id, ancestor_id, result, member_id=member_id,
             )
             if not archive_text:
                 continue
@@ -769,6 +811,40 @@ class RetrievalService:
                 return extract
 
         return None
+
+    async def _embed_query(self, query: str) -> list[float] | None:
+        if self.embeddings is None:
+            return None
+        try:
+            return await self.embeddings.embed(query)
+        except Exception as exc:
+            logger.warning("Retrieval: embedding failed for query %r: %s", query[:60], exc)
+            return None
+
+    async def _search_ledger(
+        self,
+        instance_id: str,
+        query: str,
+        active_space_id: str,
+        scope_chain: list[str] | None,
+        member_id: str,
+    ) -> list[tuple[float, str, str]]:
+        """Rank the member's Ledger entries in scope against the query (BM25).
+
+        Every entry is searchable, recent or old, active or sealed: the Ledger
+        is the design's index into the source logs, and each entry names the
+        log remember_details opens. Returns (score, space_id, entry) best first.
+        """
+        if self.compaction is None:
+            return []
+        docs: list[tuple[str, str]] = []
+        for space_id in scope_chain or [active_space_id]:
+            for entry in await self.compaction.load_all_ledger_entries(
+                instance_id, space_id, member_id,
+            ):
+                docs.append((space_id, entry))
+        ranked = bm25_rank(query, [entry for _, entry in docs])
+        return [(score, docs[i][0], docs[i][1]) for i, score in ranked[:LEDGER_TOP_K]]
 
     async def _collect_maybe_same_as(
         self,
@@ -950,6 +1026,7 @@ class RetrievalService:
         if include_archives:
             archive_task = self._search_archives(
                 instance_id, query, active_space_id, scope_chain,
+                member_id=requesting_member_id,
             )
         else:
             async def _no_archive():
@@ -1056,6 +1133,8 @@ class RetrievalService:
         entity_results: list[EntityResult],
         archive_result: str | None,
         maybe_same_as: list[tuple[EntityNode, EntityNode]],
+        ledger_hits: list[tuple[float, str, str]] | None = None,
+        active_space_id: str = "",
     ) -> str:
         """Format retrieval results as readable prose within token budget."""
         parts: list[str] = []
@@ -1080,6 +1159,21 @@ class RetrievalService:
                 parts.append(entry_text)
                 budget_remaining -= tokens
                 seen_ids.add(sk.entry.id)
+
+        # Ledger entries: what was discussed when, and which source log has it
+        for _score, space_id, entry in ledger_hits or []:
+            where = "" if space_id == active_space_id else f" [space: {space_id}]"
+            entry_text = f"From the Ledger{where}:\n{entry}"
+            tokens = len(entry_text) // 4
+            if tokens <= budget_remaining:
+                parts.append(entry_text)
+                budget_remaining -= tokens
+        if ledger_hits:
+            note = ("For the exact conversation, call remember_details with the "
+                    "entry's source log (and its space, if one is named).")
+            if len(note) // 4 <= budget_remaining:
+                parts.append(note)
+                budget_remaining -= len(note) // 4
 
         # Archive extract
         if archive_result and budget_remaining > 100:

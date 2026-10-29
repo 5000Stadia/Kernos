@@ -175,6 +175,8 @@ class TurnContext:
 
     # Phase timing (ms) — populated by process() and _run_space_loop
     phase_timings: dict[str, int] = field(default_factory=dict)
+    # Set by persist: compaction/harvest run after the reply (run_boundary).
+    boundary_pending: bool = False
 
     # Runtime trace collector — structured events for diagnostic visibility
     trace: Any = None  # TurnEventCollector, set at turn start
@@ -1065,7 +1067,7 @@ class MessageHandler:
         self._evaluators: dict[str, "AwarenessEvaluator"] = {}  # per-instance evaluators
         self._error_buffer = ErrorBuffer()
         self._pending_system_events: dict[str, list[str]] = {}
-        self._compacting: set[str] = set()  # space_ids currently compacting
+        self._compacting: set[tuple[str, str]] = set()  # (space_id, member_id) pairs compacting
         self._turn_counter: int = 0  # monotonic turn counter for tool LRU tracking
         self.preference_parsing_enabled: bool = True  # Bypassable (Agent Card principle)
         self._runners: dict[str, SpaceRunner] = {}  # "tenant:space" → SpaceRunner
@@ -1183,22 +1185,23 @@ class MessageHandler:
         self._gardener = None  # set on first call via _get_gardener_service()
 
         # Wire up retrieval service for the `remember` kernel tool
+        # Without VOYAGE_API_KEY, remember still searches the Ledger and
+        # matches facts by their words; only search by meaning is lost.
         self._retrieval = None
         try:
             voyage_api_key = os.getenv("VOYAGE_API_KEY", "")
-            if voyage_api_key:
-                from kernos.kernel.embeddings import EmbeddingService
-                from kernos.kernel.embedding_store import JsonEmbeddingStore
-                from kernos.kernel.retrieval import RetrievalService
-                data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
-                self._retrieval = RetrievalService(
-                    state=state,
-                    embedding_service=EmbeddingService(voyage_api_key),
-                    embedding_store=JsonEmbeddingStore(data_dir),
-                    compaction=self.compaction,
-                    reasoning=reasoning,
-                )
-                reasoning.set_retrieval(self._retrieval)
+            from kernos.kernel.embeddings import EmbeddingService
+            from kernos.kernel.embedding_store import JsonEmbeddingStore
+            from kernos.kernel.retrieval import RetrievalService
+            data_dir = os.getenv("KERNOS_DATA_DIR", "./data")
+            self._retrieval = RetrievalService(
+                state=state,
+                embedding_service=EmbeddingService(voyage_api_key) if voyage_api_key else None,
+                embedding_store=JsonEmbeddingStore(data_dir),
+                compaction=self.compaction,
+                reasoning=reasoning,
+            )
+            reasoning.set_retrieval(self._retrieval)
         except Exception as exc:
             logger.warning("Failed to initialize RetrievalService: %s", exc)
 
@@ -5611,6 +5614,12 @@ class MessageHandler:
                     if not extra_future.done():
                         extra_future.set_result("")
 
+                # Boundary work (compaction + fact harvest) runs after the
+                # reply is out, still inside this space's turn: the user
+                # never waits on it, and the next message here waits for it.
+                if primary_ctx.boundary_pending:
+                    await self._phase_boundary(primary_ctx)
+
             except asyncio.CancelledError:
                 # Resolve any pending futures before exiting
                 for item in merged_messages:
@@ -9210,6 +9219,15 @@ class MessageHandler:
         if ctx.handler is None:
             ctx.handler = self
         await persist.run(ctx)
+
+    async def _phase_boundary(self, ctx: TurnContext) -> None:
+        """Compaction and fact harvest for a finished turn (phases/persist.py)."""
+        from kernos.messages.phases import persist
+        ctx.boundary_pending = False
+        try:
+            await persist.run_boundary(ctx)
+        except Exception as exc:
+            logger.warning("BOUNDARY: failed for space=%s: %s", ctx.active_space_id, exc)
 
     def _record_phase_timings(self, timings: dict[str, int], total_ms: int) -> None:
         """Record phase timings for session averages. Keep last 50 turns."""

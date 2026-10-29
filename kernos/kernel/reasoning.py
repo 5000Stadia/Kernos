@@ -3325,6 +3325,13 @@ class ReasoningService:
         """
         source_ref = input_data.get("source_ref", "")
         query = input_data.get("query", "")
+        # A Ledger entry from an ancestor space names its space; logs are
+        # read under the requesting member either way.
+        _space = (input_data.get("space") or "").strip()
+        if _space:
+            if not re.fullmatch(r"[A-Za-z0-9_:-]+", _space):
+                return f"'{_space[:40]}' is not a space id. Pass the id remember() showed."
+            space_id = _space
 
         if not source_ref:
             return (

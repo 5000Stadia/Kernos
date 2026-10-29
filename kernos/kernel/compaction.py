@@ -790,6 +790,30 @@ class CompactionService:
         forward = entries[-2:]
         return "\n\n".join(forward)
 
+    async def load_all_ledger_entries(
+        self, instance_id: str, space_id: str, member_id: str = "",
+    ) -> list[str]:
+        """Every Ledger entry the member has in this space: sealed archives
+        first, then the active document, each entry once (rotation carries
+        the newest entries forward into the next document)."""
+        space_dir = self._space_dir(instance_id, space_id, member_id)
+        texts: list[str] = []
+        archive_dir = space_dir / "archives"
+        if archive_dir.is_dir():
+            for path in sorted(archive_dir.glob("compaction_archive_*.md")):
+                texts.append(path.read_text(encoding="utf-8"))
+        document = await self.load_document(instance_id, space_id, member_id)
+        if document:
+            texts.append(document)
+        entries: list[str] = []
+        seen: set[str] = set()
+        for text in texts:
+            for entry in self._parse_ledger_entries(text):
+                if entry not in seen:
+                    seen.add(entry)
+                    entries.append(entry)
+        return entries
+
     # --- ROUTER-EVIDENCE-V1: public read-only accessors ---
     #
     # ROUTER-EVIDENCE-V1 batch 2.2 surfaces the Living State and the most
