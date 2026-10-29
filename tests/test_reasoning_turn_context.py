@@ -242,7 +242,9 @@ async def test_assembled_input_reaches_real_integration_with_notices_and_file_re
     await handler._phase_route(ctx)
     ctx.active_space_id = "synthetic-space"
     ctx.upload_notifications = ["SYNTHETIC_UPLOAD_NOTICE"]
-    handler._orphaned_user_content = ["SYNTHETIC_EARLIER_INPUT"]
+    handler.conv_logger.read_recent = AsyncMock(return_value=[{
+        "role": "user", "content": "SYNTHETIC_EARLIER_INPUT",
+    }])
     handler._files = SimpleNamespace(write_file=AsyncMock())
     await handler._phase_assemble(ctx)
     assembled = ctx.messages[-1]["content"]
