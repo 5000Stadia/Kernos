@@ -752,6 +752,8 @@ async def cmd_rebuild_ledger(args) -> None:
     from kernos.kernel.tokens import EstimateTokenAdapter
     from kernos.providers.chains import build_chains_from_env
 
+    from kernos.kernel.credentials import resolve_openai_codex_credential
+    resolve_openai_codex_credential()
     chains, primary = build_chains_from_env()
     lightweight = chains.get("lightweight") or chains.get("primary") or []
     print("Model chain (lightweight): " + ", ".join(
@@ -760,7 +762,11 @@ async def cmd_rebuild_ledger(args) -> None:
     ))
     state = _state_store()
     compaction = CompactionService(
-        state=state, reasoning=ReasoningService(chains=chains),
+        # Only complete_simple is used, never a turn loop, so a no-op turn
+        # runner satisfies REASONING-SERVICE-CONSTRUCTION-PARITY-V1 (as in
+        # scripts/regenerate_reference_catalog.py).
+        state=state,
+        reasoning=ReasoningService(chains=chains, turn_runner_provider=lambda *a, **kw: None),
         token_adapter=EstimateTokenAdapter(), data_dir=_data_dir(),
     )
     conv = ConversationLogger(data_dir=_data_dir())
