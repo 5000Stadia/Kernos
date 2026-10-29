@@ -135,12 +135,14 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     active_space_id = ctx.active_space_id
 
     # Space context (compaction, cross-domain, system events, receipts)
+    ctx.orphaned_user_content.clear()
     (
         space_messages, ctx.results_prefix, ctx.memory_prefix,
         _procedures_prefix, _canvases_prefix,
     ) = await handler._assemble_space_context(
         instance_id, ctx.conversation_id, active_space_id, active_space,
         member_id=ctx.member_id,
+        orphaned_user_content=ctx.orphaned_user_content,
     )
 
     # RELATIONAL-MESSAGING v5: pick up any queued messages addressed to
@@ -903,6 +905,8 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     try:
         pending_triggers = await handler._trigger_store.list_all(instance_id)
         for trig in pending_triggers:
+            if trig.member_id and trig.member_id != ctx.member_id:
+                continue
             if trig.pending_delivery:
                 ctx.upload_notifications.append(
                     f"[Scheduled action result — {trig.action_description}]: {trig.pending_delivery}")
@@ -914,11 +918,10 @@ async def run(ctx: PhaseContext) -> PhaseContext:
     # Build messages array (CONVERSATION block — carried by messages, not system prompt)
     final_user_content = message.content
     # Prepend orphaned user messages from rapid-fire input
-    orphans = getattr(handler, '_orphaned_user_content', None)
+    orphans = ctx.orphaned_user_content
     if orphans:
         prefix = "\n".join(f"(Earlier message: {o})" for o in orphans)
         final_user_content = prefix + "\n\n" + (message.content or "")
-        handler._orphaned_user_content = None
     if ctx.upload_notifications:
         final_user_content = "\n".join(ctx.upload_notifications) + (
             "\n\n" + final_user_content if final_user_content else "")

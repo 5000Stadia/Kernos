@@ -1275,6 +1275,7 @@ def _notify_retirement(handler, trigger: Trigger) -> None:
             trigger.instance_id,
             f'[SYSTEM] trigger_retired: "{trigger.action_description}" — '
             f'{trigger.failure_reason}. Recreate under event triggers if needed.',
+            member_id=trigger.member_id,
         )
     except Exception:
         pass
@@ -1303,6 +1304,7 @@ def _apply_transient_failure(trigger: Trigger, handler) -> None:
                 trigger.instance_id,
                 f'[SYSTEM] trigger_degraded: "{trigger.action_description}" — '
                 f'{trigger.failure_reason}. Service may need reconnection.',
+                member_id=trigger.member_id,
             )
         except Exception:
             pass
@@ -1345,6 +1347,7 @@ async def retire_stale_triggers(
                         trigger.instance_id,
                         f'[SYSTEM] trigger_retired: "{trigger.action_description}" — '
                         f'{trigger.failure_reason}. Recreate if needed.',
+                        member_id=trigger.member_id,
                     )
                 except Exception:
                     pass

@@ -153,6 +153,7 @@ class TurnContext:
     results_prefix: str | None = None
     memory_prefix: str | None = None
     merged_count: int = 0  # Number of user messages merged into this turn
+    orphaned_user_content: list[str] = field(default_factory=list)
     # COGNITIVE-CONTEXT-V1 C3a: typed cognitive substrate constructed
     # by the assemble phase from already-loaded locals. Carried to
     # ReasoningRequest so the decoupled path can thread it through
@@ -1033,7 +1034,7 @@ class MessageHandler:
         self._covenant_cleanup_done: set[str] = set()
         self._evaluators: dict[str, "AwarenessEvaluator"] = {}  # per-instance evaluators
         self._error_buffer = ErrorBuffer()
-        self._pending_system_events: dict[str, list[str]] = {}
+        self._pending_system_events: dict[tuple[str, str], list[str]] = {}
         self._compacting: set[tuple[str, str]] = set()  # (space_id, member_id) pairs compacting
         self._turn_counter: int = 0  # monotonic turn counter for tool LRU tracking
         self.preference_parsing_enabled: bool = True  # Bypassable (Agent Card principle)
@@ -2593,14 +2594,17 @@ class MessageHandler:
         """Read conversation log text, or None if the log doesn't exist — satisfies HandlerProtocol."""
         return await self.conv_logger.read_log_text(instance_id, space_id, log_number, member_id=member_id)
 
-    def queue_system_event(self, instance_id: str, event: str) -> None:
-        """Queue a system event for injection into the next system prompt."""
-        self._pending_system_events.setdefault(instance_id, []).append(event)
+    def queue_system_event(self, instance_id: str, event: str, *, member_id: str = "") -> None:
+        """Queue an event for its member, or the instance when no member is set."""
+        self._pending_system_events.setdefault((instance_id, member_id), []).append(event)
         logger.info("SYSTEM_EVENT_QUEUED: instance=%s event=%s", instance_id, event[:100])
 
-    def drain_system_events(self, instance_id: str) -> list[str]:
-        """Drain and return all pending system events for an instance."""
-        return self._pending_system_events.pop(instance_id, [])
+    def drain_system_events(self, instance_id: str, *, member_id: str = "") -> list[str]:
+        """Drain this member's events and any instance-wide notices."""
+        events = self._pending_system_events.pop((instance_id, member_id), [])
+        if member_id:
+            events += self._pending_system_events.pop((instance_id, ""), [])
+        return events
 
     async def send_outbound(
         self, instance_id: str, member_id: str,
@@ -3498,6 +3502,7 @@ class MessageHandler:
         active_space_id: str,
         active_space: ContextSpace | None,
         member_id: str = "",
+        orphaned_user_content: list[str] | None = None,
     ) -> tuple[list[dict], str | None, str | None, str | None]:
         """Assemble the agent's conversation context for the active space.
 
@@ -3540,7 +3545,7 @@ class MessageHandler:
             logger.warning("CROSS_DOMAIN_DELIVER: failed: %s", exc)
 
         # 2c. System events → RESULTS
-        system_events = self.drain_system_events(instance_id)
+        system_events = self.drain_system_events(instance_id, member_id=member_id)
         if system_events:
             events_block = "RECENT SYSTEM EVENTS:\n" + "\n".join(system_events)
             results_parts.append(events_block)
@@ -3756,9 +3761,9 @@ class MessageHandler:
                 "Content: %.100s",
                 _content,
             )
-        # Orphaned content will be prepended to the current user message in _phase_assemble
-        if merged_orphans:
-            self._orphaned_user_content = merged_orphans
+        # Keep unfinished input on the requesting turn while other spaces assemble.
+        if orphaned_user_content is not None:
+            orphaned_user_content.extend(merged_orphans)
 
         # Canvas context surface (CANVAS-V1 Pillar 6) — cacheable prefix zone
         canvases_prefix = await self._build_canvases_prefix(
@@ -3948,7 +3953,7 @@ class MessageHandler:
         # as a labeled note AND marks them surfaced, guaranteeing delivery.
         if not hasattr(self, "_whispers_offered"):
             self._whispers_offered: dict[tuple, list] = {}
-        self._whispers_offered[(instance_id, active_space_id)] = list(relevant)
+        self._whispers_offered[(instance_id, requesting_member_id, active_space_id)] = list(relevant)
 
         logger.info("AWARENESS: offered whispers=%d for space=%s",
                      len(relevant), active_space_id)
@@ -4051,14 +4056,11 @@ class MessageHandler:
         store = getattr(self, "_whispers_offered", None)
         if not store:
             return response
-        key = (ctx.instance_id, getattr(ctx, "active_space_id", "") or "")
+        key = (
+            ctx.instance_id, getattr(ctx, "member_id", "") or "",
+            getattr(ctx, "active_space_id", "") or "",
+        )
         offered = store.pop(key, None)
-        if offered is None:
-            # Tolerant fallback: per-space runners are serial, so at most one
-            # offered batch is pending for this instance — pop it by instance.
-            for k in [k for k in store if k[0] == ctx.instance_id]:
-                offered = store.pop(k, [])
-                break
         if not offered:
             return response
 
