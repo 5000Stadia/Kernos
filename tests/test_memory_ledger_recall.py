@@ -184,3 +184,24 @@ class TestStripSeededHead:
         assert strip_seeded_head(cur, prev) == "[2026-05-02T09:00:00] [user] [discord] c\n"
         assert strip_seeded_head(cur, None) == cur
         assert strip_seeded_head("[2026-05-03T00:00:00] [user] [discord] z\n", prev).endswith("z\n")
+
+
+async def test_old_archive_living_state_remains_searchable_without_index(tmp_path):
+    compaction, retrieval = _services(tmp_path)
+    _write(compaction, "sp1", "mem_a", _doc(E1, state="The obsidian beacon uses access code SILVER-29."),
+           archive="compaction_archive_001.md")
+    text = await retrieval.search("t1", "obsidian beacon", "sp1", requesting_member_id="mem_a")
+    assert "SILVER-29" in text and "Historical archived state" in text
+    assert "compaction_archive_001" in text and "sp1" in text
+    assert len(text) <= 6000
+    other = await retrieval.search("t1", "obsidian beacon", "sp1", requesting_member_id="mem_b")
+    assert "SILVER-29" not in other
+
+
+async def test_structured_state_intercept_shares_final_output_budget(tmp_path):
+    from unittest.mock import patch
+    _, retrieval = _services(tmp_path)
+    with patch("kernos.kernel.introspection.build_user_truth_view",
+               new=AsyncMock(return_value="Synthetic state. " * 1000)):
+        text = await retrieval.search("t1", "notification settings", "sp1", requesting_member_id="mem_a")
+    assert len(text) <= 6000 and "omitted" in text

@@ -1,6 +1,6 @@
 """Retrieval Service — handles remember() tool calls.
 
-Searches KnowledgeEntries, the entity graph, and compaction archives.
+Searches facts, entities, Ledger entries and member-owned raw conversation history.
 Returns formatted readable text within a token budget.
 
 The `remember` tool is a kernel-managed tool — not an MCP tool.
@@ -9,6 +9,7 @@ to this service instead of MCPClientManager.
 """
 import asyncio
 import math
+import os
 import re
 from kernos.utils import utc_now
 import logging
@@ -372,7 +373,7 @@ def _apply_foresight_boost(
 class RetrievalService:
     """Handles remember() tool calls.
 
-    Searches KnowledgeEntries, the entity graph, and compaction archives.
+    Searches facts, entities, Ledger entries and member-owned raw conversation history.
     Returns formatted readable text within a token budget.
     """
 
@@ -383,12 +384,14 @@ class RetrievalService:
         embedding_store,  # JsonEmbeddingStore — Any to avoid import
         compaction,  # CompactionService — Any to avoid circular import
         reasoning,  # ReasoningService — Any to avoid circular import
+        conversation_logger=None,
     ) -> None:
         self.state = state
         self.embeddings = embedding_service
         self.embedding_store = embedding_store
         self.compaction = compaction
         self.reasoning = reasoning
+        self.conversation_logger = conversation_logger
 
     async def _build_scope_chain(self, instance_id: str, space_id: str) -> list[str]:
         """Walk up the parent chain. Returns [space_id, parent_id, grandparent_id, ...].
@@ -428,10 +431,9 @@ class RetrievalService:
         authored by other members are filtered per the simplified relationship
         permission model. Callers in turn-path should always pass it.
 
-        Per COHORT-ADAPT-MEMORY: this path now shares its pipeline with
-        `search_structured(include_archives=True)`. Output shape is text
-        (existing remember-tool surface); structured shape lives on the
-        sibling method.
+        Knowledge/entity policy is shared with search_structured. The text
+        tool also retrieves Ledger entries and switchable raw history; the
+        unregistered memory cohort keeps its existing structured surface.
         """
         now = utc_now()
         query_lower = query.lower()
@@ -449,7 +451,12 @@ class RetrievalService:
                 )
                 if state_view:
                     logger.info("REMEMBER_STATE_AUGMENT: query=%s — augmenting with inspect_state", query[:60])
-                    return f"[Structured state — authoritative]\n{state_view}"
+                    text = f"[Structured state — authoritative]\n{state_view}"
+                    limit = RETRIEVAL_RESULT_TOKEN_BUDGET * 4
+                    if len(text) > limit:
+                        note = "\n[... omitted; use inspect_state for the full state ...]"
+                        text = text[:limit - len(note)] + note
+                    return text
             except Exception as exc:
                 logger.warning("REMEMBER_STATE_AUGMENT: failed: %s", exc)
 
@@ -484,16 +491,19 @@ class RetrievalService:
             permission_map=permission_map,
             trace=trace,
         )
-        archive_task = self._search_archives(
-            instance_id, query, active_space_id, scope_chain,
-            member_id=requesting_member_id,
-        )
         ledger_task = self._search_ledger(
             instance_id, query, active_space_id, scope_chain, requesting_member_id,
         )
+        raw_task = self._search_conversations(
+            instance_id, query, scope_chain or [active_space_id], requesting_member_id,
+        )
+        archive_task = self._search_archives(
+            instance_id, query, active_space_id, scope_chain,
+            member_id=requesting_member_id, include_ledger=False,
+        )
 
-        knowledge_candidates, entity_results, archive_result, ledger_hits = await asyncio.gather(
-            knowledge_task, entity_task, archive_task, ledger_task,
+        knowledge_candidates, entity_results, ledger_hits, raw_hits, archive_result = await asyncio.gather(
+            knowledge_task, entity_task, ledger_task, raw_task, archive_task,
             return_exceptions=True,
         )
 
@@ -504,12 +514,15 @@ class RetrievalService:
         if isinstance(entity_results, Exception):
             logger.warning("Retrieval: entity search failed: %s", entity_results)
             entity_results = []
-        if isinstance(archive_result, Exception):
-            logger.warning("Retrieval: archive search failed: %s", archive_result)
-            archive_result = None
         if isinstance(ledger_hits, Exception):
             logger.warning("Retrieval: ledger search failed: %s", ledger_hits)
             ledger_hits = []
+        if isinstance(raw_hits, Exception):
+            logger.warning("Retrieval: raw conversation search failed: %s", raw_hits)
+            raw_hits = []
+        if isinstance(archive_result, Exception):
+            logger.warning("Retrieval: legacy archive search failed: %s", archive_result)
+            archive_result = None
 
         # Collect MAYBE_SAME_AS for uncertainty notes (gated per the design review edit #4)
         maybe_same_as = await self._collect_maybe_same_as(
@@ -528,13 +541,26 @@ class RetrievalService:
 
         # Stage 3: Format within token budget
         logger.info(
-            "REMEMBER query=%s space=%s knowledge=%d entities=%d ledger=%d archive=%s",
+            "REMEMBER query=%s space=%s knowledge=%d entities=%d ledger=%d raw=%d",
             query[:60], active_space_id, len(knowledge_candidates),
-            len(entity_results), len(ledger_hits), bool(archive_result),
+            len(entity_results), len(ledger_hits), len(raw_hits),
         )
         return self._format_results(
             knowledge_candidates, entity_results, archive_result, maybe_same_as,
             ledger_hits=ledger_hits, active_space_id=active_space_id,
+            raw_hits=raw_hits, query=query,
+        )
+
+    async def _search_conversations(
+        self, instance_id: str, query: str, scope_chain: list[str], member_id: str,
+    ) -> list:
+        if (not member_id or self.conversation_logger is None
+                or os.getenv("KERNOS_MEMORY_RAW_SEARCH", "1").strip().lower()
+                in {"0", "false", "off", "no"}):
+            return []
+        from kernos.kernel.raw_recall import search_conversations
+        return await search_conversations(
+            self.conversation_logger, instance_id, member_id, scope_chain, query,
         )
 
     async def _search_knowledge(
@@ -761,56 +787,33 @@ class RetrievalService:
         active_space_id: str,
         scope_chain: list[str] | None = None,
         member_id: str = "",
+        *, include_ledger: bool = True,
     ) -> str | None:
-        """Search the member's compaction archives via the index. Walks scope chain."""
-        _chain = scope_chain or [active_space_id]
+        """Compatibility history for structured recall, without the retired LLM index.
 
-        for ancestor_id in _chain:
-            index_text = await self.compaction.load_index(instance_id, ancestor_id, member_id)
-            if not index_text:
-                continue
-
-            # Ask Haiku: which archive (if any) is relevant to this query?
-            result = await self.reasoning.complete_simple(
-                system_prompt=(
-                    "Given this archive index and a query, determine if any archive "
-                    "is relevant. If yes, return the archive number (just the digit). "
-                    "If no, return 'none'. Return only the archive number or 'none'."
-                ),
-                user_content=f"Index:\n{index_text}\n\nQuery: {query}",
-                max_tokens=32,
-                prefer_cheap=True,
+        Existing sealed Ledger entries remain searchable alongside active
+        entries, even when the old index is missing or out of date.
+        """
+        if self.compaction is None:
+            return None
+        parts = []
+        if include_ledger:
+            hits = await self._search_ledger(
+                instance_id, query, active_space_id, scope_chain, member_id,
             )
-
-            result = result.strip().lower()
-            if result == "none" or not result:
-                continue
-
-            # Load the matching archive
-            archive_text = await self.compaction.load_archive(
-                instance_id, ancestor_id, result, member_id=member_id,
-            )
-            if not archive_text:
-                continue
-
-            # Second Haiku call: extract relevant section
-            extract = await self.reasoning.complete_simple(
-                system_prompt=(
-                    "Extract the information relevant to this query from the archive. "
-                    "Return a concise, readable summary. If nothing is relevant, "
-                    "return 'nothing found'."
-                ),
-                user_content=f"Query: {query}\n\nArchive:\n{archive_text}",
-                max_tokens=800,
-                prefer_cheap=True,
-            )
-
-            if extract and "nothing found" not in extract.lower():
-                if ancestor_id != active_space_id:
-                    logger.info("SCOPE_CHAIN_HIT: query=%r found_in=%s (ancestor)", query[:60], ancestor_id)
-                return extract
-
-        return None
+            parts.extend(f"[space: {space_id}]\n{entry}" for _, space_id, entry in hits)
+        states = []
+        for space_id in scope_chain or [active_space_id]:
+            for archive, text in await self.compaction.load_archived_living_states(
+                instance_id, space_id, member_id,
+            ):
+                states.append((space_id, archive, text))
+        from kernos.kernel.raw_recall import excerpt_text
+        for i, _ in bm25_rank(query, [text for _, _, text in states])[:3]:
+            space_id, archive, text = states[i]
+            parts.append(f"Historical archived state [space: {space_id}; {archive}]:\n"
+                         + excerpt_text(text, query, 3000))
+        return "\n\n".join(parts) or None
 
     async def _embed_query(self, query: str) -> list[float] | None:
         if self.embeddings is None:
@@ -928,11 +931,10 @@ class RetrievalService:
         the two paths cannot drift — they share the entity / knowledge /
         archive / state-intercept logic via the same internal helpers.
 
-        Per the design review edit #2: archive search is gated behind
-        `include_archives` because today's `_search_archives`
-        invokes Haiku twice. The cohort path passes `False`; the
-        legacy `remember`-tool path passes `True` (preserves
-        existing archive coverage).
+        include_archives retains the optional historical Ledger coverage
+        for structured callers. It now uses direct BM25 rather than the
+        retired model-written archive index. Raw windows belong to the
+        remember text-tool surface.
 
         Per the design review edit #6: only embedding/vector failure produces
         ``retrieval_attempted=False`` with empty arrays. Every
@@ -1135,73 +1137,66 @@ class RetrievalService:
         maybe_same_as: list[tuple[EntityNode, EntityNode]],
         ledger_hits: list[tuple[float, str, str]] | None = None,
         active_space_id: str = "",
+        raw_hits: list | None = None,
+        query: str = "",
     ) -> str:
-        """Format retrieval results as readable prose within token budget."""
+        """Pack evidence within the shared 1,500-token (6,000-character) budget.
+
+        Raw windows get room before facts can exhaust the output. Keep a
+        third for other evidence when present; ordinary windows are whole,
+        oversized ones explicitly excerpt around the matching evidence.
+        """
+        from kernos.kernel.raw_recall import format_window
         parts: list[str] = []
-        budget_remaining = RETRIEVAL_RESULT_TOKEN_BUDGET
+        remaining = RETRIEVAL_RESULT_TOKEN_BUDGET * 4
 
-        # Entity context
+        def append(text: str) -> bool:
+            nonlocal remaining
+            cost = len(text) + (2 if parts else 0)
+            if text and cost <= remaining:
+                parts.append(text)
+                remaining -= cost
+                return True
+            return False
+
+        other = knowledge_results or entity_results or ledger_hits or archive_result
+        raw_remaining = min(remaining, 4000) if other else remaining
+        for window in raw_hits or []:
+            text = format_window(window, query, raw_remaining - (2 if parts else 0))
+            if text:
+                before = remaining
+                if append(text):
+                    raw_remaining -= before - remaining
+
         for er in entity_results:
-            entity_text = self._format_entity(er.entity, er.knowledge)
-            tokens = len(entity_text) // 4
-            if tokens <= budget_remaining:
-                parts.append(entity_text)
-                budget_remaining -= tokens
+            append(self._format_entity(er.entity, er.knowledge))
 
-        # Knowledge entries (ranked, deduplicated against entity knowledge)
         seen_ids = {e.id for er in entity_results for e in er.knowledge}
         for sk in knowledge_results:
-            if sk.entry.id in seen_ids:
-                continue
-            entry_text = f"{sk.entry.subject}: {sk.entry.content}"
-            tokens = len(entry_text) // 4
-            if tokens <= budget_remaining:
-                parts.append(entry_text)
-                budget_remaining -= tokens
-                seen_ids.add(sk.entry.id)
+            if sk.entry.id not in seen_ids:
+                if append(f"{sk.entry.subject}: {sk.entry.content}"):
+                    seen_ids.add(sk.entry.id)
 
-        # Ledger entries: what was discussed when, and which source log has it
         for _score, space_id, entry in ledger_hits or []:
             where = "" if space_id == active_space_id else f" [space: {space_id}]"
-            entry_text = f"From the Ledger{where}:\n{entry}"
-            tokens = len(entry_text) // 4
-            if tokens <= budget_remaining:
-                parts.append(entry_text)
-                budget_remaining -= tokens
+            append(f"From the Ledger{where}:\n{entry}")
         if ledger_hits:
-            note = ("For the exact conversation, call remember_details with the "
-                    "entry's source log (and its space, if one is named).")
-            if len(note) // 4 <= budget_remaining:
-                parts.append(note)
-                budget_remaining -= len(note) // 4
+            append("For the exact conversation, call remember_details with the "
+                   "entry's source log (and its space, if one is named).")
 
-        # Archive extract
-        if archive_result and budget_remaining > 100:
-            archive_tokens = len(archive_result) // 4
-            if archive_tokens <= budget_remaining:
-                parts.append(f"From history: {archive_result}")
-                budget_remaining -= archive_tokens
-            else:
-                # Truncate archive to fit
-                chars = budget_remaining * 4
-                parts.append(f"From history: {archive_result[:chars]}...")
+        if archive_result:
+            prefix = "From history: "
+            available = remaining - (2 if parts else 0) - len(prefix)
+            if available > 100:
+                text = archive_result
+                if len(text) > available:
+                    text = text[:available - 3] + "..."
+                append(prefix + text)
 
-        # MAYBE_SAME_AS notes
         for node_a, node_b in maybe_same_as:
-            note = (
-                f"Note: {node_a.canonical_name} and {node_b.canonical_name} "
-                f"may be the same person — treat carefully."
-            )
-            tokens = len(note) // 4
-            if tokens <= budget_remaining:
-                parts.append(note)
-                budget_remaining -= tokens
-
-        return (
-            "\n\n".join(parts)
-            if parts
-            else "No relevant information found in memory."
-        )
+            append(f"Note: {node_a.canonical_name} and {node_b.canonical_name} "
+                   "may be the same person — treat carefully.")
+        return "\n\n".join(parts) if parts else "No relevant information found in memory."
 
     def _format_entity(
         self, entity: EntityNode, knowledge: list[KnowledgeEntry]

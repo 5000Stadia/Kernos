@@ -517,63 +517,29 @@ class TestFormatResults:
 
 
 class TestArchiveSearch:
-    async def test_no_index_returns_none(self):
-        service = RetrievalService(
-            state=AsyncMock(),
-            embedding_service=AsyncMock(),
-            embedding_store=AsyncMock(),
-            compaction=AsyncMock(),
-            reasoning=AsyncMock(),
-        )
-        service.compaction.load_index = AsyncMock(return_value=None)
-        result = await service._search_archives("test-tenant", "query", "space_1")
-        assert result is None
+    async def test_no_ledger_history_returns_none(self):
+        service = RetrievalService(AsyncMock(), None, AsyncMock(), AsyncMock(), AsyncMock())
+        service.compaction.load_all_ledger_entries.return_value = []
+        assert await service._search_archives("test-tenant", "query", "space_1") is None
+        service.reasoning.complete_simple.assert_not_called()
 
-    async def test_no_relevant_archive_returns_none(self):
-        service = RetrievalService(
-            state=AsyncMock(),
-            embedding_service=AsyncMock(),
-            embedding_store=AsyncMock(),
-            compaction=AsyncMock(),
-            reasoning=AsyncMock(),
-        )
-        service.compaction.load_index = AsyncMock(return_value="## Archive #1\nSome content")
-        service.reasoning.complete_simple = AsyncMock(return_value="none")
-        result = await service._search_archives("test-tenant", "unrelated", "space_1")
-        assert result is None
-
-    async def test_relevant_archive_extracted(self):
-        service = RetrievalService(
-            state=AsyncMock(),
-            embedding_service=AsyncMock(),
-            embedding_store=AsyncMock(),
-            compaction=AsyncMock(),
-            reasoning=AsyncMock(),
-        )
-        service.compaction.load_index = AsyncMock(return_value="## Archive #1\nD&D campaign")
-        service.compaction.load_archive = AsyncMock(return_value="Full archive content...")
-        # First call returns archive number, second call returns extraction
-        service.reasoning.complete_simple = AsyncMock(
-            side_effect=["1", "The party fought a dragon in the mountain caves."]
-        )
-        result = await service._search_archives("test-tenant", "D&D early campaign", "space_1")
-        assert result == "The party fought a dragon in the mountain caves."
-
-    async def test_nothing_found_returns_none(self):
-        service = RetrievalService(
-            state=AsyncMock(),
-            embedding_service=AsyncMock(),
-            embedding_store=AsyncMock(),
-            compaction=AsyncMock(),
-            reasoning=AsyncMock(),
-        )
-        service.compaction.load_index = AsyncMock(return_value="## Archive #1\nSome content")
-        service.compaction.load_archive = AsyncMock(return_value="Archive text")
-        service.reasoning.complete_simple = AsyncMock(
-            side_effect=["1", "Nothing found in this archive."]
-        )
-        result = await service._search_archives("test-tenant", "query", "space_1")
-        assert result is None
+    async def test_existing_history_needs_no_index_or_llm(self, tmp_path):
+        from kernos.kernel.compaction import CompactionService
+        from kernos.kernel.tokens import EstimateTokenAdapter
+        compaction = CompactionService(AsyncMock(), AsyncMock(), EstimateTokenAdapter(), str(tmp_path))
+        folder = compaction._space_dir("test-tenant", "space_1", "member_a") / "archives"
+        folder.mkdir(parents=True)
+        entry = "## Compaction #1 (source: log_001)\n\n- The party fought a dragon in the mountain caves."
+        (folder / "compaction_archive_001.md").write_text(
+            f"# Ledger\n\n{entry}\n\n# Living State\n\nOld state.")
+        reasoning = AsyncMock()
+        service = RetrievalService(AsyncMock(), None, AsyncMock(), compaction, reasoning)
+        result = await service._search_archives(
+            "test-tenant", "dragon caves", "space_1", member_id="member_a")
+        assert entry in result and "space_1" in result
+        assert await service._search_archives(
+            "test-tenant", "dragon caves", "space_1", member_id="member_b") is None
+        reasoning.complete_simple.assert_not_called()
 
 
 # ─── Full search pipeline ────────────────────────────────────────────

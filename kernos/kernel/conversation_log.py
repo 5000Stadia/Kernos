@@ -21,12 +21,24 @@ import logging
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class HistoricalTurn:
+    """A turn's original coordinates, unchanged when seeded copies are skipped."""
+
+    log_number: int
+    turn_number: int
+    speaker: str
+    timestamp: str
+    content: str
 
 # Pattern matching the start of a log entry: [timestamp] [speaker] [channel]
 _ENTRY_RE = re.compile(
@@ -103,6 +115,61 @@ class ConversationLogger:
     def __init__(self, data_dir: str = "./data") -> None:
         self._data_dir = Path(data_dir)
         self._meta_locks: dict[str, asyncio.Lock] = {}
+        self._history_cache: dict[tuple[str, str, str], tuple[tuple, tuple[HistoricalTurn, ...]]] = {}
+
+    async def read_historical_turns(
+        self, instance_id: str, space_id: str, member_id: str,
+    ) -> tuple[HistoricalTurn, ...]:
+        """Read only this member's closed logs, without shared-folder fallback.
+
+        The current log is already in turn context and contains the recall
+        question itself. Missing metadata conservatively treats the newest
+        log as current. Cache only parsed closed files; disk remains truth.
+        """
+        if not member_id:
+            return ()
+        return await asyncio.to_thread(
+            self._read_historical_turns_sync, instance_id, space_id, member_id,
+        )
+
+    def _read_historical_turns_sync(
+        self, instance_id: str, space_id: str, member_id: str,
+    ) -> tuple[HistoricalTurn, ...]:
+        folder = self._logs_dir(instance_id, space_id, member_id)
+        files = sorted((int(p.stem[4:]), p) for p in folder.glob("log_*.txt")
+                       if re.fullmatch(r"log_\d+", p.stem))
+        if not files:
+            return ()
+        meta_path = folder / "meta.json"
+        current = files[-1][0]
+        if meta_path.exists():
+            current = int(json.loads(meta_path.read_text(encoding="utf-8"))["current_log"])
+        closed = [(number, path) for number, path in files if number != current]
+        fingerprint = (current, tuple((n, p.stat().st_mtime_ns, p.stat().st_size) for n, p in files))
+        key = (instance_id, space_id, member_id)
+        cached = self._history_cache.get(key)
+        if cached and cached[0] == fingerprint:
+            return cached[1]
+        turns = []
+        paths = dict(files)
+        previous_text, previous_number = None, None
+        for number, path in closed:
+            text = path.read_text(encoding="utf-8")
+            parsed = _parse_entries(text)
+            if previous_number != number - 1:
+                predecessor = paths.get(number - 1)
+                previous_text = predecessor.read_text(encoding="utf-8") if predecessor else None
+            unseeded = _parse_entries(strip_seeded_head(
+                text, previous_text,
+            ))
+            offset = len(parsed) - len(unseeded)
+            turns.extend(HistoricalTurn(number, offset + i + 1, entry["speaker"],
+                                        entry["timestamp"], entry["content"])
+                         for i, entry in enumerate(unseeded))
+            previous_text, previous_number = text, number
+        result = tuple(turns)
+        self._history_cache[key] = (fingerprint, result)
+        return result
 
     def _get_lock(self, instance_id: str, space_id: str, member_id: str = "") -> asyncio.Lock:
         """Per-(space, member) asyncio lock for serializing meta read-modify-write."""

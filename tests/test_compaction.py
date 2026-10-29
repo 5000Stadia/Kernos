@@ -252,31 +252,6 @@ class TestDocumentParsing:
         ls = self.service._extract_living_state(NO_LIVING_STATE_DOC)
         assert ls == ""
 
-    def test_forward_relevant_entries_last_2(self):
-        result = self.service._extract_forward_relevant_entries(SAMPLE_DOC, 3)
-        assert "Compaction #2" in result
-        assert "Compaction #3" in result
-        assert "Compaction #1" not in result
-
-    def test_forward_relevant_entries_single(self):
-        doc = """# Ledger
-
-## Compaction #1 — 2026-03-01 → 2026-03-01
-
-Only one entry.
-
-# Living State
-
-Some state.
-"""
-        result = self.service._extract_forward_relevant_entries(doc, 1)
-        assert "Compaction #1" in result
-
-    def test_forward_relevant_entries_empty(self):
-        result = self.service._extract_forward_relevant_entries(EMPTY_DOC, 0)
-        assert result == ""
-
-
 # ---------------------------------------------------------------------------
 # Message Formatting
 # ---------------------------------------------------------------------------
@@ -354,130 +329,6 @@ class TestCeilingComputation:
 
 # ---------------------------------------------------------------------------
 # Personality Evolution on Rotation
-# ---------------------------------------------------------------------------
-
-
-class TestPersonalityEvolution:
-    async def test_personality_evolves_on_rotation(self, tmp_path):
-        """_rotate() calls _evolve_personality which rewrites soul.personality_notes."""
-        from kernos.kernel.soul import Soul
-        from kernos.kernel.state import KnowledgeEntry
-
-        big_doc = "# Ledger\n\n## Compaction #1\nContent.\n\n## Compaction #2\nMore.\n\n# Living State\n\nCurrent state.\n"
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(
-            side_effect=["Summary of archive.", "Updated personality: curious and driven."]
-        )
-        mock_state = MagicMock()
-        soul = Soul(instance_id="t1", personality_notes="Initial personality.")
-        mock_state.get_soul = AsyncMock(return_value=soul)
-        mock_state.query_knowledge = AsyncMock(return_value=[
-            KnowledgeEntry(
-                id="ke1", instance_id="t1", category="fact", subject="user",
-                content="Builds software intuitively", confidence="stated",
-                source_event_id="", source_description="test",
-                created_at="2026-01-01T00:00:00+00:00",
-                last_referenced="2026-01-01T00:00:00+00:00",
-                tags=[], lifecycle_archetype="habitual",
-            ),
-        ])
-        mock_state.save_soul = AsyncMock()
-
-        adapter = EstimateTokenAdapter()
-        service = CompactionService(
-            state=mock_state, reasoning=mock_reasoning,
-            token_adapter=adapter, data_dir=str(tmp_path),
-        )
-
-        space_dir = tmp_path / "t1" / "state" / "compaction" / "sp1"
-        space_dir.mkdir(parents=True)
-        (space_dir / "active_document.md").write_text(big_doc)
-
-        cs = CompactionState(
-            space_id="sp1", compaction_number=2,
-            global_compaction_number=2, history_tokens=500,
-            document_budget=1000, message_ceiling=500,
-            conversation_headroom=8000,
-        )
-
-        space = MagicMock()
-        space.name = "Test"
-        space.description = "test"
-
-        await service._rotate("t1", "sp1", space, cs)
-
-        # Verify personality was updated
-        mock_state.save_soul.assert_called()
-        saved_soul = mock_state.save_soul.call_args[0][0]
-        assert "curious and driven" in saved_soul.personality_notes
-
-    async def test_personality_evolution_failure_doesnt_block_rotation(self, tmp_path):
-        """If personality evolution fails, rotation still completes."""
-        big_doc = "# Ledger\n\n## Compaction #1\nContent.\n\n# Living State\n\nCurrent state.\n"
-        mock_reasoning = MagicMock()
-        # First call: index summary. Second call (personality): will fail
-        mock_reasoning.complete_simple = AsyncMock(
-            side_effect=["Summary.", Exception("LLM failure")]
-        )
-        mock_state = MagicMock()
-        mock_state.get_soul = AsyncMock(return_value=MagicMock(personality_notes="old"))
-        mock_state.query_knowledge = AsyncMock(return_value=[
-            MagicMock(content="fact", lifecycle_archetype="structural"),
-        ])
-
-        adapter = EstimateTokenAdapter()
-        service = CompactionService(
-            state=mock_state, reasoning=mock_reasoning,
-            token_adapter=adapter, data_dir=str(tmp_path),
-        )
-
-        space_dir = tmp_path / "t1" / "state" / "compaction" / "sp1"
-        space_dir.mkdir(parents=True)
-        (space_dir / "active_document.md").write_text(big_doc)
-
-        cs = CompactionState(
-            space_id="sp1", compaction_number=1,
-            global_compaction_number=1, history_tokens=500,
-            document_budget=1000, message_ceiling=500,
-            conversation_headroom=8000,
-        )
-
-        space = MagicMock()
-        space.name = "Test"
-
-        # Should NOT raise
-        await service._rotate("t1", "sp1", space, cs)
-
-        # Archive should still be created
-        assert (space_dir / "archives" / "compaction_archive_001.md").exists()
-
-    async def test_no_personality_evolution_without_knowledge(self, tmp_path):
-        """If no user knowledge entries, personality is not rewritten."""
-        mock_reasoning = MagicMock()
-        mock_state = MagicMock()
-        mock_state.get_soul = AsyncMock(return_value=MagicMock(personality_notes="original"))
-        mock_state.query_knowledge = AsyncMock(return_value=[])
-        mock_state.save_soul = AsyncMock()
-
-        service = CompactionService(
-            state=mock_state, reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        await service._evolve_personality("t1")
-
-        # save_soul should NOT be called (no facts to work with)
-        mock_state.save_soul.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Adaptive Headroom
-# ---------------------------------------------------------------------------
-
-
-
-# ---------------------------------------------------------------------------
-# Headroom Estimation
 # ---------------------------------------------------------------------------
 
 
@@ -993,41 +844,46 @@ class TestCompactFromLog:
         assert kinds == ["compaction.triggered", "compaction.completed"]
 
 
-class TestRotation:
-    async def test_rotation_creates_archive_and_carries_forward(self, tmp_path):
-        svc, _ = _service(tmp_path, _output(), "Summary of archive contents.")
+class TestContinuousLedger:
+    @pytest.mark.parametrize("seal_budget", ["1", "invalid", "0"])
+    async def test_compaction_never_seals_or_writes_an_index(self, tmp_path, monkeypatch, seal_budget):
+        monkeypatch.setenv("KERNOS_SEAL_BUDGET", seal_budget)
+        svc, reasoning = _service(tmp_path, _output(), "Legacy index summary.")
         _write_doc(svc, PRIOR, "mem_a")
         cs = await svc.compact_from_log(
             "t1", "sp1", _space(), LOG, 3,
-            _state(compaction_number=2, global_compaction_number=2, document_budget=10),
+            _state(compaction_number=2, global_compaction_number=2, document_budget=1),
             member_id="mem_a",
         )
-        assert cs.archive_count == 1 and cs.compaction_number == 0
-        space_dir = svc._space_dir("t1", "sp1", "mem_a")
-        archive = (space_dir / "archives" / "compaction_archive_001.md").read_text()
-        assert "Compaction #1" in archive and "Compaction #3" in archive
-        index = (space_dir / "index.md").read_text()
-        assert "Archive #1" in index and "Summary of archive contents" in index
+        folder = svc._space_dir("t1", "sp1", "mem_a")
+        assert cs.archive_count == 0 and cs.compaction_number == 3
+        assert not (folder / "index.md").exists()
+        assert not (folder / "archives").exists()
         doc = await svc.load_document("t1", "sp1", "mem_a")
-        assert "Compaction #1 " not in doc
-        assert "Compaction #2 " in doc and "Compaction #3 " in doc
-        assert "Campaign planning underway." in doc
+        assert len(svc._parse_ledger_entries(doc)) == 3
+        assert "Compaction #1" in doc and "Compaction #3" in doc
+        assert reasoning.complete_simple.await_count == 1
 
-    async def test_seal_budget_env_overrides(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KERNOS_SEAL_BUDGET", "10")
-        svc, _ = _service(tmp_path, _output(), "Summary.")
-        cs = await svc.compact_from_log("t1", "sp1", _space(), LOG, 1, _state())
-        assert cs.archive_count == 1
-
-    async def test_high_rotation_rate_reduces_headroom(self, tmp_path):
-        svc, _ = _service(tmp_path, _output(), "Summary.")
+    async def test_existing_archive_and_index_are_preserved(self, tmp_path):
+        svc, _ = _service(tmp_path, _output(), "Legacy index summary.")
+        _write_doc(svc, PRIOR, "mem_a")
+        folder = svc._space_dir("t1", "sp1", "mem_a")
+        archives = folder / "archives"
+        archives.mkdir()
+        archive = archives / "compaction_archive_001.md"
+        archive.write_text(PRIOR)
+        index = folder / "index.md"
+        index.write_text("Original index remains readable.")
         cs = await svc.compact_from_log(
-            "t1", "sp1", _space(), LOG, 1,
-            _state(compaction_number=1, global_compaction_number=3, archive_count=0,
-                   document_budget=10, conversation_headroom=10000, _context_def_tokens=0),
+            "t1", "sp1", _space(), LOG, 3,
+            _state(compaction_number=2, global_compaction_number=2,
+                   archive_count=1, document_budget=1), member_id="mem_a",
         )
-        # 1 rotation in 4 compactions = 25% > 20% → headroom reduced by 5%
-        assert cs.conversation_headroom == int(10000 * 0.95)
+        assert cs.archive_count == 1
+        assert list(archives.iterdir()) == [archive]
+        assert archive.read_text() == PRIOR
+        assert index.read_text() == "Original index remains readable."
+        assert len(await svc.load_all_ledger_entries("t1", "sp1", "mem_a")) == 3
 
 
 class TestArchiveStoryRefresh:

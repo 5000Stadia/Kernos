@@ -129,6 +129,8 @@ def _service(
 
     compaction = MagicMock()
     compaction.load_index = AsyncMock(return_value=archive_text)
+    compaction.load_all_ledger_entries = AsyncMock(return_value=[])
+    compaction.load_archived_living_states = AsyncMock(return_value=[])
     compaction.load_archive = AsyncMock(return_value=archive_text)
 
     svc = RetrievalService(
@@ -287,10 +289,10 @@ async def test_search_structured_invokes_archive_when_included():
         active_space_id="default",
         include_archives=True,
     )
-    # Archive search ran (Haiku may or may not produce a non-"none"
-    # extract depending on the mock; the key invariant is that it's
-    # gated to run only when include_archives=True).
-    assert svc.reasoning.complete_simple.called
+    # Legacy history coverage uses direct Ledger search, with no index-picker call.
+    assert snap.archive is None  # the fixture has no matching Ledger entries
+    svc.reasoning.complete_simple.assert_not_called()
+
 
 
 # ---------------------------------------------------------------------------

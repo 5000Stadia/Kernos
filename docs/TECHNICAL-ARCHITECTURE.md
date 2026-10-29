@@ -140,7 +140,7 @@ When `work_mode=True`, the router signals intentional domain work. The handler l
 
 - **Memory:** `remember()` walks UP the parent chain. Facts in a parent are visible from children.
 - **Files:** `read_file` walks UP the parent chain. Local files shadow parent files with the same name.
-- **Archives:** `_search_archives` walks the chain — searches current space first, then parent, then grandparent.
+- **History:** `remember` searches Ledger entries and, by default, raw historical turns across the current space and its ancestors. Raw matches merge overlapping neighbour windows before selecting up to three; current logs and duplicate seeds are excluded. Sources retain member, space, log and original turn coordinates. `KERNOS_MEMORY_RAW_SEARCH=0` disables raw search for comparison; no embedding or model call is needed. Existing sealed Ledger entries remain searchable without their old index.
 - **Write policy:** `write_file` defaults to current space. `target_space_id` parameter allows writing to a parent (universal updates). Non-ancestor writes rejected.
 
 ### Cross-Domain Signals
@@ -162,8 +162,8 @@ After compaction in a parent space, `_produce_child_briefings()` runs for each c
 - **Trigger:** New tokens in the member's log for this space reach the threshold (default ~8,000 tokens via `KERNOS_COMPACTION_THRESHOLD`). Runs after the reply (see Persist).
 - **Process:** LLM reads the new span (the log minus the head seeded from the previous log), the Ledger so far (bounded) and the current Living State → writes the new Ledger entry's bullets + a new Living State. Code writes the entry header from the span's timestamps and appends it: earlier entries never pass through the model. Truncated or malformed output is refused and the document left untouched.
 - **Log rotation:** Old log archived as `log_NNN.txt`. New log created with seeded messages from old log.
-- **Reference-based:** Compaction documents point back to source logs. Full text retrievable via `remember_details()`.
-- **Sealing:** When the document exceeds its budget (`KERNOS_SEAL_BUDGET` overrides it), it is sealed into `archives/` with an index entry. Sealed entries stay searchable.
+- **Reference-based:** Compaction documents and raw recall windows point back to source logs. Full text is retrievable via `remember_details()`. Raw evidence has room within the shared final 1,500-token (6,000-character estimate) recall budget; oversized windows are explicitly excerpted around matching terms, never silently clipped at the head.
+- **Continuous Ledger:** New seals and model-written archive indices are retired. Compaction keeps every entry in the active document; bounded prompt input and the hot tail keep per-turn context small. Existing sealed files remain readable and searchable. `KERNOS_SEAL_BUDGET` is no longer used.
 - **Repair:** `kernos.cli rebuild-ledger INSTANCE MEMBER` restores entries for closed logs no entry cites (lost under the earlier whole-document rewrite).
 
 ### Adaptive Seed Depth

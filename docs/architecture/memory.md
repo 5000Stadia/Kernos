@@ -31,7 +31,7 @@ The Ledger is the conversational arc. It is the assistant's answer to *"what act
 Per-space logs are the raw material (`kernos/kernel/conversation_log.py`). Every turn appends to the space's log. At compaction boundaries, the log is transformed into a two-layer structure:
 
 - **Living State** — the short, rewritten summary of the current working context. This is the part the agent reads back in the `MEMORY` zone. It's rewritten at each compaction, from the previous Living State and the new span.
-- **Ledger** — append-only entries, one per compacted span: a short topical index whose header names its source log (`## Compaction #N (source: log_NNN) — first → last`). The agent sees the most recent entries (the hot tail, about 2,000 tokens) and an archive story for the older ones; every entry stays searchable through `remember`.
+- **Ledger** — append-only entries, one per compacted span: a short topical index whose header names its source log (`## Compaction #N (source: log_NNN) — first → last`). The agent sees the most recent entries (the hot tail, about 2,000 tokens) and an archive story for the older ones; every entry stays searchable through `remember`. New compactions keep one continuous Ledger; sealing and the model-written archive index are retired. Existing sealed entries remain readable and searchable, even without an index.
 
 The operational distinction matters. Summary-based memory systems degrade because the summary is the *only* representation of history; when the summary drifts, history drifts with it. The Ledger keeps the narrative **recoverable**: the Living State may be a summary, but each Ledger entry points into the raw log it indexes, and the logs are the source of truth.
 
@@ -133,7 +133,7 @@ This is what makes the per-member architecture durable over time. A family of th
 
 ## What this architecture makes easy
 
-- **Long-arc grounding.** A household that has used Kernos for six months, or a team that has used it across three quarterly cycles, can retrieve the arc of what happened — not just a summary of what the system thinks happened. `remember` ranks every one of the member's Ledger entries in scope (BM25, active and sealed alike) alongside facts and entities, and names each entry's source log; `remember_details` opens that log, in that space, for the same member.
+- **Long-arc grounding.** A household that has used Kernos for six months, or a team that has used it across three quarterly cycles, can retrieve the arc of what happened — not just a summary of what the system thinks happened. `remember` ranks every one of the member's Ledger entries in scope (BM25, active and sealed alike) alongside facts and entities. By default it also searches the member's raw historical turns in the active space and its ancestors. Each match includes neighbouring turns, their original speakers and timestamps, and space/log/turn coordinates. Overlapping windows merge before the top three are selected; rollover seeds do not consume duplicate slots. The current log in every searched space is excluded because the agent already sees it. `remember_details` opens the cited log, in that space, for the same member.
 - **Trustworthy fact reference.** When the agent says *"you mentioned you prefer morning meetings"* or *"your co-owner asked about the Q3 runway two weeks ago"*, the fact has a stable ID, a known source span, and a reconciled history.
 - **Graceful supersession.** When a fact changes (the member's role, the team's process, the kid's teacher this year), the `update` verb supersedes cleanly — the old value is archived, the new value replaces it under the same ID, and references to the ID keep working.
 - **Sensitivity at harvest time.** Each new or updated fact is classified (open/contextual/personal) at the moment it's extracted, so the disclosure-gate (see [Messenger](disclosure-and-messenger.md)) has the information it needs from day one.
@@ -145,6 +145,14 @@ This is what makes the per-member architecture durable over time. A family of th
 - **It does not attempt to re-derive the present from history each turn.** The Living State is the agent's working picture, and it is refreshed at compaction. Turn-to-turn, the agent reads the Living State and the recent Ledger, and reaches older entries through `remember`.
 - **It does not prevent all stale facts.** A fact that was true but stops being true without an explicit contradiction in a later span can persist. This is an acceptable failure mode — the fix is the user saying *"actually that's not the case anymore"*, which the harvester will pick up on the next boundary as an `update`.
 - **It does not attempt turn-level extraction of "anything the agent might need to know."** The harvester extracts what is durable. Transient turn-level context (what the user asked three messages ago) lives in the recent history, not in the Facts store.
+
+## Raw-history recall: an architectural upgrade
+
+`KERNOS_MEMORY_RAW_SEARCH=1` enables lexical search of closed conversation logs inside `remember` (the default). Setting it to `0` retains Ledger, fact and entity retrieval for comparison. Raw search requires a member and never falls back to legacy shared logs. It uses the existing BM25 implementation with an in-process cache of parsed closed files, invalidated when their names, sizes or modification times change; there is no persistent index, extra model call or embedding requirement.
+
+Returned windows are labelled as historical reference. The final output shares a 1,500-token budget (the project's 6,000-character estimate), including wrappers and source pointers. Raw evidence receives room before facts can fill the response. Ordinary windows are returned whole; an oversized window gets an explicitly marked excerpt centred on matching terms, with its speaker and source preserved and a `remember_details` pointer to the full conversation. Up to three distinct windows fit; the budget can reduce that number.
+
+This is a lexical baseline, not a semantic search or a resolution of evolving truth. Token matching follows the existing ASCII word/number tokenizer; paraphrases and non-ASCII-only queries can miss. Recall quality is measured separately from the isolation and source-preservation checks.
 
 ## Related architecture
 
@@ -158,5 +166,7 @@ This is what makes the per-member architecture durable over time. A family of th
 - `kernos/kernel/compaction.py` — `CompactionService.compact_from_log` (append-only compaction), `load_context_document` (what the agent sees), `load_all_ledger_entries`, `rebuild_missing_entries`
 - `kernos/messages/phases/persist.py` — `run_boundary`, the after-the-reply trigger for compaction and harvest
 - `kernos/kernel/retrieval.py` — `RetrievalService.search` (`remember`), `_search_ledger`, `bm25_rank`
+- `kernos/kernel/raw_recall.py` — neighbour-window BM25 search and bounded historical excerpts
+- `kernos/kernel/conversation_log.py` — `read_historical_turns`, member-scoped closed-log reads and parsed-file cache
 - `kernos/kernel/reasoning.py` — `_handle_remember_details`
 - `kernos/kernel/state.py` — `KnowledgeEntry.owner_member_id`; the per-member scoping

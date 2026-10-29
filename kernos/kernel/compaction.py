@@ -789,16 +789,6 @@ class CompactionService:
         match = re.search(r'# Living State\s*\n(.*)', document, re.DOTALL)
         return match.group(1).strip() if match else ""
 
-    def _extract_forward_relevant_entries(
-        self, document: str, current_compaction_number: int,
-    ) -> str:
-        """Extract the last 2 Ledger entries for carry-forward on rotation."""
-        entries = self._parse_ledger_entries(document)
-        if not entries:
-            return ""
-        forward = entries[-2:]
-        return "\n\n".join(forward)
-
     async def load_all_ledger_entries(
         self, instance_id: str, space_id: str, member_id: str = "",
     ) -> list[str]:
@@ -822,6 +812,14 @@ class CompactionService:
                     seen.add(entry)
                     entries.append(entry)
         return entries
+
+    async def load_archived_living_states(
+        self, instance_id: str, space_id: str, member_id: str = "",
+    ) -> list[tuple[str, str]]:
+        """Compatibility evidence unique to old sealed Living States."""
+        folder = self._space_dir(instance_id, space_id, member_id) / "archives"
+        return [(path.stem, self._extract_living_state(path.read_text(encoding="utf-8")))
+                for path in sorted(folder.glob("compaction_archive_*.md"))]
 
     # --- ROUTER-EVIDENCE-V1: public read-only accessors ---
     #
@@ -1231,10 +1229,8 @@ class CompactionService:
             instance_id, space_id, entries, member_id=member_id,
         )
 
-        # Check rotation (KERNOS_SEAL_BUDGET overrides the computed budget)
-        seal_budget = int(os.getenv("KERNOS_SEAL_BUDGET", "0") or 0) or comp_state.document_budget
-        if new_history_tokens > seal_budget:
-            await self._rotate(instance_id, space_id, space, comp_state, member_id=member_id)
+        # Keep a continuous Ledger. Raw logs and all existing Ledger files
+        # are searchable directly; no new seals or model-written index.
 
         await self.save_state(instance_id, space_id, comp_state, member_id=member_id)
 
@@ -1373,199 +1369,3 @@ class CompactionService:
     @staticmethod
     def _render_document(entries: list[str], living_state: str) -> str:
         return "# Ledger\n\n" + "\n\n".join(entries) + "\n\n# Living State\n\n" + living_state + "\n"
-
-    # --- Rotation ---
-
-    async def _rotate(
-        self,
-        instance_id: str,
-        space_id: str,
-        space: ContextSpace,
-        comp_state: CompactionState,
-        member_id: str = "",
-    ) -> None:
-        """Seal active document as archive, create fresh document.
-
-        Member-scoped: archives and index.md live under the member subdir
-        so one member's compaction history cannot leak into another's.
-        """
-        space_dir = self._space_dir(instance_id, space_id, member_id)
-        archive_dir = space_dir / "archives"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-
-        active_doc_path = space_dir / "active_document.md"
-        active_doc = active_doc_path.read_text(encoding="utf-8")
-
-        # 1. Seal as archive
-        comp_state.archive_count += 1
-        archive_name = f"compaction_archive_{comp_state.archive_count:03d}.md"
-        (archive_dir / archive_name).write_text(active_doc, encoding="utf-8")
-
-        # 2. Generate index summary
-        summary_input = active_doc[-8000:] if len(active_doc) > 8000 else active_doc
-        summary = await self.reasoning.complete_simple(
-            system_prompt=(
-                "Write a 1-3 sentence summary of this compaction document. "
-                "Include the domain, key events, and date range. "
-                "This summary will be used as an index entry for future retrieval."
-            ),
-            user_content=summary_input,
-            max_tokens=200,
-            prefer_cheap=True,
-        )
-
-        # 3. Append to index
-        index_path = space_dir / "index.md"
-        first_compaction = comp_state.global_compaction_number - comp_state.compaction_number + 1
-        last_compaction = comp_state.global_compaction_number
-        index_entry = (
-            f"\n## Archive #{comp_state.archive_count}\n"
-            f"Compactions {first_compaction}\u2013{last_compaction} | "
-            f"{comp_state.last_compaction_at[:10]}\n\n"
-            f"{summary.strip()}\n"
-        )
-
-        if index_path.exists():
-            existing_index = index_path.read_text(encoding="utf-8")
-            index_path.write_text(existing_index + index_entry, encoding="utf-8")
-        else:
-            index_path.write_text("# Compaction Index\n" + index_entry, encoding="utf-8")
-
-        # 4. Re-count index tokens
-        comp_state.index_tokens = await self.adapter.count_tokens(
-            index_path.read_text(encoding="utf-8")
-        )
-
-        # 4b. Personality evolution — rewrite soul.personality_notes
-        try:
-            await self._evolve_personality(instance_id, member_id=member_id)
-        except Exception as exc:
-            logger.warning("Personality evolution failed for %s: %s", instance_id, exc)
-
-        # 5. Create new active document
-        living_state = self._extract_living_state(active_doc)
-        forward_entries = self._extract_forward_relevant_entries(
-            active_doc, comp_state.compaction_number
-        )
-
-        new_doc = ""
-        if forward_entries:
-            new_doc += f"# Ledger\n\n{forward_entries}\n\n"
-        else:
-            new_doc += "# Ledger\n\n"
-        new_doc += f"# Living State\n\n{living_state}"
-
-        active_doc_path.write_text(new_doc, encoding="utf-8")
-
-        # 6. Re-count and recompute
-        comp_state.history_tokens = await self.adapter.count_tokens(new_doc)
-        comp_state.compaction_number = 0
-
-        # Adaptive headroom
-        rotations_per_100 = (
-            comp_state.archive_count
-            / max(comp_state.global_compaction_number, 1)
-        ) * 100
-
-        if rotations_per_100 > 20:
-            comp_state.conversation_headroom = int(
-                comp_state.conversation_headroom * 0.95
-            )
-
-        comp_state.conversation_headroom = max(
-            4000, min(comp_state.conversation_headroom, 40000)
-        )
-
-        comp_state.document_budget = compute_document_budget(
-            MODEL_MAX_TOKENS,
-            comp_state._system_overhead,
-            comp_state.index_tokens,
-            comp_state.conversation_headroom,
-        )
-        comp_state.message_ceiling = self._compute_ceiling(comp_state)
-
-        # Emit compaction.rotation
-        try:
-            if self.events:
-                await emit_event(
-                    self.events,
-                    EventType.COMPACTION_ROTATION,
-                    instance_id,
-                    "compaction",
-                    payload={
-                        "space_id": space_id,
-                        "archive_count": comp_state.archive_count,
-                        "new_document_budget": comp_state.document_budget,
-                        "conversation_headroom": comp_state.conversation_headroom,
-                    },
-                )
-        except Exception as exc:
-            logger.warning("Failed to emit compaction.rotation: %s", exc)
-
-        logger.info(
-            "Rotated compaction document for %s/%s — archive #%d",
-            instance_id, space_id, comp_state.archive_count,
-        )
-
-    async def _evolve_personality(self, instance_id: str, member_id: str = "") -> None:
-        """Rewrite personality_notes based on accumulated knowledge.
-
-        Fires only on compaction rotation — infrequent, cheap, deliberate.
-        Failure never blocks rotation. Writes to member profile if available.
-        """
-        # Load current personality from member profile or soul
-        current_personality = "(no personality notes yet)"
-        if member_id and hasattr(self, '_instance_db') and self._instance_db:
-            profile = await self._instance_db.get_member_profile(member_id)
-            if profile:
-                current_personality = profile.get("personality_notes", "") or current_personality
-        else:
-            soul = await self.state.get_soul(instance_id)
-            if soul and soul.personality_notes:
-                current_personality = soul.personality_notes
-
-        # Load recent user knowledge entries
-        user_ke = await self.state.query_knowledge(
-            instance_id, subject="user", active_only=True, limit=30,
-            member_id=member_id,
-        )
-        user_facts = [e.content for e in user_ke
-                      if e.lifecycle_archetype in ("structural", "identity", "habitual")]
-        if not user_facts:
-            return
-
-        facts_text = "\n".join(f"- {f}" for f in user_facts)
-
-        result = await self.reasoning.complete_simple(
-            system_prompt=(
-                "You are deepening an AI agent's personality profile based on "
-                "continued interaction. DEEPEN, do not replace. The existing profile "
-                "is a crystallized identity — refine it with more specificity as new "
-                "evidence accumulates. One unusual exchange should add nuance, not "
-                "rewrite the portrait. The agent should be recognizably the same, "
-                "with more texture."
-            ),
-            user_content=(
-                f"Current personality profile:\n{current_personality}\n\n"
-                f"Recent observations:\n{facts_text}\n\n"
-                "Revise the personality profile. Preserve the stable core — vibe, "
-                "pace, posture, boundaries. Add specificity where new evidence "
-                "supports it. Describe PATTERNS, not events. "
-                "'Approaches problems by mapping them to familiar frameworks' is "
-                "a pattern. 'Mentioned late-night coding on March 6' is an event "
-                "— do not include events. Keep it 4-8 sentences. Write a presence."
-            ),
-            max_tokens=300,
-            prefer_cheap=True,
-        )
-
-        if member_id and hasattr(self, '_instance_db') and self._instance_db:
-            await self._instance_db.upsert_member_profile(member_id, {
-                "personality_notes": result.strip(),
-            })
-        else:
-            soul = await self.state.get_soul(instance_id)
-            if soul:
-                soul.personality_notes = result.strip()
-                await self.state.save_soul(soul, source="compaction_rotation", trigger="personality_evolution")
-        logger.info("Personality evolved for %s/%s on rotation", instance_id, member_id or "legacy")

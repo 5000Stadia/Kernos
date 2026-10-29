@@ -149,7 +149,7 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "knowledge-retrieval",
         "The memory moat: retrieval over knowledge/entities/archives, entity "
         "resolution, dedup, embeddings.",
-        ("kernos/kernel/retrieval.py", "kernos/kernel/resolution.py",
+        ("kernos/kernel/retrieval.py", "kernos/kernel/raw_recall.py", "kernos/kernel/resolution.py",
          "kernos/kernel/entities.py", "kernos/kernel/dedup.py",
          "kernos/kernel/embeddings.py", "kernos/kernel/embedding_store.py",
          "kernos/kernel/note_this.py"),

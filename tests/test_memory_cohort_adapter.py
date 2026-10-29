@@ -146,6 +146,8 @@ def _retrieval_service(
 
     compaction = MagicMock()
     compaction.load_index = AsyncMock(return_value=archive_text)
+    compaction.load_all_ledger_entries = AsyncMock(return_value=[])
+    compaction.load_archived_living_states = AsyncMock(return_value=[])
     compaction.load_archive = AsyncMock(return_value=archive_text)
 
     return RetrievalService(

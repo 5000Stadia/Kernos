@@ -1,167 +1,167 @@
 {
   "file_path": "docs/TECHNICAL-ARCHITECTURE.md",
-  "source_hash": "ee11b6cadf624349065d923973a9948a5060d09d5019398e809584273a8c11ba",
-  "generated_at": "2026-10-29T03:14:43.590212+00:00",
+  "source_hash": "a0387699f51919cb371b85306a9b8560439f44a068df592495efeed7437a0f40",
+  "generated_at": "2026-10-29T04:52:59.900386+00:00",
   "sections": [
     {
       "section_title": "System Overview",
-      "one_line": "Overview of KERNOS architecture, message flow, core services, and separation of kernel infrastructure from agent reason…",
+      "one_line": "KERNOS architecture, message processing, memory, capabilities, and infrastructure ownership",
       "line_start": 18,
       "line_end": 43
     },
     {
       "section_title": "The Turn Pipeline",
-      "one_line": "Inbound message turn pipeline: six phases, boundary processing, and async-safe hot-path file I/O",
+      "one_line": "Inbound message turn pipeline: six phases, key methods, boundary work, and async-safe hot-path I/O",
       "line_start": 44,
       "line_end": 72
     },
     {
       "section_title": "1. Routing",
-      "one_line": "Routes messages across spaces, including downward searches and intentional domain work.",
+      "one_line": "Routing messages across hierarchical spaces, including downward search and domain-specific work switching",
       "line_start": 73,
       "line_end": 111
     },
     {
       "section_title": "2. Context Spaces",
-      "one_line": "Context Space hierarchy, lifecycle, switching, inheritance, cross-domain signals, and parent briefings",
+      "one_line": "Context space hierarchy, creation, switching, scope inheritance, parent briefings, and cross-domain signals",
       "line_start": 112,
       "line_end": 155
     },
     {
       "section_title": "3. Compaction",
-      "one_line": "Token-triggered log compaction with adaptive context seeding, living state updates, ledger indexing, archival, and repa…",
+      "one_line": "How compaction summarizes conversation history, preserves context, and maintains searchable logs and state",
       "line_start": 156,
       "line_end": 182
     },
     {
       "section_title": "4. Tool Surfacing",
-      "one_line": "Tool cataloging and tiered surfacing of relevant tools, with lazy promotion and preloading for efficient access",
+      "one_line": "Tool discovery and surfacing across kernel, MCP, and workspace tools using tiered access and promotion.",
       "line_start": 183,
       "line_end": 208
     },
     {
       "section_title": "5. Cognitive UI (System Prompt)",
-      "one_line": "Cognitive UI system prompt structure, context handling, provenance, and retrieval guidance",
+      "one_line": "System prompt structure for curated context, memory, procedures, tools, and retrieval on each turn",
       "line_start": 209,
       "line_end": 233
     },
     {
       "section_title": "6. Memory & Knowledge",
-      "one_line": "Memory and knowledge storage, lifecycle management, fact harvesting, and contextual retrieval",
+      "one_line": "Knowledge storage, lifecycle, harvesting, tiered injection, and retrieval across facts, entities, ledgers, and archives",
       "line_start": 234,
       "line_end": 262
     },
     {
       "section_title": "7. Reasoning & Tool Dispatch",
-      "one_line": "Reasoning, provider fallback, tool dispatch, approval gates, and reliability safeguards",
+      "one_line": "Reasoning, provider fallback, tool dispatch, approval gates, and reliability safeguards for Kernos tool use.",
       "line_start": 263,
       "line_end": 343
     },
     {
       "section_title": "8. Agentic Workspace",
-      "one_line": "Agentic workspace tools for sandboxed code execution, artifact tracking, tool registration, and iterative building.",
+      "one_line": "Building and managing tools and projects in a secure, tracked agent workspace",
       "line_start": 344,
       "line_end": 369
     },
     {
       "section_title": "9. Procedural Knowledge",
-      "one_line": "Distinguishes covenants for behavioral rules from procedures for multi-step workflows in the hierarchy.",
+      "one_line": "Distinguishes behavioral covenants from multi-step procedures and explains their capture, storage, and scope.",
       "line_start": 370,
       "line_end": 394
     },
     {
       "section_title": "10. Self-Directed Execution",
-      "one_line": "Autonomous multi-step planning and execution with budgets, discoveries, and user interruption",
+      "one_line": "Autonomous multi-step task planning and execution with budgets, progress updates, and user interruption handling",
       "line_start": 395,
       "line_end": 420
     },
     {
       "section_title": "10b. Long-Horizon Projects",
-      "one_line": "First-class long-horizon project tracking across spaces, canvases, decisions, status, and scheduled check-ins",
+      "one_line": "Long-horizon project tracking through canvases, decisions, context spaces, status summaries, and scheduler check-ins",
       "line_start": 421,
       "line_end": 438
     },
     {
       "section_title": "11. Improvement Loop — Behavioral Self-Improvement",
-      "one_line": "Behavioral self-improvement through pattern detection, covenant procedures, selective injection, and malfunction alerts",
+      "one_line": "Behavioral self-improvement through pattern detection, covenant injection, and system malfunction reporting",
       "line_start": 439,
       "line_end": 465
     },
     {
       "section_title": "11b. Improvement Loop Tier 2 — Spec-Driven Code Improvement",
-      "one_line": "Spec-driven code improvement with diagnostics, approval gates, deployment safeguards, recovery, and self-stewardship",
+      "one_line": "Spec-driven code improvement with diagnostics, approval gates, safe deployment, recovery, and self-monitoring.",
       "line_start": 466,
       "line_end": 547
     },
     {
       "section_title": "11c. Workflow Loop Primitive",
-      "one_line": "Trigger-driven workflow execution with audited actions, approval gates, and restart-safe processing",
+      "one_line": "Background execution for trigger-driven workflows with sequential actions, auditing, approvals, and safe restart handli…",
       "line_start": 548,
       "line_end": 643
     },
     {
       "section_title": "12. Awareness & Scheduling",
-      "one_line": "Proactive insight evaluation and time- or event-based scheduling, including project check-in reminders",
+      "one_line": "Proactive awareness evaluation and time- or event-based scheduling triggers",
       "line_start": 644,
       "line_end": 661
     },
     {
       "section_title": "13. State Storage",
-      "one_line": "Persistent project state storage using SQLite per instance and a shared cross-instance database.",
+      "one_line": "State storage using per-instance SQLite databases and a shared database for cross-instance state",
       "line_start": 662,
       "line_end": 679
     },
     {
       "section_title": "13b. Member Identity & Multi-Member",
-      "one_line": "Per-member identity, lifecycle, context isolation, invitations, memory, follow-ups, and whisper handling",
+      "one_line": "Per-member identity, context, routing, invites, memory, follow-ups, and whisper handling in multi-member Kernos",
       "line_start": 680,
       "line_end": 732
     },
     {
       "section_title": "13c. Platform Adapters",
-      "one_line": "Platform adapters for Discord, SMS, and Telegram, including identity discovery, invite codes, and secure credential set…",
+      "one_line": "Platform adapters for Discord, SMS, and Telegram, including invites, identity discovery, and secure credentials",
       "line_start": 733,
       "line_end": 756
     },
     {
       "section_title": "14. Capabilities & MCP",
-      "one_line": "Connected MCP servers and capability registry for managing servers and loading tools",
+      "one_line": "Lists connected MCP servers and manages available capabilities and tools.",
       "line_start": 757,
       "line_end": 772
     },
     {
       "section_title": "14b. External Agents (ACPX Integration)",
-      "one_line": "ACPX integration for dispatching external CLI agents and bridging requests with Kernos safely.",
+      "one_line": "ACPX integration for dispatching to external CLI agents and bridging requests between Kernos and agent clients",
       "line_start": 773,
       "line_end": 826
     },
     {
       "section_title": "15. Identity & Covenants",
-      "one_line": "Defines agent identity and manages enforceable behavioral covenants derived from user instructions.",
+      "one_line": "Documents agent identity and behavioral covenants, including soul state and enforced user instructions.",
       "line_start": 827,
       "line_end": 842
     },
     {
       "section_title": "16. Friction Observer",
-      "one_line": "Post-turn observer that detects friction signals and writes diagnostic reports.",
+      "one_line": "Post-turn detection of agent friction signals and diagnostic report generation",
       "line_start": 843,
       "line_end": 861
     },
     {
       "section_title": "17. Persistence",
-      "one_line": "Persistent state storage, per-tenant and per-space data organization, and non-destructive archival of deleted or supers…",
+      "one_line": "Persistence storage, state layouts, SQLite and JSON backends, per-space files, and non-destructive archival behavior",
       "line_start": 862,
       "line_end": 881
     },
     {
       "section_title": "18. Standing Principles",
-      "one_line": "Core design principles for Kernos’s conservative, ambient, provider-neutral architecture and state management",
+      "one_line": "Core design principles governing Kernos’s architecture, state, safety, and provider-neutral operation",
       "line_start": 882,
       "line_end": 896
     },
     {
       "section_title": "19. Supporting Systems (brief map)",
-      "one_line": "A map of supporting Kernos systems for canvases, retrieval, tools, credentials, messaging, health, and runtime reliabil…",
+      "one_line": "A brief map of supporting Kernos systems and the modules that implement them.",
       "line_start": 897,
       "line_end": 912
     }

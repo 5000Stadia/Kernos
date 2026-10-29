@@ -1200,6 +1200,7 @@ class MessageHandler:
                 embedding_store=JsonEmbeddingStore(data_dir),
                 compaction=self.compaction,
                 reasoning=reasoning,
+                conversation_logger=self.conv_logger,
             )
             reasoning.set_retrieval(self._retrieval)
         except Exception as exc:
