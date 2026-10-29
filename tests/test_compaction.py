@@ -1,8 +1,8 @@
 """Tests for the compaction system (SPEC-2C).
 
 Covers: token adapters, CompactionState round-trip, document parsing,
-compact() with mock LLM, rotation + archival, trigger logic, headroom
-estimation, context assembly integration.
+compact_from_log() with mock LLM, rotation + archival, headroom estimation,
+context assembly integration.
 """
 import json
 import math
@@ -309,37 +309,6 @@ class TestFormatMessages:
 # ---------------------------------------------------------------------------
 
 
-class TestTriggerLogic:
-    async def test_should_compact_below_ceiling(self):
-        service = CompactionService(
-            state=MagicMock(), reasoning=MagicMock(),
-            token_adapter=EstimateTokenAdapter(), data_dir="/tmp",
-        )
-        cs = CompactionState(
-            space_id="sp1", cumulative_new_tokens=5000, message_ceiling=10000
-        )
-        assert await service.should_compact("sp1", cs) is False
-
-    async def test_should_compact_at_ceiling(self):
-        service = CompactionService(
-            state=MagicMock(), reasoning=MagicMock(),
-            token_adapter=EstimateTokenAdapter(), data_dir="/tmp",
-        )
-        cs = CompactionState(
-            space_id="sp1", cumulative_new_tokens=10000, message_ceiling=10000
-        )
-        assert await service.should_compact("sp1", cs) is True
-
-    async def test_should_compact_above_ceiling(self):
-        service = CompactionService(
-            state=MagicMock(), reasoning=MagicMock(),
-            token_adapter=EstimateTokenAdapter(), data_dir="/tmp",
-        )
-        cs = CompactionState(
-            space_id="sp1", cumulative_new_tokens=15000, message_ceiling=10000
-        )
-        assert await service.should_compact("sp1", cs) is True
-
 
 # ---------------------------------------------------------------------------
 # Ceiling Computation
@@ -376,271 +345,11 @@ class TestCeilingComputation:
 # ---------------------------------------------------------------------------
 
 
-class TestCompact:
-    async def test_first_compaction(self, tmp_path):
-        """First compaction creates a document with Compaction #1 and Living State."""
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(return_value=(
-            "# Ledger\n\n"
-            "## Compaction #1 — 2026-03-10T10:00:00 → 2026-03-10T12:00:00\n\n"
-            "User discussed D&D campaign plans.\n\n"
-            "# Living State\n\n"
-            "## Current Situation\nPlanning a new campaign.\n"
-        ))
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(
-            id="sp1", instance_id="t1", name="D&D Campaign",
-            description="Fantasy campaign", space_type="domain",
-        )
-
-        cs = CompactionState(
-            space_id="sp1",
-            message_ceiling=100000,
-            document_budget=180000,
-            conversation_headroom=8000,
-            cumulative_new_tokens=50000,
-            _context_def_tokens=200,
-            _system_overhead=4000,
-        )
-
-        messages = [
-            {"role": "user", "content": "Let's plan our D&D campaign", "timestamp": "2026-03-10T10:00:00"},
-            {"role": "assistant", "content": "Great! What kind of campaign?", "timestamp": "2026-03-10T10:00:30"},
-        ]
-
-        result = await service.compact("t1", "sp1", space, messages, cs)
-
-        assert result.compaction_number == 1
-        assert result.global_compaction_number == 1
-        assert result.cumulative_new_tokens == 0
-        assert result.last_compaction_at != ""
-        assert result.history_tokens > 0
-
-        # Verify document was written
-        doc = await service.load_document("t1", "sp1")
-        assert doc is not None
-        assert "Compaction #1" in doc
-        assert "Living State" in doc
-
-    async def test_second_compaction_appends(self, tmp_path):
-        """Second compaction appends Compaction #2, leaves #1 unchanged."""
-        first_doc = (
-            "# Ledger\n\n"
-            "## Compaction #1 — 2026-03-10T10:00:00 → 2026-03-10T12:00:00\n\n"
-            "First session content.\n\n"
-            "# Living State\n\n"
-            "Initial state.\n"
-        )
-
-        updated_doc = (
-            "# Ledger\n\n"
-            "## Compaction #1 — 2026-03-10T10:00:00 → 2026-03-10T12:00:00\n\n"
-            "First session content.\n\n"
-            "## Compaction #2 — 2026-03-11T14:00:00 → 2026-03-11T16:00:00\n\n"
-            "Second session content.\n\n"
-            "# Living State\n\n"
-            "Updated state.\n"
-        )
-
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(return_value=updated_doc)
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        # Pre-write the first document
-        from kernos.utils import _safe_name
-        space_dir = tmp_path / _safe_name("t1") / "state" / "compaction" / _safe_name("sp1")
-        space_dir.mkdir(parents=True)
-        (space_dir / "active_document.md").write_text(first_doc)
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(
-            id="sp1", instance_id="t1", name="D&D",
-            description="Campaign", space_type="domain",
-        )
-
-        cs = CompactionState(
-            space_id="sp1",
-            compaction_number=1,
-            global_compaction_number=1,
-            message_ceiling=100000,
-            document_budget=180000,
-            conversation_headroom=8000,
-            cumulative_new_tokens=50000,
-            history_tokens=500,
-            _context_def_tokens=200,
-            _system_overhead=4000,
-        )
-
-        messages = [
-            {"role": "user", "content": "Continue the campaign", "timestamp": "2026-03-11T14:00:00"},
-        ]
-
-        result = await service.compact("t1", "sp1", space, messages, cs)
-
-        assert result.compaction_number == 2
-        assert result.global_compaction_number == 2
-
-        doc = await service.load_document("t1", "sp1")
-        assert "Compaction #1" in doc
-        assert "Compaction #2" in doc
-
-    async def test_compaction_resets_accumulator(self, tmp_path):
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(return_value="# Ledger\n\n# Living State\n\nEmpty.\n")
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(id="sp1", instance_id="t1", name="Test")
-
-        cs = CompactionState(
-            space_id="sp1",
-            cumulative_new_tokens=99999,
-            message_ceiling=100000,
-            document_budget=180000,
-            _context_def_tokens=0,
-            _system_overhead=0,
-        )
-
-        result = await service.compact("t1", "sp1", space, [], cs)
-        assert result.cumulative_new_tokens == 0
-
 
 # ---------------------------------------------------------------------------
 # Rotation
 # ---------------------------------------------------------------------------
 
-
-class TestRotation:
-    async def test_rotation_creates_archive(self, tmp_path):
-        """When doc exceeds budget, rotation creates archive + index."""
-        # Make a doc that will exceed a tiny budget
-        big_doc = (
-            "# Ledger\n\n"
-            "## Compaction #1 — 2026-03-01 → 2026-03-01\n\n"
-            "Entry one.\n\n"
-            "## Compaction #2 — 2026-03-02 → 2026-03-02\n\n"
-            "Entry two.\n\n"
-            "# Living State\n\n"
-            "Current state content.\n"
-        )
-
-        mock_reasoning = MagicMock()
-        # First call: compact() returns a big doc
-        # Second call: _rotate() generates index summary
-        mock_reasoning.complete_simple = AsyncMock(
-            side_effect=[big_doc, "Summary of archive contents."]
-        )
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(
-            id="sp1", instance_id="t1", name="Test",
-            description="Test space", space_type="domain",
-        )
-
-        cs = CompactionState(
-            space_id="sp1",
-            compaction_number=2,
-            global_compaction_number=5,
-            message_ceiling=100000,
-            document_budget=10,  # Tiny budget forces rotation
-            conversation_headroom=8000,
-            _context_def_tokens=200,
-            _system_overhead=4000,
-        )
-
-        result = await service.compact("t1", "sp1", space, [], cs)
-
-        # After rotation
-        assert result.archive_count == 1
-        assert result.compaction_number == 0  # Reset after rotation
-
-        # Check archive file exists
-        from kernos.utils import _safe_name
-        archive_path = (
-            tmp_path / _safe_name("t1") / "state" / "compaction"
-            / _safe_name("sp1") / "archives" / "compaction_archive_001.md"
-        )
-        assert archive_path.exists()
-
-        # Check index exists
-        index_path = (
-            tmp_path / _safe_name("t1") / "state" / "compaction"
-            / _safe_name("sp1") / "index.md"
-        )
-        assert index_path.exists()
-        index_content = index_path.read_text()
-        assert "Archive #1" in index_content
-        assert "Summary of archive contents" in index_content
-
-    async def test_rotation_carries_forward_entries(self, tmp_path):
-        """After rotation, new doc has Living State + last 2 Ledger entries."""
-        big_doc = (
-            "# Ledger\n\n"
-            "## Compaction #1 — 2026-03-01 → 2026-03-01\n\n"
-            "Old entry.\n\n"
-            "## Compaction #2 — 2026-03-02 → 2026-03-02\n\n"
-            "Recent entry 1.\n\n"
-            "## Compaction #3 — 2026-03-03 → 2026-03-03\n\n"
-            "Recent entry 2.\n\n"
-            "# Living State\n\n"
-            "Current state.\n"
-        )
-
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(
-            side_effect=[big_doc, "Archive summary."]
-        )
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(id="sp1", instance_id="t1", name="Test")
-
-        cs = CompactionState(
-            space_id="sp1",
-            compaction_number=3,
-            global_compaction_number=3,
-            document_budget=10,  # Force rotation
-            message_ceiling=100000,
-            conversation_headroom=8000,
-            _context_def_tokens=200,
-            _system_overhead=4000,
-        )
-
-        await service.compact("t1", "sp1", space, [], cs)
-
-        # Check new active document
-        doc = await service.load_document("t1", "sp1")
-        assert doc is not None
-        # Should have the last 2 entries carried forward
-        assert "Compaction #2" in doc
-        assert "Compaction #3" in doc
-        # First entry should NOT be carried forward
-        assert "Compaction #1" not in doc
-        # Living State should be carried forward
-        assert "Current state" in doc
 
 
 # ---------------------------------------------------------------------------
@@ -766,41 +475,6 @@ class TestPersonalityEvolution:
 # ---------------------------------------------------------------------------
 
 
-class TestAdaptiveHeadroom:
-    async def test_high_rotation_rate_reduces_headroom(self, tmp_path):
-        """If rotation rate > 20%, headroom is reduced by 5%."""
-        big_doc = "# Ledger\n\n# Living State\n\nContent.\n"
-
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(
-            side_effect=[big_doc, "Summary."]
-        )
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-        )
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(id="sp1", instance_id="t1", name="Test")
-
-        cs = CompactionState(
-            space_id="sp1",
-            compaction_number=1,
-            global_compaction_number=3,
-            archive_count=0,  # Will become 1 after rotation → 1/4 = 25% > 20%
-            document_budget=10,
-            message_ceiling=100000,
-            conversation_headroom=10000,
-            _context_def_tokens=0,
-            _system_overhead=4000,
-        )
-
-        result = await service.compact("t1", "sp1", space, [], cs)
-
-        # 25% > 20% → headroom reduced by 5%
-        assert result.conversation_headroom == int(10000 * 0.95)
-
 
 # ---------------------------------------------------------------------------
 # Headroom Estimation
@@ -925,7 +599,9 @@ class TestCompactionPrompt:
         assert "context historian" in COMPACTION_SYSTEM_PROMPT
         assert "Ledger" in COMPACTION_SYSTEM_PROMPT
         assert "Living State" in COMPACTION_SYSTEM_PROMPT
-        assert "append only" in COMPACTION_SYSTEM_PROMPT.lower()
+        assert "never modified" in COMPACTION_SYSTEM_PROMPT.lower()
+        assert "# New Ledger Entry" in COMPACTION_SYSTEM_PROMPT
+        assert "FACT_HARVEST" not in COMPACTION_SYSTEM_PROMPT
         assert "bullet points only" in COMPACTION_SYSTEM_PROMPT.lower()
         assert "remember_details" in COMPACTION_SYSTEM_PROMPT
         assert "source log" in COMPACTION_SYSTEM_PROMPT.lower()
@@ -935,42 +611,6 @@ class TestCompactionPrompt:
 # Event Emission
 # ---------------------------------------------------------------------------
 
-
-class TestEventEmission:
-    async def test_compact_emits_events(self, tmp_path):
-        mock_reasoning = MagicMock()
-        mock_reasoning.complete_simple = AsyncMock(
-            return_value="# Ledger\n\n# Living State\n\nState.\n"
-        )
-
-        mock_events = MagicMock()
-        mock_events.append = AsyncMock()
-
-        from kernos.kernel.events import JsonEventStream
-        events = JsonEventStream(str(tmp_path))
-
-        service = CompactionService(
-            state=MagicMock(), reasoning=mock_reasoning,
-            token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path),
-            events=events,
-        )
-
-        from kernos.kernel.spaces import ContextSpace
-        space = ContextSpace(id="sp1", instance_id="t1", name="Test")
-
-        cs = CompactionState(
-            space_id="sp1", message_ceiling=100000, document_budget=180000,
-            _context_def_tokens=0, _system_overhead=0,
-        )
-
-        await service.compact("t1", "sp1", space, [], cs)
-
-        # Check that compaction events were emitted
-        all_events = await events.query("t1", event_types=["compaction.triggered"], limit=10)
-        assert len(all_events) >= 1
-
-        completed = await events.query("t1", event_types=["compaction.completed"], limit=10)
-        assert len(completed) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -1197,3 +837,239 @@ FOLLOW_UPS:
         assert "FOLLOW_UPS" not in result
         assert "Before." in result
         assert "After." in result
+
+
+# ---------------------------------------------------------------------------
+# compact_from_log: the Ledger is append-only by construction
+# ---------------------------------------------------------------------------
+
+LOG = (
+    "[2026-03-10T10:00:00.123+00:00] [user] [discord] Let's plan our D&D campaign\n"
+    "[2026-03-10T10:00:30.456+00:00] [assistant] [discord] Great! What kind?\n"
+)
+PRIOR = (
+    "# Ledger\n\n"
+    "## Compaction #1 (source: log_001) — 2026-03-01T09:00 → 2026-03-01T09:30\n\n"
+    "- Alex birthday: April 12, sushi, $50/pp.\n\n"
+    "## Compaction #2 (source: log_002) — 2026-03-02T09:00 → 2026-03-02T09:30\n\n"
+    "- Guitar: knows G/C/D/Em.\n\n"
+    "# Living State\n\n"
+    "Planning a birthday dinner.\n"
+)
+
+
+def _output(bullets="- D&D: new campaign planned.", state="Campaign planning underway.",
+            extra=""):
+    return (f"{extra}# New Ledger Entry\n\n{bullets}\n\n# Living State\n\n{state}\n\n"
+            "SEED_DEPTH: 5\nRECURRING_WORKFLOWS: NONE\nFOLLOW_UPS: NONE\n")
+
+
+def _service(tmp_path, *responses, events=None):
+    reasoning = MagicMock()
+    reasoning.complete_simple = AsyncMock(side_effect=list(responses))
+    return CompactionService(
+        state=MagicMock(), reasoning=reasoning,
+        token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path), events=events,
+    ), reasoning
+
+
+def _space():
+    from kernos.kernel.spaces import ContextSpace
+    return ContextSpace(id="sp1", instance_id="t1", name="D&D",
+                        description="Campaign", space_type="domain")
+
+
+def _state(**kw):
+    base = dict(space_id="sp1", message_ceiling=100000, document_budget=180000,
+                conversation_headroom=8000, _context_def_tokens=200, _system_overhead=4000)
+    base.update(kw)
+    return CompactionState(**base)
+
+
+def _write_doc(svc, text, member_id=""):
+    path = svc._space_dir("t1", "sp1", member_id) / "active_document.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+class TestCompactFromLog:
+    async def test_first_compaction_writes_entry_with_code_header(self, tmp_path):
+        svc, _ = _service(tmp_path, _output())
+        cs = await svc.compact_from_log("t1", "sp1", _space(), LOG, 3, _state(),
+                                        member_id="mem_a")
+        assert cs.compaction_number == 1 and cs.global_compaction_number == 1
+        assert cs.cumulative_new_tokens == 0 and cs.history_tokens > 0
+        assert cs.last_seed_depth == 5
+        doc = await svc.load_document("t1", "sp1", "mem_a")
+        assert doc.startswith("# Ledger\n\n## Compaction #1 (source: log_003) — "
+                              "2026-03-10T10:00 → 2026-03-10T10:00\n\n- D&D: new campaign planned.")
+        assert doc.rstrip().endswith("Campaign planning underway.")
+        assert "SEED_DEPTH" not in doc
+
+    async def test_earlier_entries_survive_word_for_word(self, tmp_path):
+        """Even if the model rewrites old entries, the document keeps the originals."""
+        tampered = ("# Ledger\n\n## Compaction #1\n\n- Alex birthday: CHANGED.\n\n"
+                    "## Compaction #3\n\n- D&D: new campaign.\n\n"
+                    "# Living State\n\nCampaign planning underway.\n")
+        svc, _ = _service(tmp_path, tampered)
+        _write_doc(svc, PRIOR)
+        await svc.compact_from_log("t1", "sp1", _space(), LOG, 3,
+                                   _state(compaction_number=2, global_compaction_number=2))
+        doc = await svc.load_document("t1", "sp1")
+        entries = svc._parse_ledger_entries(doc)
+        assert entries[:2] == svc._parse_ledger_entries(PRIOR)
+        assert "CHANGED" not in doc
+        assert entries[2].startswith("## Compaction #3 (source: log_003)")
+        assert "- D&D: new campaign." in entries[2]
+
+    async def test_model_sees_ledger_and_state_but_never_outputs_them(self, tmp_path):
+        svc, reasoning = _service(tmp_path, _output())
+        _write_doc(svc, PRIOR)
+        await svc.compact_from_log("t1", "sp1", _space(), LOG, 3,
+                                   _state(global_compaction_number=2))
+        kwargs = reasoning.complete_simple.call_args.kwargs
+        assert "Ledger So Far:" in kwargs["user_content"]
+        assert "Alex birthday" in kwargs["user_content"]
+        assert "Current Living State:\n\nPlanning a birthday dinner." in kwargs["user_content"]
+        assert kwargs["allow_truncated"] is False
+
+    async def test_long_ledger_input_is_bounded(self, tmp_path):
+        many = "\n\n".join(f"## Compaction #{i} (source: log_{i:03d})\n\n- Topic {i}: " + "x" * 400
+                            for i in range(1, 101))
+        svc, reasoning = _service(tmp_path, _output(), "Archive story.")
+        _write_doc(svc, f"# Ledger\n\n{many}\n\n# Living State\n\nState.\n")
+        await svc.compact_from_log("t1", "sp1", _space(), LOG, 101,
+                                   _state(global_compaction_number=100))
+        content = reasoning.complete_simple.call_args_list[0].kwargs["user_content"]
+        assert "oldest entries are omitted" in content
+        assert "Topic 100:" in content and "Topic 1: " not in content
+        doc = await svc.load_document("t1", "sp1")
+        assert len(svc._parse_ledger_entries(doc)) == 101  # nothing dropped on disk
+
+    async def test_truncated_output_leaves_document_untouched(self, tmp_path):
+        from kernos.kernel.compaction import CompactionOutputError
+        from kernos.kernel.reasoning import TruncatedResponseError
+        svc, _ = _service(tmp_path, TruncatedResponseError("max_tokens"))
+        path = _write_doc(svc, PRIOR)
+        cs = _state(compaction_number=2, global_compaction_number=2)
+        with pytest.raises(CompactionOutputError):
+            await svc.compact_from_log("t1", "sp1", _space(), LOG, 3, cs)
+        assert path.read_text(encoding="utf-8") == PRIOR
+        assert cs.global_compaction_number == 2
+
+    async def test_output_missing_living_state_is_refused(self, tmp_path):
+        from kernos.kernel.compaction import CompactionOutputError
+        svc, _ = _service(tmp_path, "# New Ledger Entry\n\n- Topic: x.\n")
+        path = _write_doc(svc, PRIOR)
+        with pytest.raises(CompactionOutputError):
+            await svc.compact_from_log("t1", "sp1", _space(), LOG, 3,
+                                       _state(global_compaction_number=2))
+        assert path.read_text(encoding="utf-8") == PRIOR
+
+    async def test_old_shape_output_without_this_entry_is_refused(self, tmp_path):
+        """A whole-document reply that lacks entry #3 must not re-append #2."""
+        from kernos.kernel.compaction import CompactionOutputError
+        svc, _ = _service(tmp_path, PRIOR)
+        _write_doc(svc, PRIOR)
+        with pytest.raises(CompactionOutputError):
+            await svc.compact_from_log("t1", "sp1", _space(), LOG, 3,
+                                       _state(global_compaction_number=2))
+
+    async def test_manifest_goes_to_space_definition(self, tmp_path):
+        svc, reasoning = _service(tmp_path, _output())
+        files = MagicMock()
+        files.load_manifest = AsyncMock(return_value={"campaign.md": "Campaign notes"})
+        svc.set_files(files)
+        await svc.compact_from_log("t1", "sp1", _space(), LOG, 1, _state())
+        system = reasoning.complete_simple.call_args.kwargs["system_prompt"]
+        assert "campaign.md: Campaign notes" in system
+
+    async def test_emits_triggered_and_completed(self, tmp_path):
+        svc, _ = _service(tmp_path, _output())
+        with patch("kernos.kernel.event_stream.emit", new=AsyncMock()) as emit:
+            await svc.compact_from_log("t1", "sp1", _space(), LOG, 1, _state())
+        kinds = [c.args[1] for c in emit.call_args_list]
+        assert kinds == ["compaction.triggered", "compaction.completed"]
+
+
+class TestRotation:
+    async def test_rotation_creates_archive_and_carries_forward(self, tmp_path):
+        svc, _ = _service(tmp_path, _output(), "Summary of archive contents.")
+        _write_doc(svc, PRIOR, "mem_a")
+        cs = await svc.compact_from_log(
+            "t1", "sp1", _space(), LOG, 3,
+            _state(compaction_number=2, global_compaction_number=2, document_budget=10),
+            member_id="mem_a",
+        )
+        assert cs.archive_count == 1 and cs.compaction_number == 0
+        space_dir = svc._space_dir("t1", "sp1", "mem_a")
+        archive = (space_dir / "archives" / "compaction_archive_001.md").read_text()
+        assert "Compaction #1" in archive and "Compaction #3" in archive
+        index = (space_dir / "index.md").read_text()
+        assert "Archive #1" in index and "Summary of archive contents" in index
+        doc = await svc.load_document("t1", "sp1", "mem_a")
+        assert "Compaction #1 " not in doc
+        assert "Compaction #2 " in doc and "Compaction #3 " in doc
+        assert "Campaign planning underway." in doc
+
+    async def test_seal_budget_env_overrides(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KERNOS_SEAL_BUDGET", "10")
+        svc, _ = _service(tmp_path, _output(), "Summary.")
+        cs = await svc.compact_from_log("t1", "sp1", _space(), LOG, 1, _state())
+        assert cs.archive_count == 1
+
+    async def test_high_rotation_rate_reduces_headroom(self, tmp_path):
+        svc, _ = _service(tmp_path, _output(), "Summary.")
+        cs = await svc.compact_from_log(
+            "t1", "sp1", _space(), LOG, 1,
+            _state(compaction_number=1, global_compaction_number=3, archive_count=0,
+                   document_budget=10, conversation_headroom=10000, _context_def_tokens=0),
+        )
+        # 1 rotation in 4 compactions = 25% > 20% → headroom reduced by 5%
+        assert cs.conversation_headroom == int(10000 * 0.95)
+
+
+class TestArchiveStoryRefresh:
+    def _entries(self, n, size=900):
+        return [f"## Compaction #{i} (source: log_{i:03d}) — 2026-03-{i:02d}T10:00 → 2026-03-{i:02d}T11:00"
+                f"\n\n- Topic {i}: " + "y" * size for i in range(1, n + 1)]
+
+    async def test_story_is_per_member_and_kept_current(self, tmp_path):
+        reasoning = MagicMock()
+        reasoning.complete_simple = AsyncMock(side_effect=["Story v1.", "Story v2."])
+        svc = CompactionService(state=MagicMock(), reasoning=reasoning,
+                                token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path))
+        entries = self._entries(12)  # ~225 tokens each: 8 fit the 2000-token hot tail
+        await svc._refresh_archive_story("t1", "sp1", entries, member_id="mem_a")
+        story = svc._load_archive_story("t1", "sp1", "mem_a")
+        assert story["story"] == "Story v1." and story["archived_entry_count"] == 4
+        assert svc._load_archive_story("t1", "sp1") is None
+        assert svc._load_archive_story("t1", "sp1", "mem_b") is None
+
+        await svc._refresh_archive_story("t1", "sp1", self._entries(13), member_id="mem_a")
+        story = svc._load_archive_story("t1", "sp1", "mem_a")
+        assert story["story"] == "Story v2." and story["archived_entry_count"] == 5
+
+    async def test_no_update_still_counts_the_entry(self, tmp_path):
+        reasoning = MagicMock()
+        reasoning.complete_simple = AsyncMock(side_effect=["Story v1.", "NO_UPDATE"])
+        svc = CompactionService(state=MagicMock(), reasoning=reasoning,
+                                token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path))
+        await svc._refresh_archive_story("t1", "sp1", self._entries(12), member_id="mem_a")
+        await svc._refresh_archive_story("t1", "sp1", self._entries(13), member_id="mem_a")
+        story = svc._load_archive_story("t1", "sp1", "mem_a")
+        assert story["story"] == "Story v1." and story["archived_entry_count"] == 5
+        assert reasoning.complete_simple.await_count == 2
+
+    async def test_context_document_reads_only_the_members_story(self, tmp_path):
+        svc = CompactionService(state=MagicMock(), reasoning=None,
+                                token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path))
+        entries = "\n\n".join(self._entries(12))
+        _write_doc(svc, f"# Ledger\n\n{entries}\n\n# Living State\n\nState.\n", "mem_a")
+        svc._save_archive_story("t1", "sp1", {"story": "Space-level story."})
+        result = await svc.load_context_document("t1", "sp1", member_id="mem_a")
+        assert "Space-level story." not in result
+        svc._save_archive_story("t1", "sp1", {"story": "A's story."}, "mem_a")
+        result = await svc.load_context_document("t1", "sp1", member_id="mem_a")
+        assert "A's story." in result

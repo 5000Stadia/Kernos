@@ -71,6 +71,30 @@ class CompactionState:
     last_seed_depth: int = 10            # Adaptive seed depth from last compaction
 
 
+# Output budget for one compaction call: the new Ledger entry, the Living
+# State and the trailer sections. Earlier Ledger entries are never output.
+COMPACTION_MAX_OUTPUT_TOKENS = 12000
+
+
+class CompactionOutputError(RuntimeError):
+    """The compaction call's output can't be committed; the document is untouched."""
+
+
+_TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})[^\]]*\]\s+\[[^\]]+\]\s+\[[^\]]+\]", re.MULTILINE)
+
+
+def _span_timestamps(log_text: str) -> tuple[str, str]:
+    """First and last entry timestamps (to the minute) in a log span."""
+    stamps = _TS_RE.findall(log_text)
+    return (stamps[0], stamps[-1]) if stamps else ("", "")
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 # ---------------------------------------------------------------------------
 # Budget computation
 # ---------------------------------------------------------------------------
@@ -172,9 +196,10 @@ You receive the following inputs in this order:
 
 1. These instructions.
 2. Context Space Definition — the domain, purpose, and character of this context space. This is your editorial lens. It determines what matters, what to preserve in detail, what to condense, and what to discard.
-3. Previous Compaction History — the existing historical record from prior compaction cycles (empty on first run). This document contains two layers: a Ledger followed by a Living State. Both are described below.
-4. Source Log Identifier — the log file this compaction is derived from (e.g., "log_003"). The full conversation text is permanently archived in this file and can be retrieved later via remember_details(). You do not need to preserve the conversation verbatim — the source log does that.
-5. New Message Exchanges — the raw conversation messages since the last compaction that must now be integrated into the record.
+3. Ledger So Far — the existing Ledger entries from prior compaction cycles, most recent last (absent on the first run; the oldest may be omitted when the Ledger is long). Read-only: the system keeps every entry, and you never rewrite or repeat them.
+4. Current Living State — the Living State as of the previous compaction (absent on the first run).
+5. Source Log Identifier — the log file this compaction is derived from (e.g., "log_003"). The full conversation text is permanently archived in this file and can be retrieved later via remember_details(). You do not need to preserve the conversation verbatim — the source log does that.
+6. New Message Exchanges — the raw conversation messages since the last compaction that must now be integrated into the record.
 
 This ordering is intentional. The Ledger occupies the middle of context where archival material belongs — present but not competing for attention. The Living State sits closer to the new messages, keeping current operational reality in sharp focus as you process what is new and produce your output.
 
@@ -182,17 +207,17 @@ This ordering is intentional. The Ledger occupies the middle of context where ar
 
 #### Output
 
-Return the complete, updated compaction history document structured as follows:
+Return exactly two sections, in this order, followed by the trailer sections described below:
 
 ```
-# Ledger
-[All existing entries unchanged, new entry appended at end]
+# New Ledger Entry
+[The bullets of ONE new Ledger entry, covering only the new message exchanges]
 
 # Living State
 [Rewritten to reflect current reality as of the end of the new message exchanges]
 ```
 
-The Ledger comes first. The Living State comes last. This ensures that when this document is fed back into the next compaction cycle, the Living State will again sit closest to the new messages — maintaining optimal positioning across every cycle.
+Do not reproduce earlier Ledger entries and do not write the entry's header: the system writes the header (number, source log, date range) and appends your entry to the Ledger, so earlier entries are preserved exactly.
 
 ---
 
@@ -208,26 +233,22 @@ Once a Ledger entry is written, it is never edited, rewritten, or removed by fut
 
 Each Ledger entry is a short bullet list — one line per topic, one sentence per bullet. No paragraphs. No narrative. No analysis.
 
-Ledger entry format:
+Ledger entry format (the system adds the `## Compaction #N (source: log_NNN) — [first message timestamp] → [last message timestamp]` header):
 
 ```
-## Compaction #N (source: log_NNN) — [first message timestamp] → [last message timestamp]
-
 - [Topic]: [one-sentence summary of what happened or was decided]
 - [Topic]: [one-sentence summary]
 - [Topic]: [one-sentence summary]
 ```
 
 Ledger rules:
-1. Append only. New entries are added at the end. Existing entries are never modified.
+1. Write only the new entry. Existing entries are kept by the system and never modified.
 2. Bullet points only. No paragraphs. No narrative prose.
 3. One line per topic. Maximum one sentence per bullet. If a topic needs more detail, the source log has it.
 4. Preserve in every bullet: named entities mentioned, decisions made, commitments given, and key facts (numbers, dates, names). These are the searchable anchors that help remember() find the right Ledger entry.
 5. Do NOT preserve: reasoning, back-and-forth discussion, suggestions, emotional context, analysis, or how conclusions were reached. Those live in the source log.
 6. Do NOT preserve: retry sequences, troubleshooting steps, tool errors, testing play-by-play, or operational narrative. If the conversation was primarily testing/debugging, summarize the OUTCOME only: what worked, what was decided, what changed.
 7. Do NOT restate facts or decisions already established in prior Ledger entries unless they materially changed. If a preference or fact is unchanged from earlier entries, skip it.
-8. Include the source log reference in the header.
-9. Sequential numbering starting from 1.
 
 Example of a GOOD Ledger entry:
 
@@ -276,16 +297,14 @@ Organize the Living State into whatever sections serve the domain. Suggested sec
 
 First compaction (no previous history):
 
-1. Write Ledger entry Compaction #1 — a short bullet list of topics discussed.
+1. Write the new Ledger entry — a short bullet list of topics discussed.
 2. Construct the initial Living State from the new message exchanges.
-3. Return the complete document: Ledger then Living State.
 
 Subsequent compactions:
 
-1. Pass through all existing Ledger entries unchanged. Do not touch them.
-2. Write a new Ledger entry. Append it after the last existing entry. Bullet list of topics — brief, indexed, not narrative.
+1. Read the Ledger so far, so the new entry doesn't restate what is already indexed.
+2. Write the new Ledger entry for the new message exchanges only. Bullet list of topics — brief, indexed, not narrative.
 3. Rewrite the Living State. Update it to reflect current reality as of the end of the new message exchanges. Remove what is no longer active. Add what is new. Information aging out of the Living State is preserved in the Ledger index AND in full detail in the source logs — nothing is truly lost.
-4. Return the complete document — full Ledger (all prior entries unchanged, new entry appended), followed by the updated Living State.
 
 ---
 
@@ -311,14 +330,12 @@ When ambiguous about the Ledger — include a bullet. One extra line costs nothi
 
 1. Never fabricate. Every fact in either layer must originate from the message exchanges or the prior compaction history.
 2. Living State is rewritten freely. It reflects current truth. Old states are preserved in the Ledger.
-3. Ledger entries are immutable. Once written, never edited, merged, reworded, or removed.
+3. Ledger entries are immutable. Once written, never edited, merged, reworded, or removed — so write each new entry with care.
 4. Preserve specificity in both layers. Names, numbers, dates, identifiers — these survive compaction at full fidelity. "Alex is turning 35 on April 12" not "a friend has a birthday coming up."
 5. Ledger entries are bullet points only. No paragraphs. No narrative. Each bullet is one topic, one sentence.
 6. Living State should be rich and detailed. It is the working document. Don't apply the Ledger's minimalism here.
 7. The document must enable continuity. A future reader with the Living State should be able to continue the conversation. A future reader with the Ledger should be able to find any past topic and retrieve the source log for details.
-8. Number Ledger entries sequentially.
-9. Every Ledger entry carries the source log reference and a message date range header.
-10. Convert relative time references to absolute dates. "Yesterday" becomes the actual date (e.g., "2026-03-23"). "Last week" becomes "week of March 17, 2026." "Two hours ago" becomes the actual time if timestamps are available. Relative references become meaningless after time passes.
+8. Convert relative time references to absolute dates. "Yesterday" becomes the actual date (e.g., "2026-03-23"). "Last week" becomes "week of March 17, 2026." "Two hours ago" becomes the actual time if timestamps are available. Relative references become meaningless after time passes.
 
 ---
 
@@ -330,7 +347,7 @@ If this context space has files (created via write_file), include a FILES sectio
 
 #### Seed Depth
 
-After producing the Ledger entry and Living State, determine how many of the most recent messages are operationally critical for the next conversation turn to continue seamlessly. You've just read the entire conversation — you know what's active, what's resolved, and what the next turn needs to pick up without losing the thread.
+After producing the new Ledger entry and the Living State, determine how many of the most recent messages are operationally critical for the next conversation turn to continue seamlessly. You've just read the entire conversation — you know what's active, what's resolved, and what the next turn needs to pick up without losing the thread.
 
 At the very end of your output, on its own line, write:
 SEED_DEPTH: N
@@ -339,27 +356,9 @@ Where N is the number of trailing messages to carry forward (minimum 3, maximum 
 
 ---
 
-#### Fact Harvest
-
-After SEED_DEPTH, extract any durable facts from this conversation that should be remembered long-term. For each fact, indicate:
-- ADD: A new fact not already in existing knowledge
-- UPDATE <id>: An update to an existing fact (use the ID from the knowledge list below)
-- REINFORCE <id>: Confirmation of an existing fact
-
-Write:
-FACT_HARVEST:
-ADD: <fact content with subject>
-UPDATE <id>: <updated content>
-REINFORCE <id>
-
-If no new facts, write:
-FACT_HARVEST: NONE
-
----
-
 #### Recurring Workflows
 
-After FACT_HARVEST, if you notice the user repeatedly following the same multi-step workflow (3+ times in this conversation), note it. These are positive patterns worth formalizing as procedures.
+After SEED_DEPTH, if you notice the user repeatedly following the same multi-step workflow (3+ times in this conversation), note it. These are positive patterns worth formalizing as procedures.
 
 RECURRING_WORKFLOWS:
 - description: [what the user does each time]
@@ -521,6 +520,7 @@ class CompactionService:
     # --- Bounded context loading (SPEC-LEDGER-ARCHITECTURE) ---
 
     HOT_TAIL_BUDGET = 2000  # tokens
+    LEDGER_INPUT_BUDGET = 8000  # tokens of prior Ledger shown to each compaction call
 
     async def load_context_document(
         self, instance_id: str, space_id: str,
@@ -547,27 +547,16 @@ class CompactionService:
 
         parts: list[str] = []
 
-        # Archive story (if we have archived entries)
+        # Archive story (if we have archived entries). It is the member's
+        # own, kept current at compaction (_refresh_archive_story).
         if archived_count > 0:
-            story = self._load_archive_story(instance_id, space_id)
+            story = self._load_archive_story(instance_id, space_id, member_id)
             if story:
                 parts.append(
                     f"Archive: [{story.get('date_range_start', '?')} → "
                     f"{story.get('date_range_end', '?')}]\n"
                     f"{story.get('story', '')}"
                 )
-            elif archived_count > 0:
-                # First load — generate archive story
-                archived_entries = entries[:archived_count]
-                story = await self._generate_initial_archive_story(
-                    instance_id, space_id, archived_entries,
-                )
-                if story:
-                    parts.append(
-                        f"Archive: [{story.get('date_range_start', '?')} → "
-                        f"{story.get('date_range_end', '?')}]\n"
-                        f"{story.get('story', '')}"
-                    )
 
         if hot_entries:
             parts.append("# Recent Ledger\n" + "\n\n".join(hot_entries))
@@ -591,9 +580,11 @@ class CompactionService:
             selected = [entries[-1]]
         return selected
 
-    def _load_archive_story(self, instance_id: str, space_id: str) -> dict | None:
-        """Load the archive story from disk."""
-        path = self._space_dir(instance_id, space_id) / "archive_story.json"
+    def _load_archive_story(
+        self, instance_id: str, space_id: str, member_id: str = "",
+    ) -> dict | None:
+        """Load the member's archive story from disk."""
+        path = self._space_dir(instance_id, space_id, member_id) / "archive_story.json"
         if not path.exists():
             return None
         try:
@@ -602,15 +593,39 @@ class CompactionService:
         except Exception:
             return None
 
-    def _save_archive_story(self, instance_id: str, space_id: str, story: dict) -> None:
-        """Save archive story to disk."""
+    def _save_archive_story(
+        self, instance_id: str, space_id: str, story: dict, member_id: str = "",
+    ) -> None:
+        """Save the member's archive story to disk."""
         import json as _json
-        path = self._space_dir(instance_id, space_id) / "archive_story.json"
+        path = self._space_dir(instance_id, space_id, member_id) / "archive_story.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_json.dumps(story, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    async def _refresh_archive_story(
+        self, instance_id: str, space_id: str, entries: list[str],
+        member_id: str = "",
+    ) -> None:
+        """Keep the member's archive story current with the entries that have
+        fallen off the hot tail. Runs at compaction, never on the turn path."""
+        hot = self._select_hot_tail(entries, self.HOT_TAIL_BUDGET)
+        archived = entries[: len(entries) - len(hot)]
+        if not archived:
+            return
+        story = self._load_archive_story(instance_id, space_id, member_id)
+        if story is None:
+            await self._generate_initial_archive_story(
+                instance_id, space_id, archived, member_id=member_id,
+            )
+            return
+        for entry in archived[int(story.get("archived_entry_count", 0)):]:
+            await self.update_archive_story(
+                instance_id, space_id, entry, member_id=member_id,
+            )
+
     async def _generate_initial_archive_story(
         self, instance_id: str, space_id: str, archived_entries: list[str],
+        member_id: str = "",
     ) -> dict | None:
         """One-time generation of archive story from all archived entries."""
         if not self.reasoning or not archived_entries:
@@ -643,7 +658,7 @@ class CompactionService:
                 "last_updated_at": utc_now(),
                 "last_archived_compaction": len(archived_entries),
             }
-            self._save_archive_story(instance_id, space_id, story)
+            self._save_archive_story(instance_id, space_id, story, member_id)
             logger.info(
                 "ARCHIVE_STORY_CREATED: space=%s entries=%d",
                 space_id, len(archived_entries),
@@ -655,9 +670,10 @@ class CompactionService:
 
     async def update_archive_story(
         self, instance_id: str, space_id: str, newly_archived_entry: str,
+        member_id: str = "",
     ) -> None:
         """Incrementally update archive story when an entry falls off hot tail."""
-        existing = self._load_archive_story(instance_id, space_id)
+        existing = self._load_archive_story(instance_id, space_id, member_id)
         if not existing or not self.reasoning:
             return
         try:
@@ -667,27 +683,26 @@ class CompactionService:
                     f"Current archive synopsis ({existing['date_range_start']} → "
                     f"{existing['date_range_end']}):\n"
                     f"{existing['story']}\n\n"
-                    f"A new ledger entry has been archived:\n{newly_archived_entry}\n\n"
-                    f"Does this entry materially change or add to the archive synopsis?\n"
+                    f"Does the ledger entry below materially change or add to the archive synopsis?\n"
                     f"- If YES: rewrite the synopsis incorporating the new information. "
                     f"Keep it under 100 words.\n"
                     f"- If NO: respond with exactly NO_UPDATE"
                 ),
-                user_content="",
+                user_content=f"Newly archived ledger entry:\n{newly_archived_entry}",
                 max_tokens=256,
                 prefer_cheap=True,
             )
+            import re as _re
+            dates = _re.findall(r'(\d{4}-\d{2}-\d{2})', newly_archived_entry)
+            if dates:
+                existing["date_range_end"] = dates[-1]
             if "NO_UPDATE" not in result.upper():
-                # Extract new date range end
-                import re as _re
-                dates = _re.findall(r'(\d{4}-\d{2}-\d{2})', newly_archived_entry)
-                if dates:
-                    existing["date_range_end"] = dates[-1]
                 existing["story"] = result.strip()
-                existing["archived_entry_count"] = existing.get("archived_entry_count", 0) + 1
-                existing["last_updated_at"] = utc_now()
-                self._save_archive_story(instance_id, space_id, existing)
                 logger.info("ARCHIVE_STORY_UPDATED: space=%s", space_id)
+            # Count the entry either way, so it is never re-processed.
+            existing["archived_entry_count"] = existing.get("archived_entry_count", 0) + 1
+            existing["last_updated_at"] = utc_now()
+            self._save_archive_story(instance_id, space_id, existing, member_id)
         except Exception as exc:
             logger.warning("ARCHIVE_STORY_UPDATE_FAILED: %s", exc)
 
@@ -721,14 +736,6 @@ class CompactionService:
         return archive_path.read_text(encoding="utf-8")
 
     # --- Trigger ---
-
-    async def should_compact(
-        self, space_id: str, comp_state: CompactionState
-    ) -> bool:
-        """Check if accumulated new messages exceed the ceiling."""
-        return comp_state.cumulative_new_tokens >= comp_state.message_ceiling
-
-    # --- Ceiling ---
 
     def _compute_ceiling(self, comp_state: CompactionState) -> int:
         """Compute message ceiling — max new tokens before compaction fires."""
@@ -829,124 +836,6 @@ class CompactionService:
         if not entries:
             return []
         return entries[-n:]
-
-    # --- Compact ---
-
-    async def compact(
-        self,
-        instance_id: str,
-        space_id: str,
-        space: ContextSpace,
-        new_messages: list[dict],
-        comp_state: CompactionState,
-    ) -> CompactionState:
-        """Run one compaction cycle."""
-        space_dir = self._space_dir(instance_id, space_id)
-        space_dir.mkdir(parents=True, exist_ok=True)
-
-        # Emit compaction.triggered
-        try:
-            if self.events:
-                await emit_event(
-                    self.events,
-                    EventType.COMPACTION_TRIGGERED,
-                    instance_id,
-                    "compaction",
-                    payload={
-                        "space_id": space_id,
-                        "compaction_number": comp_state.global_compaction_number + 1,
-                        "cumulative_new_tokens": comp_state.cumulative_new_tokens,
-                        "message_ceiling": comp_state.message_ceiling,
-                    },
-                )
-        except Exception as exc:
-            logger.warning("Failed to emit compaction.triggered: %s", exc)
-
-        # Load existing document
-        active_doc_path = space_dir / "active_document.md"
-        existing_doc = active_doc_path.read_text(encoding="utf-8") if active_doc_path.exists() else ""
-
-        # Format new messages
-        messages_text = self._format_messages(new_messages)
-
-        # Context space definition
-        space_definition = (
-            f"Space: {space.name}\n"
-            f"Type: {space.space_type}\n"
-            f"Description: {space.description}\n"
-            f"Posture: {space.posture}\n"
-        )
-
-        # Manifest injection — tell the compaction model what files exist
-        if self._files:
-            try:
-                manifest = await self._files.load_manifest(instance_id, space_id)
-                if manifest:
-                    manifest_text = "Current files in this space:\n"
-                    for fname, desc in manifest.items():
-                        manifest_text += f"  - {fname}: {desc}\n"
-                    space_definition += f"\n{manifest_text}"
-            except Exception as exc:
-                logger.warning("Failed to load manifest for compaction injection: %s", exc)
-
-        # Build the compaction call
-        user_content = ""
-        if existing_doc:
-            user_content += f"Previous Compaction History:\n\n{existing_doc}\n\n---\n\n"
-        user_content += f"New Message Exchanges:\n\n{messages_text}"
-
-        updated_doc = await self.reasoning.complete_simple(
-            system_prompt=COMPACTION_SYSTEM_PROMPT,
-            user_content=(
-                f"Context Space Definition:\n\n{space_definition}\n\n---\n\n"
-                f"{user_content}"
-            ),
-            max_tokens=16000,
-            prefer_cheap=True,
-        )
-
-        # Store updated document
-        active_doc_path.write_text(updated_doc, encoding="utf-8")
-
-        # Re-count tokens via adapter
-        new_history_tokens = await self.adapter.count_tokens(updated_doc)
-
-        # Update state
-        comp_state.history_tokens = new_history_tokens
-        comp_state.compaction_number += 1
-        comp_state.global_compaction_number += 1
-        comp_state.cumulative_new_tokens = 0
-        comp_state.last_compaction_at = utc_now()
-
-        # Recompute message ceiling
-        comp_state.message_ceiling = self._compute_ceiling(comp_state)
-
-        # Check rotation
-        if new_history_tokens > comp_state.document_budget:
-            await self._rotate(instance_id, space_id, space, comp_state)
-
-        # Save state
-        await self.save_state(instance_id, space_id, comp_state)
-
-        # Emit compaction.completed
-        try:
-            if self.events:
-                await emit_event(
-                    self.events,
-                    EventType.COMPACTION_COMPLETED,
-                    instance_id,
-                    "compaction",
-                    payload={
-                        "space_id": space_id,
-                        "compaction_number": comp_state.global_compaction_number,
-                        "history_tokens": comp_state.history_tokens,
-                        "message_ceiling": comp_state.message_ceiling,
-                    },
-                )
-        except Exception as exc:
-            logger.warning("Failed to emit compaction.completed: %s", exc)
-
-        return comp_state
 
     @staticmethod
     def _parse_seed_depth(doc: str) -> int:
@@ -1170,14 +1059,22 @@ class CompactionService:
         comp_state: CompactionState,
         member_id: str = "",
     ) -> CompactionState:
-        """Run compaction from a space log file (P3).
+        """Compact one span of a member's space log into the Ledger.
+
+        The model writes only the new Ledger entry's bullets and the new
+        Living State. Code writes the entry header from the span's own
+        timestamps and appends the entry to the existing Ledger, so earlier
+        entries never pass through the model and stay exactly as written:
+        the Ledger is append-only by construction, not by request.
 
         Args:
-            log_text: The full text of the current log file.
+            log_text: The span to compact: the current log without the
+                entries seeded from the previous log (already compacted).
             source_log_number: The log number (e.g., 3 for log_003.txt).
-            comp_state: Current compaction state for this space.
+            comp_state: Current compaction state for this space and member.
 
-        Returns: Updated CompactionState after successful compaction.
+        Raises CompactionOutputError (and leaves the document untouched)
+        when the model's output is truncated or lacks either section.
         """
         # DISCLOSURE-GATE: compaction artifacts MUST be member-scoped. When
         # multiple members share a space (e.g., two members on the same
@@ -1211,6 +1108,8 @@ class CompactionService:
             active_doc_path.read_text(encoding="utf-8")
             if active_doc_path.exists() else ""
         )
+        prior_entries = self._parse_ledger_entries(existing_doc)
+        prior_state = self._extract_living_state(existing_doc)
 
         # Space definition
         space_definition = (
@@ -1232,68 +1131,59 @@ class CompactionService:
             except Exception as exc:
                 logger.warning("Manifest load failed for compaction: %s", exc)
 
-        # Build existing knowledge list for fact harvest
-        _knowledge_section = ""
-        try:
-            _ke = await self.state.query_knowledge(instance_id, active_only=True, limit=100)
-            if _ke:
-                _ke_lines = [f"  [{e.id}] {e.subject}: {e.content[:100]}" for e in _ke[:50]]
-                _knowledge_section = f"\n\nExisting knowledge (for FACT_HARVEST UPDATE/REINFORCE):\n" + "\n".join(_ke_lines)
-        except Exception:
-            pass
-
-        # Build compaction prompt with source log reference
         user_content = ""
-        if existing_doc:
-            user_content += f"Previous Compaction History:\n\n{existing_doc}\n\n---\n\n"
+        if prior_entries:
+            shown = self._select_hot_tail(prior_entries, self.LEDGER_INPUT_BUDGET)
+            omitted = len(prior_entries) - len(shown)
+            note = f" (the {omitted} oldest entries are omitted here)" if omitted else ""
+            user_content += f"Ledger So Far{note}:\n\n" + "\n\n".join(shown) + "\n\n---\n\n"
+        if prior_state:
+            user_content += f"Current Living State:\n\n{prior_state}\n\n---\n\n"
         user_content += (
-            f"Source: log_{source_log_number:03d}\n"
-            f"You are compacting source log log_{source_log_number:03d}. "
-            f"Include this reference in your Ledger entry header.\n\n"
+            f"Source: log_{source_log_number:03d}\n\n"
             f"New Message Exchanges:\n\n{log_text}"
-            f"{_knowledge_section}"
         )
 
-        updated_doc = await self.reasoning.complete_simple(
-            system_prompt=COMPACTION_SYSTEM_PROMPT + f"\n\n{space_definition}",
-            user_content=user_content,
-            max_tokens=16000,
-            prefer_cheap=True,
-        )
+        from kernos.kernel.reasoning import TruncatedResponseError
+        try:
+            output = await self.reasoning.complete_simple(
+                system_prompt=COMPACTION_SYSTEM_PROMPT + f"\n\n{space_definition}",
+                user_content=user_content,
+                max_tokens=COMPACTION_MAX_OUTPUT_TOKENS,
+                prefer_cheap=True,
+                allow_truncated=False,
+            )
+        except TruncatedResponseError as exc:
+            raise CompactionOutputError(f"compaction output truncated: {exc}") from exc
 
-        # Parse and strip adaptive seed depth
-        seed_depth = self._parse_seed_depth(updated_doc)
-        updated_doc = self._strip_seed_depth(updated_doc)
+        # Parse and strip the trailer sections
+        seed_depth = self._parse_seed_depth(output)
+        output = self._strip_seed_depth(output)
         comp_state.last_seed_depth = seed_depth
+        output = self._strip_fact_harvest(output)  # no longer requested; tolerate it
 
-        # Parse and strip fact harvest
-        fact_harvest = self._parse_fact_harvest(updated_doc)
-        updated_doc = self._strip_fact_harvest(updated_doc)
-        if fact_harvest:
-            logger.info("COMPACTION_HARVEST: facts=%d adds=%d updates=%d reinforces=%d",
-                len(fact_harvest),
-                sum(1 for f in fact_harvest if f["action"] == "add"),
-                sum(1 for f in fact_harvest if f["action"] == "update"),
-                sum(1 for f in fact_harvest if f["action"] == "reinforce"))
-        # Store harvest results on comp_state for the handler to process
-        comp_state._fact_harvest = fact_harvest  # type: ignore[attr-defined]
-
-        # Parse and strip recurring workflows
-        recurring_workflows = self._parse_recurring_workflows(updated_doc)
-        updated_doc = self._strip_recurring_workflows(updated_doc)
+        recurring_workflows = self._parse_recurring_workflows(output)
+        output = self._strip_recurring_workflows(output)
         if recurring_workflows:
             logger.info("COMPACTION_WORKFLOWS: count=%d", len(recurring_workflows))
         comp_state._recurring_workflows = recurring_workflows  # type: ignore[attr-defined]
 
-        # Parse and strip commitments
-        commitments = self._parse_follow_ups(updated_doc)
-        updated_doc = self._strip_follow_ups(updated_doc)
+        commitments = self._parse_follow_ups(output)
+        output = self._strip_follow_ups(output)
         if commitments:
             logger.info("COMPACTION_FOLLOW_UPS: count=%d", len(commitments))
         comp_state._follow_ups = commitments  # type: ignore[attr-defined]
 
-        # Write updated document
-        active_doc_path.write_text(updated_doc, encoding="utf-8")
+        entry_number = comp_state.global_compaction_number + 1
+        bullets, living_state = self._parse_compaction_output(output, entry_number)
+
+        first_ts, last_ts = _span_timestamps(log_text)
+        header = f"## Compaction #{entry_number} (source: log_{source_log_number:03d})"
+        if first_ts:
+            header += f" — {first_ts} → {last_ts}"
+        entries = prior_entries + [f"{header}\n\n{bullets}"]
+        updated_doc = self._render_document(entries, living_state)
+        _write_atomic(active_doc_path, updated_doc)
 
         # Update state
         new_history_tokens = await self.adapter.count_tokens(updated_doc)
@@ -1304,8 +1194,13 @@ class CompactionService:
         comp_state.last_compaction_at = utc_now()
         comp_state.message_ceiling = self._compute_ceiling(comp_state)
 
-        # Check rotation
-        if new_history_tokens > comp_state.document_budget:
+        await self._refresh_archive_story(
+            instance_id, space_id, entries, member_id=member_id,
+        )
+
+        # Check rotation (KERNOS_SEAL_BUDGET overrides the computed budget)
+        seal_budget = int(os.getenv("KERNOS_SEAL_BUDGET", "0") or 0) or comp_state.document_budget
+        if new_history_tokens > seal_budget:
             await self._rotate(instance_id, space_id, space, comp_state, member_id=member_id)
 
         await self.save_state(instance_id, space_id, comp_state, member_id=member_id)
@@ -1332,6 +1227,38 @@ class CompactionService:
             logger.debug("Failed to emit compaction.completed: %s", exc)
 
         return comp_state
+
+    def _parse_compaction_output(self, output: str, entry_number: int) -> tuple[str, str]:
+        """Return (new entry bullets, Living State) from the compaction output.
+
+        Tolerates a model that returned the old whole-document shape, but only
+        by taking the entry it numbered as this one, never an older entry.
+        """
+        state_match = re.search(r"^#\s*Living State\s*$\n?(.*)", output, re.DOTALL | re.MULTILINE)
+        living_state = state_match.group(1).strip() if state_match else ""
+        before_state = output[:state_match.start()] if state_match else output
+
+        bullets = ""
+        entry_match = re.search(r"^#\s*New Ledger Entry\s*$\n?(.*)", before_state, re.DOTALL | re.MULTILINE)
+        if entry_match:
+            bullets = entry_match.group(1).strip()
+        else:
+            own = re.search(
+                rf"^## Compaction #{entry_number}\b[^\n]*\n(.*)", before_state,
+                re.DOTALL | re.MULTILINE,
+            )
+            if own:
+                bullets = re.split(r"^## Compaction #\d+", own.group(1), flags=re.MULTILINE)[0].strip()
+        if not bullets or not living_state:
+            raise CompactionOutputError(
+                "compaction output lacks "
+                + ("the new Ledger entry" if not bullets else "the Living State")
+            )
+        return bullets, living_state
+
+    @staticmethod
+    def _render_document(entries: list[str], living_state: str) -> str:
+        return "# Ledger\n\n" + "\n\n".join(entries) + "\n\n# Living State\n\n" + living_state + "\n"
 
     # --- Rotation ---
 
@@ -1397,7 +1324,7 @@ class CompactionService:
 
         # 4b. Personality evolution — rewrite soul.personality_notes
         try:
-            await self._evolve_personality(instance_id)
+            await self._evolve_personality(instance_id, member_id=member_id)
         except Exception as exc:
             logger.warning("Personality evolution failed for %s: %s", instance_id, exc)
 
