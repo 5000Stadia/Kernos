@@ -1548,7 +1548,7 @@ class ReasoningService:
                     return await handle_manage_schedule(
                         self._trigger_store,
                         request.instance_id,
-                        member_id=request.active_space_id,
+                        member_id=getattr(request, "member_id", "") or "",
                         space_id=request.active_space_id,
                         action=_action,
                         trigger_id=(tool_input or {}).get("trigger_id", ""),

@@ -140,6 +140,29 @@ def resolve_owner_member_id(instance_id: str) -> str:
     return f"member:{instance_id}:owner"
 
 
+async def trigger_member_id(trigger, handler) -> str:
+    """The member a trigger belongs to: its creator, else the owner.
+
+    manage_schedule once recorded the space id as the member, so firings
+    were logged under a member that doesn't exist; such triggers fall back
+    to the owner, as triggers with no member always have. The owner is the
+    real member id when the instance db knows it, so the firing lands in
+    the log the owner's agent reads.
+    """
+    member_id = trigger.member_id or ""
+    if member_id and member_id != trigger.space_id:
+        return member_id
+    instance_db = getattr(handler, "_instance_db", None)
+    if instance_db is not None:
+        try:
+            owner = await instance_db.get_owner_member_id()
+            if owner:
+                return owner
+        except Exception:
+            pass
+    return resolve_owner_member_id(trigger.instance_id)
+
+
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
@@ -1092,7 +1115,7 @@ async def _store_scheduled_message(handler, trigger: Trigger, content: str) -> N
                 speaker="assistant",
                 channel="scheduled",
                 content=log_content,
-                member_id=trigger.member_id,
+                member_id=await trigger_member_id(trigger, handler),
             )
     except Exception as exc:
         logger.warning(
@@ -1129,7 +1152,7 @@ async def _write_receipt(
             speaker="system",
             channel="receipt",
             content=receipt_content,
-            member_id=trigger.member_id,
+            member_id=await trigger_member_id(trigger, handler),
         )
     except Exception as exc:
         logger.warning("RECEIPT_WRITE_FAILED: trigger=%s error=%s", trigger.trigger_id, exc)
@@ -1139,7 +1162,7 @@ async def _fire_trigger(trigger: Trigger, handler) -> bool:
     """Execute a trigger's action. Returns True on success."""
     if trigger.action_type == "notify":
         message = trigger.action_params.get("message", trigger.action_description)
-        member_id = trigger.member_id or resolve_owner_member_id(trigger.instance_id)
+        member_id = await trigger_member_id(trigger, handler)
         channel = trigger.notify_via or None
         success = await handler.send_outbound(
             trigger.instance_id, member_id, channel, message,
@@ -1206,7 +1229,7 @@ async def _fire_trigger(trigger: Trigger, handler) -> bool:
                 return False
 
             # Deliver result to user
-            member_id = trigger.member_id or resolve_owner_member_id(trigger.instance_id)
+            member_id = await trigger_member_id(trigger, handler)
             delivery_msg = f"Scheduled action completed: {trigger.action_description}\n\nResult: {result}"
             channel = trigger.notify_via or None
             success = await handler.send_outbound(
@@ -1622,7 +1645,7 @@ async def _evaluate_calendar_trigger(
 
             # Deliver via send_outbound — canonical member ID
             channel = trigger.notify_via or None
-            member_id = resolve_owner_member_id(trigger.instance_id)
+            member_id = await trigger_member_id(trigger, handler)
 
             # Proactive budget check
             if proactive_budget_check and not proactive_budget_check("event_trigger"):
@@ -1641,7 +1664,7 @@ async def _evaluate_calendar_trigger(
                         speaker="assistant",
                         channel="scheduled",
                         content=f"[EVENT] {message}",
-                        member_id=trigger.member_id,
+                        member_id=await trigger_member_id(trigger, handler),
                     )
 
                 # Execution receipt
