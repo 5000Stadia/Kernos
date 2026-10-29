@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-29T07:37:34.409953+00:00",
+  "generated_at": "2026-10-29T07:51:31.430045+00:00",
   "entries": {
     "docs/ADAPTER-GUIDE.md": {
       "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
@@ -103,7 +103,7 @@
       "artifact_path": "docs/_catalog/architecture/kernel-tool-registry.json"
     },
     "docs/architecture/memory.md": {
-      "source_hash": "c6737f26c390af5d05193e0ca5183937fc09fabec443364ceec91493553b94a5",
+      "source_hash": "31a47184845a987dab3637654ffaca6afddf0fd64370b8c87261f287708d8619",
       "artifact_path": "docs/_catalog/architecture/memory.json"
     },
     "docs/architecture/model-registry.md": {

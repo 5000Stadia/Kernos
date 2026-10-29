@@ -565,6 +565,34 @@ async def test_invented_narrative_span_is_repaired_instead_of_silently_emptied(t
     assert decode_state(document)["narrative"]
 
 
+async def test_model_source_labels_resolve_to_original_coordinates_without_changing_quotes():
+    from kernos.kernel.living_state import ThreadReasoner, PROPOSAL_SCHEMA
+    ident = "studio/log_002/turn_17@12:41"
+    source = dict(id=ident, space_id=SPACE, log_number=2, turn_number=17,
+                  start=12, end=41, quote=ident, speaker="user", channel="chat")
+    async def complete_simple(**kw):
+        payload = json.loads(kw["user_content"])
+        assert payload["sources"][0]["id"] == "s0"
+        assert payload["sources"][0]["quote"] == ident
+        assert payload["open_threads"][0]["id"] == "thread_existing"
+        assert payload["open_threads"][0]["evidence"][0]["id"] == "s0"
+        return json.dumps(dict(open=[dict(kind="commitment", responsible="user", evidence=["s0"])], close=[]))
+    reasoner = ThreadReasoner(MagicMock(complete_simple=complete_simple), "Workshop", SPACE)
+    payload = dict(sources=[source], open_threads=[dict(id="thread_existing", evidence=[source])])
+    result = await reasoner.ask("THREAD_PROPOSER", payload, PROPOSAL_SCHEMA)
+    assert result["open"][0]["evidence"] == [ident]
+    assert payload["sources"][0]["id"] == ident
+
+
+async def test_unknown_short_source_label_is_not_resolved_or_consumed():
+    from kernos.kernel.living_state import ThreadReasoner, PROPOSAL_SCHEMA, LivingStateError
+    response = dict(open=[dict(kind="decision", responsible="user", evidence=["s999"])], close=[])
+    reasoning = MagicMock(complete_simple=AsyncMock(return_value=json.dumps(response)))
+    reasoner = ThreadReasoner(reasoning, "Workshop", SPACE)
+    with pytest.raises(LivingStateError, match="unknown source IDs"):
+        await reasoner.ask("THREAD_PROPOSER", dict(sources=[dict(id="real_source")]), PROPOSAL_SCHEMA)
+
+
 async def test_ledger_repair_preserves_thread_metadata_byte_for_byte(tmp_path):
     scenario, harness = _first(tmp_path)
     for boundary in scenario["boundaries"][:2]:

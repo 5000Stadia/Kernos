@@ -420,11 +420,35 @@ class ThreadReasoner:
         source_ids = {s["id"] for s in payload.get("sources", [])}
         cited_fields = ("open", "close") if schema is PROPOSAL_SCHEMA else (
             ("narrative",) if schema is HISTORIAN_SCHEMA else ())
+        aliases = {f"s{i}": source["id"] for i, source in enumerate(payload.get("sources", []))}
+        by_source = {ident: alias for alias, ident in aliases.items()}
+        def label_sources(value):
+            if isinstance(value, list):
+                return [label_sources(v) for v in value]
+            if not isinstance(value, dict):
+                return value
+            labelled = {}
+            for key, item in value.items():
+                if key == "id" and isinstance(item, str):
+                    labelled[key] = by_source.get(item, item)
+                elif key == "evidence" and isinstance(item, list):
+                    labelled[key] = [by_source.get(e, e) if isinstance(e, str) else label_sources(e)
+                                     for e in item]
+                else:
+                    labelled[key] = label_sources(item)
+            return labelled
+        # Models select small opaque labels; only code resolves them to the
+        # original physical coordinates retained in every accepted record.
+        wire_payload = label_sources(payload) if cited_fields else payload
+        if cited_fields:
+            prompt += ("\nUse the short source IDs (s0, s1, ...) in this input's sources table. "
+                       "Copy these labels exactly in evidence; code supplies the physical coordinates. "
+                       "Never construct a source ID from offsets or combine labels into a new span.")
         for attempt in range(2):
             try:
                 raw = await self.reasoning.complete_simple(
                     system_prompt=prompt + "\nContext-space purpose: " + self.purpose,
-                    user_content=json.dumps(payload, ensure_ascii=False), output_schema=schema,
+                    user_content=json.dumps(wire_payload, ensure_ascii=False), output_schema=schema,
                     max_tokens=12000, prefer_cheap=True, allow_truncated=False)
                 result = json.loads(raw)
             except Exception as exc:
@@ -436,8 +460,11 @@ class ThreadReasoner:
                 for operation in result[field] if isinstance(result[field], list) else []:
                     if not isinstance(operation, dict) or not isinstance(operation.get("evidence"), list):
                         continue  # The caller checks malformed operation shapes.
-                    invalid.extend(repr(ident) for ident in operation["evidence"]
+                    resolved = [aliases.get(ident, ident) if isinstance(ident, str) else ident
+                                for ident in operation["evidence"]]
+                    invalid.extend(repr(ident) for ident in resolved
                                    if not isinstance(ident, str) or ident not in source_ids)
+                    operation["evidence"] = resolved
             if not invalid:
                 return result
             if attempt:
