@@ -2209,6 +2209,7 @@ class MessageHandler:
             canvas_service=canvas,
             instance_db=idb,
             reasoning_service=reasoning,
+            event_emit=canvas._emit,
         )
         logger.info("GARDENER_SERVICE_INITIALIZED")
         return self._gardener

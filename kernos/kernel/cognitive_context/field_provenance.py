@@ -61,7 +61,8 @@ class FieldProvenance:
     * ``wiring_state`` (the design review-required, three-state):
 
       - ``"wired"`` — populate_field has explicit routing returning
-        real content.
+        real content. This describes population routing; producer
+        availability and production registration are documented in notes.
       - ``"deferred"`` — explicitly deferred; ``deferred_until``
         names the phase that will land the wiring. populate_field
         returns the type-appropriate default; tests treat this as
@@ -351,13 +352,12 @@ FIELD_PROVENANCE: dict[str, FieldProvenance] = {
         expected_type="tuple[dict[str, Any], ...]",
         wiring_state="wired",
         notes=(
-            "Gardener-cohort output. C4 graduates this field to wired "
-            "via PopulationContext.gardener_observations. Production "
-            "wiring (C4) registers register_gardener_cohort in server.py "
-            "and the integration runner copies the cohort output through "
-            "into the packet's memory zone. Pre-cohort-output turns see "
-            "an empty tuple — decoupled-only enrichment per the design review's spec "
-            "clarification (legacy doesn't render gardener observations)."
+            "Population routing is wired via PopulationContext.gardener_observations. "
+            "The gardener cohort is not registered by production boot paths "
+            "(server.py, repl.py, turn_runner_provider.py register covenant only), "
+            "so production turns currently see an empty tuple. Explicitly supplied "
+            "observations still populate the packet's memory zone. This is "
+            "decoupled-only enrichment; legacy does not render gardener observations."
         ),
     ),
     "memory.procedures": FieldProvenance(

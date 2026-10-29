@@ -450,6 +450,14 @@ async def test_populate_request_tool_returns_real_schema():
     assert "input_schema" in out
 
 
+async def test_gardener_population_preserves_supplied_observations_without_producer():
+    """Dormant production registration does not disable the existing population seam."""
+    observations = ({"canvas_id": "canvas_test", "pending_proposals": []},)
+    ctx = PopulationContext(gardener_observations=observations)
+    assert await populate_field("memory.gardener_observations", ctx) == observations
+    assert await populate_field("memory.gardener_observations", PopulationContext()) == ()
+
+
 async def test_populate_deferred_field_returns_type_appropriate_default():
     """Deferred fields populate to defaults matching their expected_type."""
     ctx = PopulationContext()

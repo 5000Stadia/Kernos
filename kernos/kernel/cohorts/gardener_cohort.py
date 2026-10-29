@@ -28,6 +28,7 @@ are explicit future work.
 from __future__ import annotations
 
 import logging
+from inspect import isawaitable
 from typing import Any, Awaitable, Callable
 
 from kernos.kernel.cohorts.descriptor import (
@@ -61,7 +62,7 @@ RECENT_EVOLUTION_LIMIT = 3
 
 # Resolver shape: given a CohortContext, return the canvas_id this
 # turn is for, or None if the exactly-one-canvas rule isn't met.
-CanvasResolver = Callable[[CohortContext], str | None]
+CanvasResolver = Callable[[CohortContext], str | None | Awaitable[str | None]]
 
 # Pattern-privacy predicate: given a pattern name, return True iff
 # the pattern is restricted. Restricted items are filtered out of
@@ -74,7 +75,7 @@ RestrictedPatternPredicate = Callable[[str], bool]
 # ---------------------------------------------------------------------------
 
 
-def _default_canvas_resolver(
+async def _default_canvas_resolver(
     ctx: CohortContext,
     *,
     instance_db: Any | None = None,
@@ -97,7 +98,7 @@ def _default_canvas_resolver(
         candidates = []
         for space in ctx.active_spaces:
             try:
-                row = instance_db.get_canvas(space.space_id)
+                row = await instance_db.get_canvas(space.space_id)
             except Exception:  # defensive — DB errors don't fail the turn
                 row = None
             if row:
@@ -112,8 +113,8 @@ def make_canvas_resolver(
 ) -> CanvasResolver:
     """Build a resolver bound to the given instance_db."""
 
-    def _resolver(ctx: CohortContext) -> str | None:
-        return _default_canvas_resolver(ctx, instance_db=instance_db)
+    async def _resolver(ctx: CohortContext) -> str | None:
+        return await _default_canvas_resolver(ctx, instance_db=instance_db)
 
     return _resolver
 
@@ -231,6 +232,8 @@ def make_gardener_cohort_run(
 
     async def gardener_cohort_run(ctx: CohortContext) -> CohortOutput:
         canvas_id = resolver(ctx)
+        if isawaitable(canvas_id):
+            canvas_id = await canvas_id
         if not canvas_id:
             return _empty_output(ctx=ctx, canvas_id=None)
 
@@ -328,10 +331,10 @@ def register_gardener_cohort(
 ) -> CohortDescriptor:
     """Register the gardener cohort on a CohortRegistry.
 
-    Returns the descriptor that was registered. Production wiring
-    (INTEGRATION-WIRE-LIVE) calls this from the boot path with a
-    real instance_db + restricted_pattern_check; tests call it
-    against a tmp registry.
+    Returns the descriptor that was registered. Production boot paths
+    currently register only the covenant cohort. Future gardener wiring
+    can call this with a real instance_db + restricted_pattern_check;
+    tests call it against a tmp registry.
     """
     descriptor = make_gardener_descriptor(
         gardener_service,

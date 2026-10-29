@@ -514,11 +514,11 @@ def test_descriptor_carries_spec_flags():
 # ---------------------------------------------------------------------------
 
 
-def test_canvas_resolver_filters_by_instance_db_get_canvas():
+async def test_canvas_resolver_filters_by_instance_db_get_canvas():
     db = MagicMock()
-    db.get_canvas.side_effect = (
+    db.get_canvas = AsyncMock(side_effect=(
         lambda sid: {"canvas_id": sid} if sid == "real" else None
-    )
+    ))
 
     resolver = make_canvas_resolver(instance_db=db)
     ctx = _ctx(
@@ -527,12 +527,13 @@ def test_canvas_resolver_filters_by_instance_db_get_canvas():
             ContextSpaceRef("not-a-canvas"),
         ),
     )
-    assert resolver(ctx) == "real"
+    assert await resolver(ctx) == "real"
+    assert db.get_canvas.await_count == 2
 
 
-def test_canvas_resolver_returns_none_when_zero_canvases_after_filter():
+async def test_canvas_resolver_returns_none_when_zero_canvases_after_filter():
     db = MagicMock()
-    db.get_canvas.return_value = None
+    db.get_canvas = AsyncMock(return_value=None)
     resolver = make_canvas_resolver(instance_db=db)
     ctx = _ctx(
         spaces=(
@@ -540,4 +541,45 @@ def test_canvas_resolver_returns_none_when_zero_canvases_after_filter():
             ContextSpaceRef("not-canvas-2"),
         ),
     )
-    assert resolver(ctx) is None
+    assert await resolver(ctx) is None
+    assert db.get_canvas.await_count == 2
+
+
+@pytest.mark.parametrize("space_ids, expected", [
+    (("real", "not-canvas"), "real"),
+    (("not-canvas",), None),
+    (("real", "also-real"), None),
+])
+async def test_cohort_resolves_canvases_using_real_async_database(tmp_path, space_ids, expected):
+    from kernos.kernel.instance_db import InstanceDB
+
+    db = InstanceDB(str(tmp_path))
+    await db.connect()
+    try:
+        for canvas_id in ("real", "also-real"):
+            await db.save_canvas({"canvas_id": canvas_id, "name": canvas_id, "scope": "team"})
+        svc = _service()
+        run = make_gardener_cohort_run(svc, instance_db=db)
+        out = await run(_ctx(spaces=tuple(ContextSpaceRef(sid) for sid in space_ids)))
+        assert out.output["canvas_id"] == expected
+        assert out.output["has_active_canvas"] is (expected is not None)
+    finally:
+        await db.close()
+
+
+async def test_cohort_preserves_custom_synchronous_canvas_resolver():
+    resolver = MagicMock(return_value="real")
+    run = make_gardener_cohort_run(_service(), canvas_resolver=resolver)
+    ctx = _ctx()
+    out = await run(ctx)
+    assert out.output["canvas_id"] == "real"
+    resolver.assert_called_once_with(ctx)
+
+
+async def test_cohort_supports_custom_asynchronous_canvas_resolver():
+    resolver = AsyncMock(return_value="real")
+    run = make_gardener_cohort_run(_service(), canvas_resolver=resolver)
+    ctx = _ctx()
+    out = await run(ctx)
+    assert out.output["canvas_id"] == "real"
+    resolver.assert_awaited_once_with(ctx)
