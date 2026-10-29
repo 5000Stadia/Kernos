@@ -50,7 +50,7 @@ Every inbound message flows through six phases:
 3. **Assemble** — Build system prompt (Cognitive UI), select tools (budgeted window), run Message Analyzer (combined classification + knowledge selection + preference detection). Analyzer runs in parallel with covenant query.
 4. **Reason** — LLM reasoning with tool use loop. Dispatch gate evaluates write actions. Tools execute (kernel, MCP, workspace).
 5. **Consequence** — Confirmation replay, projectors, soul update, cross-domain signal check, tool promotion.
-6. **Persist** — Store messages, conversation log, compaction check (includes fact harvest), domain assessment, child briefings.
+6. **Persist** — Store messages, conversation log, events. Then, after the reply is delivered and still inside the space's turn, the **boundary** step: compaction check (includes fact harvest), domain assessment, child briefings.
 
 ### Key Methods
 
@@ -59,7 +59,8 @@ Every inbound message flows through six phases:
 - `_phase_assemble()` — Cognitive UI block construction, budgeted tool window, Message Analyzer (classification + knowledge + preference in one call)
 - `_phase_reason()` — ReasoningRequest construction, task engine execution
 - `_phase_consequence()` — Post-turn processing, cross-domain signals
-- `_phase_persist()` — Conversation logging, compaction trigger, domain assessment, child briefings
+- `_phase_persist()` — Conversation logging and events; marks the turn for boundary work
+- `_phase_boundary()` — After the reply: compaction, fact harvest, domain assessment, child briefings (`persist.run_boundary`)
 
 ### Async-Safe Hot-Path File I/O
 
@@ -158,10 +159,12 @@ After compaction in a parent space, `_produce_child_briefings()` runs for each c
 
 ### Mechanism
 
-- **Trigger:** Estimated token count of conversation log exceeds threshold (default ~8,000 tokens via `KERNOS_COMPACTION_THRESHOLD`)
-- **Process:** LLM reads full conversation log → produces Ledger entry (topic index) + Living State (current operational reality)
+- **Trigger:** New tokens in the member's log for this space reach the threshold (default ~8,000 tokens via `KERNOS_COMPACTION_THRESHOLD`). Runs after the reply (see Persist).
+- **Process:** LLM reads the new span (the log minus the head seeded from the previous log), the Ledger so far (bounded) and the current Living State → writes the new Ledger entry's bullets + a new Living State. Code writes the entry header from the span's timestamps and appends it: earlier entries never pass through the model. Truncated or malformed output is refused and the document left untouched.
 - **Log rotation:** Old log archived as `log_NNN.txt`. New log created with seeded messages from old log.
 - **Reference-based:** Compaction documents point back to source logs. Full text retrievable via `remember_details()`.
+- **Sealing:** When the document exceeds its budget (`KERNOS_SEAL_BUDGET` overrides it), it is sealed into `archives/` with an index entry. Sealed entries stay searchable.
+- **Repair:** `kernos.cli rebuild-ledger INSTANCE MEMBER` restores entries for closed logs no entry cites (lost under the earlier whole-document rewrite).
 
 ### Adaptive Seed Depth
 
@@ -173,7 +176,7 @@ Current operational reality. What's TRUE RIGHT NOW — active scene state, pendi
 
 ### Ledger
 
-Append-only topic index. Each entry has topic label, date range, source log reference. Enables retrieval of exact conversation text via `remember_details(log_NNN)`. Entries are never edited or removed.
+Append-only topic index, append-only by construction. Each entry has topic label, date range, source log reference. Enables retrieval of exact conversation text via `remember_details(log_NNN)`. Entries are never edited or removed. The agent sees the most recent entries (~2,000 tokens) and a per-member archive story for older ones, kept current at compaction.
 
 ---
 
@@ -246,14 +249,14 @@ Fields: id, instance_id, content, lifecycle_archetype, context_space, confidence
 
 ### Fact Harvest
 
-Post-turn cohort agent. Reads conversation and extracts/updates knowledge entries. Operations: add (new), update (modify), reinforce (bump storage_strength). Fires on space departure and pre-compaction.
+Boundary cohort agent. Reconciles a conversation span against the member's own facts. Operations: add (new, with member/space scope, content hash and embedding), update (archives the old version, keeps the ID, sets `supersedes`), reinforce (bumps storage_strength and reinforcement_count). Fires at compaction and on space departure; a per-log mark keeps a span from being harvested twice.
 
 ### Retrieval
 
 **File:** `kernos/kernel/retrieval.py` — `RetrievalService`
 
-- `remember(query)` — Searches knowledge entries (semantic + scope chain) + entity graph + compaction archives. Three concurrent searches via asyncio.gather. Returns formatted readable text within 1500-token budget.
-- `remember_details(source_ref, query)` — Retrieves exact text from archived log file.
+- `remember(query)` — Searches knowledge entries (semantic, with word matching when there is no embedding) + entity graph + the member's Ledger entries (BM25, active and sealed, scope chain) + sealed archives. Four concurrent searches via asyncio.gather. Ledger hits name their source log and, for an ancestor, its space. Returns formatted readable text within 1500-token budget. Works without `VOYAGE_API_KEY` (no search by meaning).
+- `remember_details(source_ref, space?, query)` — Retrieves exact text from the requesting member's archived log file.
 
 ---
 
