@@ -257,6 +257,129 @@ async def test_global_wall_clock_cap_cancels_pending():
     assert by_id["ok"].outcome is Outcome.SUCCESS
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("late_error", [False, True], ids=["return", "raise"])
+async def test_global_timeout_returns_while_cohort_cleanup_is_still_pending(late_error):
+    loop = asyncio.get_running_loop()
+    blocked = loop.create_future()
+    cleanup_started = loop.create_future()
+    release_cleanup = loop.create_future()
+    cohort_tasks = set()
+
+    async def slow(ctx):
+        if ctx.turn_id != "turn-1":
+            return _ok_output("slow", {"turn": ctx.turn_id})
+        cohort_tasks.add(asyncio.current_task())
+        try:
+            await blocked
+        except asyncio.CancelledError:
+            cleanup_started.set_result(None)
+            await release_cleanup
+        if late_error:
+            raise RuntimeError("late cleanup failure")
+        return _ok_output("slow", {"late": True})
+
+    async def fast(ctx):
+        return _ok_output("fast", {"turn": ctx.turn_id})
+
+    r = CohortRegistry()
+    r.register(CohortDescriptor(cohort_id="slow", run=slow, timeout_ms=5000))
+    r.register(CohortDescriptor(cohort_id="fast", run=fast, timeout_ms=5000))
+    runner, audit = _make_runner(
+        r,
+        config=CohortFanOutConfig(
+            global_timeout_seconds=0.02, cancellation_drain_seconds=0.01
+        ),
+    )
+    run_task = asyncio.create_task(runner.run(_ctx()))
+    try:
+        await asyncio.wait_for(cleanup_started, timeout=1)
+        cohort_tasks.update(
+            task for task in asyncio.all_tasks() if task.get_name() == "cohort:slow"
+        )
+        result = await asyncio.wait_for(asyncio.shield(run_task), timeout=1)
+
+        assert not release_cleanup.done()
+        assert blocked.cancelled()
+        assert result.global_timeout_engaged is True
+        assert [o.cohort_id for o in result.outputs] == ["slow", "fast"]
+        assert result.outputs[0].outcome is Outcome.TIMEOUT_GLOBAL
+        assert result.outputs[0].output == {}
+        assert result.outputs[1].outcome is Outcome.SUCCESS
+        assert result.outputs[1].output == {"turn": "turn-1"}
+        assert len(audit) == 1
+        assert [o["outcome"] for o in audit[0]["outcomes"]] == [
+            "timeout_global", "success"
+        ]
+
+        # A new turn can finish while the previous cohort still settles.
+        next_result = await asyncio.wait_for(
+            runner.run(_ctx(turn_id="turn-2")), timeout=1
+        )
+        assert next_result.global_timeout_engaged is False
+        assert all(o.outcome is Outcome.SUCCESS for o in next_result.outputs)
+        assert all(o.output == {"turn": "turn-2"} for o in next_result.outputs)
+        assert len(audit) == 2
+    finally:
+        release_cleanup.set_result(None)
+        await asyncio.wait_for(
+            asyncio.gather(run_task, *cohort_tasks, return_exceptions=True), timeout=1
+        )
+
+    assert all(task.done() for task in cohort_tasks)
+    assert result.outputs[0].outcome is Outcome.TIMEOUT_GLOBAL
+    assert result.outputs[0].output == {}
+    assert len(audit) == 2
+
+
+@pytest.mark.asyncio
+async def test_cohort_settling_during_drain_preserves_its_final_state():
+    loop = asyncio.get_running_loop()
+    blocked = loop.create_future()
+    cleanup_started = loop.create_future()
+    release_cleanup = loop.create_future()
+
+    async def slow(ctx):
+        try:
+            await blocked
+        except asyncio.CancelledError:
+            cleanup_started.set_result(None)
+            await release_cleanup
+        return _ok_output("slow", {"settled": True})
+
+    r = CohortRegistry()
+    r.register(CohortDescriptor(cohort_id="slow", run=slow, timeout_ms=5000))
+    runner, audit = _make_runner(
+        r,
+        config=CohortFanOutConfig(
+            global_timeout_seconds=0.02, cancellation_drain_seconds=0.2
+        ),
+    )
+    run_task = asyncio.create_task(runner.run(_ctx()))
+    try:
+        await asyncio.wait_for(cleanup_started, timeout=1)
+        cohort_task = next(
+            task for task in asyncio.all_tasks() if task.get_name() == "cohort:slow"
+        )
+    finally:
+        release_cleanup.set_result(None)
+    result = await asyncio.wait_for(run_task, timeout=1)
+
+    assert blocked.cancelled()
+    assert result.global_timeout_engaged is True
+    assert result.outputs[0].cohort_run_id == "turn-1:slow:0"
+    assert cohort_task.done()
+    # Preserve the settled task's state, including a successful result
+    # when cancellation was suppressed.
+    if cohort_task.cancelled():
+        assert result.outputs[0].outcome is Outcome.TIMEOUT_GLOBAL
+        assert result.outputs[0].output == {}
+    else:
+        assert result.outputs[0].outcome is Outcome.SUCCESS
+        assert result.outputs[0].output == {"settled": True}
+    assert audit[0]["outcomes"][0]["outcome"] == result.outputs[0].outcome.value
+
+
 # ---------------------------------------------------------------------------
 # Scenario 8: required cohort failure (non-safety)
 # ---------------------------------------------------------------------------

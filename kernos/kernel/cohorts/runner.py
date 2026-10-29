@@ -338,9 +338,11 @@ class CohortFanOutRunner:
         context: CohortContext,
         global_timeout_engaged: bool,
     ) -> _TaskOutcome:
-        # Cancelled task → global timeout (in v1, the only cancel
-        # source is the runner's global cap).
-        if task.cancelled():
+        # Cancellation may still be settling after the bounded drain.
+        # Pending tasks have no exception/result to inspect; report the
+        # global timeout while allowing their cleanup to finish. Completed
+        # tasks still take the normal result path below.
+        if not task.done() or task.cancelled():
             return _TaskOutcome(
                 outcome=Outcome.TIMEOUT_GLOBAL,
                 duration_ms=0,  # task didn't produce timing
