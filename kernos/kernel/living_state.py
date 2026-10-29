@@ -417,17 +417,37 @@ class ThreadReasoner:
         self.reasoning, self.purpose, self.space_id = reasoning, purpose, space_id
 
     async def ask(self, prompt: str, payload: dict, schema: dict) -> dict:
-        try:
-            raw = await self.reasoning.complete_simple(
-                system_prompt=prompt + "\nContext-space purpose: " + self.purpose,
-                user_content=json.dumps(payload, ensure_ascii=False), output_schema=schema,
-                max_tokens=12000, prefer_cheap=True, allow_truncated=False)
-            result = json.loads(raw)
-        except Exception as exc:
-            raise LivingStateError("Living State model operation failed; source cursor retained") from exc
-        if not isinstance(result, dict) or not set(schema["required"]) <= result.keys():
-            raise LivingStateError("Living State model returned an incomplete object")
-        return result
+        source_ids = {s["id"] for s in payload.get("sources", [])}
+        cited_fields = ("open", "close") if schema is PROPOSAL_SCHEMA else (
+            ("narrative",) if schema is HISTORIAN_SCHEMA else ())
+        for attempt in range(2):
+            try:
+                raw = await self.reasoning.complete_simple(
+                    system_prompt=prompt + "\nContext-space purpose: " + self.purpose,
+                    user_content=json.dumps(payload, ensure_ascii=False), output_schema=schema,
+                    max_tokens=12000, prefer_cheap=True, allow_truncated=False)
+                result = json.loads(raw)
+            except Exception as exc:
+                raise LivingStateError("Living State model operation failed; source cursor retained") from exc
+            if not isinstance(result, dict) or not set(schema["required"]) <= result.keys():
+                raise LivingStateError("Living State model returned an incomplete object")
+            invalid = []
+            for field in cited_fields:
+                for operation in result[field] if isinstance(result[field], list) else []:
+                    if not isinstance(operation, dict) or not isinstance(operation.get("evidence"), list):
+                        continue  # The caller checks malformed operation shapes.
+                    invalid.extend(repr(ident) for ident in operation["evidence"]
+                                   if not isinstance(ident, str) or ident not in source_ids)
+            if not invalid:
+                return result
+            if attempt:
+                raise LivingStateError("Model repeatedly used unknown source IDs; source cursor retained")
+            prompt += ("\nSOURCE ID REPAIR: The previous response used unknown source IDs: "
+                       + ", ".join(dict.fromkeys(invalid))[:1200]
+                       + ". Copy IDs exactly from this input's sources table. Never merge offsets "
+                       "or invent a larger span. To cite combined passages, select multiple existing IDs. "
+                       "Return the complete corrected object.")
+        raise AssertionError("Unreachable source-ID validation state")
 
     async def verify(self, candidates: list[dict], sources: list[dict], records: list[dict],
                      legacy_context: str = "") -> set[str]:

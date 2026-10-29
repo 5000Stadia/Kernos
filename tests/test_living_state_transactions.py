@@ -497,6 +497,74 @@ async def test_authority_channel_is_preserved_and_consumed_prefix_changes_are_re
     assert await service.load_document(INSTANCE, SPACE, MEMBER) == original
 
 
+async def test_invented_source_span_is_repaired_before_opening_is_consumed(tmp_path):
+    scenario, harness = _first(tmp_path)
+    reasoner = harness[4]
+    original = reasoner.complete_simple
+    attempts = 0
+    async def merged_first_span(**kw):
+        nonlocal attempts
+        result = await original(**kw)
+        if "THREAD_PROPOSER" in kw["system_prompt"]:
+            attempts += 1
+            if attempts == 1:
+                result = json.loads(result)
+                result["open"][0]["evidence"] = ["studio/log_001/turn_3@0:99999"]
+                return json.dumps(result)
+            assert "SOURCE ID REPAIR" in kw["system_prompt"]
+        return result
+    reasoner.complete_simple = merged_first_span
+    document, records = await _advance(harness, scenario, scenario["boundaries"][0])
+    assert attempts == 2
+    assert len(records) == 2
+    assert decode_state(document)["migration"]["complete"]
+
+
+async def test_repeated_unknown_source_ids_leave_migration_cursor_unconsumed(tmp_path):
+    scenario, harness = _first(tmp_path)
+    reasoner = harness[4]
+    original = reasoner.complete_simple
+    attempts = 0
+    async def always_unknown(**kw):
+        nonlocal attempts
+        result = await original(**kw)
+        if "THREAD_PROPOSER" in kw["system_prompt"]:
+            attempts += 1
+            result = json.loads(result)
+            result["open"][0]["evidence"] = ["invented-source"]
+            return json.dumps(result)
+        return result
+    reasoner.complete_simple = always_unknown
+    with pytest.raises(CompactionOutputError, match="unknown source IDs"):
+        await _advance(harness, scenario, scenario["boundaries"][0])
+    state = decode_state(await harness[0].load_document(INSTANCE, SPACE, MEMBER))
+    assert attempts == 2
+    assert state["migration"]["cursor"] == 0
+    assert state["events"] == []
+
+
+async def test_invented_narrative_span_is_repaired_instead_of_silently_emptied(tmp_path):
+    scenario, harness = _first(tmp_path)
+    reasoner = harness[4]
+    original = reasoner.complete_simple
+    attempts = 0
+    async def merged_first_span(**kw):
+        nonlocal attempts
+        result = await original(**kw)
+        if "SPLIT_HISTORIAN" in kw["system_prompt"]:
+            attempts += 1
+            if attempts == 1:
+                result = json.loads(result)
+                result["narrative"][0]["evidence"] = ["studio/log_001/turn_6@0:99999"]
+                return json.dumps(result)
+            assert "SOURCE ID REPAIR" in kw["system_prompt"]
+        return result
+    reasoner.complete_simple = merged_first_span
+    document, _ = await _advance(harness, scenario, scenario["boundaries"][0])
+    assert attempts == 2
+    assert decode_state(document)["narrative"]
+
+
 async def test_ledger_repair_preserves_thread_metadata_byte_for_byte(tmp_path):
     scenario, harness = _first(tmp_path)
     for boundary in scenario["boundaries"][:2]:
