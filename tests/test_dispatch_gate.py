@@ -816,7 +816,7 @@ class TestModelGateAuthority:
         svc.complete_simple = capture_simple
         import asyncio
         # Use hard_write to always reach model regardless of reactive flag
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             svc._gate_tool_call(
                 "delete-event", {}, "hard_write",
                 "I was thinking", "t1", "space_1",

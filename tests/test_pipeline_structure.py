@@ -155,7 +155,10 @@ class TestPhaseFilesHaveSensibleSize:
         # (Briefly bumped to 1200 for PREFLIGHT-V1's snapshot
         # capture; restored to 1150 when PREFLIGHT was rejected.)
         ("provision", 30, 200),
-        ("route", 80, 250),
+        # route raised to 280 at domain formation (44c9f0d): the
+        # topic-hint ledger and escalation ladder live in the route
+        # phase; substrate work, not unrelated creep.
+        ("route", 80, 280),
         ("assemble", 400, 1150),
         ("reason", 20, 100),
         ("consequence", 50, 200),

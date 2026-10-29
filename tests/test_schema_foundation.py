@@ -349,7 +349,7 @@ def test_covenant_rule_loads_from_old_json(tmp_path):
         assert by_type["must_not"].layer == "principle"            # default
         assert by_type["must_not"].version == 1
 
-    asyncio.get_event_loop().run_until_complete(_check())
+    asyncio.run(_check())
 
 
 def test_default_covenant_rules_updated_wording(monkeypatch):
@@ -443,7 +443,7 @@ def test_covenant_migration_updates_old_wording(tmp_path):
         raw = _json.loads((state_dir / "contracts.json").read_text())
         assert "third-party CONTACTS" in raw[0]["description"]
 
-    asyncio.get_event_loop().run_until_complete(_check())
+    asyncio.run(_check())
 
 
 def test_covenant_migration_skips_user_modified_rules(tmp_path):
@@ -468,7 +468,7 @@ def test_covenant_migration_skips_user_modified_rules(tmp_path):
         # User-sourced rule should NOT be migrated
         assert rules[0].description == "Never send messages to external contacts without owner approval"
 
-    asyncio.get_event_loop().run_until_complete(_check())
+    asyncio.run(_check())
 
 
 # ---------------------------------------------------------------------------

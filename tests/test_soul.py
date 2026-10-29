@@ -450,10 +450,12 @@ async def test_soul_not_updated_on_reasoning_failure():
         or "went wrong" in lowered
     ), result
 
-    # Soul should NOT be updated (save_soul called only once — during init)
-    # The post-response update path is not reached on failure
-    init_save_count = 1  # only the _get_or_init_soul save
-    assert state.save_soul.call_count == init_save_count
+    # Soul should NOT be updated by the post-response path on failure.
+    # Provisioning may save it (creation, and timezone discovery since
+    # f74fe44 made that discovery work); nothing else may.
+    provisioning = {"new_instance", "timezone_discovery"}
+    triggers = [c.kwargs.get("trigger", "") for c in state.save_soul.call_args_list]
+    assert triggers and set(triggers) <= provisioning, triggers
 
 
 async def test_agent_hatched_event_emitted():

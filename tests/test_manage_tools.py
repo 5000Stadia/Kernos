@@ -131,7 +131,7 @@ class TestManageToolsList:
         rs._tools_changed = False
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             rs._handle_manage_capabilities("tenant_test", "list", "")
         )
 

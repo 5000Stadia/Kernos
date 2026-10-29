@@ -285,7 +285,7 @@ def test_handler_uses_registry_for_capability_prompt():
     mock_provider.complete.return_value = _mock_provider_response("Hi!")
 
     import asyncio
-    asyncio.get_event_loop().run_until_complete(handler.process(_make_message()))
+    asyncio.run(handler.process(_make_message()))
 
     handler.registry.build_tool_directory.assert_called()
 

@@ -147,11 +147,17 @@ class TestPortableDescriptorEndToEnd:
         )
         assert ok, "engine did not execute the action sequence"
         assert stack["state"][("instance", "inst_a", "morning_briefing")] == 1
-        # Notification delivered through the wrapped surface.
+        # Notification delivered through the wrapped surface. It is the
+        # second step, so wait for it rather than racing it.
+        assert await _wait_for(lambda: len(stack["delivered"]) >= 1)
         assert len(stack["delivered"]) == 1
         assert stack["delivered"][0]["message"] == "Good morning."
-        # Ledger captured both steps.
-        entries = await stack["ledger"].read_all("inst_a", "morning-briefing")
+        # Ledger captured both steps (the second may land just after delivery).
+        for _ in range(100):
+            entries = await stack["ledger"].read_all("inst_a", "morning-briefing")
+            if len(entries) >= 2:
+                break
+            await asyncio.sleep(0.02)
         assert len(entries) == 2
         assert entries[0]["agent_or_action"] == "mark_state"
         assert entries[1]["agent_or_action"] == "notify_user"
