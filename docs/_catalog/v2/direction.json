@@ -1,85 +1,91 @@
 {
   "file_path": "docs/v2/direction.md",
-  "source_hash": "f7118c8f62650f68fa652a502bc7cc6448418380b0f60a9ccfeca3013c001872",
-  "generated_at": "2026-05-06T18:21:08.569557+00:00",
+  "source_hash": "e1d66ad17c6d41e58640b8fe8ae0cf7dc3337e92e3da6acb4fd10833e217b7fe",
+  "generated_at": "2026-10-29T03:19:09.134086+00:00",
   "sections": [
     {
       "section_title": "The inversion",
-      "one_line": "V1-to-V2 shift from turn-driven runtime to continuous cognition kernel",
+      "one_line": "Contrasts V1’s turn-driven runtime with V2’s continuous per-member Cognition Kernel",
       "line_start": 5,
       "line_end": 12
     },
     {
       "section_title": "What a Cognition Kernel does",
-      "one_line": "Kernels maintain a live world model, reflect and project on state changes, and surface only relevant signals.",
+      "one_line": "The Cognition Kernel’s four functions: world modeling, reflection, projection, and relevance filtering.",
       "line_start": 13,
       "line_end": 24
     },
     {
       "section_title": "The six characters",
-      "one_line": "Six fictional AI analogies for V2’s architecture and behavior",
+      "one_line": "Fictional AI archetypes illustrating the Cognition Kernel’s core V2 capabilities and risks",
       "line_start": 25,
       "line_end": 37
     },
     {
-      "section_title": "Why continuous, not turn-driven",
-      "one_line": "Rationale for a continuous Kernos architecture that can notice changes between turns and act proactively",
+      "section_title": "The World Model substrate exists: pattern-buffer",
+      "one_line": "Pattern-buffer as Kernos V2’s world-model memory substrate and integration path",
       "line_start": 38,
-      "line_end": 51
+      "line_end": 49
+    },
+    {
+      "section_title": "Why continuous, not turn-driven",
+      "one_line": "Why a continuous Cognition Kernel enables proactive, time-aware agent behavior beyond turn-driven interaction",
+      "line_start": 50,
+      "line_end": 63
     },
     {
       "section_title": "Why silence is the default output",
-      "one_line": "Why the Kernel defaults to silence and only surfaces highly relevant, timely notices",
-      "line_start": 52,
-      "line_end": 61
+      "one_line": "Aggressive relevance filtering keeps most observations silent and surfaces only timely, high-impact signals.",
+      "line_start": 64,
+      "line_end": 73
     },
     {
       "section_title": "Forward modeling and bounded autonomy",
-      "one_line": "Projecting near-term outcomes to decide when Kernos acts automatically, asks for approval, or holds back.",
-      "line_start": 62,
-      "line_end": 75
+      "one_line": "Forward modeling, branch-world simulation, and rules for bounded autonomous action",
+      "line_start": 74,
+      "line_end": 87
     },
     {
       "section_title": "Principal modeling",
-      "one_line": "Member preference model used to guide relevance filtering and action classification",
-      "line_start": 76,
-      "line_end": 83
+      "one_line": "Structured modeling of member preferences, behavior patterns, goals, communication style, and decision tendencies",
+      "line_start": 88,
+      "line_end": 95
     },
     {
       "section_title": "Fused streams",
-      "one_line": "Combining calendar, email, location, and other streams into one world model",
-      "line_start": 84,
-      "line_end": 97
+      "one_line": "Multi-stream World Model integration for context-aware insights across conversations, schedules, email, location, plans…",
+      "line_start": 96,
+      "line_end": 109
     },
     {
       "section_title": "SPEC-COGNITION-KERNEL-V1",
-      "one_line": "Foundational V2 kernel substrate for world model, supervisor, and restartability",
-      "line_start": 98,
-      "line_end": 118
+      "one_line": "The foundational substrate for continuous cognition, World Model state, supervisor processes, synchronization, and rest…",
+      "line_start": 110,
+      "line_end": 130
     },
     {
       "section_title": "After SPEC-COGNITION-KERNEL-V1",
-      "one_line": "Post-kernel spec roadmap from reflection and projection to outbound signals and bounded autonomy",
-      "line_start": 119,
-      "line_end": 131
+      "one_line": "Roadmap from the cognition kernel substrate to JARVIS-class behavior through staged specifications.",
+      "line_start": 131,
+      "line_end": 144
     },
     {
       "section_title": "What V2 inherits from V1",
-      "one_line": "V1 safety architecture carried forward as the alignment substrate for V2",
-      "line_start": 132,
-      "line_end": 139
+      "one_line": "How V1’s safety architecture forms the alignment substrate inherited by V2",
+      "line_start": 145,
+      "line_end": 152
     },
     {
       "section_title": "What V2 explicitly does not promise",
-      "one_line": "V2 scope limits and explicit non-promises",
-      "line_start": 140,
-      "line_end": 147
+      "one_line": "V2’s scope limits: bounded autonomy, single-member focus, and gradual delivery without a fixed ship date",
+      "line_start": 153,
+      "line_end": 160
     },
     {
       "section_title": "Related",
-      "one_line": "Links to V1 alignment, roadmap, and architecture docs relevant to V2",
-      "line_start": 148,
-      "line_end": 152
+      "one_line": "Related documentation on the V1 alignment substrate, roadmap, and architecture overview",
+      "line_start": 161,
+      "line_end": 165
     }
   ]
 }

@@ -1,0 +1,37 @@
+{
+  "file_path": "docs/DESIGN-PRINCIPLES.md",
+  "source_hash": "54466bf290098db2c54fdbe79ff440b2d15c3f85aa59a70e2a0a6dbecd0f0d54",
+  "generated_at": "2026-10-29T03:13:16.175078+00:00",
+  "sections": [
+    {
+      "section_title": "Family I — Honesty Architecture",
+      "one_line": "Structural safeguards for auditable actions, honest completion tracking, reversible changes, and transparent failures",
+      "line_start": 14,
+      "line_end": 89
+    },
+    {
+      "section_title": "Family II — Model-Tolerant Interfaces",
+      "one_line": "Model-tolerant interface patterns for context rendering, cohort judgments, tool repair, and safe failures",
+      "line_start": 90,
+      "line_end": 250
+    },
+    {
+      "section_title": "Family III — Proportional Safety",
+      "one_line": "Proportional safety through dispatch-time risk assessment, covenants, bootstrap limits, and abuse escalation",
+      "line_start": 251,
+      "line_end": 314
+    },
+    {
+      "section_title": "Family IV — Self-Maintenance",
+      "one_line": "Self-testing, reviewed self-improvement, and structured failure evidence for safe autonomous upkeep",
+      "line_start": 315,
+      "line_end": 372
+    },
+    {
+      "section_title": "One sentence each, for the impatient",
+      "one_line": "A quick reference to Kernos principles for receipts, auditing, repair, safety, and failure handling.",
+      "line_start": 373,
+      "line_end": 391
+    }
+  ]
+}

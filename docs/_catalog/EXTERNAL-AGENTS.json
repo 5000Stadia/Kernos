@@ -1,71 +1,71 @@
 {
   "file_path": "docs/EXTERNAL-AGENTS.md",
-  "source_hash": "9ce560fc1a5669b46f6e5c05bbf53ca86b8be843df3173fe5fe04526684236c9",
-  "generated_at": "2026-05-22T17:09:10.079264+00:00",
+  "source_hash": "5392595a1bdc95b6885fa047ce74ddbb03c6e400bbcc4c87e73a850377bd40df",
+  "generated_at": "2026-10-29T03:13:47.391114+00:00",
   "sections": [
     {
       "section_title": "When to use which mode",
-      "one_line": "Choosing between consult and build modes",
+      "one_line": "Choosing between Consult for questions and Build for coding tasks",
       "line_start": 12,
       "line_end": 20
     },
     {
       "section_title": "When to use which harness",
-      "one_line": "Guidance for choosing the right external agent harness for review, knowledge, or implementation tasks.",
+      "one_line": "Guidance for choosing the right external agent harness for different software tasks",
       "line_start": 21,
       "line_end": 32
     },
     {
       "section_title": "When to consult — and when not to",
-      "one_line": "When to use consultation versus handle tasks directly",
+      "one_line": "Guidance on when to use consultation and when to handle a task directly",
       "line_start": 33,
       "line_end": 46
     },
     {
       "section_title": "What the agent calls",
-      "one_line": "Available agent tools and how to choose harnesses and backends",
+      "one_line": "Kernos agent consultation and code execution tools, supported harnesses, options, and session handling",
       "line_start": 47,
       "line_end": 84
     },
     {
       "section_title": "Aider — special note",
-      "one_line": "Aider backend access in v1 and note that consult mode is unsupported",
+      "one_line": "Aider's v1 agent access and lack of consult mode",
       "line_start": 85,
       "line_end": 93
     },
     {
       "section_title": "Reentrancy policy — what consultation cannot do",
-      "one_line": "Rules for when consultation is blocked or depth-limited in different runtime contexts",
+      "one_line": "Defines where consultation is permitted, its nesting limits, and contexts where reentrancy is blocked for safety.",
       "line_start": 94,
       "line_end": 118
     },
     {
       "section_title": "Audit + observability",
-      "one_line": "Consultation logs and queries for status, errors, timing, and session history",
+      "one_line": "Consultation audit logging, session tracing, and operator queries for failures and history",
       "line_start": 119,
       "line_end": 154
     },
     {
       "section_title": "Architecture",
-      "one_line": "How Kernos external agent layers and ACPX bridge are organized",
+      "one_line": "Architecture and integration of external agent harnesses, ACPX dispatch, audit logging, and file-bridge communication.",
       "line_start": 155,
       "line_end": 249
     },
     {
       "section_title": "Composition with shipped substrate",
-      "one_line": "Consultation behavior with shipped substrate, including logs, model overrides, and per-member isolation",
+      "one_line": "Consultation compatibility with existing substrate, audit logging, model overrides, and multi-member isolation",
       "line_start": 250,
       "line_end": 263
     },
     {
       "section_title": "Future arcs",
-      "one_line": "Future Kernos v1 follow-on features and out-of-scope specs",
+      "one_line": "Planned follow-on features for MCP, streaming consultation, token limits, and user-facing inspection.",
       "line_start": 264,
       "line_end": 277
     },
     {
       "section_title": "References",
-      "one_line": "External agent consultation specs, code, tests, and upstream reference links",
+      "one_line": "Reference materials for external-agent consultation, ACPX integration, and related tests",
       "line_start": 278,
       "line_end": 290
     }

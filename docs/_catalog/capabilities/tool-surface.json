@@ -1,67 +1,97 @@
 {
   "file_path": "docs/capabilities/tool-surface.md",
-  "source_hash": "e647f660ceaaa0e86609e86c08a698583a263e24dd5d4d0881cbdae383719aef",
-  "generated_at": "2026-05-06T18:06:42.914327+00:00",
+  "source_hash": "f44b13094b3848bcde8ca49046f554f2436c2fdd72fde8edf157fa541990fcb4",
+  "generated_at": "2026-10-29T03:16:42.059155+00:00",
   "sections": [
     {
       "section_title": "Always-pinned tools",
-      "one_line": "Tools always available in every turn",
+      "one_line": "Reference for tools available in every turn, including their effects and documentation pages.",
       "line_start": 7,
-      "line_end": 28
+      "line_end": 38
     },
     {
       "section_title": "Reference primitive (REFERENCE-PRIMITIVE-V1)",
-      "one_line": "Tools for retrieving, storing, organizing, and recovering project-deep reference content",
-      "line_start": 29,
-      "line_end": 42
-    },
-    {
-      "section_title": "Identity + soul",
-      "one_line": "Identity and soul tools for reading self data, updating soul, and inspecting source",
-      "line_start": 43,
+      "one_line": "Reference storage, retrieval, organization, versioning, and recovery for project-deep documentation.",
+      "line_start": 39,
       "line_end": 52
     },
     {
-      "section_title": "Canvas (CANVAS-V1)",
-      "one_line": "Canvas and page tools for reading, writing, listing, searching, and preference handling",
+      "section_title": "Identity + soul",
+      "one_line": "Identity and soul tools for reading, updating, and accessing related source and canonical documentation.",
       "line_start": 53,
-      "line_end": 65
+      "line_end": 62
+    },
+    {
+      "section_title": "Canvas (CANVAS-V1)",
+      "one_line": "Canvas and page tools for creating, reading, editing, searching, and managing canvas preferences",
+      "line_start": 63,
+      "line_end": 75
     },
     {
       "section_title": "Covenants + behavior",
-      "one_line": "Tools for covenant management and whisper dismissal behavior",
-      "line_start": 66,
-      "line_end": 72
+      "one_line": "Tools for managing covenants and dismissing proactive-awareness whispers",
+      "line_start": 76,
+      "line_end": 82
     },
     {
       "section_title": "Channels + scheduling",
-      "one_line": "Channel management, sending messages, and scheduling controls",
-      "line_start": 73,
-      "line_end": 80
+      "one_line": "Channel management, message sending, and scheduled task tools and documentation",
+      "line_start": 83,
+      "line_end": 90
     },
     {
-      "section_title": "Cross-space + external agents",
-      "one_line": "Tools for cross-space requests and consulting external agents",
-      "line_start": 81,
-      "line_end": 87
+      "section_title": "Cross-space requests",
+      "one_line": "Requests for soft writes across spaces using the request_space_action tool",
+      "line_start": 91,
+      "line_end": 98
     },
     {
       "section_title": "Diagnostics",
-      "one_line": "Tools for diagnosing runtime issues, LLM chains, and messenger problems",
-      "line_start": 88,
-      "line_end": 99
+      "one_line": "Tools for tracing runtime issues, diagnosing problems, proposing fixes, and configuring diagnostic models and messaging.",
+      "line_start": 99,
+      "line_end": 110
     },
     {
       "section_title": "Capabilities (manage external services)",
-      "one_line": "Manage external service capabilities",
-      "line_start": 100,
-      "line_end": 105
+      "one_line": "Managing external service capabilities with the manage_capabilities tool",
+      "line_start": 111,
+      "line_end": 116
+    },
+    {
+      "section_title": "Coding sessions + external agents",
+      "one_line": "Using external coding agents for second opinions and delegated coding tasks",
+      "line_start": 117,
+      "line_end": 126
+    },
+    {
+      "section_title": "Long-horizon projects (LONG-HORIZON-PROJECT-V1)",
+      "one_line": "Tools for opening, updating, planning, and reviewing long-horizon projects.",
+      "line_start": 127,
+      "line_end": 135
+    },
+    {
+      "section_title": "Self-administration",
+      "one_line": "Tools for inspecting context, recording notes, deleting files, restarting, and self-testing Kernos.",
+      "line_start": 136,
+      "line_end": 146
+    },
+    {
+      "section_title": "Git operations (GIT-OPERATIONS-PRIMITIVES-V1)",
+      "one_line": "Git inspection, review, commit, and push operations for the self-improvement loop",
+      "line_start": 147,
+      "line_end": 159
+    },
+    {
+      "section_title": "Self-improvement loop + recovery (AUTONOMOUS-IMPROVEMENT-LOOP arc)",
+      "one_line": "Autonomous self-improvement, recovery, fix authorization, validation, and closure workflows",
+      "line_start": 160,
+      "line_end": 177
     },
     {
       "section_title": "Effect classification (the gate)",
-      "one_line": "Kernel tool effect classification for dispatch-gate approval rules",
-      "line_start": 106,
-      "line_end": 116
+      "one_line": "How Kernos classifies tools and actions by effect to determine dispatch gate behavior",
+      "line_start": 178,
+      "line_end": 188
     }
   ]
 }

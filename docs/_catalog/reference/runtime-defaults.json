@@ -1,0 +1,25 @@
+{
+  "file_path": "docs/reference/runtime-defaults.md",
+  "source_hash": "dd918b9f135773e70cf836df7e3354071080c6f2c581beab807a4ccb71110956",
+  "generated_at": "2026-10-29T03:18:35.913893+00:00",
+  "sections": [
+    {
+      "section_title": "What each lane actually does when on",
+      "one_line": "Operational roles and boundaries of each Kernos lane when enabled",
+      "line_start": 21,
+      "line_end": 40
+    },
+    {
+      "section_title": "`Enabled when` grammar",
+      "one_line": "Allowed `Enabled when` condition forms: single-variable membership or all-variable nonempty checks",
+      "line_start": 41,
+      "line_end": 51
+    },
+    {
+      "section_title": "Known inconsistency (pinned, not endorsed)",
+      "one_line": "Observed inconsistencies in environment-flag truthiness and their compatibility status",
+      "line_start": 52,
+      "line_end": 66
+    }
+  ]
+}

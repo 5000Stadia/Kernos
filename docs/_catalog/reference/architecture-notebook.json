@@ -1,89 +1,89 @@
 {
   "file_path": "docs/reference/architecture-notebook.md",
-  "source_hash": "8dd3ae0c65a0d08e733c6be7fae97d0974d95c114b676e577cbbf25588c5cdc2",
-  "generated_at": "2026-05-06T18:14:28.211227+00:00",
+  "source_hash": "be42ce2d01344e5cd76cd37629c9916d3171e4bcaa3a2041941524c096db04ec",
+  "generated_at": "2026-10-29T03:18:15.027111+00:00",
   "sections": [
     {
       "section_title": "⚠️ HISTORICAL — Last updated 2026-03-06",
-      "one_line": "Archive of architectural rationale, design options, and deferred decisions for future phases",
+      "one_line": "Historical archive of Kernos architectural rationale, deferred decisions, and phase-specific design context",
       "line_start": 1,
       "line_end": 18
     },
     {
       "section_title": "TABLE OF CONTENTS",
-      "one_line": "Overview of Kernos documentation sections and roadmap",
+      "one_line": "Kernos documentation roadmap covering foundational principles, architecture phases, agent behavior, scenarios, research…",
       "line_start": 19,
       "line_end": 35
     },
     {
       "section_title": "1. FOUNDATIONAL INSIGHTS",
-      "one_line": "Core kernel principles that guide all phases and interfaces",
+      "one_line": "Core KERNOS architectural principles: kernel-managed context, zero-cost paths, emergent infrastructure, and shared state",
       "line_start": 36,
       "line_end": 85
     },
     {
       "section_title": "2. PHASE 1B: KERNEL INTERNALS",
-      "one_line": "Kernel architecture and the five core primitives behind reactive, proactive, and generative modes",
+      "one_line": "Kernel internal architecture: five primitives, three operating modes, design rationale, and guiding principles.",
       "line_start": 86,
       "line_end": 129
     },
     {
       "section_title": "3. PHASE 2: MULTI-AGENT & PROACTIVE",
-      "one_line": "Architecture for background memory, inline context, consolidation, and proactive notifications",
+      "one_line": "Multi-agent memory, contextual awareness, consolidation, and proactive assistance architecture",
       "line_start": 130,
       "line_end": 199
     },
     {
       "section_title": "4. PHASE 2-3: CONTEXT SPACES",
-      "one_line": "Isolated per-topic context windows, routing, handoff notes, and cross-context memory",
+      "one_line": "Managing multiple domain-specific context spaces with automatic routing, handoffs, memory, and behavioral rules.",
       "line_start": 200,
       "line_end": 287
     },
     {
       "section_title": "5. PHASE 2-3: BEHAVIORAL CONTRACTS",
-      "one_line": "Behavior rules for agent musts, must-nots, preferences, and human escalation points",
+      "one_line": "Agent behavioral contracts, progressive autonomy, memory retrieval, and bootstrap consolidation",
       "line_start": 288,
       "line_end": 326
     },
     {
       "section_title": "6. PHASE 2-3: CAPABILITY ACQUISITION",
-      "one_line": "How KERNOS discovers, acquires, and installs new capabilities with user approval",
+      "one_line": "KERNOS discovers needed capabilities, resolves prerequisites, and installs tools with user approval.",
       "line_start": 327,
       "line_end": 350
     },
     {
       "section_title": "7. PHASE 3: MULTI-LLM ARCHITECTURE",
-      "one_line": "Planning model routing across multiple LLMs with cost and effectiveness tracking",
+      "one_line": "Multi-LLM model routing architecture and the foundation for cost and effectiveness tracking",
       "line_start": 351,
       "line_end": 379
     },
     {
       "section_title": "8. PHASE 3-4: AGENT LIFECYCLE",
-      "one_line": "Agent creation, personalization, refinement, evaluation, and coordination in Kernos",
+      "one_line": "Agent seeding, personalization, behavioral refinement, evaluation, and task-based coordination across agent lifecycles",
       "line_start": 380,
       "line_end": 409
     },
     {
       "section_title": "9. REAL SCENARIOS THAT SHAPED DESIGN",
-      "one_line": "Real-world examples that shaped Kernos architecture, tenancy, and capability design",
+      "one_line": "Real-world scenarios illustrating Kernos’s agent provisioning, memory, capability acquisition, and multi-tenant design.",
       "line_start": 410,
       "line_end": 480
     },
     {
       "section_title": "10. LESSONS FROM OSBUILDER (OPENCLAW)",
-      "one_line": "OpenClaw lessons on orchestration, memory, routing, proactive behavior, and event-driven architecture",
+      "one_line": "Lessons from OpenClaw on agent orchestration, memory, capabilities, proactive behavior, and event architecture",
       "line_start": 481,
       "line_end": 508
     },
     {
       "section_title": "11. PHASE 2 PREPARATION — RESEARCH LEADS",
-      "one_line": "Research leads to study before writing Phase 2 specs",
+      "one_line": "Phase 2 architectural research on structured outputs, entity resolution, temporal memory, contracts, and retrieval",
       "line_start": 509,
       "line_end": 574
     },
     {
       "section_title": "12. OPEN QUESTIONS — NO ANSWER YET",
-      "one_line": "Open architectural questions and unresolved design issues",
+      "one_line": "Unresolved Kernos questions about awareness, context spaces, maintenance, behavioral contracts, routing, and memory int…",
       "line_start": 575,
       "line_end": 605
     }

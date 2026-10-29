@@ -1,163 +1,169 @@
 {
   "file_path": "docs/TECHNICAL-ARCHITECTURE.md",
-  "source_hash": "0321936f2ef6d64b5268614ef31c4c6df7c42b5164a582a6c3f31b4792ed2793",
-  "generated_at": "2026-05-22T17:11:44.920632+00:00",
+  "source_hash": "ee11b6cadf624349065d923973a9948a5060d09d5019398e809584273a8c11ba",
+  "generated_at": "2026-10-29T03:14:43.590212+00:00",
   "sections": [
     {
       "section_title": "System Overview",
-      "one_line": "Kernos architecture for message handling, memory, routing, and agent coordination",
+      "one_line": "Overview of KERNOS architecture, message flow, core services, and separation of kernel infrastructure from agent reason…",
       "line_start": 18,
       "line_end": 43
     },
     {
       "section_title": "The Turn Pipeline",
-      "one_line": "Kernos turn processing pipeline from provisioning through persistence",
+      "one_line": "Inbound message turn pipeline: six phases, boundary processing, and async-safe hot-path file I/O",
       "line_start": 44,
-      "line_end": 65
+      "line_end": 72
     },
     {
       "section_title": "1. Routing",
-      "one_line": "Message routing across spaces, including query-mode downward search and work-mode domain switching",
-      "line_start": 66,
-      "line_end": 104
+      "one_line": "Routes messages across spaces, including downward searches and intentional domain work.",
+      "line_start": 73,
+      "line_end": 111
     },
     {
       "section_title": "2. Context Spaces",
-      "one_line": "How Kernos organizes context spaces, inheritance, creation, switching, and cross-domain updates",
-      "line_start": 105,
-      "line_end": 148
+      "one_line": "Context Space hierarchy, lifecycle, switching, inheritance, cross-domain signals, and parent briefings",
+      "line_start": 112,
+      "line_end": 155
     },
     {
       "section_title": "3. Compaction",
-      "one_line": "Conversation log compaction into a living state, ledger, and archived seed logs",
-      "line_start": 149,
-      "line_end": 173
+      "one_line": "Token-triggered log compaction with adaptive context seeding, living state updates, ledger indexing, archival, and repa…",
+      "line_start": 156,
+      "line_end": 182
     },
     {
       "section_title": "4. Tool Surfacing",
-      "one_line": "Tool cataloging, surfacing, and promotion across tiers and spaces",
-      "line_start": 174,
-      "line_end": 199
+      "one_line": "Tool cataloging and tiered surfacing of relevant tools, with lazy promotion and preloading for efficient access",
+      "line_start": 183,
+      "line_end": 208
     },
     {
       "section_title": "5. Cognitive UI (System Prompt)",
-      "one_line": "System prompt layout for caching, context, and turn-by-turn cognitive UI state",
-      "line_start": 200,
-      "line_end": 224
+      "one_line": "Cognitive UI system prompt structure, context handling, provenance, and retrieval guidance",
+      "line_start": 209,
+      "line_end": 233
     },
     {
       "section_title": "6. Memory & Knowledge",
-      "one_line": "Conversation memory storage, tiered injection, fact harvesting, and retrieval",
-      "line_start": 225,
-      "line_end": 253
+      "one_line": "Memory and knowledge storage, lifecycle management, fact harvesting, and contextual retrieval",
+      "line_start": 234,
+      "line_end": 262
     },
     {
       "section_title": "7. Reasoning & Tool Dispatch",
-      "one_line": "How Kernos routes LLM tool calls, selects provider chains, and gates writes",
-      "line_start": 254,
-      "line_end": 291
+      "one_line": "Reasoning, provider fallback, tool dispatch, approval gates, and reliability safeguards",
+      "line_start": 263,
+      "line_end": 343
     },
     {
       "section_title": "8. Agentic Workspace",
-      "one_line": "Building, testing, registering, and tracking tools and artifacts in the agentic workspace",
-      "line_start": 292,
-      "line_end": 317
+      "one_line": "Agentic workspace tools for sandboxed code execution, artifact tracking, tool registration, and iterative building.",
+      "line_start": 344,
+      "line_end": 369
     },
     {
       "section_title": "9. Procedural Knowledge",
-      "one_line": "Scoped rules and workflows for distinguishing covenants from procedures in Kernos",
-      "line_start": 318,
-      "line_end": 342
+      "one_line": "Distinguishes covenants for behavioral rules from procedures for multi-step workflows in the hierarchy.",
+      "line_start": 370,
+      "line_end": 394
     },
     {
       "section_title": "10. Self-Directed Execution",
-      "one_line": "Autonomous multi-step plan execution with budgeted self-directed turns",
-      "line_start": 343,
-      "line_end": 368
+      "one_line": "Autonomous multi-step planning and execution with budgets, discoveries, and user interruption",
+      "line_start": 395,
+      "line_end": 420
+    },
+    {
+      "section_title": "10b. Long-Horizon Projects",
+      "one_line": "First-class long-horizon project tracking across spaces, canvases, decisions, status, and scheduled check-ins",
+      "line_start": 421,
+      "line_end": 438
     },
     {
       "section_title": "11. Improvement Loop — Behavioral Self-Improvement",
-      "one_line": "Self-improvement through friction detection, covenant creation, and malfunction warnings",
-      "line_start": 369,
-      "line_end": 395
+      "one_line": "Behavioral self-improvement through pattern detection, covenant procedures, selective injection, and malfunction alerts",
+      "line_start": 439,
+      "line_end": 465
     },
     {
       "section_title": "11b. Improvement Loop Tier 2 — Spec-Driven Code Improvement",
-      "one_line": "Spec-driven code improvement with runtime traces, diagnostics, and debug commands",
-      "line_start": 396,
-      "line_end": 418
+      "one_line": "Spec-driven code improvement with diagnostics, approval gates, deployment safeguards, recovery, and self-stewardship",
+      "line_start": 466,
+      "line_end": 547
     },
     {
       "section_title": "11c. Workflow Loop Primitive",
-      "one_line": "Background engine for trigger-driven workflows with audited steps and approval pauses",
-      "line_start": 419,
-      "line_end": 504
+      "one_line": "Trigger-driven workflow execution with audited actions, approval gates, and restart-safe processing",
+      "line_start": 548,
+      "line_end": 643
     },
     {
       "section_title": "12. Awareness & Scheduling",
-      "one_line": "Running whisper evaluations and time/event triggers for proactive insights and calendar monitoring",
-      "line_start": 505,
-      "line_end": 520
+      "one_line": "Proactive insight evaluation and time- or event-based scheduling, including project check-in reminders",
+      "line_start": 644,
+      "line_end": 661
     },
     {
       "section_title": "13. State Storage",
-      "one_line": "State storage for per-instance SQLite data and shared instance state",
-      "line_start": 521,
-      "line_end": 536
+      "one_line": "Persistent project state storage using SQLite per instance and a shared cross-instance database.",
+      "line_start": 662,
+      "line_end": 679
     },
     {
       "section_title": "13b. Member Identity & Multi-Member",
-      "one_line": "Member-specific identity, routing, and memory handling for multiple members in Kernos",
-      "line_start": 537,
-      "line_end": 589
+      "one_line": "Per-member identity, lifecycle, context isolation, invitations, memory, follow-ups, and whisper handling",
+      "line_start": 680,
+      "line_end": 732
     },
     {
       "section_title": "13c. Platform Adapters",
-      "one_line": "Platform adapters for Discord, SMS, and Telegram, including invite codes and credential setup",
-      "line_start": 590,
-      "line_end": 613
+      "one_line": "Platform adapters for Discord, SMS, and Telegram, including identity discovery, invite codes, and secure credential set…",
+      "line_start": 733,
+      "line_end": 756
     },
     {
       "section_title": "14. Capabilities & MCP",
-      "one_line": "Managing connected MCP servers and capability/tool loading in Kernos",
-      "line_start": 614,
-      "line_end": 629
+      "one_line": "Connected MCP servers and capability registry for managing servers and loading tools",
+      "line_start": 757,
+      "line_end": 772
     },
     {
       "section_title": "14b. External Agents (ACPX Integration)",
-      "one_line": "ACPX integration for Kernos external CLI agents and bridge request handling",
-      "line_start": 630,
-      "line_end": 683
+      "one_line": "ACPX integration for dispatching external CLI agents and bridging requests with Kernos safely.",
+      "line_start": 773,
+      "line_end": 826
     },
     {
-      "section_title": "12. Identity & Covenants",
-      "one_line": "Agent identity settings and enforced user behavior contracts",
-      "line_start": 684,
-      "line_end": 699
+      "section_title": "15. Identity & Covenants",
+      "one_line": "Defines agent identity and manages enforceable behavioral covenants derived from user instructions.",
+      "line_start": 827,
+      "line_end": 842
     },
     {
-      "section_title": "13. Friction Observer",
-      "one_line": "Detection of friction signals and diagnostic reports after each turn",
-      "line_start": 700,
-      "line_end": 718
+      "section_title": "16. Friction Observer",
+      "one_line": "Post-turn observer that detects friction signals and writes diagnostic reports.",
+      "line_start": 843,
+      "line_end": 861
     },
     {
-      "section_title": "14. Platform Adapters",
-      "one_line": "Platform adapters for Discord and SMS that communicate with the handler through NormalizedMessage",
-      "line_start": 719,
-      "line_end": 727
+      "section_title": "17. Persistence",
+      "one_line": "Persistent state storage, per-tenant and per-space data organization, and non-destructive archival of deleted or supers…",
+      "line_start": 862,
+      "line_end": 881
     },
     {
-      "section_title": "15. Persistence",
-      "one_line": "Persistent storage of tenant and space state, including file layout and non-destructive deletions",
-      "line_start": 728,
-      "line_end": 747
+      "section_title": "18. Standing Principles",
+      "one_line": "Core design principles for Kernos’s conservative, ambient, provider-neutral architecture and state management",
+      "line_start": 882,
+      "line_end": 896
     },
     {
-      "section_title": "16. Standing Principles",
-      "one_line": "Core design principles for Kernos: safety-first, memory-centric, modular, provider-neutral operation",
-      "line_start": 748,
-      "line_end": 759
+      "section_title": "19. Supporting Systems (brief map)",
+      "one_line": "A map of supporting Kernos systems for canvases, retrieval, tools, credentials, messaging, health, and runtime reliabil…",
+      "line_start": 897,
+      "line_end": 912
     }
   ]
 }

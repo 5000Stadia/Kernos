@@ -1,0 +1,13 @@
+{
+  "file_path": "docs/workflow-actions.md",
+  "source_hash": "47da08781cf8c5c3e63ed055ab9a0abfcb3927f0ba85dcd1e342657a18a060a6",
+  "generated_at": "2026-10-29T03:19:13.492336+00:00",
+  "sections": [
+    {
+      "section_title": "`request_approval`",
+      "one_line": "Creates a durable approval request, pauses the workflow, and resumes it when an approval decision is recorded.",
+      "line_start": 3,
+      "line_end": 46
+    }
+  ]
+}

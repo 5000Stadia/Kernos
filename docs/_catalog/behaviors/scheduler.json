@@ -1,55 +1,61 @@
 {
   "file_path": "docs/behaviors/scheduler.md",
-  "source_hash": "67c27009ccf3cfa33f52fa8e8dd7dd8dbd26aa6103171fdc83c62526e22e0f76",
-  "generated_at": "2026-05-06T18:01:01.893903+00:00",
+  "source_hash": "b6e48b45d67aa350706daffc1e49a814c116bc63e060dd1b70d390274065b02b",
+  "generated_at": "2026-10-29T03:15:34.292590+00:00",
   "sections": [
     {
       "section_title": "How It Works",
-      "one_line": "Trigger storage and 60-second scheduler evaluation loop",
+      "one_line": "Scheduler triggers and the awareness evaluator’s 60-second evaluation cycle",
       "line_start": 5,
       "line_end": 8
     },
     {
       "section_title": "Trigger Types",
-      "one_line": "Types of triggers and their authorization requirements for notifications and tool calls",
+      "one_line": "Trigger types for outbound notifications and covenant-authorized tool calls",
       "line_start": 9,
       "line_end": 14
     },
     {
       "section_title": "manage_schedule Tool",
-      "one_line": "Scheduled action management: create, list, update, pause, resume, and remove triggers",
+      "one_line": "Manage scheduled actions, including creating, updating, pausing, resuming, listing, and removing triggers",
       "line_start": 15,
       "line_end": 32
     },
     {
-      "section_title": "Time Handling",
-      "one_line": "Local time parsing, storage, and recurring trigger scheduling",
+      "section_title": "Forgiving Dispatch (TOOL-ARG-REPAIR-V1)",
+      "one_line": "Forgiving normalization of reminder tool arguments, including action, message, time extraction, and missing-schedule ha…",
       "line_start": 33,
-      "line_end": 38
+      "line_end": 42
+    },
+    {
+      "section_title": "Time Handling",
+      "one_line": "Local-to-UTC time conversion, timezone-aware scheduling, recurring triggers, and user-facing fire-time display",
+      "line_start": 43,
+      "line_end": 50
     },
     {
       "section_title": "Failure Handling",
-      "one_line": "Handling trigger delivery, tool-call, and MCP connection failures",
-      "line_start": 39,
-      "line_end": 44
-    },
-    {
-      "section_title": "Lifecycle",
-      "one_line": "Trigger statuses and their meanings",
-      "line_start": 45,
-      "line_end": 53
-    },
-    {
-      "section_title": "Storage",
-      "one_line": "Atomic storage of trigger state in data/{instance_id}/state/triggers.json",
-      "line_start": 54,
+      "one_line": "Handling validation, delivery, tool, and MCP failures in scheduled triggers",
+      "line_start": 51,
       "line_end": 57
     },
     {
-      "section_title": "Code Locations",
-      "one_line": "Paths for scheduler, trigger, and tick loop code in Kernos",
+      "section_title": "Lifecycle",
+      "one_line": "Trigger lifecycle statuses, transitions, failure tracking, and history preservation.",
       "line_start": 58,
-      "line_end": 65
+      "line_end": 70
+    },
+    {
+      "section_title": "Storage",
+      "one_line": "Trigger state storage and atomic file writes",
+      "line_start": 71,
+      "line_end": 74
+    },
+    {
+      "section_title": "Code Locations",
+      "one_line": "Maps scheduling, trigger, tool failure, and tick-loop components to their source files",
+      "line_start": 75,
+      "line_end": 85
     }
   ]
 }

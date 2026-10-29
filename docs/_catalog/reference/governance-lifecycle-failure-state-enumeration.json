@@ -1,0 +1,49 @@
+{
+  "file_path": "docs/reference/governance-lifecycle-failure-state-enumeration.md",
+  "source_hash": "0ae82c7c312bb0068502b7debd7d2fec3732deb2a17a2b11b000e201ec3172d9",
+  "generated_at": "2026-10-29T03:18:29.210190+00:00",
+  "sections": [
+    {
+      "section_title": "Purpose",
+      "one_line": "Acceptance criteria and regression catalog for durable governance findings and one retained history entry per closure.",
+      "line_start": 9,
+      "line_end": 34
+    },
+    {
+      "section_title": "System model",
+      "one_line": "Source, archive, and audit artifact lifecycle with invariants for closure, recovery, retries, and concurrency",
+      "line_start": 35,
+      "line_end": 62
+    },
+    {
+      "section_title": "The nine failure-state families",
+      "one_line": "Catalogs nine failure-state families from RED review rounds and the lifecycle invariants each exposes.",
+      "line_start": 63,
+      "line_end": 290
+    },
+    {
+      "section_title": "Structural conclusions",
+      "one_line": "System-wide conclusions about transaction safety, identity, recovery, locking, and upgrades",
+      "line_start": 291,
+      "line_end": 312
+    },
+    {
+      "section_title": "Rewrite acceptance criteria",
+      "one_line": "Acceptance criteria for a single-document state rewrite with safe transactions, migrations, failure handling, and concu…",
+      "line_start": 313,
+      "line_end": 378
+    },
+    {
+      "section_title": "Precursor findings outside the lifecycle state machine",
+      "one_line": "Integration defects outside the lifecycle state machine and transaction acceptance criteria",
+      "line_start": 379,
+      "line_end": 387
+    },
+    {
+      "section_title": "Review rule carried forward",
+      "one_line": "Guidance for state-based review of failures, retries, concurrency, and artifact identity",
+      "line_start": 388,
+      "line_end": 400
+    }
+  ]
+}

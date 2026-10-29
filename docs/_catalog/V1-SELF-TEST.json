@@ -1,0 +1,13 @@
+{
+  "file_path": "docs/V1-SELF-TEST.md",
+  "source_hash": "9651501af4553335b2e2822ea477cd14df0c6ffa5d5abcd8f2bb824a5cc04875",
+  "generated_at": "2026-10-29T03:14:45.330786+00:00",
+  "sections": [
+    {
+      "section_title": "KERNOS v1 self-test",
+      "one_line": "Comprehensive readiness check of KERNOS v1 capabilities, tools, safety boundaries, and operational state",
+      "line_start": 1,
+      "line_end": 110
+    }
+  ]
+}

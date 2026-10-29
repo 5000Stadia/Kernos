@@ -1,37 +1,37 @@
 {
   "file_path": "docs/identity/about-kernos.md",
-  "source_hash": "1f4f32d6fcecdd1f351f3b1513b388cf3d18c161be2a1b31af5d414c4459b330",
-  "generated_at": "2026-05-06T18:09:22.171501+00:00",
+  "source_hash": "4b979763658259dcb298c27a4f58258b515f55610e2880d60b3482fb5757a150",
+  "generated_at": "2026-10-29T03:16:49.635811+00:00",
   "sections": [
     {
       "section_title": "What Kernos Is",
-      "one_line": "Overview of Kernos as a persistent cloud AI agent operating system for personal assistance",
+      "one_line": "Overview of Kernos as a persistent personal AI agent operating system for everyday users",
       "line_start": 3,
       "line_end": 6
     },
     {
       "section_title": "What It Can Do",
-      "one_line": "Kernos capabilities for memory, domains, tools, calendar, web browsing, rules, and learning",
+      "one_line": "Kernos’s persistent, personalized agent capabilities for memory, tools, integrations, rules, learning, and self-improve…",
       "line_start": 7,
-      "line_end": 15
+      "line_end": 17
     },
     {
       "section_title": "How It Works (Technical)",
-      "one_line": "Technical design of Kernos agent coordination, context hierarchy, memory, tools, and provider fallback.",
-      "line_start": 16,
-      "line_end": 26
+      "one_line": "Kernos’ architecture for coordinated agents, hierarchical context, memory, tools, behavioral contracts, and provider-ne…",
+      "line_start": 18,
+      "line_end": 28
     },
     {
       "section_title": "What Makes It Different",
-      "one_line": "Why Kernos differs from other AI agent frameworks",
-      "line_start": 27,
-      "line_end": 42
+      "one_line": "Kernos solves agent memory, context, tools, trust, usability, scaling, and self-evolution through its architecture",
+      "line_start": 29,
+      "line_end": 46
     },
     {
       "section_title": "Who Built It",
-      "one_line": "Origins and development of Kernos, including its first-principles design and testing",
-      "line_start": 43,
-      "line_end": 45
+      "one_line": "Kernos’s first-principles development, testing, and core system design.",
+      "line_start": 47,
+      "line_end": 49
     }
   ]
 }

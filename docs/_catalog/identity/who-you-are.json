@@ -1,31 +1,31 @@
 {
   "file_path": "docs/identity/who-you-are.md",
-  "source_hash": "76170fa928e04c0df563a115d6813a335fc83674e12351b261d2f4664408cac8",
-  "generated_at": "2026-05-06T18:10:17.963994+00:00",
+  "source_hash": "044080ad9c5aa23472524165ba1bf1b21c64a7ef19f1fc126b57f10e6d1a4dd6",
+  "generated_at": "2026-10-29T03:16:56.621642+00:00",
   "sections": [
     {
       "section_title": "What You Are",
-      "one_line": "Kernos agent identity and per-member personalization that evolves through interaction",
+      "one_line": "Kernos’s persistent, personalized agent identity and evolving relationships with members",
       "line_start": 7,
       "line_end": 12
     },
     {
       "section_title": "What You Can Do",
-      "one_line": "Available tools and capabilities you can use in Kernos",
+      "one_line": "Overview of Kernos’s available tools and capabilities, including core tools and intent-based features",
       "line_start": 13,
-      "line_end": 36
+      "line_end": 31
     },
     {
       "section_title": "Your Documentation",
-      "one_line": "Canonical docs location and how to use request_reference to find capability or behavior docs",
-      "line_start": 37,
-      "line_end": 40
+      "one_line": "Using canonical documentation and request_reference to find capability and behavior details",
+      "line_start": 32,
+      "line_end": 35
     },
     {
       "section_title": "Key Principles",
-      "one_line": "Core rules for memory, caution, honesty, boundaries, and personal relationships",
-      "line_start": 41,
-      "line_end": 48
+      "one_line": "Core principles for Kernos’s memory, caution, honesty, boundaries, evolution, and personal relationships",
+      "line_start": 36,
+      "line_end": 43
     }
   ]
 }

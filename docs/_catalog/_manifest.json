@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-22T17:12:19.099016+00:00",
+  "generated_at": "2026-10-29T03:19:13.533978+00:00",
   "entries": {
     "docs/ADAPTER-GUIDE.md": {
       "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
@@ -10,17 +10,25 @@
       "source_hash": "2ff5eb25b96b91fc6f1a675510170abc453f533f98fba1ad9641d041f45a668c",
       "artifact_path": "docs/_catalog/CROSS-SPACE-REQUESTS.json"
     },
+    "docs/DESIGN-PRINCIPLES.md": {
+      "source_hash": "54466bf290098db2c54fdbe79ff440b2d15c3f85aa59a70e2a0a6dbecd0f0d54",
+      "artifact_path": "docs/_catalog/DESIGN-PRINCIPLES.json"
+    },
     "docs/EXTERNAL-AGENTS.md": {
-      "source_hash": "9ce560fc1a5669b46f6e5c05bbf53ca86b8be843df3173fe5fe04526684236c9",
+      "source_hash": "5392595a1bdc95b6885fa047ce74ddbb03c6e400bbcc4c87e73a850377bd40df",
       "artifact_path": "docs/_catalog/EXTERNAL-AGENTS.json"
     },
     "docs/TECHNICAL-ARCHITECTURE.md": {
-      "source_hash": "0321936f2ef6d64b5268614ef31c4c6df7c42b5164a582a6c3f31b4792ed2793",
+      "source_hash": "ee11b6cadf624349065d923973a9948a5060d09d5019398e809584273a8c11ba",
       "artifact_path": "docs/_catalog/TECHNICAL-ARCHITECTURE.json"
     },
     "docs/TESTING-PATTERN.md": {
       "source_hash": "c239a97719f65608378ade86bf2cae0228f0e6203b8b1c90b29638ee7b433eaf",
       "artifact_path": "docs/_catalog/TESTING-PATTERN.json"
+    },
+    "docs/V1-SELF-TEST.md": {
+      "source_hash": "9651501af4553335b2e2822ea477cd14df0c6ffa5d5abcd8f2bb824a5cc04875",
+      "artifact_path": "docs/_catalog/V1-SELF-TEST.json"
     },
     "docs/architecture/browser.md": {
       "source_hash": "914845a3df6c62d8c88bf6db8c1c3b17a6aae4e58799c195a5bef1b746c81055",
@@ -59,7 +67,7 @@
       "artifact_path": "docs/_catalog/architecture/cohort-memory.json"
     },
     "docs/architecture/context-spaces.md": {
-      "source_hash": "0c38d4408aa16830983b9dae94146c4dc176f8b0c41ae0514c797c20bddb4f56",
+      "source_hash": "7df6f4519f222d17da13746154f82aafbeef13b9a5793bb620d795554522bff4",
       "artifact_path": "docs/_catalog/architecture/context-spaces.json"
     },
     "docs/architecture/crb.md": {
@@ -95,7 +103,7 @@
       "artifact_path": "docs/_catalog/architecture/kernel-tool-registry.json"
     },
     "docs/architecture/memory.md": {
-      "source_hash": "476adfa948c7b87d7c5d3a6e5d0c7996983acdd16e45a6c86ad3135bb1d1fc39",
+      "source_hash": "b859dabf57547aa2d65051576bed4a04dca7b4b468a810ef511dd3762436b9c2",
       "artifact_path": "docs/_catalog/architecture/memory.json"
     },
     "docs/architecture/model-registry.md": {
@@ -171,7 +179,7 @@
       "artifact_path": "docs/_catalog/behaviors/proactive-awareness.json"
     },
     "docs/behaviors/scheduler.md": {
-      "source_hash": "67c27009ccf3cfa33f52fa8e8dd7dd8dbd26aa6103171fdc83c62526e22e0f76",
+      "source_hash": "b6e48b45d67aa350706daffc1e49a814c116bc63e060dd1b70d390274065b02b",
       "artifact_path": "docs/_catalog/behaviors/scheduler.json"
     },
     "docs/capabilities/calendar.md": {
@@ -191,7 +199,7 @@
       "artifact_path": "docs/_catalog/capabilities/cross-space-requests.json"
     },
     "docs/capabilities/diagnostics.md": {
-      "source_hash": "74d5a7f0a468f1f710792e73b4cb5942a76c40514a0d8d775590b87f6f749f07",
+      "source_hash": "aa4389a3e63898c82edfeb72cb6aa3e6a8296051110d80a60d2e5472eef34eba",
       "artifact_path": "docs/_catalog/capabilities/diagnostics.json"
     },
     "docs/capabilities/external-agents.md": {
@@ -207,7 +215,7 @@
       "artifact_path": "docs/_catalog/capabilities/memory-tools.json"
     },
     "docs/capabilities/overview.md": {
-      "source_hash": "9814f813276b89ee208d70eb0a22443df556ad5e809672041b7476ff625d7085",
+      "source_hash": "911e73c55b9c3394c052f8967e7db273fa525c1585d256a0c8f5cdc4a150b731",
       "artifact_path": "docs/_catalog/capabilities/overview.json"
     },
     "docs/capabilities/references.md": {
@@ -223,7 +231,7 @@
       "artifact_path": "docs/_catalog/capabilities/sms.json"
     },
     "docs/capabilities/tool-surface.md": {
-      "source_hash": "e647f660ceaaa0e86609e86c08a698583a263e24dd5d4d0881cbdae383719aef",
+      "source_hash": "f44b13094b3848bcde8ca49046f554f2436c2fdd72fde8edf157fa541990fcb4",
       "artifact_path": "docs/_catalog/capabilities/tool-surface.json"
     },
     "docs/capabilities/web-browsing.md": {
@@ -247,7 +255,7 @@
       "artifact_path": "docs/_catalog/env-protection.json"
     },
     "docs/identity/about-kernos.md": {
-      "source_hash": "1f4f32d6fcecdd1f351f3b1513b388cf3d18c161be2a1b31af5d414c4459b330",
+      "source_hash": "4b979763658259dcb298c27a4f58258b515f55610e2880d60b3482fb5757a150",
       "artifact_path": "docs/_catalog/identity/about-kernos.json"
     },
     "docs/identity/onboarding.md": {
@@ -259,27 +267,31 @@
       "artifact_path": "docs/_catalog/identity/soul-system.json"
     },
     "docs/identity/who-you-are.md": {
-      "source_hash": "76170fa928e04c0df563a115d6813a335fc83674e12351b261d2f4664408cac8",
+      "source_hash": "044080ad9c5aa23472524165ba1bf1b21c64a7ef19f1fc126b57f10e6d1a4dd6",
       "artifact_path": "docs/_catalog/identity/who-you-are.json"
     },
     "docs/index.md": {
-      "source_hash": "5fe3d1653948912c0ec0ed5c88323865a0e4df241d2b4b68ebcdcfdad1545e6e",
+      "source_hash": "31a55f462c4d39c4e1847e0cf9f54f89c1f4f61799fdf8449571a9b6be8f0d3b",
       "artifact_path": "docs/_catalog/index.json"
     },
     "docs/install.md": {
-      "source_hash": "eef88ba2abd67934e132fad02f6c2a3292f49faa79744e40e023e8f8d36f4968",
+      "source_hash": "af27462fbe71166b2b3e9303c49bcc222a5fab68353517ac702bd360821bf423",
       "artifact_path": "docs/_catalog/install.json"
     },
     "docs/kernos-introduction.md": {
-      "source_hash": "95003901e022a6b0309f28fbeee713d3c093e76774dc49c6bc2ca507a78eb99c",
+      "source_hash": "70112af47840cf3a4372a95709fe735f752ad20593628a721f681d21ae29a555",
       "artifact_path": "docs/_catalog/kernos-introduction.json"
+    },
+    "docs/notes/soak-04.md": {
+      "source_hash": "b19b8b2aff21021a2557556da40e464f1881ffed41fc11ca0a78c5f9a59e16b9",
+      "artifact_path": "docs/_catalog/notes/soak-04.json"
     },
     "docs/operating/reference-catalog-baked.md": {
       "source_hash": "181ef19625442ea1e0d9bf473b9871f4744c22ed5fc42f0238d509f8ca807bb8",
       "artifact_path": "docs/_catalog/operating/reference-catalog-baked.json"
     },
     "docs/reference/architecture-notebook.md": {
-      "source_hash": "8dd3ae0c65a0d08e733c6be7fae97d0974d95c114b676e577cbbf25588c5cdc2",
+      "source_hash": "be42ce2d01344e5cd76cd37629c9916d3171e4bcaa3a2041941524c096db04ec",
       "artifact_path": "docs/_catalog/reference/architecture-notebook.json"
     },
     "docs/reference/blueprint-original-vision.md": {
@@ -310,9 +322,21 @@
       "source_hash": "c85f8f89d11bb7aec2d7920a032e1c0767a6310ded799f741ff28550889aa65f",
       "artifact_path": "docs/_catalog/reference/external-research/CWA-STREAMING-TOOL-EXECUTION.json"
     },
+    "docs/reference/governance-lifecycle-failure-state-enumeration.md": {
+      "source_hash": "0ae82c7c312bb0068502b7debd7d2fec3732deb2a17a2b11b000e201ec3172d9",
+      "artifact_path": "docs/_catalog/reference/governance-lifecycle-failure-state-enumeration.json"
+    },
     "docs/reference/kernel-architecture-outline.md": {
       "source_hash": "28d84b4b29a417c0e9dfd980fbfba306e519a065c3da2e16dab2e15bd77582a7",
       "artifact_path": "docs/_catalog/reference/kernel-architecture-outline.json"
+    },
+    "docs/reference/runtime-defaults.md": {
+      "source_hash": "dd918b9f135773e70cf836df7e3354071080c6f2c581beab807a4ccb71110956",
+      "artifact_path": "docs/_catalog/reference/runtime-defaults.json"
+    },
+    "docs/research/README.md": {
+      "source_hash": "c21aa7f57473a885a499d3dfbef9cde7dddca6f346df70aba31df0f69bd46d85",
+      "artifact_path": "docs/_catalog/research/README.json"
     },
     "docs/roadmap.md": {
       "source_hash": "ca4039894befd95c3e8726f1f011f5183e7878d373558a00546c9b62229549c0",
@@ -339,8 +363,12 @@
       "artifact_path": "docs/_catalog/v2/alignment-substrate.json"
     },
     "docs/v2/direction.md": {
-      "source_hash": "f7118c8f62650f68fa652a502bc7cc6448418380b0f60a9ccfeca3013c001872",
+      "source_hash": "e1d66ad17c6d41e58640b8fe8ae0cf7dc3337e92e3da6acb4fd10833e217b7fe",
       "artifact_path": "docs/_catalog/v2/direction.json"
+    },
+    "docs/workflow-actions.md": {
+      "source_hash": "47da08781cf8c5c3e63ed055ab9a0abfcb3927f0ba85dcd1e342657a18a060a6",
+      "artifact_path": "docs/_catalog/workflow-actions.json"
     },
     "docs/workflow-patterns/00-library-meta.md": {
       "source_hash": "77941e3d81e1fde8cd5ada4ef3d380c349a6a2b365deb8f969cd9dfb9d7d21f5",

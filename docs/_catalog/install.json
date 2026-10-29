@@ -1,85 +1,85 @@
 {
   "file_path": "docs/install.md",
-  "source_hash": "eef88ba2abd67934e132fad02f6c2a3292f49faa79744e40e023e8f8d36f4968",
-  "generated_at": "2026-05-10T09:50:47.991448+00:00",
+  "source_hash": "af27462fbe71166b2b3e9303c49bcc222a5fab68353517ac702bd360821bf423",
+  "generated_at": "2026-10-29T03:17:26.791923+00:00",
   "sections": [
     {
       "section_title": "Requirements",
-      "one_line": "Required software and credentials for running Kernos",
+      "one_line": "Prerequisites for installing and running Kernos, including runtime, LLM, and messaging credentials",
       "line_start": 5,
       "line_end": 19
     },
     {
       "section_title": "Quick install",
-      "one_line": "Quick local install and server startup for Kernos",
+      "one_line": "Quick installation and first-run setup for the Kernos server",
       "line_start": 20,
       "line_end": 39
     },
     {
       "section_title": "Launcher paths",
-      "one_line": "Launcher entry points for running Kernos in Discord or local CLI chat",
+      "one_line": "Kernos launcher options for the full Discord runtime and local CLI chat",
       "line_start": 40,
       "line_end": 81
     },
     {
       "section_title": "Environment Configuration",
-      "one_line": "Environment variables for LLM providers, messaging adapters, storage, and optional services",
+      "one_line": "Environment variables for configuring LLM providers, messaging adapters, integrations, storage, fallback chains, and te…",
       "line_start": 82,
-      "line_end": 175
+      "line_end": 180
     },
     {
       "section_title": "Auto-Update",
-      "one_line": "Startup and daily update settings for checking, pulling, and applying Kernos updates",
-      "line_start": 176,
-      "line_end": 222
+      "one_line": "Configuration for automatic startup and daily background updates, update notifications, and tracked Git branches",
+      "line_start": 181,
+      "line_end": 227
     },
     {
       "section_title": "Workspace Scope",
-      "one_line": "Controls how much filesystem access agent code has in a Kernos workspace.",
-      "line_start": 223,
-      "line_end": 240
+      "one_line": "Filesystem access scope for code written and run by the agent",
+      "line_start": 228,
+      "line_end": 245
     },
     {
       "section_title": "Workspace Builder Backend",
-      "one_line": "Backend options for choosing and scoping the workspace code builder",
-      "line_start": 241,
-      "line_end": 272
+      "one_line": "Workspace builder backends, model selection, integration status, and workspace scope limitations",
+      "line_start": 246,
+      "line_end": 277
     },
     {
       "section_title": "Verifying Install",
-      "one_line": "Checking that Kernos is installed correctly and the onboarding flow works",
-      "line_start": 273,
-      "line_end": 284
+      "one_line": "Testing the Kernos installation and verifying bot onboarding and messaging work correctly",
+      "line_start": 278,
+      "line_end": 289
     },
     {
       "section_title": "Running in Production",
-      "one_line": "Production deployment options and safety considerations for running Kernos",
-      "line_start": 285,
-      "line_end": 296
+      "one_line": "Production deployment options, resource needs, and security considerations for running Kernos.",
+      "line_start": 290,
+      "line_end": 301
     },
     {
       "section_title": "First-boot canvases",
-      "one_line": "Initial canvases seeded on first boot for system reference, workflow patterns, procedures, and tools",
-      "line_start": 297,
-      "line_end": 311
+      "one_line": "First-boot canvas seeding, contents, deployment behavior, and reseeding rules",
+      "line_start": 302,
+      "line_end": 316
     },
     {
       "section_title": "Troubleshooting",
-      "one_line": "Common setup and runtime fixes for Kernos import, provider, Discord, compaction, and MCP issues.",
-      "line_start": 312,
-      "line_end": 323
+      "one_line": "Troubleshooting Kernos installation, provider configuration, Discord, compaction, and MCP connectivity issues",
+      "line_start": 317,
+      "line_end": 328
     },
     {
       "section_title": "Getting Help",
-      "one_line": "Reporting Kernos issues on GitHub",
-      "line_start": 324,
-      "line_end": 327
+      "one_line": "Ways to report Kernos issues through its GitHub repository",
+      "line_start": 329,
+      "line_end": 332
     },
     {
       "section_title": "Related",
-      "one_line": "Links to the project overview and roadmap",
-      "line_start": 328,
-      "line_end": 331
+      "one_line": "Links to the project overview and roadmap.",
+      "line_start": 333,
+      "line_end": 336
     }
   ]
 }

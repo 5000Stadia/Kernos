@@ -1,35 +1,35 @@
 {
   "file_path": "docs/index.md",
-  "source_hash": "5fe3d1653948912c0ec0ed5c88323865a0e4df241d2b4b68ebcdcfdad1545e6e",
-  "generated_at": "2026-05-06T18:10:47.143109+00:00",
+  "source_hash": "31a55f462c4d39c4e1847e0cf9f54f89c1f4f61799fdf8449571a9b6be8f0d3b",
+  "generated_at": "2026-10-29T03:17:06.908997+00:00",
   "sections": [
     {
       "section_title": "Kernos documentation map",
-      "one_line": "Starting point for navigating Kernos canonical documentation and finding all docs sections",
+      "one_line": "Navigation map for Kernos’s canonical documentation, linking architecture, capability, behavior, identity, and roadmap …",
       "line_start": 7,
       "line_end": 14
     },
     {
       "section_title": "How It Works",
-      "one_line": "Kernos architecture and how messages flow through adapters, handler, and kernel",
+      "one_line": "Kernos’s three-layer architecture: adapters, message handling, and the kernel’s intelligence infrastructure.",
       "line_start": 15,
       "line_end": 24
     },
     {
       "section_title": "Core Principles",
-      "one_line": "Fundamental rules for responsible, honest, and careful stewardship of a user's digital life",
+      "one_line": "Guiding principles for responsible, honest, conservative, and personalized digital assistance",
       "line_start": 25,
       "line_end": 34
     },
     {
       "section_title": "Documentation Structure",
-      "one_line": "Guide to the documentation sections and what each covers",
+      "one_line": "Navigation guide to Kernos architecture, capabilities, behaviors, identity, and roadmap documentation",
       "line_start": 35,
       "line_end": 46
     },
     {
       "section_title": "Recent additions (post-Multi-Member V1)",
-      "one_line": "Post-Multi-Member V1 documentation for new Kernos architecture, tools, references, triggers, and workflows",
+      "one_line": "Architecture and capability documentation for substrate added after Multi-Member V1.",
       "line_start": 47,
       "line_end": 64
     }

@@ -1,0 +1,31 @@
+{
+  "file_path": "docs/research/README.md",
+  "source_hash": "c21aa7f57473a885a499d3dfbef9cde7dddca6f346df70aba31df0f69bd46d85",
+  "generated_at": "2026-10-29T03:18:42.783280+00:00",
+  "sections": [
+    {
+      "section_title": "The question",
+      "one_line": "Assessment of which KERNOS architectural elements are novel versus commonplace in agentic harnesses",
+      "line_start": 12,
+      "line_end": 19
+    },
+    {
+      "section_title": "Method",
+      "one_line": "Three-track self-audit verifying documented claims against code and prior systems.",
+      "line_start": 20,
+      "line_end": 40
+    },
+    {
+      "section_title": "Findings at a glance",
+      "one_line": "Summary of novelty and originality findings across Kernos system features",
+      "line_start": 41,
+      "line_end": 56
+    },
+    {
+      "section_title": "Reading notes",
+      "one_line": "Caveats on search findings, documentation discrepancies, and related design principles",
+      "line_start": 57,
+      "line_end": 68
+    }
+  ]
+}
