@@ -586,3 +586,118 @@ class TestSeededTokensTracking:
         await logger.roll_log("t1", "s1")
         info2 = await logger.get_current_log_info("t1", "s1")
         assert info2["seeded_tokens_est"] == 0
+
+
+class TestSourceTurns:
+    async def test_source_includes_current_while_recall_stays_closed(self, tmp_path):
+        logger = ConversationLogger(tmp_path)
+        await logger.append("t1", "s1", "user", "discord", "Older promise", member_id="m1")
+        await logger.roll_log("t1", "s1", member_id="m1")
+        await logger.append("t1", "s1", "assistant", "discord", "Current reply", member_id="m1")
+
+        source = await logger.read_source_turns("t1", "s1", "m1")
+        closed = await logger.read_historical_turns("t1", "s1", "m1")
+        assert [t.content for t in source] == ["Older promise", "Current reply"]
+        assert [t.content for t in closed] == ["Older promise"]
+        assert await logger.read_source_turns("t1", "s1", "m1", include_current=False) == closed
+        assert {(t.space_id, t.member_id) for t in source + closed} == {("s1", "m1")}
+
+    async def test_scope_listing_and_reads_never_fall_back(self, tmp_path):
+        logger = ConversationLogger(tmp_path)
+        await logger.append("t1", "own", "user", "discord", "Own", member_id="m1")
+        await logger.append("t1", "other", "user", "discord", "Other member", member_id="m2")
+        await logger.append("t1", "legacy", "user", "discord", "Shared legacy")
+        await logger.append("t2", "elsewhere", "user", "discord", "Other tenant", member_id="m1")
+        empty_folder = tmp_path / "tenants/t1/spaces/empty/members/m1/logs"
+        empty_folder.mkdir(parents=True)
+
+        assert await logger.list_member_space_ids("t1", "m1") == ["empty", "own"]
+        assert await logger.list_member_space_ids("t1", "") == []
+        assert await logger.list_member_space_ids("t1", "missing") == []
+        assert await logger.list_member_space_ids("missing", "m1") == []
+        for space, member in [("other", "m1"), ("legacy", "m1"), ("own", "m2"), ("own", "")]:
+            assert await logger.read_source_turns("t1", space, member) == ()
+        assert [t.content for t in await logger.read_source_turns("t1", "own", "m1")] == ["Own"]
+
+    async def test_duplicate_timestamps_and_seed_skips_preserve_physical_coordinates(self, tmp_path):
+        logger = ConversationLogger(tmp_path)
+        timestamp = "2026-10-28T12:00:00+00:00"
+        for speaker, content in [("user", "Question\ncontinued"), ("assistant", "Answer")]:
+            await logger.append("t1", "s1", speaker, "discord", content,
+                                timestamp=timestamp, member_id="m1")
+        await logger.roll_log("t1", "s1", member_id="m1")
+        await logger.seed_from_previous("t1", "s1", 1, tail_entries=2, member_id="m1")
+        await logger.append("t1", "s1", "user", "discord", "New commitment",
+                            timestamp=timestamp, member_id="m1")
+
+        source = await logger.read_source_turns("t1", "s1", "m1")
+        assert [(t.log_number, t.turn_number, t.speaker, t.timestamp, t.content) for t in source] == [
+            (1, 1, "user", timestamp, "Question\ncontinued"),
+            (1, 2, "assistant", timestamp, "Answer"),
+            (2, 3, "user", timestamp, "New commitment"),
+        ]
+
+    async def test_closed_mode_still_uses_excluded_predecessor_to_skip_seeds(self, tmp_path):
+        logger = ConversationLogger(tmp_path)
+        await logger.append("t1", "s1", "user", "discord", "Excluded current", member_id="m1")
+        await logger.roll_log("t1", "s1", member_id="m1")
+        await logger.seed_from_previous("t1", "s1", 1, tail_entries=1, member_id="m1")
+        await logger.append("t1", "s1", "assistant", "discord", "Genuine later turn", member_id="m1")
+        # An unusual metadata state must not make a seeded copy of the
+        # excluded log searchable as if it were a new closed-log turn.
+        meta = logger._load_meta("t1", "s1", "m1")
+        meta["current_log"] = 1
+        logger._save_meta("t1", "s1", meta, "m1")
+
+        closed = await logger.read_source_turns("t1", "s1", "m1", include_current=False)
+        assert [(t.log_number, t.turn_number, t.content) for t in closed] == [
+            (2, 2, "Genuine later turn"),
+        ]
+        assert await logger.read_historical_turns("t1", "s1", "m1") == closed
+
+    async def test_cache_modes_rollover_and_current_appends(self, tmp_path):
+        logger = ConversationLogger(tmp_path)
+        await logger.append("t1", "s1", "user", "discord", "First", member_id="m1")
+        assert await logger.read_historical_turns("t1", "s1", "m1") == ()
+        first = await logger.read_source_turns("t1", "s1", "m1")
+        assert [t.content for t in first] == ["First"]
+        assert await logger.read_historical_turns("t1", "s1", "m1") == ()
+        assert await logger.read_source_turns("t1", "s1", "m1") is first
+        await logger.append("t1", "s1", "assistant", "discord", "Second", member_id="m1")
+        assert [t.content for t in await logger.read_source_turns("t1", "s1", "m1")] == ["First", "Second"]
+        # Rollover changes only metadata until the next append.
+        await logger.roll_log("t1", "s1", member_id="m1")
+        assert [t.content for t in await logger.read_historical_turns("t1", "s1", "m1")] == ["First", "Second"]
+        await logger.append("t1", "s1", "user", "discord", "Third", member_id="m1")
+        assert [t.content for t in await logger.read_source_turns("t1", "s1", "m1")] == ["First", "Second", "Third"]
+        assert [t.content for t in await logger.read_historical_turns("t1", "s1", "m1")] == ["First", "Second"]
+
+    async def test_cache_detects_same_size_source_edit_with_preserved_mtime(self, tmp_path):
+        import os
+
+        logger = ConversationLogger(tmp_path)
+        await logger.append("t1", "s1", "user", "discord", "First", member_id="m1")
+        await logger.roll_log("t1", "s1", member_id="m1")
+        await logger.read_source_turns("t1", "s1", "m1")
+        await logger.read_historical_turns("t1", "s1", "m1")
+        path = tmp_path / "tenants/t1/spaces/s1/members/m1/logs/log_001.txt"
+        stat = path.stat()
+        path.write_text(path.read_text().replace("First", "Other"))
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        assert [t.content for t in await logger.read_source_turns("t1", "s1", "m1")] == ["Other"]
+        assert [t.content for t in await logger.read_historical_turns("t1", "s1", "m1")] == ["Other"]
+
+    async def test_missing_metadata_only_excludes_newest_for_recall(self, tmp_path):
+        logger = ConversationLogger(tmp_path)
+        await logger.append("t1", "s1", "user", "discord", "Old", member_id="m1")
+        await logger.roll_log("t1", "s1", member_id="m1")
+        await logger.append("t1", "s1", "user", "discord", "Latest", member_id="m1")
+        (tmp_path / "tenants/t1/spaces/s1/members/m1/logs/meta.json").unlink()
+        assert [t.content for t in await logger.read_source_turns("t1", "s1", "m1")] == ["Old", "Latest"]
+        assert [t.content for t in await logger.read_historical_turns("t1", "s1", "m1")] == ["Old"]
+
+    def test_historical_turn_old_constructor_remains_valid(self):
+        from kernos.kernel.conversation_log import HistoricalTurn
+
+        turn = HistoricalTurn(1, 2, "user", "2026-10-28T12:00:00Z", "Words")
+        assert (turn.space_id, turn.member_id) == ("", "")

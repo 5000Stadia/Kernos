@@ -39,6 +39,8 @@ class HistoricalTurn:
     speaker: str
     timestamp: str
     content: str
+    space_id: str = ""
+    member_id: str = ""
 
 # Pattern matching the start of a log entry: [timestamp] [speaker] [channel]
 _ENTRY_RE = re.compile(
@@ -115,7 +117,36 @@ class ConversationLogger:
     def __init__(self, data_dir: str = "./data") -> None:
         self._data_dir = Path(data_dir)
         self._meta_locks: dict[str, asyncio.Lock] = {}
-        self._history_cache: dict[tuple[str, str, str], tuple[tuple, tuple[HistoricalTurn, ...]]] = {}
+        self._history_cache: dict[tuple[str, str, str, bool], tuple[tuple, tuple[HistoricalTurn, ...]]] = {}
+
+    async def list_member_space_ids(self, instance_id: str, member_id: str) -> list[str]:
+        """List spaces with this member's own logs folder, including empty ones."""
+        if not member_id:
+            return []
+        return await asyncio.to_thread(self._list_member_space_ids_sync, instance_id, member_id)
+
+    def _list_member_space_ids_sync(self, instance_id: str, member_id: str) -> list[str]:
+        spaces = self._data_dir / "tenants" / instance_id / "spaces"
+        if not spaces.is_dir():
+            return []
+        return sorted(space.name for space in spaces.iterdir()
+                      if space.is_dir() and (space / "members" / member_id / "logs").is_dir())
+
+    async def read_source_turns(
+        self, instance_id: str, space_id: str, member_id: str, *, include_current: bool = True,
+    ) -> tuple[HistoricalTurn, ...]:
+        """Read this member's source history for compaction and migration.
+
+        Unlike recall, source validation normally needs the current log too.
+        Seeded copies are skipped without renumbering physical source turns.
+        No member means no source history; shared legacy logs are never used.
+        """
+        if not member_id:
+            return ()
+        return await asyncio.to_thread(
+            self._read_source_turns_sync, instance_id, space_id, member_id,
+            include_current=include_current,
+        )
 
     async def read_historical_turns(
         self, instance_id: str, space_id: str, member_id: str,
@@ -124,7 +155,7 @@ class ConversationLogger:
 
         The current log is already in turn context and contains the recall
         question itself. Missing metadata conservatively treats the newest
-        log as current. Cache only parsed closed files; disk remains truth.
+        log as current. Disk remains truth for the parsed cache.
         """
         if not member_id:
             return ()
@@ -135,6 +166,13 @@ class ConversationLogger:
     def _read_historical_turns_sync(
         self, instance_id: str, space_id: str, member_id: str,
     ) -> tuple[HistoricalTurn, ...]:
+        return self._read_source_turns_sync(
+            instance_id, space_id, member_id, include_current=False,
+        )
+
+    def _read_source_turns_sync(
+        self, instance_id: str, space_id: str, member_id: str, *, include_current: bool,
+    ) -> tuple[HistoricalTurn, ...]:
         folder = self._logs_dir(instance_id, space_id, member_id)
         files = sorted((int(p.stem[4:]), p) for p in folder.glob("log_*.txt")
                        if re.fullmatch(r"log_\d+", p.stem))
@@ -144,16 +182,21 @@ class ConversationLogger:
         current = files[-1][0]
         if meta_path.exists():
             current = int(json.loads(meta_path.read_text(encoding="utf-8"))["current_log"])
-        closed = [(number, path) for number, path in files if number != current]
-        fingerprint = (current, tuple((n, p.stat().st_mtime_ns, p.stat().st_size) for n, p in files))
-        key = (instance_id, space_id, member_id)
+        selected = files if include_current else [(number, path) for number, path in files if number != current]
+        # Fingerprint all files: even an excluded predecessor can change which
+        # head turns are recognised as seeds. ctime/inode also detect an edit
+        # or replacement that preserves the old length and modification time.
+        source_stats = [(number, path.stat()) for number, path in files]
+        fingerprint = (current, tuple((n, st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
+                                      for n, st in source_stats))
+        key = (instance_id, space_id, member_id, include_current)
         cached = self._history_cache.get(key)
         if cached and cached[0] == fingerprint:
             return cached[1]
         turns = []
         paths = dict(files)
         previous_text, previous_number = None, None
-        for number, path in closed:
+        for number, path in selected:
             text = path.read_text(encoding="utf-8")
             parsed = _parse_entries(text)
             if previous_number != number - 1:
@@ -164,7 +207,8 @@ class ConversationLogger:
             ))
             offset = len(parsed) - len(unseeded)
             turns.extend(HistoricalTurn(number, offset + i + 1, entry["speaker"],
-                                        entry["timestamp"], entry["content"])
+                                        entry["timestamp"], entry["content"],
+                                        space_id, member_id)
                          for i, entry in enumerate(unseeded))
             previous_text, previous_number = text, number
         result = tuple(turns)
