@@ -828,44 +828,11 @@ def _build_now_block(
             f"your core values or hard boundaries.)\n"
             f"{active_space.posture}"
         )
-    # Self-directed execution context
-    if execution_envelope:
-        plan_id = execution_envelope.get("plan_id", "?")
-        step_id = execution_envelope.get("step_id", "?")
-        step_desc = execution_envelope.get("step_description", "")
-        budget_remaining = execution_envelope.get("budget_steps", 0) - execution_envelope.get("steps_used", 0)
-        if execution_envelope.get("paused"):
-            # Paused plan — user is sending a regular message
-            reason = execution_envelope.get("paused_reason", "budget limit")
-            _reason_display = {"step_limit": "step limit", "token_budget": "token budget", "time_limit": "time limit"}.get(reason, reason)
-            parts.append(
-                f"PAUSED PLAN\n"
-                f"Plan {plan_id} is paused at step {step_id} ({_reason_display}). "
-                f"Used {execution_envelope.get('steps_used', 0)}/{execution_envelope.get('budget_steps', '?')} steps.\n"
-                f"Next step was: {step_desc}\n"
-                f"If the user wants to continue, call manage_plan with action='continue' "
-                f"and the same plan_id. The budget will be extended automatically.\n"
-                f"If the user wants to change limits, pass budget_override with "
-                f"max_steps, max_tokens, or max_time_s. Set to 0 for no limit."
-            )
-        else:
-            _is_final = execution_envelope.get("is_final_step", False)
-            _step_instruction = (
-                f"This is the FINAL STEP. Your response will be sent directly to the user. "
-                f"Choose delivery: if the user is waiting for results, produce the full "
-                f"detailed deliverable (not a summary). If unclear, offer a short notice. "
-                f"If not useful to show now, produce no text (just complete the work). "
-                f"If delivery depends on an event, use manage_schedule instead."
-                if _is_final else
-                f"Execute this step, then call manage_plan with action='continue' and the next step_id. "
-                f"If you discover something the user should know, set notify_user."
-            )
-            parts.append(
-                f"SELF-DIRECTED EXECUTION\n"
-                f"Plan: {plan_id} | Step: {step_id} | Budget remaining: {budget_remaining} steps\n"
-                f"Objective: {step_desc}\n"
-                f"{_step_instruction}"
-            )
+    # Self-directed execution context, shared with the live presence renderer.
+    from kernos.kernel.execution_context import format_execution_envelope
+    execution_context = format_execution_envelope(execution_envelope)
+    if execution_context:
+        parts.append(execution_context)
     return "## NOW\n" + "\n".join(parts)
 
 

@@ -48,6 +48,7 @@ from typing import Any, Awaitable, Callable
 from kernos.kernel.enactment.service import (
     PresenceRenderResult,
 )
+from kernos.kernel.execution_context import format_execution_envelope
 from kernos.kernel.integration.briefing import (
     ActionKind,
     Briefing,
@@ -61,6 +62,7 @@ from kernos.kernel.integration.briefing import (
     RespondOnly,
 )
 from kernos.providers.base import ContentBlock, ProviderResponse
+from kernos.utils import format_user_datetime
 
 
 logger = logging.getLogger(__name__)
@@ -410,8 +412,9 @@ def _render_substrate(packet: Any) -> str:
         ts = getattr(now, "timestamp_utc", None)
         if ts is not None:
             now_lines.append(
-                f"Current time: {ts.isoformat()} "
-                f"({now.user_timezone or 'UTC'})"
+                f"Current time: {format_user_datetime(ts, now.user_timezone)} "
+                f"({now.user_timezone or 'system local'}) / "
+                f"{ts.strftime('%Y-%m-%d %H:%M')} UTC"
             )
         if now.platform:
             now_lines.append(f"Platform: {now.platform}")
@@ -425,6 +428,9 @@ def _render_substrate(packet: Any) -> str:
             now_lines.append(
                 f"Active space: {now.active_space_name}"
             )
+        execution_context = format_execution_envelope(now.execution_envelope)
+        if execution_context:
+            now_lines.append(execution_context)
         if now_lines:
             parts.append("## NOW\n" + "\n".join(now_lines))
 
