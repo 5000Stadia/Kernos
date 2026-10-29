@@ -166,6 +166,9 @@ class ReasoningRequest:
     # Empty string = no canonical entry (e.g., direct kernel-tool
     # paths that don't flow through the live dispatcher).
     audit_entry_id: str = ""
+    # Owned by this request, including dispatches from concurrent space turns.
+    # The reason phase hands this collector to its PhaseContext for persistence.
+    tool_calls_trace: list[dict] = field(default_factory=list)
 
 
 # GateResult and ApprovalToken extracted to kernos/kernel/gate.py (re-exported above)
@@ -336,12 +339,9 @@ class ReasoningService:
         self._tools_changed: bool = False  # Set by manage_capabilities; handler checks post-reasoning
         # Lazy tool loading: tracks which MCP tools have been loaded per-space session
         self._loaded_tools: dict[str, set[str]] = {}  # space_id → set of tool names
-        # Turn-level tool call trace — accumulated during reasoning, read+cleared by handler.
-        # IWL C2: when `trace_sink` is provided at construction, the new
-        # path's StepDispatcher writes into the same backing list so
-        # `drain_tool_trace()` returns entries from BOTH paths uniformly.
-        # Default: a fresh internal list (back-compat with legacy-only
-        # callers).
+        # Compatibility sink for directly wired dispatchers. Active turns use
+        # ReasoningRequest.tool_calls_trace, so concurrent requests never share
+        # this service-level list or drain one another's receipts.
         self._turn_tool_trace: list[dict] = (
             trace_sink if trace_sink is not None else []
         )
@@ -587,19 +587,11 @@ class ReasoningService:
         return self._last_real_input_tokens.get(instance_id, 0)
 
     def drain_tool_trace(self) -> list[dict]:
-        """Return and clear the accumulated tool call trace for the current turn.
+        """Return and clear the compatibility sink for direct-dispatch callers.
 
-        IWL drain-ordering invariant (the design review final-signoff note): the
-        handler is the single owner of this drain. response_delivery /
-        StepDispatcher append into the trace store but never call
-        this method. After `reason()` returns, the handler calls
-        drain_tool_trace() once to consume the turn's entries.
-
-        IWL trace-sink note: when `trace_sink` was injected at
-        construction, the underlying list is shared with the new
-        path's StepDispatcher; drain returns entries from whichever
-        path produced them. The list is cleared in-place to preserve
-        the shared reference for subsequent turns.
+        Active handler turns persist their request-owned tool_calls_trace and
+        never call this service-wide drain. Clear in place to preserve any
+        explicitly injected compatibility sink reference.
         """
         trace = list(self._turn_tool_trace)
         self._turn_tool_trace.clear()

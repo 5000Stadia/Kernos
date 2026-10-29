@@ -15,6 +15,9 @@ from kernos.utils import utc_now
 async def run(ctx: PhaseContext) -> PhaseContext:
     """Phase 4: Build ReasoningRequest, execute via task engine."""
     handler = ctx.handler
+    # Assembly owns the current user's model-visible text: it may include
+    # notices, earlier input, or a bounded preview with a saved-file reference.
+    input_text = ctx.messages[-1]["content"] if ctx.messages else ctx.message.content
     ctx.task = Task(
         id=generate_task_id(), type=TaskType.REACTIVE_SIMPLE,
         instance_id=ctx.instance_id, conversation_id=ctx.conversation_id,
@@ -46,7 +49,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         model=handler.reasoning.main_model,
         trigger="user_message", active_space_id=ctx.active_space_id,
         member_id=ctx.member_id,
-        input_text=ctx.message.content, active_space=ctx.active_space,
+        input_text=input_text, active_space=ctx.active_space,
         user_timezone=_tz,
         trace=ctx.trace,
         model_override=model_override,
@@ -56,6 +59,7 @@ async def run(ctx: PhaseContext) -> PhaseContext:
         # renderer. None on legacy fixtures and pre-C3a callers.
         cognitive_context=getattr(ctx, "cognitive_context", None),
     )
+    ctx.tool_calls_trace = request.tool_calls_trace
     ctx.task = await handler.engine.execute(ctx.task, request)
     ctx.response_text = ctx.task.result_text
     return ctx

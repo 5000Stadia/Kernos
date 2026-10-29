@@ -412,6 +412,30 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         from kernos.kernel.turn_runner import TurnRunner
 
         telemetry = AggregatedTelemetry()
+        # Bind collectors to the request, never the launcher's shared context.
+        # Legacy request-like fixtures may omit the carrier; they still get a
+        # fresh local collector rather than another turn's entries.
+        trace_sink = getattr(request, "tool_calls_trace", None)
+        if trace_sink is None:
+            trace_sink = []
+
+        async def integration_dispatcher(tool_id, args, inputs):
+            from kernos.kernel.enactment.dispatcher import _build_trace_entry
+
+            try:
+                result = await ctx.integration_dispatcher(tool_id, args, inputs)
+            except Exception as exc:
+                trace_sink.append(_build_trace_entry(
+                    tool_id=tool_id, arguments=args, is_error=True,
+                    output={"error": str(exc)},
+                ))
+                raise
+            trace_sink.append(_build_trace_entry(
+                tool_id=tool_id, arguments=args,
+                is_error=bool(result.get("is_error")), output=result,
+            ))
+            return result
+
         # CHAIN-CALLER-PARITY-V1: when ctx.chains is set (production
         # path), build a per-turn resilient chain caller that closes
         # over the request for model-override resolution and carries
@@ -440,7 +464,7 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         dispatcher = StepDispatcher(
             executor=ctx.executor,
             descriptor_lookup=ctx.descriptor_lookup,
-            trace_sink=ctx.trace_sink,
+            trace_sink=trace_sink,
             event_emitter=ctx.dispatcher_event_emitter,
             audit_emitter=ctx.dispatcher_audit_emitter,
             on_dispatch_complete=telemetry.add_tool_iteration,
@@ -460,7 +484,7 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         presence = PresenceRenderer(
             chain_caller=wrapped_chain,
             tool_dispatcher=build_renderer_to_integration_adapter(
-                integration_dispatcher=ctx.integration_dispatcher,
+                integration_dispatcher=integration_dispatcher,
                 inputs_factory=_renderer_inputs_factory,
             ),
         )
@@ -481,7 +505,7 @@ def build_turn_runner_provider(ctx: ThinPathContext) -> Callable[[Any, Any], tup
         _action_record_sink = ctx.action_record_sink
         integration = IntegrationService(
             chain_caller=wrapped_chain,
-            read_only_dispatcher=ctx.integration_dispatcher,
+            read_only_dispatcher=integration_dispatcher,
             audit_emitter=ctx.integration_audit_emitter,
             config=IntegrationConfig.from_env(),
             action_record_drainer=lambda: list(_action_record_sink),

@@ -5495,16 +5495,9 @@ class MessageHandler:
                             continue
                         primary_ctx.phase_timings["reason"] = int((time.monotonic() - _t0) * 1000)
 
-                        # RESPONSE-FIDELITY-V1 Batch 1.4 (2026-05-08):
-                        # drain BEFORE persist so the conv-log receipt
-                        # block has data to format. The drain previously
-                        # ran AFTER persist, leaving ctx.tool_calls_trace
-                        # empty during conv-log writes — silent no-op for
-                        # both the legacy "Tool effects" block and the
-                        # newer "Action state this turn" block. action
-                        # records draining co-locates here for the same
-                        # reason.
-                        primary_ctx.tool_calls_trace = self.reasoning.drain_tool_trace()
+                        # Tool traces already belong to this context via its
+                        # reasoning request. Drain action records BEFORE
+                        # persist so the conv-log receipt block can format them.
                         primary_ctx.action_state_records = self.reasoning.drain_action_records()
 
                         _t0 = time.monotonic()
