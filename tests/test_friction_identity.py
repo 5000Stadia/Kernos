@@ -76,6 +76,45 @@ async def test_same_type_distinguishes_detector_branches_and_resources(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_large_surfaced_tool_set_keeps_identity_across_recommendations(tmp_path):
+    observer = FrictionObserver(data_dir=str(tmp_path))
+    tools = {f"vendor_project_management_operation_{i:02d}" for i in range(30)}
+
+    def detect(surfaced):
+        return observer._check_request_for_surfaced([
+            {"name": "request_tool", "input": {"capability_name": "vendor_project_management"}},
+        ], surfaced, {})
+
+    first, second, different = await _write_reports(observer, [
+        detect(tools), detect(tools),
+        detect(tools - {"vendor_project_management_operation_29"}
+               | {"vendor_project_management_operation_30"}),
+    ], ["SIMPLIFY", "ADD", "SIMPLIFY"])
+    assert _signature(first) == _signature(second)
+    assert _signature(first) != _signature(different)
+    assert fr._detector_identity(first.read_text(), "TOOL_REQUEST_FOR_SURFACED_TOOL") is not None
+
+
+@pytest.mark.asyncio
+async def test_large_retry_tool_pair_keeps_identity_and_order(tmp_path):
+    observer = FrictionObserver(data_dir=str(tmp_path))
+    alpha, beta = "alpha_" + "x" * 600, "beta_" + "x" * 600
+
+    def detect(failed, succeeded):
+        return observer._check_better_method_on_retry([
+            {"name": failed, "success": False},
+            {"name": succeeded, "success": True},
+        ], {})
+
+    first, second, reversed_pair = await _write_reports(observer, [
+        detect(alpha, beta), detect(alpha, beta), detect(beta, alpha),
+    ], ["SIMPLIFY", "ADD", "SIMPLIFY"])
+    assert _signature(first) == _signature(second)
+    assert _signature(first) != _signature(reversed_pair)
+    assert fr._detector_identity(first.read_text(), "BETTER_METHOD_ON_RETRY") is not None
+
+
+@pytest.mark.asyncio
 async def test_changed_recommendation_obeys_persisted_reservation_and_cooldown(tmp_path, monkeypatch):
     monkeypatch.setenv("KERNOS_FRICTION_RESPONSE", "1")
     observer = FrictionObserver(data_dir=str(tmp_path))

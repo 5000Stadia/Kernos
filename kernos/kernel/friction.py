@@ -13,6 +13,7 @@ against the catalog's patterns; the hook dispatches to
 pattern's ``lifecycle_state``. Fail-open: classifier errors log and
 continue; never block the report write.
 """
+import hashlib
 import json
 import logging
 import os
@@ -34,6 +35,18 @@ _PREF_PATTERNS = [
     re.compile(r"\b(remind me|notify me|let me know|alert me)\b.{0,40}\b(before|when|if|every)\b", re.I),
     re.compile(r"\b(don'?t|do not|stop)\b.{0,30}\b(ask|confirm|check|send|notify)\b", re.I),
 ]
+
+
+def _tool_resource_key(tool_names: list[str], *, ordered: bool = False) -> str:
+    """Bound resource size without dropping any structured tool identity.
+
+    Sets ignore input order; retry pairs preserve failed-to-succeeded order.
+    The full names remain in report evidence rather than identity metadata.
+    """
+    names = tool_names if ordered else sorted(set(tool_names))
+    canonical = json.dumps(names, separators=(",", ":"))
+    kind = "tool-pair" if ordered else "tool-set"
+    return f"{kind}:sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
 @dataclass
@@ -272,7 +285,7 @@ class FrictionObserver:
                     ],
                     context=ctx,
                     problem_site="request_tool.already_surfaced",
-                    problem_resource=json.dumps(sorted(set(matching_surfaced))),
+                    problem_resource=_tool_resource_key(matching_surfaced),
                 )
         return None
 
@@ -509,7 +522,7 @@ class FrictionObserver:
                         heuristic=True,
                         report_class="opportunity",
                         problem_site="tool.retry_better_method",
-                        problem_resource=json.dumps([worse, name]),
+                        problem_resource=_tool_resource_key([worse, name], ordered=True),
                     )
         return None
 
