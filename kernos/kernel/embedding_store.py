@@ -21,16 +21,27 @@ class JsonEmbeddingStore:
 
     def __init__(self, data_dir: str | Path) -> None:
         self._data_dir = Path(data_dir)
+        # path -> ((mtime_ns, size), data): a search reads one vector per
+        # fact, so re-parsing the whole file each time made recall O(n²).
+        self._cache: dict[Path, tuple[tuple[int, int], dict[str, list[float]]]] = {}
 
     def _path(self, instance_id: str) -> Path:
         return self._data_dir / _safe_name(instance_id) / "state" / "embeddings.json"
 
     def _read(self, instance_id: str) -> dict[str, list[float]]:
         path = self._path(instance_id)
-        if not path.exists():
+        try:
+            st = path.stat()
+        except FileNotFoundError:
             return {}
+        stamp = (st.st_mtime_ns, st.st_size)
+        cached = self._cache.get(path)
+        if cached and cached[0] == stamp:
+            return dict(cached[1])
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        self._cache[path] = (stamp, data)
+        return dict(data)
 
     def _write(self, instance_id: str, data: dict[str, list[float]]) -> None:
         path = self._path(instance_id)

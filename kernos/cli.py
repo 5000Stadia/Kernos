@@ -34,6 +34,28 @@ def _data_dir() -> str:
     return os.getenv("KERNOS_DATA_DIR", "./data")
 
 
+_OPEN_STORES: list = []
+
+
+def _state_store():
+    """The state store the running bot uses (SQLite unless KERNOS_STORE_BACKEND=json)."""
+    if os.getenv("KERNOS_STORE_BACKEND", "sqlite") == "json":
+        from kernos.kernel.state_json import JsonStateStore
+        return JsonStateStore(_data_dir())
+    from kernos.kernel.state_sqlite import SqliteStateStore
+    store = SqliteStateStore(_data_dir())
+    _OPEN_STORES.append(store)  # closed after the command, or the process can't exit
+    return store
+
+
+async def _dispatch_and_close(args) -> None:
+    try:
+        await _dispatch(args)
+    finally:
+        for store in _OPEN_STORES:
+            await store.close_all()
+
+
 def _fmt(obj) -> str:
     return json.dumps(obj, indent=2, default=str)
 
@@ -76,9 +98,8 @@ async def cmd_events(args) -> None:
 
 
 async def cmd_profile(args) -> None:
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     profile = await state.get_instance_profile(args.instance_id)
     if profile is None:
         print(f"No profile found for instance '{args.instance_id}'.")
@@ -98,9 +119,8 @@ async def cmd_profile(args) -> None:
 async def cmd_knowledge(args) -> None:
     from datetime import datetime, timezone
     from kernos.kernel.retrieval import compute_quality_score
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     entries = await state.query_knowledge(
         instance_id=args.instance_id,
         subject=args.subject,
@@ -144,9 +164,8 @@ async def cmd_knowledge(args) -> None:
 
 
 async def cmd_contract(args) -> None:
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     rules = await state.get_contract_rules(
         instance_id=args.instance_id,
         capability=args.capability,
@@ -167,9 +186,8 @@ async def cmd_contract(args) -> None:
 
 async def cmd_contracts(args) -> None:
     """Display behavioral contract rules grouped by type."""
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     rules = await state.get_contract_rules(instance_id=args.instance_id, active_only=True)
     if not rules:
         print(f"No contract rules found for '{args.instance_id}'.")
@@ -212,9 +230,8 @@ async def cmd_contracts(args) -> None:
 
 async def cmd_soul(args) -> None:
     """Display the hatched soul for an instance."""
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     soul = await state.get_soul(args.instance_id)
     if soul is None:
         print(f"No soul found for instance '{args.instance_id}'. (Not yet hatched.)")
@@ -244,9 +261,8 @@ async def cmd_soul(args) -> None:
 
 async def cmd_spaces(args) -> None:
     """Display context spaces for an instance."""
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     spaces = await state.list_context_spaces(args.instance_id)
     if not spaces:
         print(f"No context spaces found for '{args.instance_id}'.")
@@ -274,9 +290,8 @@ async def cmd_spaces(args) -> None:
 
 async def cmd_entities(args) -> None:
     """Display entity nodes for an instance."""
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     entities = await state.query_entity_nodes(args.instance_id, active_only=not args.include_inactive)
     if not entities:
         print(f"No entities found for '{args.instance_id}'.")
@@ -375,9 +390,8 @@ async def cmd_compaction(args) -> None:
     """Display compaction state for an instance's context spaces."""
     from kernos.kernel.compaction import CompactionService
     from kernos.kernel.tokens import EstimateTokenAdapter
-    from kernos.kernel.state_json import JsonStateStore
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     adapter = EstimateTokenAdapter()
 
     # Create a minimal compaction service just for loading state
@@ -463,10 +477,9 @@ async def cmd_create_space(args) -> None:
     """Create a new context space for an instance."""
     import uuid
     from kernos.kernel.spaces import ContextSpace
-    from kernos.kernel.state_json import JsonStateStore
     from datetime import datetime, timezone
 
-    state = JsonStateStore(_data_dir())
+    state = _state_store()
     now = datetime.now(timezone.utc).isoformat()
     space_id = f"space_{uuid.uuid4().hex[:8]}"
 
@@ -603,8 +616,7 @@ async def cmd_capabilities(args) -> None:
     # Optionally load tenant-specific status from persisted state
     tenant_cap_map: dict[str, str] = {}
     if args.tenant:
-        from kernos.kernel.state_json import JsonStateStore
-        state = JsonStateStore(_data_dir())
+        state = _state_store()
         profile = await state.get_instance_profile(args.tenant)
         if profile and profile.capabilities:
             tenant_cap_map = profile.capabilities
@@ -680,7 +692,6 @@ async def cmd_backfill_embeddings(args) -> None:
     from dotenv import load_dotenv
     load_dotenv()
 
-    from kernos.kernel.state_json import JsonStateStore
     from kernos.kernel.embedding_store import JsonEmbeddingStore
     from kernos.kernel.embeddings import EmbeddingService
 
@@ -690,7 +701,7 @@ async def cmd_backfill_embeddings(args) -> None:
         return
 
     data_dir = _data_dir()
-    state = JsonStateStore(data_dir)
+    state = _state_store()
     embed_store = JsonEmbeddingStore(data_dir)
     embed_service = EmbeddingService(api_key)
 
@@ -713,9 +724,9 @@ async def cmd_backfill_embeddings(args) -> None:
     success = 0
     failed = 0
     for entry in missing:
-        text = f"{entry.subject} {entry.content}"
         try:
-            embedding = await embed_service.embed(text)
+            # Content only, as the live write paths (harvest, note_this) embed.
+            embedding = await embed_service.embed(entry.content)
             await embed_store.save(instance_id, entry.id, embedding)
             success += 1
             print(f"  ✓ {entry.id}: {entry.content[:60]}")
@@ -961,7 +972,7 @@ def main() -> None:
             sys.exit(rc)
         return
 
-    asyncio.run(_dispatch(args))
+    asyncio.run(_dispatch_and_close(args))
 
 
 if __name__ == "__main__":
