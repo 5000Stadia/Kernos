@@ -30,12 +30,12 @@ The Ledger is the conversational arc. It is the assistant's answer to *"what act
 
 Per-space logs are the raw material (`kernos/kernel/conversation_log.py`). Every turn appends to the space's log. At compaction boundaries, the log is transformed into a two-layer structure:
 
-- **Living State** — the short, rewritten summary of the current working context. This is the part the agent reads back in the `MEMORY` zone. It's rewritten at each compaction, from the previous Living State and the new span.
+- **Living State** — cited commitments and adopted decisions retained until supported closure, plus a short narrative generated fresh from relevant source turns. The agent reads this bounded view in the `MEMORY` zone. The previous generated narrative is not input to its successor.
 - **Ledger** — append-only entries, one per compacted span: a short topical index whose header names its source log (`## Compaction #N (source: log_NNN) — first → last`). The agent sees the most recent entries (the hot tail, about 2,000 tokens) and an archive story for the older ones; every entry stays searchable through `remember`. New compactions keep one continuous Ledger; sealing and the model-written archive index are retired. Existing sealed entries remain readable and searchable, even without an index.
 
-The operational distinction matters. Summary-based memory systems degrade because the summary is the *only* representation of history; when the summary drifts, history drifts with it. The Ledger keeps the narrative **recoverable**: the Living State may be a summary, but each Ledger entry points into the raw log it indexes, and the logs are the source of truth.
+The operational distinction matters. Summary-based memory systems degrade because the summary is the *only* representation of history; when the summary drifts, history drifts with it. The Ledger keeps the narrative **recoverable**: each entry points into the raw log it indexes, and the logs are the source of truth. Compaction selects what supports the intent and cohesive continuation of the space; preserving every incidental example detail is not its quality standard.
 
-**Append-only by construction.** The compaction call writes only the new entry's bullets and the new Living State. Code writes the entry header from the span's own timestamps and appends the entry to the existing ones, which never pass through the model, so earlier entries stay exactly as written. Truncated or malformed output raises `CompactionOutputError` and leaves the document untouched. (Until this was built, the model rewrote the whole document each cycle and earlier entries could be lost; `kernos.cli rebuild-ledger` restores such entries from their source logs.)
+**Append-only by construction.** The compaction call writes only the new entry's bullets and the new Living State. Code writes the entry header from the span's own timestamps and appends the entry to the existing ones, which never pass through the model, so earlier entries stay exactly as written. Truncated or malformed output raises `CompactionOutputError`; rejected output cannot replace the Ledger or accepted state. Migration can already have saved its pinned inputs and completed batch checkpoints, which remain resumable. (Until this was built, the model rewrote the whole document each cycle and earlier entries could be lost; `kernos.cli rebuild-ledger` restores such entries from their source logs.)
 
 Entry point: `CompactionService.compact_from_log` in `kernos/kernel/compaction.py`.
 
@@ -94,7 +94,7 @@ Both stores are refreshed at **boundary transitions**, not every turn.
 
 The two kinds of boundary:
 
-- **Compaction boundary** — the member's log in this space has gained `KERNOS_COMPACTION_THRESHOLD` new tokens (default 8,000). Compaction runs; a Ledger entry is appended and the Living State rewritten; the fact harvester runs on the compacted span. The entries seeded into a new log from the previous one are left out, since they were compacted there.
+- **Compaction boundary** — the member's log in this space has gained `KERNOS_COMPACTION_THRESHOLD` new tokens (default 8,000). Compaction runs; a Ledger entry is appended, supported thread changes are recorded, and the short narrative is regenerated; the fact harvester runs on the compacted span. The entries seeded into a new log from the previous one are left out, since they were compacted there.
 - **Space-switch boundary** — the user moved from one space to another. The part of the departing space's log not yet harvested is harvested, and a mark records how far harvesting has reached.
 
 Boundary work runs **after the reply** is delivered, still inside the space's turn: the user never waits on it, and the next message in the space waits for it.
@@ -126,7 +126,7 @@ This is what makes the per-member architecture durable over time. A family of th
 
 | Failure | How single-store systems fail | How the two-store model addresses it |
 |---|---|---|
-| **Summary drift** | The summary is rewritten each pass on top of the previous summary; small errors compound | The Ledger is append-only by construction and each entry points into its raw log, so the arc is recoverable however the Living State drifts. (The Living State itself is still rewritten from its previous version.) |
+| **Summary drift** | The summary is rewritten each pass on top of the previous summary; small errors compound | The Ledger is append-only by construction and each entry points into its raw log, so the arc is recoverable however the Living State drifts. (The new Living State also keeps supported open items separately and generates its narrative without the previous prose.) |
 | **Fact duplication** | Extractor doesn't see existing facts; every pass adds near-duplicates | Existing facts are in the prompt; add/update/reinforce decisions happen at extraction time |
 | **Contradiction** | Extractor adds a new "X is true" fact without noticing an old "X is false" fact | `update` with the existing ID archives the old version and keeps the ID for the new one |
 | **Orphaned truth** | A durable fact exists in an old conversation but was never structurally extracted | Compaction boundary runs harvest; the durable truths in the compacted span are reconciled into the store before the span is archived |
@@ -154,6 +154,22 @@ Returned windows are labelled as historical reference. The final output shares a
 
 This is a lexical baseline, not a semantic search or a resolution of evolving truth. Token matching follows the existing ASCII word/number tokenizer; paraphrases and non-ASCII-only queries can miss. Recall quality is measured separately from the isolation and source-preservation checks.
 
+## Living State: cohesive continuation without recursive prose
+
+This is an architectural upgrade from the original rewritten Living State. `KERNOS_MEMORY_THREAD_STATE=1` enables it for member-scoped compaction (the default). An unmigrated data copy with `0` retains the previous writer for comparison. A migrated register is never discarded by disabling the flag. Anonymous legacy calls retain their old contract and do not acquire access to member source folders.
+
+The durable layer holds real commitments and adopted decisions that matter to the space's intent, including established creative premises. Code assigns evidence IDs to exact passages in physical source turns, preserving speaker, time, space, log, turn and offsets. The model selects evidence IDs; code copies their words. An accepted item's text is immutable. OPEN and CLOSE events are appended; age, omission from a summary, and a display cap never close an item.
+
+A separate semantic verifier checks proposals against the quoted sources and their context. A real citation alone is not support. Speaker and channel are preserved: internal plan dispatches labelled as user turns cannot establish a human choice, user commitment or completion confirmation. Decisions require user adoption; completion needs user confirmation or a completed receipt, not an unsupported assistant claim. Partial completion and uncertain identity leave an obligation open. The verifier also checks narrative claims. These semantic judgments remain fallible: missed or false openings and wrong or missed closures must be measured, not inferred from source validity or verbatim survival.
+
+The short narrative is generated from recent source passages, the topical Ledger and selected verified open and newly resolved items. Original partial-progress passages are retrieved when checking later completion; completed and cancelled plans carry both their opening and closing evidence. Source words are shared once in verifier input, with candidates referring to their IDs. The narrative never receives its previous version. It should retain purpose, salient current context and what a participant needs to continue; flippant examples and incidental colours may properly disappear. Detail-access recall and cohesive compaction are evaluated separately.
+
+Migration retains the entire original summary as explicitly unverified history. It reviews the member's whole source history in this space and its permitted ancestors in bounded, pinned batches. Early openings remain provisional until all later evidence through the cutoff has been considered. Unrelated sibling conversations are excluded; a closure recorded only there can remain stale until relevant evidence reaches the permitted scope. Unresolved legacy text remains searchable through `remember`, labelled unverified rather than promoted to current truth.
+
+The rendered thread section is capped at 6,000 characters, including recent resolutions, and the narrative at 1,600. An overflow indicator names omitted open items; their records remain stored and searchable with authoritative status and opening/closing sources. Subject-specific open-item queries rank matching records; a bare overview returns the newest three. This lookup is lexical, so paraphrases can miss. Reconciliation considers all persisted open records in bounded batches, including items hidden from the per-turn view. The original legacy summary is retained for explicit lookup rather than repeatedly injected into current context.
+
+One versioned metadata block in `active_document.md` commits thread events, source frontiers, narrative, counters and retry-required trailers together by atomic replacement. Source frontiers include physical turn counts and prefix digests from the same reads as the evidence. Interrupted migrations retain their original fresh-span classification and resume their pinned source batches; retries reuse committed work or process a newly appended suffix. `state.json` is repairable bookkeeping; a current cache retains later retry/backoff and runtime updates. Ledger repair preserves the metadata block byte for byte. This does not promise exactly-once delivery of the scheduler's existing follow-up side effects.
+
 ## Related architecture
 
 - **[Context spaces](context-spaces.md)** — how the Ledger and Facts stores are partitioned per-space
@@ -168,5 +184,6 @@ This is a lexical baseline, not a semantic search or a resolution of evolving tr
 - `kernos/kernel/retrieval.py` — `RetrievalService.search` (`remember`), `_search_ledger`, `bm25_rank`
 - `kernos/kernel/raw_recall.py` — neighbour-window BM25 search and bounded historical excerpts
 - `kernos/kernel/conversation_log.py` — `read_historical_turns`, member-scoped closed-log reads and parsed-file cache
+- `kernos/kernel/living_state.py` — supported thread transitions, bounded rendering, source migration and retry metadata
 - `kernos/kernel/reasoning.py` — `_handle_remember_details`
 - `kernos/kernel/state.py` — `KnowledgeEntry.owner_member_id`; the per-member scoping

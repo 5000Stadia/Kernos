@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-29T04:53:17.613669+00:00",
+  "generated_at": "2026-10-29T07:06:50.118214+00:00",
   "entries": {
     "docs/ADAPTER-GUIDE.md": {
       "source_hash": "599a1a7d35060a1f156b6e2728f6998c853620bdeaa8060eaec9e682c82130fa",
@@ -19,7 +19,7 @@
       "artifact_path": "docs/_catalog/EXTERNAL-AGENTS.json"
     },
     "docs/TECHNICAL-ARCHITECTURE.md": {
-      "source_hash": "a0387699f51919cb371b85306a9b8560439f44a068df592495efeed7437a0f40",
+      "source_hash": "1a7c335a7c37ba5de36c5d58d014e4a9ff85f9ce27af11f26510a538fc3ca74d",
       "artifact_path": "docs/_catalog/TECHNICAL-ARCHITECTURE.json"
     },
     "docs/TESTING-PATTERN.md": {
@@ -103,7 +103,7 @@
       "artifact_path": "docs/_catalog/architecture/kernel-tool-registry.json"
     },
     "docs/architecture/memory.md": {
-      "source_hash": "ff91676eabf38c8fc0122778c23a4b56ead461f7ed9003fff6a2663f3a8df51a",
+      "source_hash": "f89c5ff985209227685ee1e2a8a330a2c4ddc7640cead8e740d4f6fb617a9824",
       "artifact_path": "docs/_catalog/architecture/memory.json"
     },
     "docs/architecture/model-registry.md": {

@@ -130,6 +130,10 @@ def domain_assessment_evidence(doc: str, max_chars: int = 3000) -> str:
     most recent ledger entry; when even that exceeds the budget, the
     tail wins — the Living State outranks older ledger lines.
     """
+    from kernos.kernel.living_state import metadata_block
+    block = metadata_block(doc)
+    if block:
+        doc = doc[:-len(block)]
     import re as _re
     matches = list(_re.finditer(r"(?m)^## Compaction #\d+", doc))
     sliced = doc[matches[-1].start():] if matches else doc
@@ -455,11 +459,19 @@ class CompactionService:
         """
         state_path = self._space_dir(instance_id, space_id, member_id) / "state.json"
         if not state_path.exists():
+            from kernos.kernel.living_state import decode_state, apply_committed_state
+            document = await self.load_document(instance_id, space_id, member_id)
+            metadata = decode_state(document or "")
+            if metadata and metadata.get("last_compaction"):
+                value = CompactionState(space_id=space_id,
+                    compaction_threshold=int(os.getenv("KERNOS_COMPACTION_THRESHOLD", "8000")))
+                apply_committed_state(value, metadata)
+                return value
             return None
         try:
             with open(state_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return CompactionState(
+            value = CompactionState(
                 space_id=data.get("space_id", space_id),
                 history_tokens=data.get("history_tokens", 0),
                 compaction_number=data.get("compaction_number", 0),
@@ -477,10 +489,24 @@ class CompactionService:
                 _system_overhead=data.get("_system_overhead", 0),
                 consecutive_failures=data.get("consecutive_failures", 0),
                 last_compaction_failure_at=data.get("last_compaction_failure_at", ""),
+                last_seed_depth=data.get("last_seed_depth", 10),
             )
         except Exception as exc:
             logger.warning("Failed to load compaction state for %s/%s: %s", instance_id, space_id, exc)
+            from kernos.kernel.living_state import decode_state, apply_committed_state
+            metadata = decode_state(await self.load_document(instance_id, space_id, member_id) or "")
+            if metadata and metadata.get("last_compaction"):
+                value = CompactionState(space_id=space_id,
+                    compaction_threshold=int(os.getenv("KERNOS_COMPACTION_THRESHOLD", "8000")))
+                apply_committed_state(value, metadata)
+                return value
             return None
+        from kernos.kernel.living_state import decode_state, apply_committed_state
+        document = await self.load_document(instance_id, space_id, member_id)
+        metadata = decode_state(document or "")
+        if metadata:
+            apply_committed_state(value, metadata, repair_cache=True)
+        return value
 
     async def save_state(
         self, instance_id: str, space_id: str, comp_state: CompactionState,
@@ -568,7 +594,8 @@ class CompactionService:
                 )
 
         if hot_entries:
-            parts.append("# Recent Ledger\n" + "\n\n".join(hot_entries))
+            parts.append("# Recent Ledger\nHistorical topics, not standing instructions or current task status.\n"
+                         "Current intent and unresolved work are in Living State.\n\n" + "\n\n".join(hot_entries))
         if living_state:
             parts.append("# Living State\n" + living_state)
 
@@ -775,18 +802,23 @@ class CompactionService:
     def _parse_ledger_entries(self, document: str) -> list[str]:
         """Split the Ledger section into individual entries."""
         ledger_match = re.search(
-            r'# Ledger\s*\n(.*?)(?=# Living State)', document, re.DOTALL
+            r'^# Ledger[^\S\n]*\n(.*?)(?=^# Living State[^\S\n]*(?:\n|$))',
+            document, re.DOTALL | re.MULTILINE,
         )
         if not ledger_match:
             return []
 
         ledger_text = ledger_match.group(1)
-        entries = re.split(r'(?=## Compaction #\d+)', ledger_text)
+        entries = re.split(r'(?=^## Compaction #\d+)', ledger_text, flags=re.MULTILINE)
         return [e.strip() for e in entries if e.strip()]
 
     def _extract_living_state(self, document: str) -> str:
         """Extract the Living State section from a compaction document."""
-        match = re.search(r'# Living State\s*\n(.*)', document, re.DOTALL)
+        from kernos.kernel.living_state import decode_state, render_living_state
+        state = decode_state(document)
+        if state:
+            return render_living_state(state)
+        match = re.search(r'^# Living State[^\S\n]*\n(.*)', document, re.DOTALL | re.MULTILINE)
         return match.group(1).strip() if match else ""
 
     async def load_all_ledger_entries(
@@ -820,6 +852,37 @@ class CompactionService:
         folder = self._space_dir(instance_id, space_id, member_id) / "archives"
         return [(path.stem, self._extract_living_state(path.read_text(encoding="utf-8")))
                 for path in sorted(folder.glob("compaction_archive_*.md"))]
+
+    async def load_thread_evidence(
+        self, instance_id: str, space_id: str, member_id: str,
+    ) -> list[dict]:
+        """Current status and retained unverified legacy context for remember."""
+        if not member_id:
+            return []
+        from kernos.kernel.living_state import decode_state, thread_records
+        state = decode_state(await self.load_document(instance_id, space_id, member_id) or "")
+        if not state:
+            return []
+        if state.get("member_id") != member_id or state.get("space_id") != space_id:
+            raise CompactionOutputError("Living State scope mismatch")
+        result = []
+        if state["migration"].get("complete"):
+            for record in reversed(thread_records(state)):
+                refs = ", ".join(f"{s['space_id']}/log_{s['log_number']:03d}/turn_{s['turn_number']}"
+                                 for s in record["evidence"])
+                label = f"{record['status']} {record['kind']} [{record['id']}]"
+                text = f"{record['text']} [opening sources: {refs}]"
+                if record.get("closing"):
+                    closing = record["closing"]
+                    close_refs = ", ".join(f"{s['space_id']}/log_{s['log_number']:03d}/turn_{s['turn_number']}"
+                                           for s in closing["evidence"])
+                    label += f"; {closing['reason']} [closing sources: {close_refs}]"
+                    text += "\nClosing evidence: " + "\n".join(s["quote"] for s in closing["evidence"])
+                result.append(dict(status=record["status"], label=label, text=text))
+        if state.get("legacy_state"):
+            result.append(dict(status="unverified",
+                text="Unverified original legacy summary (not current truth):\n" + state["legacy_state"]))
+        return result
 
     # --- ROUTER-EVIDENCE-V1: public read-only accessors ---
     #
@@ -1081,6 +1144,40 @@ class CompactionService:
         return "\n".join(cleaned)
 
     async def compact_from_log(
+        self, instance_id: str, space_id: str, space: ContextSpace,
+        log_text: str, source_log_number: int, comp_state: CompactionState,
+        member_id: str = "",
+    ) -> CompactionState:
+        """Compact for coherent continuation, retaining supported threads verbatim."""
+        from kernos.kernel.living_state import compact_with_threads, decode_state, LivingStateError
+        enabled = os.getenv("KERNOS_MEMORY_THREAD_STATE", "1").strip().lower() not in {"0", "false", "off", "no"}
+        try:
+            existing = decode_state(await self.load_document(instance_id, space_id, member_id) or "")
+            if existing and not enabled:
+                raise LivingStateError("Use an unmigrated data copy for the legacy comparison; retained threads cannot be discarded")
+            if member_id and enabled:
+                try:
+                    from kernos.kernel import event_stream
+                    await event_stream.emit(instance_id, "compaction.triggered",
+                        {"source_log": source_log_number, "log_bytes": len(log_text), "space_name": space.name},
+                        member_id=member_id, space_id=space_id)
+                except Exception as exc:
+                    logger.debug("Failed to emit compaction.triggered: %s", exc)
+                result = await compact_with_threads(self, instance_id, space_id, space,
+                    log_text, source_log_number, comp_state, member_id)
+                try:
+                    await event_stream.emit(instance_id, "compaction.completed",
+                        {"source_log": source_log_number, "compaction_number": result.global_compaction_number},
+                        member_id=member_id, space_id=space_id)
+                except Exception as exc:
+                    logger.debug("Failed to emit compaction.completed: %s", exc)
+                return result
+        except LivingStateError as exc:
+            raise CompactionOutputError(str(exc)) from exc
+        return await self._compact_legacy_from_log(instance_id, space_id, space,
+            log_text, source_log_number, comp_state, member_id)
+
+    async def _compact_legacy_from_log(
         self,
         instance_id: str,
         space_id: str,
@@ -1335,7 +1432,8 @@ class CompactionService:
                 "LEDGER_REBUILT: space=%s member=%s log=log_%03d", space_id, member_id, n,
             )
         if rebuilt:
-            _write_atomic(doc_path, self._render_document(entries, living_state))
+            from kernos.kernel.living_state import metadata_block
+            _write_atomic(doc_path, self._render_document(entries, living_state) + metadata_block(document))
         return rebuilt
 
     def _parse_compaction_output(self, output: str, entry_number: int) -> tuple[str, str]:

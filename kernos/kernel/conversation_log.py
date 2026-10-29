@@ -41,6 +41,7 @@ class HistoricalTurn:
     content: str
     space_id: str = ""
     member_id: str = ""
+    channel: str = ""
 
 # Pattern matching the start of a log entry: [timestamp] [speaker] [channel]
 _ENTRY_RE = re.compile(
@@ -208,7 +209,7 @@ class ConversationLogger:
             offset = len(parsed) - len(unseeded)
             turns.extend(HistoricalTurn(number, offset + i + 1, entry["speaker"],
                                         entry["timestamp"], entry["content"],
-                                        space_id, member_id)
+                                        space_id, member_id, entry["channel"])
                          for i, entry in enumerate(unseeded))
             previous_text, previous_number = text, number
         result = tuple(turns)

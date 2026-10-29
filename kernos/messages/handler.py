@@ -4848,6 +4848,12 @@ class MessageHandler:
         if not doc:
             return
 
+        # The document also contains historical Ledger and opaque recovery
+        # metadata. Only the rendered current view is briefing evidence.
+        current_state = self.compaction._extract_living_state(doc)
+        if not current_state:
+            return
+
         for child in children:
             try:
                 briefing = await self.reasoning.complete_simple(
@@ -4860,7 +4866,7 @@ class MessageHandler:
                     user_content=(
                         f"Parent: {space.name}\n"
                         f"Child: {child.name} — {child.description}\n\n"
-                        f"Parent's current state:\n{doc[:4000]}"
+                        f"Parent's current state:\n{current_state[:4000]}"
                     ),
                     max_tokens=512,
                     prefer_cheap=True,

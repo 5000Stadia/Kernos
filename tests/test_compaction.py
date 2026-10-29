@@ -12,6 +12,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def legacy_ledger_control(monkeypatch):
+    """These fixtures isolate the pre-split Ledger/control path.
+
+    The source-backed split state and its model protocol are exercised by
+    test_living_state_replay and its independently labelled transcripts.
+    """
+    monkeypatch.setenv("KERNOS_MEMORY_THREAD_STATE", "0")
+
 from kernos.kernel.compaction import (
     COMPACTION_INSTRUCTION_TOKENS,
     COMPACTION_MODEL_USABLE_TOKENS,

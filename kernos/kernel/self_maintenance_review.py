@@ -142,7 +142,7 @@ REVIEW_SLICES: tuple[ReviewSlice, ...] = (
         "stewardship",
         "Compaction harvest: value extraction, tension detection, sensitivity "
         "classification, operational insights as whispers; token accounting.",
-        ("kernos/kernel/compaction.py", "kernos/kernel/fact_harvest.py",
+        ("kernos/kernel/compaction.py", "kernos/kernel/living_state.py", "kernos/kernel/fact_harvest.py",
          "kernos/kernel/tokens.py", "kernos/kernel/token_estimator.py"),
     ),
     ReviewSlice(

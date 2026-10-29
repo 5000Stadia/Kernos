@@ -137,8 +137,17 @@ class _ScriptedReasoning:
                                      "evidence": [source["id"]]})
             return json.dumps({"open": openings, "close": closings})
         if marker == "THREAD_VERIFIER":
+            by_id = {source["id"]: source for source in sources}
+            def expand(value):
+                if isinstance(value, list):
+                    return [expand(v) for v in value]
+                if not isinstance(value, dict):
+                    return value
+                return {key: ([by_id[e] if isinstance(e, str) else e for e in item]
+                              if key == "evidence" else expand(item))
+                        for key, item in value.items()}
             supported, unsupported, uncertain = [], [], []
-            for candidate in payload["candidates"]:
+            for candidate in expand(payload["candidates"]):
                 operation = candidate["op"]
                 evidence = candidate.get("evidence", [])
                 keys = {_source_key(source) for source in evidence}
@@ -156,7 +165,7 @@ class _ScriptedReasoning:
                                    for closed in gold["close"])
                 else:
                     assert operation == "narrative", candidate
-                    accepted = bool(evidence)
+                    accepted = bool(evidence) or (candidate.get("purpose") == "ledger-topic" and bool(sources))
                 if accepted:
                     supported.append(candidate["id"])
                 else:

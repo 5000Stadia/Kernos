@@ -160,7 +160,7 @@ After compaction in a parent space, `_produce_child_briefings()` runs for each c
 ### Mechanism
 
 - **Trigger:** New tokens in the member's log for this space reach the threshold (default ~8,000 tokens via `KERNOS_COMPACTION_THRESHOLD`). Runs after the reply (see Persist).
-- **Process:** LLM reads the new span (the log minus the head seeded from the previous log), the Ledger so far (bounded) and the current Living State → writes the new Ledger entry's bullets + a new Living State. Code writes the entry header from the span's timestamps and appends it: earlier entries never pass through the model. Truncated or malformed output is refused and the document left untouched.
+- **Process:** Member-scoped compaction keeps cited commitments and adopted decisions separately from a short fresh narrative (`KERNOS_MEMORY_THREAD_STATE=1`). A proposer selects code-assigned original passages; a separate verifier checks whether they support an opening, closure or narrative claim. Code copies accepted thread words unchanged and appends OPEN/CLOSE events. The historian writes one new Ledger entry and a narrative from sources and verified threads, never from its previous prose. Earlier Ledger entries stay unchanged. The legacy comparison remains available on unmigrated data with the flag set to `0`.
 - **Log rotation:** Old log archived as `log_NNN.txt`. New log created with seeded messages from old log.
 - **Reference-based:** Compaction documents and raw recall windows point back to source logs. Full text is retrievable via `remember_details()`. Raw evidence has room within the shared final 1,500-token (6,000-character estimate) recall budget; oversized windows are explicitly excerpted around matching terms, never silently clipped at the head.
 - **Continuous Ledger:** New seals and model-written archive indices are retired. Compaction keeps every entry in the active document; bounded prompt input and the hot tail keep per-turn context small. Existing sealed files remain readable and searchable. `KERNOS_SEAL_BUDGET` is no longer used.
@@ -172,7 +172,9 @@ The compaction LLM determines how many trailing messages to carry forward. Outpu
 
 ### Living State
 
-Current operational reality. What's TRUE RIGHT NOW — active scene state, pending decisions, in-progress work, outstanding tasks. NOT a topic summary. Rewritten on every compaction cycle.
+Working context for coherent continuation: intent-bearing commitments and decisions retained with original evidence, plus a separately regenerated short narrative of salient current context. Incidental example-detail coverage is not the quality criterion. Source-valid citations do not by themselves establish semantic correctness; labelled replay checks missed/false openings, wrong/missed closures and stale items.
+
+The thread view is bounded (6,000 characters; narrative 1,600), with overflow and source-frontier notices. Hidden open items remain searchable through `remember` and are reconciled in batches regardless of display. Migration scans the whole permitted member history before asserting current status; the complete original summary is retained as unverified, searchable legacy context. A versioned block in the atomically replaced document is authoritative for events, source-prefix digests, counters and trailers, so interrupted migration and post-write retries preserve accepted state. The separate counter file is repairable. See `kernos/kernel/living_state.py`.
 
 ### Ledger
 
