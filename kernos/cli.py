@@ -737,6 +737,44 @@ async def cmd_backfill_embeddings(args) -> None:
     print(f"\nBackfill complete: {success} embedded, {failed} failed")
 
 
+async def cmd_rebuild_ledger(args) -> None:
+    """Recompact closed logs that no Ledger entry cites, one member at a time.
+
+    Uses the bot's model chains and the live compaction prompt; changes only
+    the Ledger (the Living State is kept). Run it on a copy first.
+    """
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    from kernos.kernel.compaction import CompactionService
+    from kernos.kernel.conversation_log import ConversationLogger
+    from kernos.kernel.reasoning import ReasoningService
+    from kernos.kernel.tokens import EstimateTokenAdapter
+    from kernos.providers.chains import build_chains_from_env
+
+    chains, primary = build_chains_from_env()
+    lightweight = chains.get("lightweight") or chains.get("primary") or []
+    print("Model chain (lightweight): " + ", ".join(
+        f"{getattr(e.provider, 'provider_name', type(e.provider).__name__)}/{e.model}"
+        for e in lightweight
+    ))
+    state = _state_store()
+    compaction = CompactionService(
+        state=state, reasoning=ReasoningService(chains=chains),
+        token_adapter=EstimateTokenAdapter(), data_dir=_data_dir(),
+    )
+    conv = ConversationLogger(data_dir=_data_dir())
+    spaces = await state.list_context_spaces(args.instance_id)
+    if args.space:
+        spaces = [sp for sp in spaces if sp.id == args.space]
+    for space in spaces:
+        rebuilt = await compaction.rebuild_missing_entries(
+            args.instance_id, space.id, space, conv, member_id=args.member_id,
+        )
+        label = ", ".join(f"log_{n:03d}" for n in rebuilt) or "nothing missing"
+        print(f"  {space.id} ({space.name}): {label}")
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -775,6 +813,8 @@ async def _dispatch(args) -> None:
         await cmd_compaction(args)
     elif args.command == "backfill-embeddings":
         await cmd_backfill_embeddings(args)
+    elif args.command == "rebuild-ledger":
+        await cmd_rebuild_ledger(args)
     elif args.command == "setup":
         cmd_setup(args)
     else:
@@ -909,6 +949,15 @@ def main() -> None:
     # backfill-embeddings
     p = subparsers.add_parser("backfill-embeddings", help="Generate embeddings for entries that lack them")
     p.add_argument("instance_id")
+
+    # rebuild-ledger
+    p = subparsers.add_parser(
+        "rebuild-ledger",
+        help="Restore Ledger entries for closed logs no entry cites (lost to the old rewrite)",
+    )
+    p.add_argument("instance_id")
+    p.add_argument("member_id")
+    p.add_argument("--space", default=None, help="Only this space (default: every space)")
 
     # create-space
     p = subparsers.add_parser("create-space", help="Create a new context space")

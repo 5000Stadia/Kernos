@@ -125,3 +125,62 @@ class TestRememberDetailsFollowsTheEntry:
             member_id="mem_a",
         )
         assert "not a space id" in text
+
+
+class TestLedgerRebuild:
+    """Entries lost to the old whole-document rewrite are rebuilt from their logs."""
+
+    async def _setup(self, tmp_path):
+        conv = ConversationLogger(data_dir=str(tmp_path))
+        for n in (1, 2, 3):
+            if n > 1:
+                old, _ = await conv.roll_log("t1", "sp1", member_id="mem_a")
+                await conv.seed_from_previous("t1", "sp1", old, tail_entries=1, member_id="mem_a")
+            await conv.append("t1", "sp1", "user", "discord", f"topic {n} discussed", member_id="mem_a")
+        await conv.roll_log("t1", "sp1", member_id="mem_a")  # log_004 is current
+        reasoning = MagicMock()
+        reasoning.complete_simple = AsyncMock(return_value=(
+            "# New Ledger Entry\n\n- Rebuilt topic.\n\n# Living State\n\nIGNORED STATE\n\nSEED_DEPTH: 3\n"))
+        compaction = CompactionService(state=MagicMock(), reasoning=reasoning,
+                                       token_adapter=EstimateTokenAdapter(), data_dir=str(tmp_path))
+        e2 = "## Compaction #2 (source: log_002) — 2026-05-03T10:00 → 2026-05-03T11:00\n\n- Topic two."
+        _write(compaction, "sp1", "mem_a", _doc(e2, state="Live state."))
+        from kernos.kernel.spaces import ContextSpace
+        space = ContextSpace(id="sp1", instance_id="t1", name="General")
+        return conv, compaction, reasoning, space, e2
+
+    async def test_rebuilds_uncited_closed_logs_in_order(self, tmp_path):
+        conv, compaction, reasoning, space, e2 = await self._setup(tmp_path)
+        rebuilt = await compaction.rebuild_missing_entries("t1", "sp1", space, conv, member_id="mem_a")
+        assert rebuilt == [1, 3]
+        doc = await compaction.load_document("t1", "sp1", "mem_a")
+        entries = compaction._parse_ledger_entries(doc)
+        assert [e.split(" (source")[0] for e in entries] == [
+            "## Compaction #1", "## Compaction #2", "## Compaction #3"]
+        assert entries[1] == e2
+        assert entries[0].split("\n")[0].endswith("(rebuilt)")
+        assert compaction._extract_living_state(doc) == "Live state."
+        # log_003's seeded head (topic 2) is not recompacted; only topic 3 is.
+        span3 = reasoning.complete_simple.call_args_list[1].kwargs["user_content"]
+        assert "topic 3 discussed" in span3 and "topic 2 discussed" not in span3
+        # Running it again finds nothing missing.
+        assert await compaction.rebuild_missing_entries("t1", "sp1", space, conv, member_id="mem_a") == []
+
+    async def test_never_reads_another_members_logs(self, tmp_path):
+        conv, compaction, reasoning, space, _ = await self._setup(tmp_path)
+        _write(compaction, "sp1", "mem_b", _doc("## Compaction #9 (source: log_009)\n\n- B."))
+        assert await compaction.rebuild_missing_entries("t1", "sp1", space, conv, member_id="mem_b") == []
+        reasoning.complete_simple.assert_not_called()
+
+
+class TestStripSeededHead:
+    def test_strips_the_run_equal_to_the_previous_tail(self):
+        from kernos.kernel.conversation_log import strip_seeded_head
+        prev = ("[2026-05-01T10:00:00] [user] [discord] a\n"
+                "[2026-05-01T10:01:00] [system] [receipt] b\n")
+        # Older seeds relabelled system lines as assistant; content and time still match.
+        cur = ("[2026-05-01T10:01:00] [assistant] [receipt] b\n"
+               "[2026-05-02T09:00:00] [user] [discord] c\n")
+        assert strip_seeded_head(cur, prev) == "[2026-05-02T09:00:00] [user] [discord] c\n"
+        assert strip_seeded_head(cur, None) == cur
+        assert strip_seeded_head("[2026-05-03T00:00:00] [user] [discord] z\n", prev).endswith("z\n")

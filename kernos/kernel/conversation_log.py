@@ -73,6 +73,26 @@ def _parse_entries(text: str) -> list[dict]:
     return entries
 
 
+def strip_seeded_head(text: str, previous_text: str | None) -> str:
+    """Drop the entries at the head of a log that were seeded from the
+    previous log. Logs written before meta recorded ``seeded_chars`` carry
+    no marker, so seeds are recognised as the longest run of head entries
+    equal (timestamp + content) to the previous log's tail."""
+    if not previous_text:
+        return text
+    tail = [(e["timestamp"], e["content"]) for e in _parse_entries(previous_text)[-25:]]
+    head = [(e["timestamp"], e["content"]) for e in _parse_entries(text)]
+    seeded = 0
+    for k in range(min(len(tail), len(head)), 0, -1):
+        if head[:k] == tail[-k:]:
+            seeded = k
+            break
+    if not seeded:
+        return text
+    starts = [m.start() for m in re.finditer(_ENTRY_RE.pattern, text, re.MULTILINE)]
+    return text[starts[seeded]:] if seeded < len(starts) else ""
+
+
 class ConversationLogger:
     """Per-space, per-member conversation log files.
 

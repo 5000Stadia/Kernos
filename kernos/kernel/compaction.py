@@ -89,6 +89,15 @@ def _span_timestamps(log_text: str) -> tuple[str, str]:
     return (stamps[0], stamps[-1]) if stamps else ("", "")
 
 
+_SOURCE_RE = re.compile(r"\(source: log_(\d+)")
+
+
+def _entry_source_log(entry: str) -> int | None:
+    """The log number an entry's header cites, if any."""
+    m = _SOURCE_RE.search(entry.split("\n", 1)[0])
+    return int(m.group(1)) if m else None
+
+
 def _write_atomic(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -1251,6 +1260,87 @@ class CompactionService:
             logger.debug("Failed to emit compaction.completed: %s", exc)
 
         return comp_state
+
+    async def rebuild_missing_entries(
+        self,
+        instance_id: str,
+        space_id: str,
+        space: ContextSpace,
+        conv_logger: Any,
+        member_id: str = "",
+    ) -> list[int]:
+        """Restore Ledger entries for closed logs that no entry cites.
+
+        The old compaction rewrote the whole document each cycle, and the
+        model sometimes dropped earlier entries; their source logs are still
+        on disk. Each such log is recompacted with the same prompt as live
+        compaction (its seeded head removed, the entries before it as the
+        Ledger so far), and only the new entry is kept: it is spliced back in
+        log order with "(rebuilt)" in its header. The Living State is left
+        as it is. Returns the log numbers rebuilt.
+        """
+        doc_path = self._space_dir(instance_id, space_id, member_id) / "active_document.md"
+        document = await self.load_document(instance_id, space_id, member_id)
+        if not document:
+            return []
+        entries = self._parse_ledger_entries(document)
+        living_state = self._extract_living_state(document)
+        archived = await self.load_all_ledger_entries(instance_id, space_id, member_id)
+        cited = {_entry_source_log(e) for e in archived} - {None}
+        info = await conv_logger.get_current_log_info(instance_id, space_id, member_id=member_id)
+        from kernos.kernel.conversation_log import strip_seeded_head
+
+        rebuilt: list[int] = []
+        for n in range(1, info["log_number"]):
+            if n in cited:
+                continue
+            text = await conv_logger.read_log_text(instance_id, space_id, n, member_id=member_id)
+            if not text or not text.strip():
+                continue
+            previous = (
+                await conv_logger.read_log_text(instance_id, space_id, n - 1, member_id=member_id)
+                if n > 1 else None
+            )
+            span = strip_seeded_head(text, previous)
+            if not span.strip():
+                continue
+            before = [e for e in entries if (_entry_source_log(e) or 0) < n]
+            shown = self._select_hot_tail(before, self.LEDGER_INPUT_BUDGET)
+            user_content = (
+                ("Ledger So Far:\n\n" + "\n\n".join(shown) + "\n\n---\n\n" if shown else "")
+                + f"Source: log_{n:03d}\n\nNew Message Exchanges:\n\n{span}"
+            )
+            space_definition = (
+                f"Space: {space.name}\nType: {space.space_type}\n"
+                f"Description: {space.description}\nPosture: {space.posture}\n"
+            )
+            from kernos.kernel.reasoning import TruncatedResponseError
+            try:
+                output = await self.reasoning.complete_simple(
+                    system_prompt=COMPACTION_SYSTEM_PROMPT + f"\n\n{space_definition}",
+                    user_content=user_content,
+                    max_tokens=COMPACTION_MAX_OUTPUT_TOKENS,
+                    prefer_cheap=True,
+                    allow_truncated=False,
+                )
+            except TruncatedResponseError as exc:
+                raise CompactionOutputError(f"rebuild of log_{n:03d} truncated: {exc}") from exc
+            output = self._strip_follow_ups(self._strip_recurring_workflows(
+                self._strip_fact_harvest(self._strip_seed_depth(output))))
+            bullets, _discarded_state = self._parse_compaction_output(output, n)
+            first_ts, last_ts = _span_timestamps(span)
+            header = f"## Compaction #{n} (source: log_{n:03d})"
+            if first_ts:
+                header += f" — {first_ts} → {last_ts}"
+            entries.append(f"{header} (rebuilt)\n\n{bullets}")
+            entries.sort(key=lambda e: _entry_source_log(e) or 0)
+            rebuilt.append(n)
+            logger.info(
+                "LEDGER_REBUILT: space=%s member=%s log=log_%03d", space_id, member_id, n,
+            )
+        if rebuilt:
+            _write_atomic(doc_path, self._render_document(entries, living_state))
+        return rebuilt
 
     def _parse_compaction_output(self, output: str, entry_number: int) -> tuple[str, str]:
         """Return (new entry bullets, Living State) from the compaction output.
