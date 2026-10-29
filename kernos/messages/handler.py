@@ -2618,10 +2618,9 @@ class MessageHandler:
         logger.info("UNKNOWN_SENDER: platform=%s sender=%s", platform, sender_id)
         return "", ban_msg or "This is a private Kernos instance. If you were invited, send your invite code."
 
-    async def read_log_text(self, instance_id: str, space_id: str, log_number: int, member_id: str = "") -> str:
-        """Read conversation log text — satisfies HandlerProtocol."""
-        result = await self.conv_logger.read_log_text(instance_id, space_id, log_number, member_id=member_id)
-        return result or ""
+    async def read_log_text(self, instance_id: str, space_id: str, log_number: int, member_id: str = "") -> str | None:
+        """Read conversation log text, or None if the log doesn't exist — satisfies HandlerProtocol."""
+        return await self.conv_logger.read_log_text(instance_id, space_id, log_number, member_id=member_id)
 
     def queue_system_event(self, instance_id: str, event: str) -> None:
         """Queue a system event for injection into the next system prompt."""

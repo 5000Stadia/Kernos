@@ -259,6 +259,11 @@ async def build_dev_handler(
             )
         except Exception as exc:
             logger.warning("repl: ensure_owner failed (non-fatal): %s", exc)
+    try:
+        _owner_mid = await instance_db.get_owner_member_id()
+        await state.attribute_unowned_knowledge(_instance_id, _owner_mid or "")
+    except Exception as exc:
+        logger.warning("repl: knowledge attribution failed (non-fatal): %s", exc)
 
     try:
         from kernos.kernel import event_stream as _evstream_mod

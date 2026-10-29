@@ -753,6 +753,11 @@ async def on_ready():
                 platform="discord",
                 channel_id=_owner_discord,
             )
+        if _instance_id:
+            _owner_mid = await instance_db.get_owner_member_id()
+            _n = await state.attribute_unowned_knowledge(_instance_id, _owner_mid or "")
+            if _n:
+                logger.info("KNOWLEDGE_ATTRIBUTED: %d ownerless facts -> owner %s", _n, _owner_mid)
     except Exception as exc:
         logger.warning("Instance DB init failed (non-fatal): %s", exc)
 

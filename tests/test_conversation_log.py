@@ -446,8 +446,8 @@ class TestRememberDetailsHandler:
         svc = ReasoningService(MagicMock(), MagicMock(), MagicMock(), MagicMock())
         handler_mock = MagicMock()
         # Satisfy HandlerProtocol: read_log_text delegates to conv_logger
-        async def _read_log(tid, sid, num):
-            return await conv_logger.read_log_text(tid, sid, num) or ""
+        async def _read_log(tid, sid, num, member_id=""):
+            return await conv_logger.read_log_text(tid, sid, num, member_id=member_id)
         handler_mock.read_log_text = _read_log
         svc.set_handler(handler_mock)
 
@@ -466,8 +466,8 @@ class TestRememberDetailsHandler:
 
         svc = ReasoningService(MagicMock(), MagicMock(), MagicMock(), MagicMock())
         handler_mock = MagicMock()
-        async def _read_log(tid, sid, num):
-            return await conv_logger.read_log_text(tid, sid, num) or ""
+        async def _read_log(tid, sid, num, member_id=""):
+            return await conv_logger.read_log_text(tid, sid, num, member_id=member_id)
         handler_mock.read_log_text = _read_log
         svc.set_handler(handler_mock)
 
@@ -479,6 +479,51 @@ class TestRememberDetailsHandler:
 # ---------------------------------------------------------------------------
 # Seeded tokens tracking (Bug fix: compaction cascade)
 # ---------------------------------------------------------------------------
+
+
+    async def test_reads_the_requesting_members_own_log(self, tmp_path):
+        """remember_details must read the member's log, never another's."""
+        from kernos.kernel.reasoning import ReasoningService
+        from unittest.mock import MagicMock
+
+        conv_logger = ConversationLogger(data_dir=str(tmp_path))
+        await conv_logger.append("t1", "s1", "user", "discord", "Henderson pricing",
+                                 member_id="mem_a")
+        await conv_logger.roll_log("t1", "s1", member_id="mem_a")
+
+        svc = ReasoningService(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+        handler_mock = MagicMock()
+
+        async def _read_log(tid, sid, num, member_id=""):
+            return await conv_logger.read_log_text(tid, sid, num, member_id=member_id)
+        handler_mock.read_log_text = _read_log
+        svc.set_handler(handler_mock)
+
+        own = await svc._handle_remember_details(
+            "t1", "s1", {"source_ref": "log_001", "query": "Henderson"},
+            member_id="mem_a",
+        )
+        assert "Henderson pricing" in own
+        other = await svc._handle_remember_details(
+            "t1", "s1", {"source_ref": "log_001", "query": "Henderson"},
+            member_id="mem_b",
+        )
+        assert "Henderson" not in other
+        assert "not found" in other
+
+    async def test_member_read_never_falls_back_to_shared_folder(self, tmp_path):
+        conv_logger = ConversationLogger(data_dir=str(tmp_path))
+        # An unscoped write lands in the shared legacy folder.
+        await conv_logger.append("t1", "s1", "user", "discord", "shared text")
+        assert await conv_logger.read_log_text("t1", "s1", 1) is not None
+        assert await conv_logger.read_log_text("t1", "s1", 1, member_id="mem_a") is None
+        text, _ = await conv_logger.read_current_log_text("t1", "s1")
+        assert "shared text" in text
+        try:
+            text, _ = await conv_logger.read_current_log_text("t1", "s1", member_id="mem_a")
+        except FileNotFoundError:
+            text = ""
+        assert "shared text" not in text
 
 
 class TestSeededTokensTracking:

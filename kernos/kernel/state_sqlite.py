@@ -374,6 +374,15 @@ class SqliteStateStore(StateStore):
                     await conn.execute(_alt)
                 except Exception:
                     pass  # Column already exists
+            # Backfill the knowledge member/space columns from the JSON
+            # overflow, for rows written before _ke_to_row filled them.
+            for _col, _field in (("member_id", "owner_member_id"),
+                                 ("space_id", "context_space")):
+                await conn.execute(
+                    f"UPDATE knowledge SET {_col}=json_extract(data, '$.{_field}') "
+                    f"WHERE ({_col}='' OR {_col} IS NULL) "
+                    f"AND COALESCE(json_extract(data, '$.{_field}'), '') != ''"
+                )
             await conn.commit()
             self._connections[instance_id] = conn
         return self._connections[instance_id]
@@ -458,16 +467,20 @@ class SqliteStateStore(StateStore):
 
     def _ke_to_row(self, e: KnowledgeEntry) -> tuple:
         d = asdict(e)
-        active = 1 if not d.get("expired_at") else 0
+        active = 1 if d.get("active", True) and not d.get("expired_at") else 0
         overflow = self._pack_overflow(e, self._KNOWLEDGE_COLS)
+        # The member_id / space_id columns mirror the dataclass's
+        # owner_member_id / context_space: they are what the member and
+        # space filters read. (Reading d["member_id"] left them empty, so
+        # the member filter matched every row.)
         return (
             d["id"], d["instance_id"], d.get("content", ""), d.get("subject", ""),
             d.get("category", ""), d.get("lifecycle_archetype", "structural"),
             d.get("storage_strength", 1.0), d.get("reinforcement_count", 1),
             d.get("last_reinforced_at", ""), d.get("salience", 0.5),
             d.get("foresight_signal", ""), d.get("foresight_expires", ""),
-            d.get("content_hash", ""), d.get("space_id", ""),
-            d.get("member_id", ""), d.get("visibility", "open"),
+            d.get("content_hash", ""), d.get("context_space", "") or "",
+            d.get("owner_member_id", "") or "", d.get("visibility", "open"),
             d.get("source_type", ""), d.get("expired_at", ""),
             active, overflow, d.get("created_at", ""), d.get("updated_at", ""),
         )
@@ -475,8 +488,9 @@ class SqliteStateStore(StateStore):
     def _row_to_ke(self, row: aiosqlite.Row) -> KnowledgeEntry:
         d = dict(row)
         overflow = _from_json(d.pop("data", "{}"), {})
-        d.pop("active", None)
+        active = d.pop("active", 1)
         merged = {**overflow, **{k: v for k, v in d.items() if v is not None}}
+        merged["active"] = bool(active) if active is not None else True
         return _build_dataclass(KnowledgeEntry, merged)
 
     async def add_knowledge(self, entry: KnowledgeEntry) -> None:
@@ -511,11 +525,19 @@ class SqliteStateStore(StateStore):
             params.append(category)
         if active_only:
             clauses.append("active=1")
-        # Member visibility: own entries + unowned (legacy/instance-level)
+        # Member visibility: the member's own entries only. Ownerless
+        # legacy entries belong to the instance owner and are attributed
+        # at boot (attribute_unowned_knowledge).
         if member_id:
-            clauses.append("(member_id=? OR member_id='' OR member_id IS NULL)")
+            clauses.append("member_id=?")
             params.append(member_id)
-        sql = f"SELECT * FROM knowledge WHERE {' AND '.join(clauses)}"
+        # Identity facts first, then most recently touched: a window cut by
+        # LIMIT must not be an arbitrary subset.
+        sql = (
+            f"SELECT * FROM knowledge WHERE {' AND '.join(clauses)} "
+            "ORDER BY (lifecycle_archetype='identity') DESC, "
+            "COALESCE(NULLIF(updated_at, ''), created_at) DESC, id"
+        )
         if not tags:
             sql += " LIMIT ?"
             params.append(limit)
@@ -546,6 +568,10 @@ class SqliteStateStore(StateStore):
                 d[k] = v
             else:
                 overflow[k] = v
+            if k == "owner_member_id":
+                d["member_id"] = v or ""
+            elif k == "context_space":
+                d["space_id"] = v or ""
         d["data"] = json.dumps(overflow, ensure_ascii=False)
         d["updated_at"] = now
         if d.get("expired_at"):

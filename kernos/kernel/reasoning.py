@@ -248,6 +248,10 @@ def _build_chains_from_legacy(
     }
 
 
+class TruncatedResponseError(RuntimeError):
+    """A completion hit its token limit and its text is incomplete."""
+
+
 class ReasoningService:
     """Owns the full tool-use reasoning loop. Provider-agnostic.
 
@@ -664,8 +668,12 @@ class ReasoningService:
         prefer_cheap: bool = False,
         output_schema: dict | None = None,
         chain: str | None = None,
+        allow_truncated: bool = True,
     ) -> str:
         """Single stateless completion. No tools, no history, no task events.
+
+        allow_truncated=False raises TruncatedResponseError when the response
+        hit max_tokens, for callers that must never commit partial text.
 
         Used by kernel infrastructure (extraction, consolidation) not by agents.
         Returns raw text response. prefer_cheap uses Haiku-class model for cost efficiency.
@@ -736,6 +744,10 @@ class ReasoningService:
                 "complete_simple: response truncated (max_tokens=%d) preview=%s",
                 max_tokens, text_preview[:200],
             )
+            if not allow_truncated:
+                raise TruncatedResponseError(
+                    f"response hit max_tokens={max_tokens}"
+                )
             if output_schema:
                 return "{}"
             # Plain-text call: return whatever was generated (partial is better than "{}")
@@ -1615,6 +1627,7 @@ class ReasoningService:
                     request.instance_id,
                     request.active_space_id,
                     tool_input,
+                    member_id=getattr(request, "member_id", "") or "",
                 )
             elif tool_name == "inspect_state":
                 from kernos.kernel.introspection import build_user_truth_view
@@ -3304,6 +3317,7 @@ class ReasoningService:
 
     async def _handle_remember_details(
         self, instance_id: str, space_id: str, input_data: dict,
+        member_id: str = "",
     ) -> str:
         """Retrieve conversation text from a specific archived log file.
 
@@ -3332,7 +3346,7 @@ class ReasoningService:
             return "Conversation logger is not available."
 
         log_text = await self._handler.read_log_text(
-            instance_id, space_id, log_number,
+            instance_id, space_id, log_number, member_id=member_id,
         )
 
         if log_text is None:

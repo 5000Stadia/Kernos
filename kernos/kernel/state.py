@@ -591,6 +591,28 @@ class StateStore(ABC):
     @abstractmethod
     async def update_knowledge(self, instance_id: str, entry_id: str, updates: dict) -> None: ...
 
+    async def attribute_unowned_knowledge(
+        self, instance_id: str, owner_member_id: str,
+    ) -> int:
+        """Give every ownerless fact to the instance owner. Returns the count.
+
+        An empty owner_member_id means the instance owner (see
+        KnowledgeEntry). Member-scoped queries match the owner exactly, so
+        legacy ownerless facts are attributed once at boot rather than
+        being visible to every member.
+        """
+        if not owner_member_id:
+            return 0
+        entries = await self.query_knowledge(
+            instance_id, active_only=False, limit=1_000_000,
+        )
+        unowned = [e for e in entries if not e.owner_member_id]
+        for e in unowned:
+            await self.update_knowledge(
+                instance_id, e.id, {"owner_member_id": owner_member_id},
+            )
+        return len(unowned)
+
     @abstractmethod
     async def save_knowledge_entry(self, entry: KnowledgeEntry) -> None:
         """Upsert a KnowledgeEntry by ID (write or overwrite)."""

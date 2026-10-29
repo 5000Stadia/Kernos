@@ -17,7 +17,8 @@ class HandlerProtocol(Protocol):
 
     async def read_log_text(
         self, instance_id: str, space_id: str, log_number: int,
-    ) -> str: ...
+        member_id: str = "",
+    ) -> str | None: ...
 
 
 @runtime_checkable

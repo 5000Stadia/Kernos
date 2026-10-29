@@ -265,6 +265,8 @@ async def run(ctx: PhaseContext) -> PhaseContext:
                                         instance_id, ctx.active_space_id, log_text,
                                         data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
                                         member_id=ctx.member_id,
+                                        embedding_service=getattr(handler._retrieval, "embeddings", None),
+                                        embedding_store=getattr(handler._retrieval, "embedding_store", None),
                                     )
                                     if ctx.trace:
                                         ctx.trace.record(

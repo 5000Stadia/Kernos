@@ -197,17 +197,11 @@ async def run(ctx: PhaseContext) -> PhaseContext:
             ctx.active_space_id, _route_space_name or "unknown",
         )
         asyncio.create_task(handler._run_session_exit(instance_id, ctx.previous_space_id, conversation_id))
-        # Harvest facts from departing space
+        # Harvest facts from the departing space's not-yet-harvested tail
         try:
-            from kernos.kernel.fact_harvest import harvest_facts
-            log_text = await handler.conv_logger.read_current_log_text(instance_id, ctx.previous_space_id, member_id=ctx.member_id)
-            if isinstance(log_text, tuple):
-                log_text = log_text[0]
-            asyncio.create_task(harvest_facts(
-                handler.reasoning, handler.state, handler.events,
-                instance_id, ctx.previous_space_id, log_text or "",
-                data_dir=os.getenv("KERNOS_DATA_DIR", "./data"),
-                member_id=ctx.member_id,
+            from kernos.kernel.fact_harvest import harvest_log_tail
+            asyncio.create_task(harvest_log_tail(
+                handler, instance_id, ctx.previous_space_id, member_id=ctx.member_id,
             ))
         except Exception:
             pass

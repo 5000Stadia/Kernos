@@ -247,11 +247,10 @@ class JsonStateStore(StateStore):
                 continue
             if tags and not any(t in entry.tags for t in tags):
                 continue
-            # Member visibility: own entries + unowned (legacy/instance-level)
-            if member_id:
-                owner = getattr(entry, "owner_member_id", "")
-                if owner and owner != member_id:
-                    continue
+            # Member visibility: the member's own entries only (ownerless
+            # entries are attributed at boot; see attribute_unowned_knowledge).
+            if member_id and getattr(entry, "owner_member_id", "") != member_id:
+                continue
             results.append(entry)
         return results[:limit]
 

@@ -56,7 +56,14 @@ SENSITIVITY — classify every new fact:
   "contextual" — usable in reasoning but don't surface casually (work details, plans)
   "personal"   — private to this member, do not disclose to others \
 (health, finances, relationships, emotional states)
-When unsure, classify as "personal". Err conservative."""
+When unsure, classify as "personal". Err conservative.
+
+SCOPE — classify every new fact:
+  "member" — true of this person wherever they are (name, family, \
+timezone, values, how they like to work). Travels to every context space.
+  "space"  — belongs to this context space's subject (a project's \
+deadline, a renovation budget). Stays with this space and its children.
+When unsure, use "member"."""
 
 
 _SECONDARY_SYSTEM_PROMPT = """\
@@ -118,9 +125,11 @@ _PRIMARY_SCHEMA = {
                         "type": "string",
                         "enum": ["open", "contextual", "personal"],
                     },
+                    "scope": {"type": "string", "enum": ["member", "space"]},
                 },
                 "required": [
-                    "content", "archetype", "confidence", "subject", "sensitivity",
+                    "content", "archetype", "confidence", "subject",
+                    "sensitivity", "scope",
                 ],
                 "additionalProperties": False,
             },
@@ -173,6 +182,8 @@ async def harvest_facts(
     conversation_text: str,
     data_dir: str = "./data",
     member_id: str = "",
+    embedding_service=None,
+    embedding_store=None,
 ) -> dict:
     """Run boundary-driven fact harvest. Returns outcome dict.
 
@@ -196,10 +207,10 @@ async def harvest_facts(
         )
         return outcome
 
-    # Load current facts for reconciliation.
+    # Load current facts for reconciliation: all of this member's active
+    # facts, whatever their subject, so an update can find its target.
     all_facts = await state_store.query_knowledge(
-        instance_id, subject="user", active_only=True, limit=200,
-        member_id=member_id,
+        instance_id, active_only=True, limit=200, member_id=member_id,
     )
     if all_facts:
         facts_text = "\n".join(
@@ -223,14 +234,17 @@ async def harvest_facts(
         )
         return outcome
     outcome["primary_ok"] = True
+    embed = _embedder(embedding_service, embedding_store, instance_id)
+    owned = {e.id for e in all_facts}
     outcome["adds"] = await _apply_adds(
-        state_store, instance_id, member_id, parsed.get("add", []),
+        state_store, instance_id, member_id, space_id,
+        parsed.get("add", []), embed,
     )
     outcome["updates"] = await _apply_updates(
-        state_store, instance_id, parsed.get("update", []),
+        state_store, instance_id, owned, parsed.get("update", []), embed,
     )
     outcome["reinforces"] = await _apply_reinforces(
-        state_store, instance_id, parsed.get("reinforce", []),
+        state_store, instance_id, owned, parsed.get("reinforce", []),
     )
 
     # --- SECONDARY: stewardship + insight ---
@@ -272,6 +286,40 @@ async def harvest_facts(
     return outcome
 
 
+
+async def harvest_log_tail(handler, instance_id: str, space_id: str, member_id: str = "") -> dict | None:
+    """Harvest the part of the member's current log not yet harvested.
+
+    Skips the entries seeded from the previous log (already harvested
+    there) and whatever an earlier harvest of this log covered, then
+    advances the harvested mark once the primary call succeeds. Used at
+    space switches, where the departing space's log is still open.
+    """
+    conv = handler.conv_logger
+    try:
+        text, log_num = await conv.read_current_log_text(
+            instance_id, space_id, member_id=member_id,
+        )
+    except FileNotFoundError:
+        return None
+    info = await conv.get_current_log_info(instance_id, space_id, member_id=member_id)
+    start = max(info.get("seeded_chars", 0), info.get("harvested_chars", 0))
+    span = text[start:]
+    if not span.strip():
+        return None
+    retrieval = getattr(handler, "_retrieval", None)
+    outcome = await harvest_facts(
+        handler.reasoning, handler.state, handler.events,
+        instance_id, space_id, span,
+        member_id=member_id,
+        embedding_service=getattr(retrieval, "embeddings", None),
+        embedding_store=getattr(retrieval, "embedding_store", None),
+    )
+    if outcome.get("primary_ok"):
+        await conv.mark_harvested(instance_id, space_id, log_num, len(text), member_id=member_id)
+    return outcome
+
+
 # --- Internal calls ---
 
 
@@ -308,68 +356,139 @@ async def _call_secondary(reasoning_service, user_content: str) -> dict | None:
 # --- Writers ---
 
 
-async def _apply_adds(state_store, instance_id, member_id, items: list[dict]) -> int:
+def _embedder(embedding_service, embedding_store, instance_id):
+    """Return an embed-on-write callback, or a no-op without an embedder.
+
+    Facts are embedded on their content alone, as note_this does, so every
+    fact is searchable by meaning. Best-effort: lexical fallback still
+    covers recall when embedding is unavailable or fails.
+    """
+    async def embed(entry_id: str, content: str) -> None:
+        if embedding_service is None or embedding_store is None:
+            return
+        try:
+            vec = await embedding_service.embed(content)
+            if vec:
+                await embedding_store.save(instance_id, entry_id, vec)
+        except Exception as exc:
+            logger.debug("FACT_HARVEST_EMBED_FAILED: id=%s error=%s", entry_id, exc)
+    return embed
+
+
+def _new_fact_id() -> str:
     import uuid
+    return f"know_{int(uuid.uuid4().int)%10**16}_{uuid.uuid4().hex[:4]}"
+
+
+async def _apply_adds(
+    state_store, instance_id, member_id, space_id, items: list[dict], embed,
+) -> int:
+    from kernos.kernel.note_this import _content_hash
     from kernos.kernel.state import KnowledgeEntry
     count = 0
     for item in items:
         content = (item.get("content") or "").strip()
         if not content:
             continue
+        subject = item.get("subject", "user")
+        now = utc_now()
         entry = KnowledgeEntry(
-            id=f"know_{int(uuid.uuid4().int)%10**16}_{uuid.uuid4().hex[:4]}",
+            id=_new_fact_id(),
             instance_id=instance_id,
             category="fact",
-            subject=item.get("subject", "user"),
+            subject=subject,
             content=content,
             confidence=item.get("confidence", "inferred"),
             source_event_id="",
             source_description="boundary_fact_harvest",
-            created_at=utc_now(),
-            last_referenced=utc_now(),
+            created_at=now,
+            last_referenced=now,
             tags=[],
             lifecycle_archetype=item.get("archetype", "structural"),
-            valid_at=utc_now(),
+            valid_at=now,
+            content_hash=_content_hash(instance_id, subject, content),
+            context_space=space_id if item.get("scope") == "space" else "",
             owner_member_id=member_id,
             sensitivity=item.get("sensitivity", "personal"),  # conservative default
         )
         await state_store.add_knowledge(entry)
+        await embed(entry.id, content)
         count += 1
         logger.info(
-            "FACT_HARVEST_ADD: instance=%s sensitivity=%s content=%r",
-            instance_id, entry.sensitivity, content[:80],
+            "FACT_HARVEST_ADD: instance=%s sensitivity=%s scope=%s content=%r",
+            instance_id, entry.sensitivity, entry.context_space or "member",
+            content[:80],
         )
     return count
 
 
-async def _apply_updates(state_store, instance_id, items: list[dict]) -> int:
+async def _apply_updates(
+    state_store, instance_id, owned: set[str], items: list[dict], embed,
+) -> int:
+    """Supersede a fact under its stable ID, archiving the old version.
+
+    The current version keeps the ID, so references to it keep working; the
+    old version is copied to a new inactive entry with invalid_at set, and
+    the current one's ``supersedes`` points to it, forming a chain.
+    """
+    from dataclasses import replace
+    from kernos.kernel.note_this import _content_hash
     count = 0
     for item in items:
         entry_id = (item.get("id") or "").strip()
         new_content = (item.get("new_content") or "").strip()
         if not entry_id or not new_content:
             continue
-        await state_store.update_knowledge(
-            instance_id, entry_id,
-            {"content": new_content, "updated_at": utc_now()},
+        if entry_id not in owned:
+            logger.warning(
+                "FACT_HARVEST_UPDATE_REFUSED: instance=%s id=%s not this member's",
+                instance_id, entry_id,
+            )
+            continue
+        current = await state_store.get_knowledge_entry(instance_id, entry_id)
+        if current is None or current.content.strip() == new_content:
+            continue
+        now = utc_now()
+        archived = replace(
+            current, id=_new_fact_id(), active=False, invalid_at=now,
         )
+        await state_store.add_knowledge(archived)
+        await state_store.update_knowledge(instance_id, entry_id, {
+            "content": new_content,
+            "content_hash": _content_hash(instance_id, current.subject, new_content),
+            "supersedes": archived.id,
+            "valid_at": now,
+            "updated_at": now,
+            "storage_strength": current.storage_strength + 1.0,
+        })
+        await embed(entry_id, new_content)
         count += 1
         logger.info(
-            "FACT_HARVEST_UPDATE: instance=%s id=%s content=%r",
-            instance_id, entry_id, new_content[:80],
+            "FACT_HARVEST_UPDATE: instance=%s id=%s archived=%s content=%r",
+            instance_id, entry_id, archived.id, new_content[:80],
         )
     return count
 
 
-async def _apply_reinforces(state_store, instance_id, items: list[dict]) -> int:
+async def _apply_reinforces(
+    state_store, instance_id, owned: set[str], items: list[dict],
+) -> int:
+    """Record that a fact was observed again: it becomes better established."""
     count = 0
     for item in items:
         entry_id = (item.get("id") or "").strip()
-        if not entry_id:
+        if not entry_id or entry_id not in owned:
             continue
-        await state_store.update_knowledge(
-            instance_id, entry_id, {"last_referenced": utc_now()},
-        )
+        current = await state_store.get_knowledge_entry(instance_id, entry_id)
+        if current is None:
+            continue
+        now = utc_now()
+        await state_store.update_knowledge(instance_id, entry_id, {
+            "last_referenced": now,
+            "last_reinforced_at": now,
+            "reinforcement_count": current.reinforcement_count + 1,
+            "storage_strength": current.storage_strength + 1.0,
+        })
         count += 1
         logger.info("FACT_HARVEST_REINFORCE: instance=%s id=%s", instance_id, entry_id)
     return count

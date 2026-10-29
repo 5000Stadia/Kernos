@@ -6,8 +6,11 @@ Each member gets their own conversation thread per space, stored at:
 Legacy (pre-multi-member) logs live at:
   {data_dir}/tenants/{instance_id}/spaces/{space_id}/logs/
 
-Lazy migration: reads check member path first, then legacy. Writes always go to
-the member-scoped path.
+Member-scoped reads and writes use only the member's own path. They never
+fall back to the shared legacy folder: its author is unknown, and reading it
+is how one member's history reached another (the disclosure gate removed the
+same fallback from compaction). Unscoped (member_id="") calls use the legacy
+path itself.
 
 Concurrency: per-(space, member) asyncio Lock serializes writes.
 Reads are eventually consistent (no lock). Single-process only.
@@ -51,6 +54,7 @@ def _parse_entries(text: str) -> list[dict]:
             role = "user" if speaker == "user" else "assistant"
             current = {
                 "role": role,
+                "speaker": speaker,
                 "content": line[content_start:],
                 "timestamp": timestamp,
                 "channel": channel,
@@ -113,12 +117,6 @@ class ConversationLogger:
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        # Lazy migration: check legacy path if member-scoped doesn't exist
-        if member_id:
-            legacy = self._meta_path(instance_id, space_id, "")
-            if legacy.exists():
-                with open(legacy, "r", encoding="utf-8") as f:
-                    return json.load(f)
         return {
             "current_log": 1,
             "current_log_tokens_est": 0,
@@ -262,15 +260,14 @@ class ConversationLogger:
         """
         meta = await self._load_meta_async(instance_id, space_id, member_id)
         log_path = self._logs_dir(instance_id, space_id, member_id) / f"log_{meta['current_log']:03d}.txt"
-        if not log_path.exists() and member_id:
-            # Check legacy path
-            legacy = self._legacy_logs_dir(instance_id, space_id) / f"log_{meta['current_log']:03d}.txt"
-            if legacy.exists():
-                log_path = legacy
         return {
             "log_number": meta["current_log"],
             "tokens_est": meta.get("current_log_tokens_est", 0),
             "seeded_tokens_est": meta.get("seeded_tokens_est", 0),
+            # Characters at the head of the log copied from the previous
+            # log (already compacted), and the prefix already fact-harvested.
+            "seeded_chars": meta.get("seeded_chars", 0),
+            "harvested_chars": meta.get("harvested_chars", 0),
             "path": log_path,
             "exists": log_path.exists(),
         }
@@ -286,11 +283,6 @@ class ConversationLogger:
         meta = await self._load_meta_async(instance_id, space_id, member_id)
         log_num = meta["current_log"]
         log_path = self._logs_dir(instance_id, space_id, member_id) / f"log_{log_num:03d}.txt"
-        if not log_path.exists() and member_id:
-            # Lazy migration: try legacy path
-            legacy = self._legacy_logs_dir(instance_id, space_id) / f"log_{log_num:03d}.txt"
-            if legacy.exists():
-                log_path = legacy
         if not log_path.exists():
             raise FileNotFoundError(f"No log file at {log_path}")
         async with aiofiles.open(log_path, "r", encoding="utf-8") as f:
@@ -312,6 +304,8 @@ class ConversationLogger:
             meta["current_log"] = new_num
             meta["current_log_tokens_est"] = 0
             meta["seeded_tokens_est"] = 0
+            meta["seeded_chars"] = 0
+            meta["harvested_chars"] = 0
             meta["created_at"] = datetime.now(timezone.utc).isoformat()
             await self._save_meta_async(instance_id, space_id, meta, member_id)
 
@@ -345,11 +339,6 @@ class ConversationLogger:
     ) -> int:
         """Internal seed implementation — must be called under lock."""
         prev_path = self._logs_dir(instance_id, space_id, member_id) / f"log_{previous_log_number:03d}.txt"
-        if not prev_path.exists() and member_id:
-            # Lazy migration: try legacy path
-            legacy = self._legacy_logs_dir(instance_id, space_id) / f"log_{previous_log_number:03d}.txt"
-            if legacy.exists():
-                prev_path = legacy
         if not prev_path.exists():
             return 0
 
@@ -369,10 +358,14 @@ class ConversationLogger:
 
         seed_text = ""
         for entry in seed_entries:
-            speaker = "user" if entry["role"] == "user" else "assistant"
+            speaker = entry.get("speaker") or entry["role"]
             line = f"[{entry['timestamp']}] [{speaker}] [{entry['channel']}] {entry['content']}\n"
             seed_text += line
 
+        prior_chars = 0
+        if current_path.exists():
+            async with aiofiles.open(current_path, "r", encoding="utf-8") as f:
+                prior_chars = len(await f.read())
         async with aiofiles.open(current_path, "a", encoding="utf-8") as f:
             await f.write(seed_text)
 
@@ -380,6 +373,7 @@ class ConversationLogger:
         seed_tokens = len(seed_text) // 4
         meta["current_log_tokens_est"] += seed_tokens
         meta["seeded_tokens_est"] = meta.get("seeded_tokens_est", 0) + seed_tokens
+        meta["seeded_chars"] = prior_chars + len(seed_text)
         await self._save_meta_async(instance_id, space_id, meta, member_id)
 
         logger.info(
@@ -387,6 +381,19 @@ class ConversationLogger:
             space_id, member_id or "legacy", previous_log_number, len(seed_entries), len(seed_text) // 4,
         )
         return len(seed_entries)
+
+    async def mark_harvested(
+        self, instance_id: str, space_id: str, log_number: int, chars: int,
+        member_id: str = "",
+    ) -> None:
+        """Record that the first ``chars`` characters of the current log have
+        been fact-harvested. A no-op if the log has rolled since."""
+        async with self._get_lock(instance_id, space_id, member_id):
+            meta = await self._load_meta_async(instance_id, space_id, member_id)
+            if meta.get("current_log") != log_number:
+                return
+            meta["harvested_chars"] = max(meta.get("harvested_chars", 0), chars)
+            await self._save_meta_async(instance_id, space_id, meta, member_id)
 
     async def read_log_text(
         self, instance_id: str, space_id: str, log_number: int,
@@ -398,11 +405,6 @@ class ConversationLogger:
         Public API — used by remember_details handler.
         """
         log_path = self._logs_dir(instance_id, space_id, member_id) / f"log_{log_number:03d}.txt"
-        if not log_path.exists() and member_id:
-            # Lazy migration: try legacy path
-            legacy = self._legacy_logs_dir(instance_id, space_id) / f"log_{log_number:03d}.txt"
-            if legacy.exists():
-                log_path = legacy
         if not log_path.exists():
             return None
         async with aiofiles.open(log_path, "r", encoding="utf-8") as f:
