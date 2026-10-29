@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "description": "Independently labelled, wholly fictional replay. Each boundary processes exactly one new log; source coordinates are physical 1-based turns within that log. Aliases are semantic gold labels, never production-generated item IDs.",
+  "evaluation": {
+    "zero_error_metrics": ["missed_openings", "false_openings", "wrong_closures", "missed_closures", "stale_items", "lost_active_items", "changed_verbatim_quotes", "invalid_source_citations"],
+    "displayed_tokens": "Measure the complete final displayed state with the production token adapter, including commitment wrappers and narrative. Report each boundary and the peak; apply the caller's configured budget, not a fixture-invented limit.",
+    "matching": "Match output items to semantic aliases using their proposition and exact opening source. Unknown propositions count as false openings. A real citation supports only what its quoted source says. Duplicate timestamps do not identify turns.",
+    "narrative": "Regenerate narrative separately at every boundary. Required details below are semantic expectations, not exact generated prose. Narrative paraphrases cannot replace the verbatim active-item store.",
+    "cohesion": "Judge retention of intent, in-force decisions, unresolved real commitments, and context needed to continue. Incidental example details receive no retention credit and need not persist."
+  },
+  "scenarios": [
+    {
+      "id": "partial_delivery",
+      "description": "Hypotheticals and unaccepted suggestions do not open items; finishing a draft and an assistant's unsupported delivery claim do not complete a compound commitment.",
+      "items": {
+        "send_handout": {
+          "kind": "commitment",
+          "opening": {"log": "log_001", "turn": 3, "role": "user", "quote": "I'll prepare the workshop handout and send the final PDF."}
+        },
+        "letter_pages": {
+          "kind": "decision",
+          "opening": {"log": "log_001", "turn": 4, "role": "user", "quote": "I decided to use letter-size pages for this workshop."}
+        }
+      },
+      "initial": {"active": [], "narrative": ""},
+      "logs": [
+        {
+          "id": "log_001",
+          "turns": [
+            {"timestamp": "2026-04-01T09:00:00+00:00", "role": "user", "text": "If we ever host a workshop, I might print badges."},
+            {"timestamp": "2026-04-01T09:01:00+00:00", "role": "assistant", "text": "You could reserve the north room."},
+            {"timestamp": "2026-04-01T09:02:00+00:00", "role": "user", "text": "I'll prepare the workshop handout and send the final PDF."},
+            {"timestamp": "2026-04-01T09:03:00+00:00", "role": "user", "text": "I decided to use letter-size pages for this workshop."},
+            {"timestamp": "2026-04-01T09:04:00+00:00", "role": "assistant", "text": "Understood. The workshop example concerns paper bridges."},
+            {"timestamp": "2026-04-01T09:05:00+00:00", "role": "user", "text": "The workshop should teach beginners how folds make paper structures stronger. For a throwaway example, imagine an orange ribbon on a sample; its color is incidental."}
+          ]
+        },
+        {
+          "id": "log_002",
+          "turns": [
+            {"timestamp": "2026-04-02T09:00:00+00:00", "role": "user", "text": "The handout draft is finished, but I still need to send the final PDF."},
+            {"timestamp": "2026-04-02T09:01:00+00:00", "role": "assistant", "text": "The final PDF has been sent."},
+            {"timestamp": "2026-04-02T09:02:00+00:00", "role": "user", "text": "I have not sent it yet. That delivery claim is incorrect."},
+            {"timestamp": "2026-04-02T09:03:00+00:00", "role": "user", "text": "The paper-bridge demonstration uses folded strips."}
+          ]
+        },
+        {
+          "id": "log_003",
+          "turns": [
+            {"timestamp": "2026-04-03T09:00:00+00:00", "role": "user", "text": "I sent the final workshop PDF to the attendees."},
+            {"timestamp": "2026-04-03T09:01:00+00:00", "role": "user", "text": "The letter-size choice still stands. The workshop example now concerns paper boats."}
+          ]
+        }
+      ],
+      "boundaries": [
+        {
+          "after_log": "log_001",
+          "gold": {
+            "open": ["send_handout", "letter_pages"], "close": [], "active": ["send_handout", "letter_pages"],
+            "non_openings": [
+              {"log": "log_001", "turn": 1, "role": "user", "quote": "If we ever host a workshop, I might print badges.", "reason": "Hypothetical possibility, not a commitment."},
+              {"log": "log_001", "turn": 2, "role": "assistant", "quote": "You could reserve the north room.", "reason": "Unaccepted assistant suggestion."}
+            ],
+            "incidental_details": [{"log": "log_001", "turn": 6, "role": "user", "quote": "For a throwaway example, imagine an orange ribbon on a sample; its color is incidental.", "reason": "Example color is not an adopted decision, commitment, or continuation requirement; no retention credit."}],
+            "narrative_required_details": ["The workshop teaches beginners how folds make paper structures stronger.", "The workshop example concerns paper bridges."]
+          }
+        },
+        {
+          "after_log": "log_002",
+          "gold": {
+            "open": [], "close": [], "active": ["send_handout", "letter_pages"],
+            "non_closures": [
+              {"alias": "send_handout", "log": "log_002", "turn": 1, "role": "user", "quote": "The handout draft is finished, but I still need to send the final PDF.", "reason": "Only the first part of the compound commitment is complete."},
+              {"alias": "send_handout", "log": "log_002", "turn": 2, "role": "assistant", "quote": "The final PDF has been sent.", "reason": "Assistant claim has no corroboration and is contradicted by the next user turn."}
+            ],
+            "narrative_required_details": ["The handout draft is finished; delivery is still outstanding.", "The demonstration uses folded strips."]
+          }
+        },
+        {
+          "after_log": "log_003",
+          "gold": {
+            "open": [],
+            "close": [{"alias": "send_handout", "reason": "completed", "evidence": [{"log": "log_003", "turn": 1, "role": "user", "quote": "I sent the final workshop PDF to the attendees."}]}],
+            "active": ["letter_pages"],
+            "narrative_required_details": ["The workshop example now concerns paper boats."],
+            "narrative_must_not_present_as_current": ["The workshop example concerns paper bridges."]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancellation_and_supersession",
+      "description": "An explicit cancellation closes a commitment; an explicitly replaced decision closes while its successor opens. An assistant outcome claim does not cancel a standing decision.",
+      "items": {
+        "order_sample": {"kind": "commitment", "opening": {"log": "log_001", "turn": 1, "role": "user", "quote": "I'll order one sample notebook."}},
+        "green_covers": {"kind": "decision", "opening": {"log": "log_001", "turn": 2, "role": "user", "quote": "The decision for the notebook run is: use green covers."}},
+        "blue_covers": {"kind": "decision", "opening": {"log": "log_002", "turn": 3, "role": "user", "quote": "The new decision for the notebook run is: use blue covers."}}
+      },
+      "initial": {"active": [], "narrative": ""},
+      "logs": [
+        {"id": "log_001", "turns": [
+          {"timestamp": "2026-04-04T09:00:00+00:00", "role": "user", "text": "I'll order one sample notebook."},
+          {"timestamp": "2026-04-04T09:01:00+00:00", "role": "user", "text": "The decision for the notebook run is: use green covers."},
+          {"timestamp": "2026-04-04T09:02:00+00:00", "role": "assistant", "text": "A sample and a full run are separate purchases."}
+        ]},
+        {"id": "log_002", "turns": [
+          {"timestamp": "2026-04-05T09:00:00+00:00", "role": "user", "text": "Cancel my notebook sample order; I am no longer going to order it."},
+          {"timestamp": "2026-04-05T09:01:00+00:00", "role": "user", "text": "The green-cover decision for the notebook run is superseded."},
+          {"timestamp": "2026-04-05T09:02:00+00:00", "role": "user", "text": "The new decision for the notebook run is: use blue covers."}
+        ]},
+        {"id": "log_003", "turns": [
+          {"timestamp": "2026-04-06T09:00:00+00:00", "role": "assistant", "text": "The blue covers have already been ordered."},
+          {"timestamp": "2026-04-06T09:01:00+00:00", "role": "user", "text": "Nothing has been ordered. Blue remains the cover choice for the notebook run."},
+          {"timestamp": "2026-04-06T09:02:00+00:00", "role": "user", "text": "The unselected sample sheet on the desk feels smooth. I have not chosen a cover texture."}
+        ]}
+      ],
+      "boundaries": [
+        {"after_log": "log_001", "gold": {"open": ["order_sample", "green_covers"], "close": [], "active": ["order_sample", "green_covers"], "narrative_required_details": ["The sample and full run are separate purchases."]}},
+        {"after_log": "log_002", "gold": {
+          "open": ["blue_covers"],
+          "close": [
+            {"alias": "order_sample", "reason": "cancelled", "evidence": [{"log": "log_002", "turn": 1, "role": "user", "quote": "Cancel my notebook sample order; I am no longer going to order it."}]},
+            {"alias": "green_covers", "reason": "superseded", "evidence": [{"log": "log_002", "turn": 2, "role": "user", "quote": "The green-cover decision for the notebook run is superseded."}]}
+          ],
+          "active": ["blue_covers"], "narrative_required_details": ["The sample order was cancelled; the run's cover choice changed to blue."]
+        }},
+        {"after_log": "log_003", "gold": {
+          "open": [], "close": [], "active": ["blue_covers"],
+          "non_closures": [{"alias": "blue_covers", "log": "log_003", "turn": 1, "role": "assistant", "quote": "The blue covers have already been ordered.", "reason": "Unsupported assistant claim; ordering would not itself supersede the standing color decision."}],
+          "narrative_required_details": ["Nothing has been ordered.", "The sample sheet feels smooth, but no cover texture has been chosen."]
+        }}
+      ]
+    },
+    {
+      "id": "legacy_and_creative_premise",
+      "description": "An older unresolved item survives migration from unstructured legacy state. A creative decision survives unrelated spans with its original wording and source.",
+      "items": {
+        "return_atlas": {"kind": "commitment", "opening": {"log": "log_001", "turn": 1, "role": "user", "quote": "I'll return the borrowed atlas."}},
+        "promise_memory_city": {"kind": "decision", "opening": {"log": "log_002", "turn": 1, "role": "user", "quote": "For this story, we decided: the city remembers every promise spoken within its walls."}}
+      },
+      "initial": {"format": "legacy_unstructured", "active": ["return_atlas"], "narrative": "Still unresolved: I'll return the borrowed atlas.", "available_source_logs": ["log_001"]},
+      "logs": [
+        {"id": "log_001", "initial_source_only": true, "turns": [
+          {"timestamp": "2026-03-01T09:00:00+00:00", "role": "user", "text": "I'll return the borrowed atlas."}
+        ]},
+        {"id": "log_002", "turns": [
+          {"timestamp": "2026-04-07T09:00:00+00:00", "role": "user", "text": "For this story, we decided: the city remembers every promise spoken within its walls."},
+          {"timestamp": "2026-04-07T09:01:00+00:00", "role": "user", "text": "One discarded title example on the worksheet reads Glass Harbor. We have not selected a story title."}
+        ]},
+        {"id": "log_003", "turns": [
+          {"timestamp": "2026-04-08T09:00:00+00:00", "role": "user", "text": "Today's unrelated exercise is describing a stone arch."},
+          {"timestamp": "2026-04-08T09:01:00+00:00", "role": "assistant", "text": "The arch is low, broad, and made from pale blocks."},
+          {"timestamp": "2026-04-08T09:02:00+00:00", "role": "user", "text": "That description fits."}
+        ]},
+        {"id": "log_004", "turns": [
+          {"timestamp": "2026-04-09T09:00:00+00:00", "role": "user", "text": "Now we are discussing a fictional weather chart. It shows steady rain."},
+          {"timestamp": "2026-04-09T09:01:00+00:00", "role": "assistant", "text": "The chart also marks a mild west wind."},
+          {"timestamp": "2026-04-09T09:02:00+00:00", "role": "user", "text": "The borrowed atlas is still here; I have not returned it."}
+        ]}
+      ],
+      "boundaries": [
+        {"after_log": "log_002", "gold": {"open": ["promise_memory_city"], "close": [], "active": ["return_atlas", "promise_memory_city"], "narrative_required_details": ["Glass Harbor is a discarded title example; no story title has been selected."]}},
+        {"after_log": "log_003", "gold": {"open": [], "close": [], "active": ["return_atlas", "promise_memory_city"], "narrative_required_details": ["The arch is low and broad with pale blocks."]}},
+        {"after_log": "log_004", "gold": {
+          "open": [], "close": [], "active": ["return_atlas", "promise_memory_city"],
+          "non_closures": [{"alias": "return_atlas", "log": "log_004", "turn": 3, "role": "user", "quote": "The borrowed atlas is still here; I have not returned it.", "reason": "Explicitly unresolved, despite an old opening source."}],
+          "narrative_required_details": ["The weather chart shows steady rain and a mild west wind."]
+        }}
+      ]
+    },
+    {
+      "id": "duplicate_times_and_unrelated_citations",
+      "description": "Two openings have identical timestamps. Actual but unrelated evidence and an unsupported assistant completion cannot close the stand task; the later user's confirmation can.",
+      "items": {
+        "replace_stand": {"kind": "commitment", "opening": {"log": "log_001", "turn": 1, "role": "user", "quote": "I'll replace the cracked display stand."}},
+        "label_boxes": {"kind": "commitment", "opening": {"log": "log_001", "turn": 2, "role": "user", "quote": "I'll label the storage boxes."}}
+      },
+      "initial": {"active": [], "narrative": ""},
+      "logs": [
+        {"id": "log_001", "turns": [
+          {"timestamp": "2026-04-10T09:00:00+00:00", "role": "user", "text": "I'll replace the cracked display stand."},
+          {"timestamp": "2026-04-10T09:00:00+00:00", "role": "user", "text": "I'll label the storage boxes."},
+          {"timestamp": "2026-04-10T09:01:00+00:00", "role": "assistant", "text": "Those are two separate jobs."}
+        ]},
+        {"id": "log_002", "turns": [
+          {"timestamp": "2026-04-11T09:00:00+00:00", "role": "user", "text": "I dusted the shelf beside the display stand."},
+          {"timestamp": "2026-04-11T09:01:00+00:00", "role": "assistant", "text": "I replaced the cracked display stand; the job is complete."},
+          {"timestamp": "2026-04-11T09:02:00+00:00", "role": "user", "text": "The cracked stand is still there. Only the shelf was dusted."}
+        ]},
+        {"id": "log_003", "turns": [
+          {"timestamp": "2026-04-12T09:00:00+00:00", "role": "user", "text": "The cracked display stand has now been replaced; I checked the new one myself."},
+          {"timestamp": "2026-04-12T09:01:00+00:00", "role": "user", "text": "If I had spare labels, I might label the drawers too."},
+          {"timestamp": "2026-04-12T09:02:00+00:00", "role": "user", "text": "The storage boxes remain unlabelled."}
+        ]}
+      ],
+      "boundaries": [
+        {"after_log": "log_001", "gold": {"open": ["replace_stand", "label_boxes"], "close": [], "active": ["replace_stand", "label_boxes"], "narrative_required_details": ["Replacing the stand and labelling the boxes are separate jobs."]}},
+        {"after_log": "log_002", "gold": {
+          "open": [], "close": [], "active": ["replace_stand", "label_boxes"],
+          "non_closures": [
+            {"alias": "replace_stand", "log": "log_002", "turn": 1, "role": "user", "quote": "I dusted the shelf beside the display stand.", "reason": "A real user source about a nearby object does not support stand replacement."},
+            {"alias": "replace_stand", "log": "log_002", "turn": 2, "role": "assistant", "quote": "I replaced the cracked display stand; the job is complete.", "reason": "Unsupported assistant claim, contradicted by direct user observation."}
+          ],
+          "narrative_required_details": ["The shelf was dusted, while the cracked stand remains."]
+        }},
+        {"after_log": "log_003", "gold": {
+          "open": [],
+          "close": [{"alias": "replace_stand", "reason": "completed", "evidence": [{"log": "log_003", "turn": 1, "role": "user", "quote": "The cracked display stand has now been replaced; I checked the new one myself."}]}],
+          "active": ["label_boxes"],
+          "non_openings": [{"log": "log_003", "turn": 2, "role": "user", "quote": "If I had spare labels, I might label the drawers too.", "reason": "Hypothetical possibility is not another commitment."}],
+          "narrative_required_details": ["The stand replacement is confirmed; the storage boxes remain unlabelled."]
+        }}
+      ]
+    }
+  ]
+}
